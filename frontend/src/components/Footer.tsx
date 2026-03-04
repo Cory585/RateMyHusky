@@ -30,9 +30,7 @@ const Footer = () => {
           <div className="footer-col">
             <h4>Affiliations</h4>
             <ul>
-              <li><a href="https://sandboxneu.com" target="_blank" rel="noreferrer">Sandbox</a></li>
-              <li><a href="https://graduatenu.com" target="_blank" rel="noreferrer">GraduateNU</a></li>
-              <li><a href="https://cooper.northeastern.edu" target="_blank" rel="noreferrer">Cooper</a></li>
+              <li><a href="https://oasisneu.com" target="_blank" rel="noreferrer">Oasis</a></li>
             </ul>
           </div>
         </div>
@@ -40,15 +38,13 @@ const Footer = () => {
 
       <div className="footer-bottom">
         <span>
-          © {new Date().getFullYear()} RateMyHusky. Made with{' '}
-          <span role="img" aria-label="heart">❤️</span> by UX Designers and
-          Developers of{' '}
+          © {new Date().getFullYear()} RateMyHusky. Made by developers of{' '}
           <a
-            href="https://sandboxneu.com"
+            href="https://oasisneu.com/"
             target="_blank"
             rel="noreferrer"
           >
-            Sandbox
+            Oasis
           </a>{' '}
           in Boston, MA.
         </span>
