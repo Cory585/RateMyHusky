@@ -34,10 +34,10 @@
   border: none;
   background: transparent;
   font-family: 'Lato', sans-serif;
-  font-size: 0.92rem;
+  font-size: 1.25rem;
   font-weight: 700;
   color: #333;
-  padding: 14px 8px 14px 20px;
+  padding: 13px 8px 14px 30px;
   cursor: pointer;
   outline: none;
   min-width: 110px;
@@ -73,8 +73,8 @@
   border: none;
   outline: none;
   font-family: 'Lato', sans-serif;
-  font-size: 0.95rem;
-  padding: 14px 20px 14px 4px;
+  font-size: 1.25rem;
+  padding: 13px 20px 14px 4px;
   color: #333;
   background: transparent;
 }
