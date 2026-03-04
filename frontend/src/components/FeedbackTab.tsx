@@ -1,9 +1,17 @@
 import { useState } from 'react';
 import logo from '../assets/logo.jpg';
+import Dropdown from './Dropdown';
 import './FeedbackTab.css';
+
+const feedbackOptions = [
+  { value: 'bug', label: 'Bug Report' },
+  { value: 'feature', label: 'Feature Request' },
+  { value: 'general', label: 'General Feedback' },
+];
 
 const FeedbackTab = () => {
   const [isOpen, setIsOpen] = useState(false);
+  const [feedbackType, setFeedbackType] = useState('');
 
   return (
     <>
@@ -30,12 +38,13 @@ const FeedbackTab = () => {
             <label className="feedback-label">
               Type of Feedback <span className="feedback-required">*</span>
             </label>
-            <select className="feedback-select" defaultValue="">
-              <option value="" disabled>Select Feedback Type</option>
-              <option value="bug">Bug Report</option>
-              <option value="feature">Feature Request</option>
-              <option value="general">General Feedback</option>
-            </select>
+            <Dropdown
+              className="feedback-dropdown"
+              options={feedbackOptions}
+              value={feedbackType}
+              onChange={setFeedbackType}
+              placeholder="Select Feedback Type"
+            />
 
             <label className="feedback-label">
               Description <span className="feedback-required">*</span>
