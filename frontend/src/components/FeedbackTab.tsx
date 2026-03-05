@@ -12,6 +12,31 @@ const feedbackOptions = [
 const FeedbackTab = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [feedbackType, setFeedbackType] = useState('');
+  const [description, setDescription] = useState('');
+  const [email, setEmail] = useState('');
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = () => {
+    if (!feedbackType || !description.trim()) {
+      setError('Please select a feedback type and enter a description.');
+      return;
+    }
+    setError('');
+    setSubmitted(true);
+  };
+
+  const handleClose = () => {
+    setIsOpen(false);
+    // Reset after close animation
+    setTimeout(() => {
+      setSubmitted(false);
+      setFeedbackType('');
+      setDescription('');
+      setEmail('');
+      setError('');
+    }, 300);
+  };
 
   return (
     <>
@@ -20,51 +45,75 @@ const FeedbackTab = () => {
       </button>
 
       {isOpen && (
-        <div className="feedback-overlay" onClick={() => setIsOpen(false)}>
-          <div className="feedback-modal" onClick={(e) => e.stopPropagation()}>
-            <button className="feedback-close" onClick={() => setIsOpen(false)}>
+        <div className="feedback-overlay" onClick={handleClose}>
+          <div
+            className={`feedback-modal ${submitted ? 'feedback-modal-shrink' : ''}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button className="feedback-close" onClick={handleClose}>
               ×
             </button>
 
-            <div className="feedback-mascot">
-              <img src={logo} alt="RateMyHusky Mascot" className="feedback-mascot-img" />
-            </div>
+            {submitted ? (
+              <div className="feedback-success">
+                <div className="feedback-success-icon">✓</div>
+                <h2 className="feedback-title">Thank You!</h2>
+                <p className="feedback-success-msg">
+                  We've received your feedback and appreciate you taking the time to help us improve RateMyHusky.
+                </p>
+                <button className="feedback-done-btn" onClick={handleClose}>
+                  Done
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="feedback-mascot">
+                  <img src={logo} alt="RateMyHusky Mascot" className="feedback-mascot-img" />
+                </div>
 
-            <h2 className="feedback-title">Feedback Form</h2>
-            <p className="feedback-subtitle">
-              Found a bug? RateMyHusky's #1 fan? Let our devs know through this form.
-            </p>
+                <h2 className="feedback-title">Feedback Form</h2>
+                <p className="feedback-subtitle">
+                  Found a bug? RateMyHusky's #1 fan? Let our devs know through this form.
+                </p>
 
-            <label className="feedback-label">
-              Type of Feedback <span className="feedback-required">*</span>
-            </label>
-            <Dropdown
-              className="feedback-dropdown"
-              options={feedbackOptions}
-              value={feedbackType}
-              onChange={setFeedbackType}
-              placeholder="Select Feedback Type"
-            />
+                {error && <p className="feedback-error">{error}</p>}
 
-            <label className="feedback-label">
-              Description <span className="feedback-required">*</span>
-            </label>
-            <textarea
-              className="feedback-textarea"
-              placeholder="Say more about bugs, suggestions, etc."
-              rows={4}
-            />
+                <label className="feedback-label">
+                  Type of Feedback <span className="feedback-required">*</span>
+                </label>
+                <Dropdown
+                  className="feedback-dropdown"
+                  options={feedbackOptions}
+                  value={feedbackType}
+                  onChange={setFeedbackType}
+                  placeholder="Select Feedback Type"
+                />
 
-            <label className="feedback-label">
-              Email (Optional)
-            </label>
-            <input
-              className="feedback-input"
-              type="email"
-              placeholder="How should we contact you?"
-            />
+                <label className="feedback-label">
+                  Description <span className="feedback-required">*</span>
+                </label>
+                <textarea
+                  className="feedback-textarea"
+                  placeholder="Say more about bugs, suggestions, etc."
+                  rows={4}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
 
-            <button className="feedback-submit">Submit</button>
+                <label className="feedback-label">
+                  Email (Optional)
+                </label>
+                <input
+                  className="feedback-input"
+                  type="email"
+                  placeholder="How should we contact you?"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+
+                <button className="feedback-submit" onClick={handleSubmit}>Submit</button>
+              </>
+            )}
           </div>
         </div>
       )}
