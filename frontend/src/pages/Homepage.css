@@ -276,60 +276,75 @@
 }
 
 /* ==============================
-   RECENT REVIEWS
+   PROFESSOR RANDOMIZER
    ============================== */
-.reviews-section {
+.randomizer-section {
   background: #fff;
 }
 
-.reviews-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 20px;
-}
-
-.review-card {
-  background: #f9f9f9;
-  border-radius: 14px;
-  padding: 24px;
+.randomizer-content {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.review-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 18px rgba(0,0,0,0.06);
-}
-
-.review-top {
-  display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
+  gap: 48px;
+  max-width: 800px;
+  margin: 0 auto;
 }
 
-.review-prof {
-  font-size: 0.95rem;
+.randomizer-text {
+  flex: 1;
+}
+
+.randomizer-desc {
+  font-size: 1.05rem;
+  color: #777;
+  line-height: 1.6;
+  margin-top: 12px;
+  margin-bottom: 28px;
+}
+
+.randomizer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: #d6394c;
+  color: #fff;
+  border: none;
+  border-radius: 14px;
+  padding: 14px 32px;
+  font-family: 'Nunito', sans-serif;
+  font-size: 1.05rem;
   font-weight: 900;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.15s;
 }
 
-.review-course {
-  font-size: 0.78rem;
-  color: #d6394c;
-  font-weight: 700;
+.randomizer-btn:hover {
+  background: #b82e3f;
+  transform: scale(1.03);
 }
 
-.review-text {
-  font-size: 0.88rem;
-  line-height: 1.55;
-  color: #555;
+.randomizer-btn:active {
+  transform: scale(0.97);
 }
 
-.review-date {
-  font-size: 0.72rem;
-  color: #bbb;
-  align-self: flex-end;
+.randomizer-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.randomizer-visual {
+  flex-shrink: 0;
+}
+
+.randomizer-dice {
+  font-size: 6rem;
+  animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-12px); }
 }
 
 /* ==============================
@@ -408,24 +423,12 @@
   color: #777;
 }
 
-.dark .reviews-section {
+.dark .randomizer-section {
   background: #1e1e1e;
 }
 
-.dark .review-card {
-  background: #242424;
-}
-
-.dark .review-card:hover {
-  box-shadow: 0 6px 18px rgba(0,0,0,0.3);
-}
-
-.dark .review-text {
-  color: #bbb;
-}
-
-.dark .review-date {
-  color: #666;
+.dark .randomizer-desc {
+  color: #999;
 }
 
 .dark .star {
@@ -468,12 +471,19 @@
     font-size: 1.25rem;
   }
 
-  .reviews-grid {
-    grid-template-columns: 1fr;
+  .randomizer-content {
+    flex-direction: column;
+    text-align: center;
+    gap: 24px;
   }
 
-  .review-card {
-    padding: 18px;
+  .randomizer-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .randomizer-dice {
+    font-size: 4rem;
   }
 
   .goat-header-row,
@@ -588,17 +598,17 @@
     font-size: 1.1rem;
   }
 
-  .review-top {
-    flex-direction: column;
-    gap: 6px;
+  .randomizer-desc {
+    font-size: 0.9rem;
   }
 
-  .review-card {
-    padding: 14px;
+  .randomizer-btn {
+    padding: 12px 24px;
+    font-size: 0.95rem;
   }
 
-  .review-text {
-    font-size: 0.82rem;
+  .randomizer-dice {
+    font-size: 3.5rem;
   }
 
   .stars {

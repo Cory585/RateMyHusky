@@ -114,10 +114,3 @@ export const goatProfessors: Record<string, { name: string; dept: string; rating
     { name: 'Dr. Thomas Blake', dept: 'Constitutional Law', rating: 4.65, reviews: 87 },
   ],
 };
-
-export const recentReviews = [
-  { professor: 'Dr. Jane Smith', course: 'CS 3500', text: 'Amazing professor! Explains complex topics in a very understandable way. Office hours are super helpful.', rating: 5, date: 'Feb 28, 2026' },
-  { professor: 'Prof. Mark Lee', course: 'FINA 2201', text: 'Tough grader but you learn a lot. Make sure to attend every lecture — participation matters.', rating: 4, date: 'Feb 27, 2026' },
-  { professor: 'Dr. Sarah Chen', course: 'BIOL 1111', text: 'Best bio professor at NEU. Her enthusiasm for the subject is contagious. Highly recommend.', rating: 5, date: 'Feb 26, 2026' },
-  { professor: 'Prof. Alan Wright', course: 'ME 2340', text: 'Fair exams and great lab sessions. Could improve on response time for emails though.', rating: 4, date: 'Feb 25, 2026' },
-];

@@ -4,7 +4,7 @@ import SearchBar from '../components/SearchBar';
 import Footer from '../components/Footer';
 import FeedbackTab from '../components/FeedbackTab';
 import ThemeToggle from '../components/ThemeToggle';
-import { stats, colleges, goatProfessors, recentReviews } from '../mock/MockData';
+import { stats, colleges, goatProfessors } from '../mock/MockData';
 import neuIcon from '../assets/neu-circle-icon.png';
 import './Homepage.css';
 
@@ -101,24 +101,37 @@ const Homepage = () => {
         </div>
       </section>
 
-      {/* ======== Recent Reviews ======== */}
-      <section className="section reviews-section">
-        <h2 className="section-title">Recent Reviews</h2>
+      {/* ======== Professor Randomizer ======== */}
+      <section className="section randomizer-section">
+        <div className="randomizer-content">
+          <div className="randomizer-text">
+            <h2 className="section-title">🎲 Feeling Lucky?</h2>
+            <p className="randomizer-desc">
+              Discover a random professor and check out their ratings. You might find your next favorite class.
+            </p>
+            <button
+              className="randomizer-btn"
+              onClick={() => {
+                const allProfs = Object.values(goatProfessors).flat();
+                const random = allProfs[Math.floor(Math.random() * allProfs.length)];
+                const slug = random.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+                window.location.href = `/professors/${slug}`;
+              }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="16 3 21 3 21 8" />
+                <line x1="4" y1="20" x2="21" y2="3" />
+                <polyline points="21 16 21 21 16 21" />
+                <line x1="15" y1="15" x2="21" y2="21" />
+                <line x1="4" y1="4" x2="9" y2="9" />
+              </svg>
+              Shuffle Professor
+            </button>
+          </div>
 
-        <div className="reviews-grid">
-          {recentReviews.map((r, i) => (
-            <div key={i} className="review-card">
-              <div className="review-top">
-                <div>
-                  <h3 className="review-prof">{r.professor}</h3>
-                  <span className="review-course">{r.course}</span>
-                </div>
-                <Stars rating={r.rating} />
-              </div>
-              <p className="review-text">{r.text}</p>
-              <span className="review-date">{r.date}</span>
-            </div>
-          ))}
+          <div className="randomizer-visual">
+            <div className="randomizer-dice">🎰</div>
+          </div>
         </div>
       </section>
 
