@@ -34,6 +34,9 @@ rmp_profs.dropna(subset=["rating", "num_ratings"], inplace=True)
 # Normalize display names — collapse double spaces like "Jelena  Golubovic"
 rmp_profs["name"] = rmp_profs["name"].astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
 
+# Precompute review name keys for professor page lookups
+rmp_reviews["_rev_name_key"] = rmp_reviews["professor_name"].astype(str).str.strip().str.lower().str.replace(r'\s+', ' ', regex=True)
+
 
 # ──────────────────────────────────────────────
 #  Friendly stat formatting:  round down then "+"
@@ -609,6 +612,220 @@ def search():
                 "dept": r["departmentName"],
             })
         return jsonify(results)
+
+
+# ──────────────────────────────────────────────
+#  Professor page — PRECOMPUTE everything at startup
+#  Uses vectorized pandas (groupby) instead of row loops
+# ──────────────────────────────────────────────
+
+import time as _time
+_t0 = _time.time()
+print("[prof-page] Precomputing professor page data...")
+
+# 1. RMP profile lookup: name_key → row index (fast — only 3.8K rows)
+_rmp_prof_index = dict(zip(rmp_profs["_name_key"], rmp_profs.index))
+
+# 2. RMP reviews: groupby name key, convert each group to list of dicts
+_rev_cols = ["professor_name", "department", "overall_rating", "course",
+             "quality", "difficulty", "date", "tags", "attendance",
+             "grade", "textbook", "online_class", "comment"]
+_rev_rename = {
+    "professor_name": "professorName", "overall_rating": "overallRating",
+}
+# Fill NaN once up front
+_rev_df = rmp_reviews[["_rev_name_key"] + _rev_cols].copy()
+_rev_df[_rev_cols] = _rev_df[_rev_cols].fillna("")
+
+_rmp_reviews_by_name = {}
+for nk, group in _rev_df.groupby("_rev_name_key"):
+    records = group[_rev_cols].to_dict("records")
+    for rec in records:
+        for old, new in _rev_rename.items():
+            rec[new] = rec.pop(old)
+        # Cast numeric fields
+        rec["overallRating"] = float(rec["overallRating"]) if rec["overallRating"] != "" else 0
+        rec["quality"] = int(rec["quality"]) if rec["quality"] != "" else 0
+        rec["difficulty"] = int(rec["difficulty"]) if rec["difficulty"] != "" else 0
+    _rmp_reviews_by_name[nk] = records
+
+print(f"[prof-page] Indexed reviews for {len(_rmp_reviews_by_name)} professors  ({_time.time()-_t0:.1f}s)")
+
+# 3. TRACE scores: groupby (courseId, instructorId, termId), convert to dicts
+_ts = trace_scores[["courseId", "instructorId", "termId",
+                     "question", "mean", "median", "std_dev",
+                     "enrollment", "completed"]].copy()
+_ts[["mean", "median", "std_dev"]] = _ts[["mean", "median", "std_dev"]].fillna(0).round(2)
+_ts[["enrollment", "completed"]] = _ts[["enrollment", "completed"]].fillna(0).astype(int)
+_ts["question"] = _ts["question"].fillna("")
+# Build composite key as a tuple
+_ts["_key"] = list(zip(_ts["courseId"].astype(int),
+                       _ts["instructorId"].astype(int),
+                       _ts["termId"].astype(int)))
+
+_trace_scores_index = {}
+for key, group in _ts.groupby("_key"):
+    _trace_scores_index[key] = group[["question", "mean", "median", "std_dev", "enrollment", "completed"]].rename(
+        columns={"std_dev": "stdDev"}
+    ).to_dict("records")
+
+print(f"[prof-page] Indexed scores for {len(_trace_scores_index)} course sections  ({_time.time()-_t0:.1f}s)")
+
+# 4. TRACE courses: groupby instructor name, embed scores from step 3
+_tc = trace_courses[["_full", "courseId", "instructorId", "termId",
+                      "termTitle", "departmentName", "displayName",
+                      "section", "enrollment"]].copy()
+_tc["courseId"] = _tc["courseId"].astype(int)
+_tc["instructorId"] = _tc["instructorId"].astype(int)
+_tc["termId"] = _tc["termId"].fillna(0).astype(int)
+_tc["enrollment"] = _tc["enrollment"].fillna(0).astype(int)
+_tc[["termTitle", "departmentName", "displayName", "section"]] = \
+    _tc[["termTitle", "departmentName", "displayName", "section"]].fillna("")
+
+_trace_courses_by_name = {}
+for nk, group in _tc.groupby("_full"):
+    courses = []
+    for row in group.itertuples(index=False):
+        key = (row.courseId, row.instructorId, row.termId)
+        courses.append({
+            "courseId": row.courseId,
+            "termId": row.termId,
+            "termTitle": row.termTitle,
+            "departmentName": row.departmentName,
+            "displayName": row.displayName,
+            "section": row.section,
+            "enrollment": row.enrollment,
+            "scores": _trace_scores_index.get(key, []),
+        })
+    courses.sort(key=lambda x: x["termId"], reverse=True)
+    _trace_courses_by_name[nk] = courses
+
+print(f"[prof-page] Indexed courses for {len(_trace_courses_by_name)} instructors  ({_time.time()-_t0:.1f}s)")
+
+# 5. TRACE comments: parse course_url to extract IDs, join to instructor names
+_tcm = trace_comments[["course_url", "question", "comment"]].copy()
+_tcm = _tcm[_tcm["comment"].notna()]
+_tcm["comment"] = _tcm["comment"].astype(str)
+_tcm = _tcm[_tcm["comment"].str.strip() != ""]
+_tcm["question"] = _tcm["question"].fillna("").astype(str)
+_tcm["course_url"] = _tcm["course_url"].fillna("").astype(str)
+
+# Extract IDs from course_url using regex:  .../courseId/instructorId/termId
+_url_parts = _tcm["course_url"].str.extract(r'/(\d+)/(\d+)/(\d+)')
+_tcm["_cid"] = pd.to_numeric(_url_parts[0], errors="coerce")
+_tcm["_iid"] = pd.to_numeric(_url_parts[1], errors="coerce")
+_tcm["_tid"] = pd.to_numeric(_url_parts[2], errors="coerce")
+_tcm = _tcm.dropna(subset=["_cid", "_iid", "_tid"])
+_tcm[["_cid", "_iid", "_tid"]] = _tcm[["_cid", "_iid", "_tid"]].astype(int)
+
+# Build a mapping: (courseId, instructorId, termId) → instructor name
+_section_to_name = dict(zip(
+    zip(_tc["courseId"], _tc["instructorId"], _tc["termId"]),
+    _tc["_full"]
+))
+
+# Map each comment to an instructor name
+_tcm["_name_key"] = [
+    _section_to_name.get((c, i, t))
+    for c, i, t in zip(_tcm["_cid"], _tcm["_iid"], _tcm["_tid"])
+]
+_tcm = _tcm[_tcm["_name_key"].notna()]
+
+_trace_comments_by_name = {}
+for nk, group in _tcm.groupby("_name_key"):
+    _trace_comments_by_name[nk] = group[["course_url", "question", "comment"]].rename(
+        columns={"course_url": "courseUrl"}
+    ).to_dict("records")
+
+print(f"[prof-page] Indexed TRACE comments for {len(_trace_comments_by_name)} instructors  ({_time.time()-_t0:.1f}s)")
+print(f"[prof-page] Precomputation complete! ({_time.time()-_t0:.1f}s total)")
+
+
+# ──────────────────────────────────────────────
+#  Professor page API routes (all O(1) lookups now)
+# ──────────────────────────────────────────────
+
+def _slug_to_name_key(slug: str) -> str:
+    """Convert URL slug back to a lowercase name key for lookup.
+    'john-smith' → 'john smith'
+    """
+    return slug.strip().lower().replace("-", " ")
+
+
+@app.route("/api/professors/<slug>")
+def professor_profile(slug):
+    name_key = _slug_to_name_key(slug)
+
+    profile = None
+
+    # Try RMP first
+    rmp_idx = _rmp_prof_index.get(name_key)
+    if rmp_idx is not None:
+        row = rmp_profs.loc[rmp_idx]
+        has_rmp = int(row["num_ratings"]) > 0 and row["rating"] > 0
+        has_trace = pd.notna(row["trace_overall"]) and int(row["trace_reviews"]) > 0
+
+        wta = None
+        if "would_take_again_pct" in row.index:
+            raw = str(row["would_take_again_pct"]).strip().replace("%", "")
+            try:
+                wta = float(raw)
+                if wta < 0:
+                    wta = None
+            except (ValueError, TypeError):
+                wta = None
+
+        difficulty = None
+        if "level_of_difficulty" in row.index:
+            try:
+                difficulty = float(row["level_of_difficulty"])
+                if pd.isna(difficulty) or difficulty <= 0:
+                    difficulty = None
+            except (ValueError, TypeError):
+                difficulty = None
+
+        profile = {
+            "name": row["name"],
+            "department": row["trace_dept"] if pd.notna(row["trace_dept"]) else row["department"],
+            "rmpRating": round(float(row["rating"]), 2) if has_rmp else None,
+            "traceRating": round(float(row["trace_overall"]), 2) if has_trace else None,
+            "avgRating": round(float(row["avg_rating"]), 2),
+            "numRatings": int(row["num_ratings"]),
+            "wouldTakeAgainPct": round(wta, 1) if wta is not None else None,
+            "difficulty": round(difficulty, 2) if difficulty is not None else None,
+            "totalRatings": int(row["total_reviews"]),
+            "professorUrl": row.get("professor_url", None) or None,
+            "traceCourses": _trace_courses_by_name.get(name_key, []),
+        }
+
+    # Try TRACE-only
+    elif name_key in _trace_courses_by_name:
+        trace_rating = trace_lookup.get(name_key)
+        trace_rev = trace_reviews_lookup.get(name_key, 0)
+        dept = trace_dept_lookup.get(name_key, "")
+
+        profile = {
+            "name": name_key.title(),
+            "department": dept,
+            "rmpRating": None,
+            "traceRating": round(float(trace_rating), 2) if trace_rating and pd.notna(trace_rating) else None,
+            "avgRating": round(float(trace_rating), 2) if trace_rating and pd.notna(trace_rating) else 0.0,
+            "numRatings": 0,
+            "wouldTakeAgainPct": None,
+            "difficulty": None,
+            "totalRatings": int(trace_rev),
+            "professorUrl": None,
+            "traceCourses": _trace_courses_by_name.get(name_key, []),
+        }
+
+    if profile is None:
+        return jsonify({"error": "Professor not found"}), 404
+
+    # Bundle everything into one response
+    profile["reviews"] = _rmp_reviews_by_name.get(name_key, [])
+    profile["traceComments"] = _trace_comments_by_name.get(name_key, [])
+
+    return jsonify(profile)
 
 
 if __name__ == "__main__":
