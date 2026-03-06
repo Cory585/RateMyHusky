@@ -277,15 +277,12 @@ print(f"[startup] {has_trace}/{len(rmp_profs)} RMP professors matched to TRACE d
 #  Precompute stats
 # ──────────────────────────────────────────────
 #  Professors  = unique full names from trace_courses
-#  Ratings     = rmp_reviews row count + total TRACE completed (deduped by section)
+#  Courses     = unique courseId in trace_courses (each section has its own courseId)
 #  Comments    = rmp_reviews with non-empty comments + trace_comments rows
 #  Departments = unique departmentName in trace_courses
 # ──────────────────────────────────────────────
 stat_professor_count = trace_courses["_full"].nunique()
-
-# Total TRACE completed reviews (already deduped to one row per section above)
-stat_trace_total_completed = int(scores_deduped["completed"].sum())
-stat_total_ratings = len(rmp_reviews) + stat_trace_total_completed
+stat_course_count    = trace_courses["courseId"].nunique()
 
 # Comments: RMP reviews with a non-empty comment + all trace_comments rows
 rmp_comment_count = int(rmp_reviews["comment"].dropna().astype(str).str.strip().ne("").sum())
@@ -293,8 +290,7 @@ stat_total_comments = rmp_comment_count + len(trace_comments)
 
 stat_department_count = trace_courses["departmentName"].nunique()
 
-print(f"[stats] {stat_professor_count} professors, {stat_total_ratings} ratings "
-      f"({len(rmp_reviews)} RMP + {stat_trace_total_completed} TRACE), "
+print(f"[stats] {stat_professor_count} professors, {stat_course_count} courses, "
       f"{stat_total_comments} comments ({rmp_comment_count} RMP + {len(trace_comments)} TRACE), "
       f"{stat_department_count} departments")
 
@@ -306,7 +302,7 @@ print(f"[stats] {stat_professor_count} professors, {stat_total_ratings} ratings 
 def stats():
     return jsonify([
         {"label": "Professors",  "value": friendly_count(stat_professor_count)},
-        {"label": "Ratings",     "value": friendly_count(stat_total_ratings)},
+        {"label": "Courses",     "value": friendly_count(stat_course_count)},
         {"label": "Comments",    "value": friendly_count(stat_total_comments)},
         {"label": "Departments", "value": friendly_count(stat_department_count)},
     ])
@@ -377,6 +373,6 @@ def random_professor():
 
 if __name__ == "__main__":
     print(f"Loaded {len(rmp_profs)} RMP professors, {len(rmp_reviews)} RMP reviews")
-    print(f"Stats → {stat_professor_count} professors, {stat_total_ratings} ratings, "
+    print(f"Stats → {stat_professor_count} professors, {stat_course_count} courses, "
           f"{stat_total_comments} comments, {stat_department_count} departments")
     app.run(debug=True, port=5001)
