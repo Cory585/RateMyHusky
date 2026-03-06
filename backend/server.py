@@ -372,25 +372,29 @@ print(f"[startup] {has_trace}/{len(rmp_profs)} RMP professors matched to TRACE d
 # ──────────────────────────────────────────────
 #  Precompute stats
 # ──────────────────────────────────────────────
-#  Professors  = unique full names from trace_courses
-#  Courses     = unique course codes from displayName (e.g. ACCT6228, not per-section)
-#  Comments    = rmp_reviews with non-empty comments + trace_comments rows (1 row = 1 comment)
-#  Departments = unique departmentName in trace_courses
-# ──────────────────────────────────────────────
-stat_professor_count = trace_courses["_full"].nunique()
 
-# Extract course code before the colon: "ACCT6228:02 (Name) - Prof" → "ACCT6228"
+# Professors = unique names from BOTH RMP and TRACE (case-insensitive, already lowercase)
+_all_prof_names = set(rmp_profs["_name_key"].unique())
+_all_prof_names.update(trace_courses["_full"].unique())
+# Strip any extra whitespace that might cause false duplicates
+_all_prof_names = set(n.strip() for n in _all_prof_names if isinstance(n, str) and n.strip())
+stat_professor_count = len(_all_prof_names)
+
+# Courses = unique course codes (e.g. "ACCT6228"), case-insensitive
 trace_courses["_course_code"] = trace_courses["displayName"].astype(str).str.split(":").str[0]
-stat_course_count = trace_courses["_course_code"].nunique()
+stat_course_count = trace_courses["_course_code"].str.upper().nunique()
 
-# Comments: RMP reviews with a non-empty comment + all trace_comments rows
-rmp_comment_count = int(rmp_reviews["comment"].dropna().astype(str).str.strip().ne("").sum())
-stat_total_comments = rmp_comment_count + len(trace_comments)
+# Evaluations = RMP reviews + TRACE completed evaluations (deduplicated per section)
+_trace_sections_deduped = trace_scores.drop_duplicates(subset=["courseId", "instructorId", "termId"])
+trace_eval_count = int(_trace_sections_deduped["completed"].fillna(0).astype(int).sum())
+rmp_review_count = len(rmp_reviews)
+stat_total_evaluations = rmp_review_count + trace_eval_count
 
-stat_department_count = trace_courses["departmentName"].nunique()
+# Departments = unique department names, case-insensitive
+stat_department_count = trace_courses["departmentName"].str.lower().str.strip().nunique()
 
 print(f"[stats] {stat_professor_count} professors, {stat_course_count} courses, "
-      f"{stat_total_comments} comments ({rmp_comment_count} RMP + {len(trace_comments)} TRACE), "
+      f"{stat_total_evaluations} evaluations ({rmp_review_count} RMP + {trace_eval_count} TRACE), "
       f"{stat_department_count} departments")
 
 
@@ -402,7 +406,7 @@ def stats():
     return jsonify([
         {"label": "Professors",  "value": friendly_count(stat_professor_count)},
         {"label": "Courses",     "value": friendly_count(stat_course_count)},
-        {"label": "Comments",    "value": friendly_count(stat_total_comments)},
+        {"label": "Evaluations", "value": friendly_count(stat_total_evaluations)},
         {"label": "Departments", "value": friendly_count(stat_department_count)},
     ])
 
@@ -794,5 +798,5 @@ def professor_profile(slug):
 if __name__ == "__main__":
     print(f"Loaded {len(rmp_profs)} RMP professors, {len(rmp_reviews)} RMP reviews")
     print(f"Stats → {stat_professor_count} professors, {stat_course_count} courses, "
-          f"{stat_total_comments} comments, {stat_department_count} departments")
+          f"{stat_total_evaluations} evaluations, {stat_department_count} departments")
     app.run(debug=True, port=5001, use_reloader=False)
