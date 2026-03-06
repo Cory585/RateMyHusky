@@ -9,7 +9,7 @@ export interface Stat {
 export interface Professor {
   name: string;
   dept: string;
-  rmpRating: number;
+  rmpRating: number | null;
   traceRating: number | null;
   blendedRating: number;
   rmpReviews: number;

@@ -263,12 +263,20 @@ rmp_profs["trace_overall"] = rmp_profs["_name_key"].map(trace_lookup)
 rmp_profs["trace_reviews"] = rmp_profs["_name_key"].map(trace_reviews_lookup).fillna(0).astype(int)
 rmp_profs["total_reviews"] = rmp_profs["num_ratings"].astype(int) + rmp_profs["trace_reviews"]
 
-rmp_profs["blended_rating"] = rmp_profs.apply(
-    lambda r: round((r["rating"] + r["trace_overall"]) / 2, 2)
-              if pd.notna(r["trace_overall"])
-              else round(r["rating"], 2),
-    axis=1,
-)
+def compute_blended(r):
+    has_rmp = r["num_ratings"] > 0 and r["rating"] > 0
+    has_trace = pd.notna(r["trace_overall"]) and r["trace_reviews"] > 0
+
+    if has_rmp and has_trace:
+        return round((r["rating"] + r["trace_overall"]) / 2, 2)
+    elif has_trace:
+        return round(float(r["trace_overall"]), 2)
+    elif has_rmp:
+        return round(float(r["rating"]), 2)
+    else:
+        return 0.0
+
+rmp_profs["blended_rating"] = rmp_profs.apply(compute_blended, axis=1)
 
 has_trace = rmp_profs["trace_overall"].notna().sum()
 print(f"[startup] {has_trace}/{len(rmp_profs)} RMP professors matched to TRACE data")
@@ -327,11 +335,15 @@ def goat_professors():
         min_reviews = 0
 
     subset = rmp_profs[rmp_profs["college"] == college].copy()
-    subset = subset[
-        (subset["num_ratings"] >= min_reviews) &
-        (subset["trace_reviews"] >= min_reviews) &
-        (subset["trace_overall"].notna())
-    ]
+    if college in NO_MIN_COLLEGES:
+        # Require at least 3 total reviews across both sources
+        subset = subset[subset["total_reviews"] >= 3]
+    else:
+        subset = subset[
+            (subset["num_ratings"] >= min_reviews) &
+            (subset["trace_reviews"] >= min_reviews) &
+            (subset["trace_overall"].notna())
+        ]
 
     # Sort by blended_rating desc, then total_reviews desc as tiebreak
     subset = subset.sort_values(
@@ -341,12 +353,13 @@ def goat_professors():
 
     result = []
     for _, row in top.iterrows():
-        has_trace_data = pd.notna(row["trace_overall"])
+        has_rmp   = int(row["num_ratings"]) > 0 and row["rating"] > 0
+        has_trace = pd.notna(row["trace_overall"]) and int(row["trace_reviews"]) > 0
         result.append({
             "name":           row["name"],
             "dept":           row["department"],
-            "rmpRating":      round(float(row["rating"]), 2),
-            "traceRating":    round(float(row["trace_overall"]), 2) if has_trace_data else None,
+            "rmpRating":      round(float(row["rating"]), 2) if has_rmp else None,
+            "traceRating":    round(float(row["trace_overall"]), 2) if has_trace else None,
             "blendedRating":  round(float(row["blended_rating"]), 2),
             "rmpReviews":     int(row["num_ratings"]),
             "traceReviews":   int(row["trace_reviews"]),
@@ -361,12 +374,13 @@ def goat_professors():
 def random_professor():
     pool = rmp_profs[rmp_profs["num_ratings"] >= 3]
     row = pool.sample(1).iloc[0]
-    has_trace_data = pd.notna(row["trace_overall"])
+    has_rmp   = int(row["num_ratings"]) > 0 and row["rating"] > 0
+    has_trace = pd.notna(row["trace_overall"]) and int(row["trace_reviews"]) > 0
     return jsonify({
         "name":          row["name"],
         "dept":          row["department"],
-        "rmpRating":     round(float(row["rating"]), 2),
-        "traceRating":   round(float(row["trace_overall"]), 2) if has_trace_data else None,
+        "rmpRating":     round(float(row["rating"]), 2) if has_rmp else None,
+        "traceRating":   round(float(row["trace_overall"]), 2) if has_trace else None,
         "blendedRating": round(float(row["blended_rating"]), 2),
         "rmpReviews":    int(row["num_ratings"]),
         "traceReviews":  int(row["trace_reviews"]),

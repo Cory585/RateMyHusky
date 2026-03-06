@@ -52,7 +52,9 @@ const RatingCell = ({ prof, isOpen, onToggle }: {
         <div className="goat-rating-tooltip">
           <div className="tooltip-row">
             <span className="tooltip-label">RMP</span>
-            <span className="tooltip-value">{prof.rmpRating.toFixed(2)}</span>
+            <span className="tooltip-value">
+              {prof.rmpRating !== null ? prof.rmpRating.toFixed(2) : '—'}
+            </span>
           </div>
           <div className="tooltip-row">
             <span className="tooltip-label">TRACE</span>
