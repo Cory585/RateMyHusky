@@ -24,6 +24,7 @@ rmp_profs    = pd.read_csv(os.path.join(DATA_DIR, "rmp_professors.csv"))
 rmp_reviews  = pd.read_csv(os.path.join(DATA_DIR, "rmp_reviews.csv"))
 trace_courses = pd.read_csv(os.path.join(DATA_DIR, "trace_courses.csv"))
 trace_scores  = pd.read_csv(os.path.join(DATA_DIR, "trace_scores.csv"))
+trace_comments = pd.read_csv(os.path.join(DATA_DIR, "trace_comments.csv"))
 
 # Clean RMP data
 rmp_profs["rating"]      = pd.to_numeric(rmp_profs["rating"], errors="coerce")
@@ -277,7 +278,7 @@ print(f"[startup] {has_trace}/{len(rmp_profs)} RMP professors matched to TRACE d
 # ──────────────────────────────────────────────
 #  Professors  = unique full names from trace_courses
 #  Ratings     = rmp_reviews row count + total TRACE completed (deduped by section)
-#  Sections    = unique courseId in trace_courses (each section has its own courseId)
+#  Comments    = rmp_reviews with non-empty comments + trace_comments rows
 #  Departments = unique departmentName in trace_courses
 # ──────────────────────────────────────────────
 stat_professor_count = trace_courses["_full"].nunique()
@@ -286,12 +287,16 @@ stat_professor_count = trace_courses["_full"].nunique()
 stat_trace_total_completed = int(scores_deduped["completed"].sum())
 stat_total_ratings = len(rmp_reviews) + stat_trace_total_completed
 
-stat_section_count = trace_courses["courseId"].nunique()
+# Comments: RMP reviews with a non-empty comment + all trace_comments rows
+rmp_comment_count = int(rmp_reviews["comment"].dropna().astype(str).str.strip().ne("").sum())
+stat_total_comments = rmp_comment_count + len(trace_comments)
+
 stat_department_count = trace_courses["departmentName"].nunique()
 
 print(f"[stats] {stat_professor_count} professors, {stat_total_ratings} ratings "
       f"({len(rmp_reviews)} RMP + {stat_trace_total_completed} TRACE), "
-      f"{stat_section_count} sections, {stat_department_count} departments")
+      f"{stat_total_comments} comments ({rmp_comment_count} RMP + {len(trace_comments)} TRACE), "
+      f"{stat_department_count} departments")
 
 
 # ──────────────────────────────────────────────
@@ -302,7 +307,7 @@ def stats():
     return jsonify([
         {"label": "Professors",  "value": friendly_count(stat_professor_count)},
         {"label": "Ratings",     "value": friendly_count(stat_total_ratings)},
-        {"label": "Sections",    "value": friendly_count(stat_section_count)},
+        {"label": "Comments",    "value": friendly_count(stat_total_comments)},
         {"label": "Departments", "value": friendly_count(stat_department_count)},
     ])
 
@@ -318,14 +323,18 @@ def colleges():
 def goat_professors():
     college     = request.args.get("college", "Khoury")
     limit       = int(request.args.get("limit", "10"))
-    min_reviews = int(request.args.get("min_reviews", "5"))
+    min_reviews = int(request.args.get("min_reviews", "10"))
 
     subset = rmp_profs[rmp_profs["college"] == college].copy()
-    subset = subset[subset["num_ratings"] >= min_reviews]
+    subset = subset[
+        (subset["num_ratings"] >= min_reviews) &
+        (subset["trace_reviews"] >= min_reviews) &
+        (subset["trace_overall"].notna())
+    ]
 
-    # Sort by blended_rating desc, then num_ratings desc as tiebreak
+    # Sort by blended_rating desc, then total_reviews desc as tiebreak
     subset = subset.sort_values(
-        ["blended_rating", "num_ratings"], ascending=[False, False]
+        ["blended_rating", "total_reviews"], ascending=[False, False]
     )
     top = subset.head(limit)
 
@@ -369,5 +378,5 @@ def random_professor():
 if __name__ == "__main__":
     print(f"Loaded {len(rmp_profs)} RMP professors, {len(rmp_reviews)} RMP reviews")
     print(f"Stats → {stat_professor_count} professors, {stat_total_ratings} ratings, "
-          f"{stat_section_count} sections, {stat_department_count} departments")
+          f"{stat_total_comments} comments, {stat_department_count} departments")
     app.run(debug=True, port=5001)
