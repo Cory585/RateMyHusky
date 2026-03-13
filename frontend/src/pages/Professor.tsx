@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
+import NotFound from './NotFound';
 import FeedbackTab from '../components/FeedbackTab';
 import ThemeToggle from '../components/ThemeToggle';
 import Dropdown from '../components/Dropdown';
@@ -50,20 +51,6 @@ const sortOptions = [
   { value: 'lowest', label: 'Lowest Rated' },
 ];
 const courseFilterAll = { value: '__all__', label: 'All Courses' };
-
-/* ───────── tag pill colours ───────── */
-const tagColors: Record<string, string> = {
-  'Tough Grader':'#e74c3c','Get Ready To Read':'#8e44ad',
-  'Participation Matters':'#2980b9','Group Projects':'#16a085',
-  'Amazing Lectures':'#27ae60','Clear Grading Criteria':'#2ecc71',
-  'Gives Good Feedback':'#1abc9c','Inspirational':'#f39c12',
-  'Lots Of Homework':'#e67e22','Hilarious':'#f1c40f',
-  'Caring':'#3498db','Respected':'#9b59b6',
-  'Lecture Heavy':'#34495e','Test Heavy':'#c0392b',
-  'Graded By Few Things':'#d35400','Accessible Outside Class':'#0984e3',
-  'Online Savvy':'#6c5ce7',
-};
-const getTagColor = (tag: string) => tagColors[tag] || '#888';
 
 const GRADE_ORDER = ['A+','A','A-','B+','B','B-','C+','C','C-','D+','D','D-','F','W','WF','P','NP','I'];
 const GRADE_COLORS: Record<string, string> = {
@@ -114,7 +101,11 @@ const Professor = () => {
 
   /* ── data loading ── */
   useEffect(() => {
-    if (!slug) return;
+    if (!slug) {
+      setLoading(false);
+      setError('Professor not found.');
+      return;
+    }
     let cancelled = false;
     async function load() {
       setLoading(true); setError('');
@@ -132,8 +123,25 @@ const Professor = () => {
 
   useEffect(() => { setVisibleReviews(10); }, [sortBy, courseFilter, reviewTab]);
 
+  const courseNameMap = new Map<string, string>();
+  profile?.traceCourses?.forEach((c) => {
+    const codeMatch = c.displayName.match(/^([A-Z]+\d+)/);
+    const code = codeMatch ? codeMatch[1] : c.displayName.split(':')[0].split(' ')[0];
+    const nameMatch = c.displayName.match(/\((.+?)\)/);
+    if (code && nameMatch) {
+      courseNameMap.set(code.toUpperCase(), nameMatch[1]);
+    }
+  });
+
+  const getFullCourseName = (courseCode: string) => {
+    if (!courseCode) return courseCode;
+    const cleanCode = courseCode.replace(/\s+/g, '').toUpperCase();
+    const title = courseNameMap.get(cleanCode);
+    return title ? `${courseCode} - ${title}` : courseCode;
+  };
+
   const uniqueCourses = Array.from(new Set(reviews.map((r) => r.course).filter(Boolean)));
-  const courseOptions = [courseFilterAll, ...uniqueCourses.map((c) => ({ value: c, label: c }))];
+  const courseOptions = [courseFilterAll, ...uniqueCourses.map((c) => ({ value: c, label: getFullCourseName(c) }))];
 
   const filteredReviews = reviews
     .filter((r) => courseFilter === '__all__' || r.course === courseFilter)
@@ -177,17 +185,7 @@ const Professor = () => {
     </div>
   );
 
-  if (error || !profile) return (
-    <div className="prof-page"><Navbar />
-      <div className="prof-error">
-        <span className="prof-error-icon">🔍</span>
-        <h2>Professor Not Found</h2>
-        <p>{error || "We couldn't find that professor."}</p>
-        <button className="prof-back-btn" onClick={() => navigate('/')}>Back to Home</button>
-      </div>
-      <Footer /><ThemeToggle />
-    </div>
-  );
+  if (error || !profile) return <NotFound />;
 
   const compareSlug = profile.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
@@ -372,14 +370,14 @@ const Professor = () => {
                       </div>
                     </div>
                     <div className="prof-review-meta">
-                      {r.course && <span className="prof-review-course">{r.course}</span>}
+                      {r.course && <span className="prof-review-course">{getFullCourseName(r.course)}</span>}
                       <span className="prof-review-date">{(() => { const d = new Date(r.date); return isNaN(d.getTime()) ? r.date : d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }); })()}</span>
                     </div>
                   </div>
                   {r.comment && <p className="prof-review-comment">{r.comment}</p>}
                   <div className="prof-review-bottom">
-                    {r.tags && (<div className="prof-review-tags">{r.tags.split(',').map((t: string) => t.trim()).filter(Boolean).map((tag: string, ti: number) => (
-                      <span key={ti} className="prof-review-tag" style={{ '--tag-color': getTagColor(tag) } as React.CSSProperties}>{tag}</span>
+                    {r.tags && (<div className="prof-review-tags">{r.tags.split('--').map((t: string) => t.trim()).filter(Boolean).map((tag: string, ti: number) => (
+                      <span key={ti} className="prof-review-tag">{tag}</span>
                     ))}</div>)}
                     <div className="prof-review-pills">
                       {r.grade && r.grade !== 'N/A' && <span className="prof-review-pill">Grade: {r.grade}</span>}
