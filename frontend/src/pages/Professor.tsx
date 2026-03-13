@@ -123,25 +123,45 @@ const Professor = () => {
 
   useEffect(() => { setVisibleReviews(10); }, [sortBy, courseFilter, reviewTab]);
 
-  const courseNameMap = new Map<string, string>();
+  const courseCodeMap = new Map<string, string>();
   profile?.traceCourses?.forEach((c) => {
-    const codeMatch = c.displayName.match(/^([A-Z]+\d+)/);
-    const code = codeMatch ? codeMatch[1] : c.displayName.split(':')[0].split(' ')[0];
-    const nameMatch = c.displayName.match(/\((.+?)\)/);
-    if (code && nameMatch) {
-      courseNameMap.set(code.toUpperCase(), nameMatch[1]);
+    const codeMatch = c.displayName.match(/^([A-Z]+)(\d+)/i);
+    if (codeMatch) {
+      const fullCode = codeMatch[0].toUpperCase();
+      const numberPart = codeMatch[2];
+      courseCodeMap.set(fullCode, fullCode);
+      if (!courseCodeMap.has(numberPart)) {
+        courseCodeMap.set(numberPart, fullCode);
+      }
+    } else {
+      const code = c.displayName.split(':')[0].split(' ')[0];
+      if (code) {
+        courseCodeMap.set(code.toUpperCase(), code.toUpperCase());
+      }
     }
   });
 
-  const getFullCourseName = (courseCode: string) => {
-    if (!courseCode) return courseCode;
-    const cleanCode = courseCode.replace(/\s+/g, '').toUpperCase();
-    const title = courseNameMap.get(cleanCode);
-    return title ? `${courseCode} - ${title}` : courseCode;
+  const getFormattedCourseCode = (courseInput: string) => {
+    if (!courseInput) return courseInput;
+    const cleanInput = courseInput.replace(/\s+/g, '').toUpperCase();
+    
+    if (courseCodeMap.has(cleanInput)) {
+      return courseCodeMap.get(cleanInput)!;
+    }
+    
+    const numMatch = cleanInput.match(/\d+/);
+    if (numMatch) {
+      const numberPart = numMatch[0];
+      if (courseCodeMap.has(numberPart)) {
+        return courseCodeMap.get(numberPart)!;
+      }
+    }
+    
+    return courseInput;
   };
 
   const uniqueCourses = Array.from(new Set(reviews.map((r) => r.course).filter(Boolean)));
-  const courseOptions = [courseFilterAll, ...uniqueCourses.map((c) => ({ value: c, label: getFullCourseName(c) }))];
+  const courseOptions = [courseFilterAll, ...uniqueCourses.map((c) => ({ value: c, label: getFormattedCourseCode(c) }))];
 
   const filteredReviews = reviews
     .filter((r) => courseFilter === '__all__' || r.course === courseFilter)
@@ -370,7 +390,7 @@ const Professor = () => {
                       </div>
                     </div>
                     <div className="prof-review-meta">
-                      {r.course && <span className="prof-review-course">{getFullCourseName(r.course)}</span>}
+                      {r.course && <span className="prof-review-course">{getFormattedCourseCode(r.course)}</span>}
                       <span className="prof-review-date">{(() => { const d = new Date(r.date); return isNaN(d.getTime()) ? r.date : d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }); })()}</span>
                     </div>
                   </div>

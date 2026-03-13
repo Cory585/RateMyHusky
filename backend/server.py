@@ -818,7 +818,7 @@ def professor_profile(slug):
         cid = str(int(c["courseId"]))
         iid = str(int(c["instructorId"]))
         tid = str(int(c["termId"])) if pd.notna(c["termId"]) else ""
-        url_patterns.add(f"{cid}/{iid}/{tid}")
+        url_patterns.add(f"sp={cid}&sp={iid}&sp={tid}")
 
     if url_patterns:
         mask = trace_comments["course_url"].apply(
