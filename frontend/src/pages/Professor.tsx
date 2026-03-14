@@ -119,12 +119,14 @@ const Professor = () => {
   }, []);
 
   useLayoutEffect(() => {
-    updateReviewPill();
-  }, [reviewTab, updateReviewPill]);
+    if (!loading) {
+      updateReviewPill();
+    }
+  }, [reviewTab, updateReviewPill, loading]);
 
   useEffect(() => {
     const container = reviewTabsRef.current;
-    if (!container) return;
+    if (!container || loading) return;
 
     updateReviewPill();
     const timer = setTimeout(() => setIsReviewPillReady(true), 150);
@@ -140,7 +142,7 @@ const Professor = () => {
       clearTimeout(timer);
       observer.disconnect();
     };
-  }, [updateReviewPill]);
+  }, [updateReviewPill, loading]);
 
   /* ── grade bars animate on scroll ── */
   useEffect(() => {

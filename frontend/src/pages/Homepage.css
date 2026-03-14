@@ -140,6 +140,62 @@
   /* Remove mask image as it conflicts with absolute pill positioning */
 }
 
+/* Fade edges when scrollable */
+.goat-college-tabs {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0px,
+    black 40px,
+    black calc(100% - 40px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0px,
+    black 40px,
+    black calc(100% - 40px),
+    transparent 100%
+  );
+}
+
+/* At scroll start — no left fade */
+.goat-college-tabs.scrolled-start {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    black 0px,
+    black calc(100% - 40px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    black 0px,
+    black calc(100% - 40px),
+    transparent 100%
+  );
+}
+
+/* At scroll end — no right fade */
+.goat-college-tabs.scrolled-end {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0px,
+    black 40px,
+    black 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0px,
+    black 40px,
+    black 100%
+  );
+}
+
+/* At both ends (no scroll needed) — no fade at all */
+.goat-college-tabs.scrolled-start.scrolled-end {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
 .goat-pill-background {
   position: absolute;
   top: 4px;
