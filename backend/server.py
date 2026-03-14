@@ -866,10 +866,23 @@ def professor_profile(slug):
             comment_text = str(c["comment"]) if pd.notna(c["comment"]) else ""
             if not comment_text.strip():
                 continue
+            
+            # Extract termId from URL for sorting: sp=105528&sp=1158&sp=198 -> last sp is tid
+            url = str(c["course_url"]) if pd.notna(c["course_url"]) else ""
+            term_id = 0
+            try:
+                # Find all sp= values
+                sp_matches = re.findall(r"sp=(\d+)", url)
+                if len(sp_matches) >= 3:
+                    term_id = int(sp_matches[2])
+            except:
+                pass
+
             comments.append({
-                "courseUrl": str(c["course_url"]) if pd.notna(c["course_url"]) else "",
+                "courseUrl": url,
                 "question": str(c["question"]) if pd.notna(c["question"]) else "",
                 "comment": comment_text,
+                "termId": term_id
             })
         profile["traceComments"] = comments
     else:

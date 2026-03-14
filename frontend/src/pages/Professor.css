@@ -200,6 +200,7 @@
 .prof-course-term-tag { font-size: 0.72rem; font-weight: 700; color: #d6394c; background: #fef0f0; padding: 2px 8px; border-radius: 8px; }
 
 /* ═══════════ REVIEWS ═══════════ */
+.prof-reviews-section { padding-bottom: 60px; }
 .prof-reviews-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 20px; }
 .prof-review-tabs { display: flex; gap: 10px; }
 .prof-review-tab {
@@ -385,60 +386,6 @@
   color: #444;
   position: relative;
   animation: traceFadeIn 0.3s ease both;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.trace-comment-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 4px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(0,0,0,0.03);
-}
-
-.trace-helpful-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: transparent;
-  border: none;
-  color: #999;
-  font-size: 0.75rem;
-  font-weight: 700;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
-  transition: all 0.2s;
-}
-
-.trace-helpful-btn:hover {
-  background: rgba(39, 174, 96, 0.08);
-  color: #27ae60;
-}
-
-.trace-helpful-btn.active {
-  color: #27ae60;
-  background: rgba(39, 174, 96, 0.12);
-}
-
-.trace-helpful-btn svg {
-  width: 14px;
-  height: 14px;
-}
-
-.trace-useful-badge {
-  font-size: 0.65rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  color: #27ae60;
-  background: rgba(39, 174, 96, 0.1);
-  padding: 2px 6px;
-  border-radius: 4px;
-  letter-spacing: 0.5px;
 }
 
 .trace-category-actions {
@@ -483,11 +430,7 @@
 }
 
 /* Dark mode overrides */
-.dark .trace-comment-bubble { background: #2a2a2a; color: #ccc; border-top-color: #333; }
-.dark .trace-helpful-btn { color: #666; }
-.dark .trace-helpful-btn:hover { background: rgba(39, 174, 96, 0.15); color: #2ecc71; }
-.dark .trace-helpful-btn.active { color: #2ecc71; background: rgba(39, 174, 96, 0.2); }
-.dark .trace-useful-badge { background: rgba(39, 174, 96, 0.2); color: #2ecc71; }
+.dark .trace-comment-bubble { background: #2a2a2a; color: #ccc; }
 .dark .trace-action-btn { background: #333; border-color: #444; color: #aaa; }
 .dark .trace-action-btn:hover { background: #444; color: #eee; }
 .dark .trace-action-btn.primary { background: #3a2020; border-color: #4a2a2a; color: #e06070; }

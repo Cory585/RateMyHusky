@@ -79,6 +79,7 @@ export interface TraceComment {
   courseUrl: string;
   question: string;
   comment: string;
+  termId: number;
 }
 
 /* ---- Fetchers ---- */

@@ -90,37 +90,9 @@ const Professor = () => {
   const [traceSort, setTraceSort] = useState('popular');
   const [expandedQuestions, setExpandedQuestions] = useState<Record<string, boolean>>({});
   const [visibleCommentsPerQuestion, setVisibleCommentsPerQuestion] = useState<Record<string, number>>({});
-  const [helpfulVotes, setHelpfulVotes] = useState<Record<string, boolean>>({});
 
   // Refs for scrolling back to specific questions
   const questionRefs = useRef<Record<string, HTMLDivElement | null>>({});
-
-  // Load helpful votes from local storage
-  useEffect(() => {
-    const saved = localStorage.getItem(`helpful_${slug}`);
-    if (saved) {
-      try {
-        setHelpfulVotes(JSON.parse(saved));
-      } catch (e) {
-        console.error('Failed to parse helpful votes', e);
-      }
-    }
-  }, [slug]);
-
-  // Save helpful votes to local storage
-  const toggleHelpful = (e: React.MouseEvent, commentId: string) => {
-    e.stopPropagation();
-    setHelpfulVotes(prev => {
-      const next = { ...prev, [commentId]: !prev[commentId] };
-      localStorage.setItem(`helpful_${slug}`, JSON.stringify(next));
-      return next;
-    });
-  };
-
-  // Check if a comment is "Detailed" (quality check)
-  const isDetailed = (text: string) => {
-    return text.length > 150 || (text.split(' ').length > 25 && /[.!?]/.test(text));
-  };
 
   /* ── back to top ── */
   useEffect(() => {
@@ -236,12 +208,33 @@ const Professor = () => {
       groups[comment.question].push(comment);
     });
 
+    // Helper to check if a comment is detailed for sorting
+    const checkDetailed = (text: string) => text.length > 150 || (text.split(' ').length > 25 && /[.!?]/.test(text));
+
     return Object.entries(groups)
-      .map(([question, comments]) => ({
-        question,
-        comments,
-        count: comments.length
-      }))
+      .map(([question, comments]) => {
+        // Find most recent termId for this question
+        const maxTermId = Math.max(...comments.map(c => c.termId || 0));
+        
+        return {
+          question,
+          maxTermId,
+          // Sort comments: 
+          // If 'newest' sort is active, newest termId first
+          // Otherwise detailed ones first
+          comments: [...comments].sort((a, b) => {
+            if (traceSort === 'newest') {
+              return (b.termId || 0) - (a.termId || 0);
+            }
+            const aDet = checkDetailed(a.comment);
+            const bDet = checkDetailed(b.comment);
+            if (aDet && !bDet) return -1;
+            if (!aDet && bDet) return 1;
+            return 0;
+          }),
+          count: comments.length
+        };
+      })
       .filter(group => {
         if (!traceSearch) return true;
         const searchLower = traceSearch.toLowerCase();
@@ -258,9 +251,10 @@ const Professor = () => {
         }
 
         switch (traceSort) {
+          case 'newest': return b.maxTermId - a.maxTermId;
           case 'popular': return b.count - a.count;
           case 'alphabetical': return a.question.localeCompare(b.question);
-          default: return 0; // Default to popular/natural order
+          default: return 0;
         }
       });
   }, [traceComments, traceSearch, traceSort]);
@@ -589,30 +583,11 @@ const Professor = () => {
                       
                       {isExpanded && (
                         <div className="trace-category-content">
-                          {group.comments.slice(0, visibleCount).map((c, ci) => {
-                            const commentId = `${group.question}_${ci}`;
-                            const isVoted = helpfulVotes[commentId];
-                            const detailed = isDetailed(c.comment);
-                            
-                            return (
-                              <div key={ci} className="trace-comment-bubble">
-                                {c.comment}
-                                <div className="trace-comment-footer">
-                                  {detailed && <span className="trace-useful-badge">Detailed</span>}
-                                  <button 
-                                    className={`trace-helpful-btn ${isVoted ? 'active' : ''}`}
-                                    onClick={(e) => toggleHelpful(e, commentId)}
-                                    title={isVoted ? "Unmark as helpful" : "Mark as helpful"}
-                                  >
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill={isVoted ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                      <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
-                                    </svg>
-                                    {isVoted ? 'Helpful' : 'Helpful?'}
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
+                          {group.comments.slice(0, visibleCount).map((c, ci) => (
+                            <div key={ci} className="trace-comment-bubble">
+                              {c.comment}
+                            </div>
+                          ))}
                           
                           <div className="trace-category-actions">
                             {visibleCount < group.count && (
