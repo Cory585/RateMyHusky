@@ -271,35 +271,52 @@ const Professor = () => {
 
   const stats = useMemo(() => {
     if (!profile) return null;
+
+    const allSelected = allCourseCodes.length > 0 && selectedCourses.size === allCourseCodes.length;
+
     const rmpRating = filteredRmpReviews.length > 0
       ? filteredRmpReviews.reduce((acc, r) => acc + r.quality, 0) / filteredRmpReviews.length
       : null;
     
     let traceSum = 0, traceWeight = 0;
     filteredTraceCourses.forEach(c => {
-      const overall = c.scores.find(s => 
-        (s.question.toLowerCase().includes('overall') && s.question.toLowerCase().includes('course')) ||
-        (s.question.toLowerCase().includes('instructor') && s.question.toLowerCase().includes('overall'))
-      );
+      const overall = c.scores.find(s => {
+        const q = s.question.toLowerCase().replace(/\s+/g, ' ');
+        return q === 'overall rating of teaching' || q.includes('overall rating') || q.includes('overall');
+      });
       if (overall) {
-        traceSum += overall.mean * overall.completed;
-        traceWeight += overall.completed;
+        const weight = overall.totalResponses ?? overall.completed;
+        if (weight > 0) {
+          traceSum += overall.mean * weight;
+          traceWeight += weight;
+        }
       }
     });
+
     const traceRating = traceWeight > 0 ? traceSum / traceWeight : null;
 
-    let combinedSum = 0, combinedWeight = 0;
-    if (rmpRating !== null) {
-      combinedSum += filteredRmpReviews.reduce((acc, r) => acc + r.quality, 0);
-      combinedWeight += filteredRmpReviews.length;
+    let avgRating = 0;
+    if (rmpRating !== null && traceRating !== null) {
+      avgRating = (rmpRating + traceRating) / 2;
+    } else if (rmpRating !== null) {
+      avgRating = rmpRating;
+    } else if (traceRating !== null) {
+      avgRating = traceRating;
     }
-    if (traceRating !== null) {
-      combinedSum += traceSum;
-      combinedWeight += traceWeight;
+
+    if (allSelected) {
+      return {
+        avgRating: profile.avgRating,
+        rmpRating: profile.rmpRating,
+        traceRating: profile.traceRating,
+        difficulty: profile.difficulty ?? 0,
+        totalRatings: profile.totalRatings,
+        wouldTakeAgainPct: profile.wouldTakeAgainPct,
+      };
     }
-    
+
     return {
-      avgRating: combinedWeight > 0 ? combinedSum / combinedWeight : 0,
+      avgRating,
       rmpRating,
       traceRating,
       difficulty: filteredRmpReviews.length > 0
@@ -308,7 +325,7 @@ const Professor = () => {
       totalRatings: filteredRmpReviews.length + traceWeight,
       wouldTakeAgainPct: profile.wouldTakeAgainPct,
     };
-  }, [profile, filteredRmpReviews, filteredTraceCourses]);
+  }, [profile, filteredRmpReviews, filteredTraceCourses, allCourseCodes, selectedCourses]);
 
   const ratingDistribution = useMemo(() => {
     return [5,4,3,2,1].map(star => ({
@@ -386,8 +403,7 @@ const Professor = () => {
       }),
     })).filter(g => 
       !traceSearch || 
-      g.question.toLowerCase().includes(traceSearch.toLowerCase()) || 
-      g.comments.some(c => c.comment.toLowerCase().includes(traceSearch.toLowerCase()))
+      g.question.toLowerCase().includes(traceSearch.toLowerCase())
     ).sort((a, b) => {
       if (traceSearch) {
         const aM = a.question.toLowerCase().includes(traceSearch.toLowerCase());
@@ -455,15 +471,17 @@ const Professor = () => {
           <span className="prof-stat-value accent"><AnimatedNumber value={stats.avgRating} /></span>
           <span className="prof-stat-label" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             Overall Rating
-            {(stats.rmpRating || stats.traceRating) && (
+            {(stats.rmpRating !== null || stats.traceRating !== null) && (
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
             )}
           </span>
           <StarRating rating={stats.avgRating ?? 0} size="lg" />
-          <div className="prof-stat-breakdown">
-            {stats.rmpRating && <span>RMP: {stats.rmpRating.toFixed(2)}</span>}
-            {stats.traceRating && <span>TRACE: {stats.traceRating.toFixed(2)}</span>}
-          </div>
+          {(stats.rmpRating !== null || stats.traceRating !== null) && (
+            <div className="prof-stat-breakdown">
+              {stats.rmpRating !== null && <span>RMP: {stats.rmpRating.toFixed(2)}</span>}
+              {stats.traceRating !== null && <span>TRACE: {stats.traceRating.toFixed(2)}</span>}
+            </div>
+          )}
         </div>
         <div className="prof-stat-card">
           <span className="prof-stat-value"><AnimatedNumber value={stats.difficulty} /></span>

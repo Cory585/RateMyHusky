@@ -44,6 +44,27 @@ rmp_profs.dropna(subset=["rating", "num_ratings"], inplace=True)
 # Normalize display names — collapse double spaces like "Jelena  Golubovic"
 rmp_profs["name"] = rmp_profs["name"].astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
 
+# Fix TRACE scores: The stored `mean` column is WRONG in the CSV — compute it from count_1..count_5
+for col in ["count_1", "count_2", "count_3", "count_4", "count_5", "completed"]:
+    trace_scores[col] = pd.to_numeric(trace_scores[col], errors="coerce").fillna(0).astype(int)
+
+trace_scores["_total_responses"] = (
+    trace_scores["count_1"] + trace_scores["count_2"] +
+    trace_scores["count_3"] + trace_scores["count_4"] +
+    trace_scores["count_5"]
+)
+trace_scores["_weighted_sum"] = (
+    1 * trace_scores["count_1"] + 2 * trace_scores["count_2"] +
+    3 * trace_scores["count_3"] + 4 * trace_scores["count_4"] +
+    5 * trace_scores["count_5"]
+)
+# Avoid division by zero
+trace_scores["mean"] = trace_scores.apply(
+    lambda r: r["_weighted_sum"] / r["_total_responses"]
+              if r["_total_responses"] > 0 else np.nan,
+    axis=1,
+)
+
 # ──────────────────────────────────────────────
 #  Alias Mapping (Entity Resolution)
 # ──────────────────────────────────────────────
@@ -277,27 +298,6 @@ trace_scores["question"] = trace_scores["question"].astype(str)
 overall_scores = trace_scores[
     trace_scores["question"].str.lower().str.contains("overall", na=False)
 ].copy()
-
-# The stored `mean` column is WRONG in the CSV — compute it from count_1..count_5
-for col in ["count_1", "count_2", "count_3", "count_4", "count_5", "completed"]:
-    overall_scores[col] = pd.to_numeric(overall_scores[col], errors="coerce").fillna(0).astype(int)
-
-overall_scores["_total_responses"] = (
-    overall_scores["count_1"] + overall_scores["count_2"] +
-    overall_scores["count_3"] + overall_scores["count_4"] +
-    overall_scores["count_5"]
-)
-overall_scores["_weighted_sum"] = (
-    1 * overall_scores["count_1"] + 2 * overall_scores["count_2"] +
-    3 * overall_scores["count_3"] + 4 * overall_scores["count_4"] +
-    5 * overall_scores["count_5"]
-)
-# Avoid division by zero
-overall_scores["mean"] = overall_scores.apply(
-    lambda r: r["_weighted_sum"] / r["_total_responses"]
-              if r["_total_responses"] > 0 else np.nan,
-    axis=1,
-)
 overall_scores.dropna(subset=["mean"], inplace=True)
 
 # Map courseId+instructorId → overall mean scores
@@ -866,6 +866,7 @@ def professor_profile(slug):
                 "stdDev": round(float(s["std_dev"]), 2) if pd.notna(s["std_dev"]) else 0,
                 "enrollment": int(s["enrollment"]) if pd.notna(s["enrollment"]) else 0,
                 "completed": int(s["completed"]) if pd.notna(s["completed"]) else 0,
+                "totalResponses": int(s["_total_responses"]) if pd.notna(s["_total_responses"]) else 0,
             })
         trace_course_list.append({
             "courseId": cid, "termId": tid,

@@ -30,6 +30,7 @@ export interface TraceCourseScore {
   stdDev: number;
   enrollment: number;
   completed: number;
+  totalResponses?: number;
 }
 
 export interface TraceCourse {
