@@ -1,6 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
-import Navbar from '../components/Navbar';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useParams, Link } from 'react-router-dom';
 import Footer from '../components/Footer';
 import NotFound from './NotFound';
 import FeedbackTab from '../components/FeedbackTab';
@@ -50,6 +49,13 @@ const sortOptions = [
   { value: 'highest', label: 'Highest Rated' },
   { value: 'lowest', label: 'Lowest Rated' },
 ];
+
+const traceSortOptions = [
+  { value: 'popular', label: 'Most Popular' },
+  { value: 'newest', label: 'Most Recent' },
+  { value: 'alphabetical', label: 'A-Z' },
+];
+
 const courseFilterAll = { value: '__all__', label: 'All Courses' };
 
 const GRADE_ORDER = ['A+','A','A-','B+','B','B-','C+','C','C-','D+','D','D-','F','W','WF','P','NP','I'];
@@ -64,7 +70,6 @@ const GRADE_COLORS: Record<string, string> = {
 /* ═══════════════════════════════════════ */
 const Professor = () => {
   const { slug } = useParams<{ slug: string }>();
-  const navigate = useNavigate();
   const reviewsRef = useRef<HTMLElement>(null);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [gradesAnimated, setGradesAnimated] = useState(false);
@@ -79,6 +84,43 @@ const Professor = () => {
   const [sortBy, setSortBy] = useState('newest');
   const [courseFilter, setCourseFilter] = useState('__all__');
   const [visibleReviews, setVisibleReviews] = useState(10);
+
+  // TRACE specific states
+  const [traceSearch, setTraceSearch] = useState('');
+  const [traceSort, setTraceSort] = useState('popular');
+  const [expandedQuestions, setExpandedQuestions] = useState<Record<string, boolean>>({});
+  const [visibleCommentsPerQuestion, setVisibleCommentsPerQuestion] = useState<Record<string, number>>({});
+  const [helpfulVotes, setHelpfulVotes] = useState<Record<string, boolean>>({});
+
+  // Refs for scrolling back to specific questions
+  const questionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  // Load helpful votes from local storage
+  useEffect(() => {
+    const saved = localStorage.getItem(`helpful_${slug}`);
+    if (saved) {
+      try {
+        setHelpfulVotes(JSON.parse(saved));
+      } catch (e) {
+        console.error('Failed to parse helpful votes', e);
+      }
+    }
+  }, [slug]);
+
+  // Save helpful votes to local storage
+  const toggleHelpful = (e: React.MouseEvent, commentId: string) => {
+    e.stopPropagation();
+    setHelpfulVotes(prev => {
+      const next = { ...prev, [commentId]: !prev[commentId] };
+      localStorage.setItem(`helpful_${slug}`, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  // Check if a comment is "Detailed" (quality check)
+  const isDetailed = (text: string) => {
+    return text.length > 150 || (text.split(' ').length > 25 && /[.!?]/.test(text));
+  };
 
   /* ── back to top ── */
   useEffect(() => {
@@ -108,12 +150,22 @@ const Professor = () => {
     }
     let cancelled = false;
     async function load() {
+      if (!slug) return;
       setLoading(true); setError('');
       try {
         const data = await fetchProfessorData(slug);
         if (cancelled) return;
         if (!data) { setError('Professor not found.'); }
-        else { setProfile(data); setReviews(data.reviews || []); setTraceComments(data.traceComments || []); }
+        else { 
+          setProfile(data); 
+          setReviews(data.reviews || []); 
+          setTraceComments(data.traceComments || []); 
+          
+          // Initial expanded state for the first few popular questions
+          if (data.traceComments && data.traceComments.length > 0) {
+            // We'll set this later after grouping
+          }
+        }
       } catch { if (!cancelled) setError('Failed to load professor data.'); }
       finally { if (!cancelled) setLoading(false); }
     }
@@ -174,6 +226,67 @@ const Professor = () => {
       }
     });
 
+  // Group TRACE comments by question
+  const groupedTrace = useMemo(() => {
+    const groups: Record<string, TraceComment[]> = {};
+    traceComments.forEach(comment => {
+      if (!groups[comment.question]) {
+        groups[comment.question] = [];
+      }
+      groups[comment.question].push(comment);
+    });
+
+    return Object.entries(groups)
+      .map(([question, comments]) => ({
+        question,
+        comments,
+        count: comments.length
+      }))
+      .filter(group => {
+        if (!traceSearch) return true;
+        const searchLower = traceSearch.toLowerCase();
+        return group.question.toLowerCase().includes(searchLower) || 
+               group.comments.some(c => c.comment.toLowerCase().includes(searchLower));
+      })
+      .sort((a, b) => {
+        // Boost matches in the question title
+        if (traceSearch) {
+          const aTitleMatch = a.question.toLowerCase().includes(traceSearch.toLowerCase());
+          const bTitleMatch = b.question.toLowerCase().includes(traceSearch.toLowerCase());
+          if (aTitleMatch && !bTitleMatch) return -1;
+          if (!aTitleMatch && bTitleMatch) return 1;
+        }
+
+        switch (traceSort) {
+          case 'popular': return b.count - a.count;
+          case 'alphabetical': return a.question.localeCompare(b.question);
+          default: return 0; // Default to popular/natural order
+        }
+      });
+  }, [traceComments, traceSearch, traceSort]);
+
+  const toggleQuestion = (question: string) => {
+    setExpandedQuestions(prev => ({
+      ...prev,
+      [question]: !prev[question]
+    }));
+    
+    if (!visibleCommentsPerQuestion[question]) {
+      setVisibleCommentsPerQuestion(prev => ({
+        ...prev,
+        [question]: 5
+      }));
+    }
+  };
+
+  const showMoreComments = (e: React.MouseEvent, question: string) => {
+    e.stopPropagation();
+    setVisibleCommentsPerQuestion(prev => ({
+      ...prev,
+      [question]: (prev[question] || 5) + 10
+    }));
+  };
+
   const ratingDistribution = [5,4,3,2,1].map((star) => ({
     star, count: reviews.filter((r) => r.quality === star).length,
   }));
@@ -199,8 +312,9 @@ const Professor = () => {
   };
 
   if (loading) return (
-    <div className="prof-page"><Navbar />
-      <div className="prof-loading"><div className="prof-loading-spinner" /><p>Loading professor data…</p></div>
+    <div className="prof-page">
+      <div className="prof-loading">
+<div className="prof-loading-spinner" /><p>Loading professor data…</p></div>
       <ThemeToggle />
     </div>
   );
@@ -211,8 +325,6 @@ const Professor = () => {
 
   return (
     <div className="prof-page">
-      <Navbar />
-
       {/* ════════ HERO ════════ */}
       <header className="prof-hero">
         <div className="prof-hero-bg" style={{ backgroundImage: `url(${neuIcon})` }} />
@@ -230,10 +342,21 @@ const Professor = () => {
 
       {/* ════════ STAT CARDS ════════ */}
       <section className="prof-stats">
-        <div className="prof-stat-card">
+        <div className="prof-stat-card prof-stat-clickable">
           <span className="prof-stat-value accent"><AnimatedNumber value={profile.avgRating} /></span>
-          <span className="prof-stat-label">Overall Rating</span>
+          <span className="prof-stat-label" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            Overall Rating
+            {(profile.rmpRating || profile.traceRating) && (
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            )}
+          </span>
           <StarRating rating={profile.avgRating ?? 0} size="lg" />
+          {(profile.rmpRating || profile.traceRating) && (
+            <div className="prof-stat-breakdown">
+              {profile.rmpRating && <span>RMP: {profile.rmpRating.toFixed(2)}</span>}
+              {profile.traceRating && <span>TRACE: {profile.traceRating.toFixed(2)}</span>}
+            </div>
+          )}
         </div>
         <div className="prof-stat-card">
           <span className="prof-stat-value"><AnimatedNumber value={profile.difficulty} /></span>
@@ -418,20 +541,120 @@ const Professor = () => {
         </>)}
 
         {reviewTab === 'trace' && (
-          <div className="prof-reviews-list">
-            {traceComments.length === 0 ? <p className="prof-no-reviews">No TRACE comments available.</p> : (
-              traceComments.slice(0, visibleReviews).map((c, i) => (
-                <div key={i} className="prof-review-card trace-card" style={{ animationDelay: `${(i % 10) * 0.04}s` }}>
-                  <span className="prof-trace-question">{c.question}</span>
-                  <p className="prof-review-comment">{c.comment}</p>
-                </div>
-              ))
-            )}
-            {visibleReviews < traceComments.length && (
-              <button className="prof-load-more" onClick={() => setVisibleReviews((v) => v + 10)}>
-                Load More ({traceComments.length - visibleReviews} remaining)
-              </button>
-            )}
+          <div className="prof-trace-container">
+            <div className="prof-trace-controls">
+              <div className="trace-search-container">
+                <span className="trace-search-icon">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                </span>
+                <input 
+                  type="text" 
+                  className="trace-search-input" 
+                  placeholder="Search questions or keywords..." 
+                  value={traceSearch}
+                  onChange={(e) => setTraceSearch(e.target.value)}
+                />
+              </div>
+              <Dropdown 
+                className="trace-sort-dropdown"
+                options={traceSortOptions}
+                value={traceSort}
+                onChange={setTraceSort}
+              />
+            </div>
+
+            <div className="prof-trace-categories">
+              {groupedTrace.length === 0 ? (
+                <p className="prof-no-reviews">No TRACE questions found matching your search.</p>
+              ) : (
+                groupedTrace.map((group) => {
+                  const isExpanded = expandedQuestions[group.question];
+                  const visibleCount = visibleCommentsPerQuestion[group.question] || 5;
+                  
+                  return (
+                    <div 
+                      key={group.question} 
+                      className={`trace-category-item ${isExpanded ? 'expanded' : ''}`}
+                      ref={el => { questionRefs.current[group.question] = el; }}
+                    >
+                      <div className="trace-category-header" onClick={() => toggleQuestion(group.question)}>
+                        <div className="trace-category-title-wrap">
+                          <h4 className="trace-category-title">{group.question}</h4>
+                          <div className="trace-category-subtitle">
+                            <span className="trace-comment-count">{group.count} comment{group.count !== 1 ? 's' : ''}</span>
+                          </div>
+                        </div>
+                        <svg className="trace-chevron" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                      </div>
+                      
+                      {isExpanded && (
+                        <div className="trace-category-content">
+                          {group.comments.slice(0, visibleCount).map((c, ci) => {
+                            const commentId = `${group.question}_${ci}`;
+                            const isVoted = helpfulVotes[commentId];
+                            const detailed = isDetailed(c.comment);
+                            
+                            return (
+                              <div key={ci} className="trace-comment-bubble">
+                                {c.comment}
+                                <div className="trace-comment-footer">
+                                  {detailed && <span className="trace-useful-badge">Detailed</span>}
+                                  <button 
+                                    className={`trace-helpful-btn ${isVoted ? 'active' : ''}`}
+                                    onClick={(e) => toggleHelpful(e, commentId)}
+                                    title={isVoted ? "Unmark as helpful" : "Mark as helpful"}
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill={isVoted ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
+                                    </svg>
+                                    {isVoted ? 'Helpful' : 'Helpful?'}
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          
+                          <div className="trace-category-actions">
+                            {visibleCount < group.count && (
+                              <button 
+                                className="trace-action-btn primary"
+                                onClick={(e) => showMoreComments(e, group.question)}
+                              >
+                                Show More ({group.count - visibleCount} left)
+                              </button>
+                            )}
+                            
+                            {visibleCount > 5 && (
+                              <button 
+                                className="trace-action-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setVisibleCommentsPerQuestion(prev => ({ ...prev, [group.question]: 5 }));
+                                  questionRefs.current[group.question]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                }}
+                              >
+                                Show Less
+                              </button>
+                            )}
+
+                            <button 
+                              className="trace-action-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleQuestion(group.question);
+                                questionRefs.current[group.question]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                              }}
+                            >
+                              Collapse Question
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
         )}
       </section>

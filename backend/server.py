@@ -44,6 +44,42 @@ rmp_profs.dropna(subset=["rating", "num_ratings"], inplace=True)
 # Normalize display names — collapse double spaces like "Jelena  Golubovic"
 rmp_profs["name"] = rmp_profs["name"].astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
 
+# ──────────────────────────────────────────────
+#  Alias Mapping (Entity Resolution)
+# ──────────────────────────────────────────────
+ALIAS_MAP = {
+    "laney strange": "elena strange",
+}
+
+def merge_rmp_aliases(df):
+    df["_name_key"] = df["name"].apply(normalize_name)
+    df["_name_key"] = df["_name_key"].replace(ALIAS_MAP)
+    rows = []
+    for nk, g in df.groupby("_name_key"):
+        if len(g) == 1:
+            rows.append(g.iloc[0])
+            continue
+        g = g.sort_values("num_ratings", ascending=False)
+        primary = g.iloc[0].copy()
+        tot = g["num_ratings"].sum()
+        if tot > 0:
+            primary["rating"] = (g["rating"] * g["num_ratings"]).sum() / tot
+            if "level_of_difficulty" in g.columns:
+                diffs = pd.to_numeric(g["level_of_difficulty"], errors="coerce")
+                if diffs.notna().any():
+                    primary["level_of_difficulty"] = (diffs.fillna(0) * g["num_ratings"]).sum() / g.loc[diffs.notna(), "num_ratings"].sum()
+            if "would_take_again_pct" in g.columns:
+                wtas = g["would_take_again_pct"].astype(str).str.replace("%", "").replace("N/A", "nan").astype(float)
+                if wtas.notna().any():
+                    val = (wtas.fillna(0) * g["num_ratings"]).sum() / g.loc[wtas.notna(), "num_ratings"].sum()
+                    primary["would_take_again_pct"] = f"{round(val, 1)}%"
+        primary["num_ratings"] = tot
+        primary["name"] = nk.title()
+        rows.append(primary)
+    return pd.DataFrame(rows).reset_index(drop=True)
+
+rmp_profs = merge_rmp_aliases(rmp_profs)
+
 
 # ──────────────────────────────────────────────
 #  Friendly stat formatting:  round down then "+"
@@ -686,7 +722,7 @@ for nk in prof_search["_name_lower"].values:
 print(f"[prof-page] Slug index: {len(_slug_to_name)} unique slugs")
 
 # Precompute review name keys
-rmp_reviews["_rev_name_key"] = rmp_reviews["professor_name"].astype(str).str.strip().str.lower().str.replace(r'\s+', ' ', regex=True)
+rmp_reviews["_rev_name_key"] = rmp_reviews["professor_name"].astype(str).str.strip().str.lower().str.replace(r'\s+', ' ', regex=True).replace(ALIAS_MAP)
 
 
 def _resolve_slug(slug):

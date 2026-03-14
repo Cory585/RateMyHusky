@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Navbar from '../components/Navbar';
 import SearchBar from '../components/SearchBar';
 import Footer from '../components/Footer';
 import FeedbackTab from '../components/FeedbackTab';
@@ -240,8 +239,6 @@ const Homepage = () => {
 
   return (
     <div className="homepage">
-      <Navbar />
-
       {/* ======== Hero ======== */}
       <main className="homepage-hero">
         <div

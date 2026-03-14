@@ -25,19 +25,28 @@ const SearchBar = () => {
       ? 'Search by professor name...'
       : 'Search by course name or code...';
 
+  const handleSearchTypeChange = (newType: string) => {
+    setSearchType(newType);
+    setQuery('');
+    setSuggestions([]);
+    setShowSuggestions(false);
+  };
+
   // Debounced fetch
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
-    if (query.trim().length < 2) {
-      setSuggestions([]);
-      setShowSuggestions(false);
+    const trimmedQuery = query.trim();
+    if (trimmedQuery.length < 2) {
+      // Don't call setState here if it's already empty/false
+      // But we need to handle it. Actually, the lint error is specific to SYNC calls in body.
+      // We can use an async or just handle it.
       return;
     }
 
     debounceRef.current = setTimeout(async () => {
       try {
-        const results = await fetchSearchSuggestions(query, searchType);
+        const results = await fetchSearchSuggestions(trimmedQuery, searchType);
         setSuggestions(results);
         setShowSuggestions(results.length > 0);
         setActiveIndex(-1);
@@ -52,6 +61,15 @@ const SearchBar = () => {
     };
   }, [query, searchType]);
 
+  // Handle query change to sync suggestions state
+  const handleQueryChange = (val: string) => {
+    setQuery(val);
+    if (val.trim().length < 2) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+    }
+  };
+
   // Close on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -63,12 +81,7 @@ const SearchBar = () => {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Clear suggestions when switching type
-  useEffect(() => {
-    setQuery('');
-    setSuggestions([]);
-    setShowSuggestions(false);
-  }, [searchType]);
+  // Removed redundant clear effect
 
   const handleSelect = (suggestion: SearchSuggestion) => {
     setShowSuggestions(false);
@@ -114,7 +127,7 @@ const SearchBar = () => {
             className="search-dropdown"
             options={searchOptions}
             value={searchType}
-            onChange={setSearchType}
+            onChange={handleSearchTypeChange}
           />
         </div>
 
@@ -140,7 +153,7 @@ const SearchBar = () => {
           type="text"
           placeholder={placeholderText}
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => handleQueryChange(e.target.value)}
           onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
           onKeyDown={handleKeyDown}
         />

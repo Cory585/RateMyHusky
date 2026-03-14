@@ -6,6 +6,7 @@ import './FeedbackTab.css';
 const feedbackOptions = [
   { value: 'bug', label: 'Bug Report' },
   { value: 'feature', label: 'Feature Request' },
+  { value: 'alias', label: 'Missing RMP Reviews / Wrong Name' },
   { value: 'general', label: 'General Feedback' },
 ];
 
@@ -36,6 +37,13 @@ const FeedbackTab = () => {
       setEmail('');
       setError('');
     }, 300);
+  };
+
+  const getPlaceholder = () => {
+    if (feedbackType === 'alias') {
+      return "Who is the professor? Please provide links to their RMP pages so we can merge their ratings.";
+    }
+    return "Say more about bugs, suggestions, etc.";
   };
 
   return (
@@ -94,7 +102,7 @@ const FeedbackTab = () => {
                 </label>
                 <textarea
                   className="feedback-textarea"
-                  placeholder="Say more about bugs, suggestions, etc."
+                  placeholder={getPlaceholder()}
                   rows={4}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
