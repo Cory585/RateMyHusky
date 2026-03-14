@@ -1,6 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Navbar from '../components/Navbar';
 import SearchBar from '../components/SearchBar';
 import Footer from '../components/Footer';
 import FeedbackTab from '../components/FeedbackTab';
@@ -156,11 +155,53 @@ const Homepage = () => {
   const [tabsAtEnd, setTabsAtEnd] = useState(false);
   const [tabsAtStart, setTabsAtStart] = useState(true);
 
+  // Pill animation state
+  const [pillStyle, setPillStyle] = useState({ left: 0, width: 0, opacity: 0 });
+  const [isPillReady, setIsPillReady] = useState(false);
+
   // Navigate to professor page
   const handleProfClick = (name: string) => {
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     navigate(`/professors/${slug}`);
   };
+
+  const updatePill = useCallback(() => {
+    if (!tabsRef.current) return;
+    const activeTab = tabsRef.current.querySelector('.goat-tab.active') as HTMLElement;
+    if (activeTab) {
+      setPillStyle({
+        left: activeTab.offsetLeft,
+        width: activeTab.offsetWidth,
+        opacity: 1
+      });
+    }
+  }, []);
+
+  // Update pill on selection change
+  useLayoutEffect(() => {
+    updatePill();
+  }, [selectedCollege, updatePill]);
+
+  // Handle initialization and resize via ResizeObserver
+  useEffect(() => {
+    const container = tabsRef.current;
+    if (!container) return;
+
+    updatePill();
+    const readyTimer = setTimeout(() => setIsPillReady(true), 150);
+
+    const observer = new ResizeObserver(() => {
+      setIsPillReady(false);
+      updatePill();
+      setTimeout(() => setIsPillReady(true), 50);
+    });
+
+    observer.observe(container);
+    return () => {
+      clearTimeout(readyTimer);
+      observer.disconnect();
+    };
+  }, [updatePill, colleges]);
 
   // Detect scroll position on college tabs
   useEffect(() => {
@@ -240,8 +281,6 @@ const Homepage = () => {
 
   return (
     <div className="homepage">
-      <Navbar />
-
       {/* ======== Hero ======== */}
       <main className="homepage-hero">
         <div
@@ -282,6 +321,15 @@ const Homepage = () => {
           className={`goat-college-tabs${tabsAtStart ? ' scrolled-start' : ''}${tabsAtEnd ? ' scrolled-end' : ''}`}
           ref={tabsRef}
         >
+          <div 
+            className={`goat-pill-background ${isPillReady ? 'animate' : ''}`}
+            style={{
+              transform: `translateX(${pillStyle.left}px)`,
+              width: `${pillStyle.width}px`,
+              opacity: pillStyle.opacity,
+              visibility: pillStyle.opacity === 0 ? 'hidden' : 'visible'
+            }}
+          />
           {colleges.map((c) => (
             <button
               key={c}

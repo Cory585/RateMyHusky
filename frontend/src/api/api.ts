@@ -30,6 +30,7 @@ export interface TraceCourseScore {
   stdDev: number;
   enrollment: number;
   completed: number;
+  totalResponses?: number;
 }
 
 export interface TraceCourse {
@@ -79,6 +80,7 @@ export interface TraceComment {
   courseUrl: string;
   question: string;
   comment: string;
+  termId: number;
 }
 
 /* ---- Fetchers ---- */

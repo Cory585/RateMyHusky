@@ -44,6 +44,63 @@ rmp_profs.dropna(subset=["rating", "num_ratings"], inplace=True)
 # Normalize display names — collapse double spaces like "Jelena  Golubovic"
 rmp_profs["name"] = rmp_profs["name"].astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
 
+# Fix TRACE scores: The stored `mean` column is WRONG in the CSV — compute it from count_1..count_5
+for col in ["count_1", "count_2", "count_3", "count_4", "count_5", "completed"]:
+    trace_scores[col] = pd.to_numeric(trace_scores[col], errors="coerce").fillna(0).astype(int)
+
+trace_scores["_total_responses"] = (
+    trace_scores["count_1"] + trace_scores["count_2"] +
+    trace_scores["count_3"] + trace_scores["count_4"] +
+    trace_scores["count_5"]
+)
+trace_scores["_weighted_sum"] = (
+    1 * trace_scores["count_1"] + 2 * trace_scores["count_2"] +
+    3 * trace_scores["count_3"] + 4 * trace_scores["count_4"] +
+    5 * trace_scores["count_5"]
+)
+# Avoid division by zero
+trace_scores["mean"] = trace_scores.apply(
+    lambda r: r["_weighted_sum"] / r["_total_responses"]
+              if r["_total_responses"] > 0 else np.nan,
+    axis=1,
+)
+
+# ──────────────────────────────────────────────
+#  Alias Mapping (Entity Resolution)
+# ──────────────────────────────────────────────
+ALIAS_MAP = {
+    "laney strange": "elena strange",
+}
+
+def merge_rmp_aliases(df):
+    df["_name_key"] = df["name"].apply(normalize_name)
+    df["_name_key"] = df["_name_key"].replace(ALIAS_MAP)
+    rows = []
+    for nk, g in df.groupby("_name_key"):
+        if len(g) == 1:
+            rows.append(g.iloc[0])
+            continue
+        g = g.sort_values("num_ratings", ascending=False)
+        primary = g.iloc[0].copy()
+        tot = g["num_ratings"].sum()
+        if tot > 0:
+            primary["rating"] = (g["rating"] * g["num_ratings"]).sum() / tot
+            if "level_of_difficulty" in g.columns:
+                diffs = pd.to_numeric(g["level_of_difficulty"], errors="coerce")
+                if diffs.notna().any():
+                    primary["level_of_difficulty"] = (diffs.fillna(0) * g["num_ratings"]).sum() / g.loc[diffs.notna(), "num_ratings"].sum()
+            if "would_take_again_pct" in g.columns:
+                wtas = g["would_take_again_pct"].astype(str).str.replace("%", "").replace("N/A", "nan").astype(float)
+                if wtas.notna().any():
+                    val = (wtas.fillna(0) * g["num_ratings"]).sum() / g.loc[wtas.notna(), "num_ratings"].sum()
+                    primary["would_take_again_pct"] = f"{round(val, 1)}%"
+        primary["num_ratings"] = tot
+        primary["name"] = nk.title()
+        rows.append(primary)
+    return pd.DataFrame(rows).reset_index(drop=True)
+
+rmp_profs = merge_rmp_aliases(rmp_profs)
+
 
 # ──────────────────────────────────────────────
 #  Friendly stat formatting:  round down then "+"
@@ -241,27 +298,6 @@ trace_scores["question"] = trace_scores["question"].astype(str)
 overall_scores = trace_scores[
     trace_scores["question"].str.lower().str.contains("overall", na=False)
 ].copy()
-
-# The stored `mean` column is WRONG in the CSV — compute it from count_1..count_5
-for col in ["count_1", "count_2", "count_3", "count_4", "count_5", "completed"]:
-    overall_scores[col] = pd.to_numeric(overall_scores[col], errors="coerce").fillna(0).astype(int)
-
-overall_scores["_total_responses"] = (
-    overall_scores["count_1"] + overall_scores["count_2"] +
-    overall_scores["count_3"] + overall_scores["count_4"] +
-    overall_scores["count_5"]
-)
-overall_scores["_weighted_sum"] = (
-    1 * overall_scores["count_1"] + 2 * overall_scores["count_2"] +
-    3 * overall_scores["count_3"] + 4 * overall_scores["count_4"] +
-    5 * overall_scores["count_5"]
-)
-# Avoid division by zero
-overall_scores["mean"] = overall_scores.apply(
-    lambda r: r["_weighted_sum"] / r["_total_responses"]
-              if r["_total_responses"] > 0 else np.nan,
-    axis=1,
-)
 overall_scores.dropna(subset=["mean"], inplace=True)
 
 # Map courseId+instructorId → overall mean scores
@@ -537,9 +573,10 @@ def random_professor():
 # Professors: merge RMP + TRACE so all instructors are searchable
 
 # RMP professors (already have avg_rating, trace_dept, etc.)
-rmp_for_search = rmp_profs[["name", "trace_dept", "avg_rating", "total_reviews"]].copy()
+rmp_for_search = rmp_profs[["name", "department", "trace_dept", "avg_rating", "total_reviews"]].copy()
 rmp_for_search["_name_lower"] = rmp_for_search["name"].apply(normalize_name)
-rmp_for_search["dept_display"] = rmp_for_search["trace_dept"]  # only TRACE dept
+# Use TRACE department if available, otherwise fall back to RMP department
+rmp_for_search["dept_display"] = rmp_for_search["trace_dept"].fillna(rmp_for_search["department"])
 
 # TRACE-only professors (not in RMP)
 trace_unique = trace_courses[["_full", "departmentName"]].drop_duplicates(subset=["_full"])
@@ -560,11 +597,11 @@ prof_search = pd.concat([
     trace_only[["name", "_name_lower", "dept_display", "avg_rating", "total_reviews"]],
 ], ignore_index=True)
 
-# Drop any without a TRACE department
+# Drop any without any department info
 prof_search = prof_search[prof_search["dept_display"].notna()]
 
-# Split into individual name parts for whole-word matching
-prof_search["_name_parts"] = prof_search["_name_lower"].str.split()
+# Split into individual name parts for whole-word matching (strip punctuation for better matching)
+prof_search["_name_parts"] = prof_search["_name_lower"].str.replace(r'[^\w\s]', '', regex=True).str.split()
 prof_search = prof_search.drop_duplicates(subset=["_name_lower"])
 
 print(f"[search] Indexed {len(prof_search)} professors ({len(rmp_for_search)} RMP + {len(trace_only)} TRACE-only)")
@@ -599,7 +636,7 @@ print(f"[search] Indexed {len(prof_search)} professors, {len(course_search)} cou
 def search():
     q = normalize_name(request.args.get("q", ""))
     search_type = request.args.get("type", "Professor")
-    limit = int(request.args.get("limit", "3"))
+    limit = int(request.args.get("limit", "5"))
 
     if len(q) < 2:
         return jsonify([])
@@ -622,11 +659,62 @@ def search():
             ~prof_search.index.isin(exact_word.index) &
             ~prof_search.index.isin(starts_word.index)
         ]
-        matches = pd.concat([
+
+        # Tier 4: Fallback for spaced queries — each word must prefix a name part
+        # e.g. "jon bell" → "jon" starts "jonathan", "bell" starts "bell"
+        fallback_matches = pd.DataFrame()
+        if ' ' in q:
+            words = q.split()
+            if len(words) >= 2:
+                def robust_match(prof_parts):
+                    if not isinstance(prof_parts, list): return False
+                    for qw in words:
+                        if not any(pp.startswith(qw) for pp in prof_parts):
+                            return False
+                    return True
+
+                mask = prof_search["_name_parts"].apply(robust_match)
+                fallback_matches = prof_search[
+                    mask &
+                    ~prof_search.index.isin(exact_word.index) &
+                    ~prof_search.index.isin(starts_word.index) &
+                    ~prof_search.index.isin(contains.index)
+                ]
+
+        # Tier 5: Each query word is a substring of any name part (loosest)
+        # e.g. "ath bell" → "ath" in "jonathan", "bell" in "bell"
+        substring_matches = pd.DataFrame()
+        if ' ' in q:
+            words = q.split()
+            if len(words) >= 2:
+                def substring_match(prof_parts):
+                    if not isinstance(prof_parts, list): return False
+                    for qw in words:
+                        if not any(qw in pp for pp in prof_parts):
+                            return False
+                    return True
+
+                already = set(exact_word.index) | set(starts_word.index) | set(contains.index)
+                if not fallback_matches.empty:
+                    already |= set(fallback_matches.index)
+
+                mask = prof_search["_name_parts"].apply(substring_match)
+                substring_matches = prof_search[
+                    mask & ~prof_search.index.isin(already)
+                ]
+
+        # Combine all tiers in priority order
+        all_matches = [
             exact_word.sort_values("total_reviews", ascending=False),
             starts_word.sort_values("total_reviews", ascending=False),
             contains.sort_values("total_reviews", ascending=False),
-        ]).head(limit)
+        ]
+        if not fallback_matches.empty:
+            all_matches.append(fallback_matches.sort_values("total_reviews", ascending=False))
+        if not substring_matches.empty:
+            all_matches.append(substring_matches.sort_values("total_reviews", ascending=False))
+
+        matches = pd.concat(all_matches).head(limit)
 
         results = []
         for _, r in matches.iterrows():
@@ -686,7 +774,7 @@ for nk in prof_search["_name_lower"].values:
 print(f"[prof-page] Slug index: {len(_slug_to_name)} unique slugs")
 
 # Precompute review name keys
-rmp_reviews["_rev_name_key"] = rmp_reviews["professor_name"].astype(str).str.strip().str.lower().str.replace(r'\s+', ' ', regex=True)
+rmp_reviews["_rev_name_key"] = rmp_reviews["professor_name"].astype(str).str.strip().str.lower().str.replace(r'\s+', ' ', regex=True).replace(ALIAS_MAP)
 
 
 def _resolve_slug(slug):
@@ -778,6 +866,7 @@ def professor_profile(slug):
                 "stdDev": round(float(s["std_dev"]), 2) if pd.notna(s["std_dev"]) else 0,
                 "enrollment": int(s["enrollment"]) if pd.notna(s["enrollment"]) else 0,
                 "completed": int(s["completed"]) if pd.notna(s["completed"]) else 0,
+                "totalResponses": int(s["_total_responses"]) if pd.notna(s["_total_responses"]) else 0,
             })
         trace_course_list.append({
             "courseId": cid, "termId": tid,
@@ -818,7 +907,7 @@ def professor_profile(slug):
         cid = str(int(c["courseId"]))
         iid = str(int(c["instructorId"]))
         tid = str(int(c["termId"])) if pd.notna(c["termId"]) else ""
-        url_patterns.add(f"{cid}/{iid}/{tid}")
+        url_patterns.add(f"sp={cid}&sp={iid}&sp={tid}")
 
     if url_patterns:
         mask = trace_comments["course_url"].apply(
@@ -830,10 +919,23 @@ def professor_profile(slug):
             comment_text = str(c["comment"]) if pd.notna(c["comment"]) else ""
             if not comment_text.strip():
                 continue
+            
+            # Extract termId from URL for sorting: sp=105528&sp=1158&sp=198 -> last sp is tid
+            url = str(c["course_url"]) if pd.notna(c["course_url"]) else ""
+            term_id = 0
+            try:
+                # Find all sp= values
+                sp_matches = re.findall(r"sp=(\d+)", url)
+                if len(sp_matches) >= 3:
+                    term_id = int(sp_matches[2])
+            except:
+                pass
+
             comments.append({
-                "courseUrl": str(c["course_url"]) if pd.notna(c["course_url"]) else "",
+                "courseUrl": url,
                 "question": str(c["question"]) if pd.notna(c["question"]) else "",
                 "comment": comment_text,
+                "termId": term_id
             })
         profile["traceComments"] = comments
     else:
@@ -846,4 +948,4 @@ if __name__ == "__main__":
     print(f"Loaded {len(rmp_profs)} RMP professors, {len(rmp_reviews)} RMP reviews")
     print(f"Stats → {stat_professor_count} professors, {stat_course_count} courses, "
           f"{stat_total_evaluations} evaluations, {stat_department_count} departments")
-    app.run(debug=True, port=5001, use_reloader=False)
+    app.run(debug=True, port=5001, use_reloader=True)
