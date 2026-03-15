@@ -359,7 +359,20 @@ const Homepage = () => {
             <button
               key={c}
               className={`goat-tab ${c === selectedCollege ? 'active' : ''}`}
-              onClick={() => setSelectedCollege(c)}
+              onClick={(e) => {
+                setSelectedCollege(c);
+                const container = tabsRef.current;
+                const btn = e.currentTarget;
+                if (container) {
+                  const fadeWidth = 40;
+                  const targetScroll = Math.max(0, btn.offsetLeft - fadeWidth);
+                  const maxScroll = container.scrollWidth - container.clientWidth;
+                  container.scrollTo({
+                    left: Math.min(targetScroll, maxScroll),
+                    behavior: 'smooth',
+                  });
+                }
+              }}
             >
               {c}
             </button>

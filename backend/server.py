@@ -478,17 +478,16 @@ stat_professor_count = len(_all_prof_names)
 trace_courses["_course_code"] = trace_courses["displayName"].astype(str).str.split(":").str[0]
 stat_course_count = trace_courses["_course_code"].str.upper().nunique()
 
-# Evaluations = RMP reviews + TRACE completed evaluations (deduplicated per section)
-_trace_sections_deduped = trace_scores.drop_duplicates(subset=["courseId", "instructorId", "termId"])
-trace_eval_count = int(_trace_sections_deduped["completed"].fillna(0).astype(int).sum())
+# Comments = RMP reviews + TRACE comments
 rmp_review_count = len(rmp_reviews)
-stat_total_evaluations = rmp_review_count + trace_eval_count
+trace_comment_count = len(trace_comments)
+stat_total_comments = rmp_review_count + trace_comment_count
 
 # Departments = unique department names, case-insensitive
 stat_department_count = trace_courses["departmentName"].str.lower().str.strip().nunique()
 
 print(f"[stats] {stat_professor_count} professors, {stat_course_count} courses, "
-      f"{stat_total_evaluations} evaluations ({rmp_review_count} RMP + {trace_eval_count} TRACE), "
+      f"{stat_total_comments} comments ({rmp_review_count} RMP + {trace_comment_count} TRACE), "
       f"{stat_department_count} departments")
 
 
@@ -500,7 +499,7 @@ def stats():
     return jsonify([
         {"label": "Professors",  "value": friendly_count(stat_professor_count)},
         {"label": "Courses",     "value": friendly_count(stat_course_count)},
-        {"label": "Evaluations", "value": friendly_count(stat_total_evaluations)},
+        {"label": "Comments", "value": friendly_count(stat_total_comments)},
         {"label": "Departments", "value": friendly_count(stat_department_count)},
     ])
 
@@ -1150,5 +1149,5 @@ def professors_catalog():
 if __name__ == "__main__":
     print(f"Loaded {len(rmp_profs)} RMP professors, {len(rmp_reviews)} RMP reviews")
     print(f"Stats → {stat_professor_count} professors, {stat_course_count} courses, "
-          f"{stat_total_evaluations} evaluations, {stat_department_count} departments")
+          f"{stat_total_comments} comments, {stat_department_count} departments")
     app.run(debug=True, port=5001, use_reloader=True)
