@@ -1,0 +1,730 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { fetchProfessorData, fetchProfessorsCatalog, fetchSearchSuggestions } from '../api/api';
+import type { CatalogProfessor, ProfessorProfile, ProfessorSuggestion } from '../api/api';
+import StarRating from '../components/StarRating';
+import Footer from '../components/Footer';
+import ThemeToggle from '../components/ThemeToggle';
+import './Compare.css';
+
+type Side = 'a' | 'b';
+
+interface TraceSnapshot {
+	term: string;
+	course: string;
+	score: number;
+}
+
+type WinnerSide = 'left' | 'right' | null;
+
+const CATALOG_LIMIT = 5000;
+
+const slugify = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+const normalizeName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const getInitials = (name: string) =>
+	name
+		.split(/\s+/)
+		.filter(Boolean)
+		.slice(0, 2)
+		.map((part) => part[0]?.toUpperCase() ?? '')
+		.join('');
+
+const parseMaybeNumber = (value: number | null | undefined) => {
+	if (typeof value !== 'number' || Number.isNaN(value)) return null;
+	return value;
+};
+
+const formatMetric = (value: number | null | undefined, digits = 2) => {
+	const parsed = parseMaybeNumber(value);
+	return parsed === null ? 'N/A' : parsed.toFixed(digits);
+};
+
+const getDifficultyClass = (value: number | null | undefined) => {
+	const d = parseMaybeNumber(value);
+	if (d === null) return 'compare-value-muted';
+	if (d <= 2.5) return 'compare-value-good';
+	if (d <= 3.5) return 'compare-value-mid';
+	return 'compare-value-hard';
+};
+
+const pickWinner = (
+	leftValue: number | null | undefined,
+	rightValue: number | null | undefined,
+	mode: 'higher' | 'lower' = 'higher',
+): WinnerSide => {
+	const left = parseMaybeNumber(leftValue);
+	const right = parseMaybeNumber(rightValue);
+
+	if (left === null || right === null) return null;
+	if (left === right) return null;
+
+	if (mode === 'higher') return left > right ? 'left' : 'right';
+	return left < right ? 'left' : 'right';
+};
+
+const getRecentTraceSnapshot = (profile: ProfessorProfile | null): TraceSnapshot | null => {
+	if (!profile?.traceCourses?.length) return null;
+
+	const sortedCourses = [...profile.traceCourses].sort((a, b) => {
+		if (a.termId !== b.termId) return b.termId - a.termId;
+		return b.courseId - a.courseId;
+	});
+
+	for (const course of sortedCourses) {
+		const overallScore = course.scores.find((score) => /overall/i.test(score.question));
+		if (overallScore && typeof overallScore.mean === 'number') {
+			return {
+				term: course.termTitle,
+				course: course.displayName,
+				score: overallScore.mean,
+			};
+		}
+	}
+
+	return null;
+};
+
+function Compare() {
+	const [searchParams, setSearchParams] = useSearchParams();
+
+	const [catalog, setCatalog] = useState<CatalogProfessor[]>([]);
+	const [catalogLoading, setCatalogLoading] = useState(true);
+	const [catalogError, setCatalogError] = useState<string | null>(null);
+
+	const [leftQuery, setLeftQuery] = useState('');
+	const [rightQuery, setRightQuery] = useState('');
+	const [leftSuggestions, setLeftSuggestions] = useState<ProfessorSuggestion[]>([]);
+	const [rightSuggestions, setRightSuggestions] = useState<ProfessorSuggestion[]>([]);
+	const [showLeftSuggestions, setShowLeftSuggestions] = useState(false);
+	const [showRightSuggestions, setShowRightSuggestions] = useState(false);
+	const [leftActiveIndex, setLeftActiveIndex] = useState(-1);
+	const [rightActiveIndex, setRightActiveIndex] = useState(-1);
+
+	const leftWrapperRef = useRef<HTMLDivElement>(null);
+	const rightWrapperRef = useRef<HTMLDivElement>(null);
+	const leftDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const rightDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	const [leftProfile, setLeftProfile] = useState<ProfessorProfile | null>(null);
+	const [rightProfile, setRightProfile] = useState<ProfessorProfile | null>(null);
+	const [leftLoading, setLeftLoading] = useState(false);
+	const [rightLoading, setRightLoading] = useState(false);
+	const [leftError, setLeftError] = useState<string | null>(null);
+	const [rightError, setRightError] = useState<string | null>(null);
+
+	const leftSlug = searchParams.get('a')?.trim() ?? '';
+	const rightSlug = searchParams.get('b')?.trim() ?? '';
+
+	useEffect(() => {
+		const oldParam = searchParams.get('prof')?.trim();
+		const existingA = searchParams.get('a')?.trim();
+		if (!oldParam || existingA) return;
+
+		const next = new URLSearchParams(searchParams);
+		next.set('a', oldParam);
+		next.delete('prof');
+		setSearchParams(next, { replace: true });
+	}, [searchParams, setSearchParams]);
+
+	useEffect(() => {
+		let cancelled = false;
+
+		const loadCatalog = async () => {
+			try {
+				setCatalogLoading(true);
+				setCatalogError(null);
+				const result = await fetchProfessorsCatalog({ sort: 'alpha', limit: CATALOG_LIMIT, page: 1 });
+				if (!cancelled) {
+					setCatalog(result.professors);
+				}
+			} catch {
+				if (!cancelled) {
+					setCatalogError('Could not load professor list. Please refresh and try again.');
+				}
+			} finally {
+				if (!cancelled) setCatalogLoading(false);
+			}
+		};
+
+		loadCatalog();
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	const catalogBySlug = useMemo(() => {
+		const map = new Map<string, CatalogProfessor>();
+		catalog.forEach((prof) => {
+			map.set(prof.slug, prof);
+		});
+		return map;
+	}, [catalog]);
+
+	const leftCatalogProfessor = leftSlug ? catalogBySlug.get(leftSlug) ?? null : null;
+	const rightCatalogProfessor = rightSlug ? catalogBySlug.get(rightSlug) ?? null : null;
+
+	useEffect(() => {
+		if (!leftSlug || leftCatalogProfessor) return;
+		setLeftError('That professor could not be found in the catalog.');
+	}, [leftSlug, leftCatalogProfessor]);
+
+	useEffect(() => {
+		if (!rightSlug || rightCatalogProfessor) return;
+		setRightError('That professor could not be found in the catalog.');
+	}, [rightSlug, rightCatalogProfessor]);
+
+	useEffect(() => {
+		setLeftQuery(leftCatalogProfessor?.name ?? '');
+		setLeftSuggestions([]);
+		setShowLeftSuggestions(false);
+		setLeftActiveIndex(-1);
+	}, [leftCatalogProfessor?.name]);
+
+	useEffect(() => {
+		setRightQuery(rightCatalogProfessor?.name ?? '');
+		setRightSuggestions([]);
+		setShowRightSuggestions(false);
+		setRightActiveIndex(-1);
+	}, [rightCatalogProfessor?.name]);
+
+	useEffect(() => {
+		let cancelled = false;
+
+		const load = async () => {
+			if (!leftSlug) {
+				setLeftProfile(null);
+				setLeftError(null);
+				return;
+			}
+			setLeftLoading(true);
+			setLeftError(null);
+			const profile = await fetchProfessorData(leftSlug);
+			if (cancelled) return;
+			if (!profile) {
+				setLeftProfile(null);
+				setLeftError('Could not load this professor profile.');
+			} else {
+				setLeftProfile(profile);
+			}
+			setLeftLoading(false);
+		};
+
+		load();
+		return () => {
+			cancelled = true;
+		};
+	}, [leftSlug]);
+
+	useEffect(() => {
+		let cancelled = false;
+
+		const load = async () => {
+			if (!rightSlug) {
+				setRightProfile(null);
+				setRightError(null);
+				return;
+			}
+			setRightLoading(true);
+			setRightError(null);
+			const profile = await fetchProfessorData(rightSlug);
+			if (cancelled) return;
+			if (!profile) {
+				setRightProfile(null);
+				setRightError('Could not load this professor profile.');
+			} else {
+				setRightProfile(profile);
+			}
+			setRightLoading(false);
+		};
+
+		load();
+		return () => {
+			cancelled = true;
+		};
+	}, [rightSlug]);
+
+	const updateSlugs = (updates: { a?: string; b?: string }) => {
+		const next = new URLSearchParams(searchParams);
+
+		if (updates.a !== undefined) {
+			if (updates.a) next.set('a', updates.a);
+			else next.delete('a');
+		}
+
+		if (updates.b !== undefined) {
+			if (updates.b) next.set('b', updates.b);
+			else next.delete('b');
+		}
+
+		next.delete('prof');
+		const nextString = next.toString();
+		if (nextString === searchParams.toString()) return;
+		setSearchParams(next, { replace: true });
+	};
+
+	const handlePick = (side: Side, slug: string) => {
+		if (side === 'a') {
+			if (slug === rightSlug) return;
+			updateSlugs({ a: slug });
+			return;
+		}
+		if (slug === leftSlug) return;
+		updateSlugs({ b: slug });
+	};
+
+	const handleClear = (side: Side) => {
+		if (side === 'a') updateSlugs({ a: '' });
+		else updateSlugs({ b: '' });
+	};
+
+	const handleSwap = () => {
+		updateSlugs({ a: rightSlug, b: leftSlug });
+	};
+
+	const getSlugForSuggestion = (name: string) => {
+		const lowered = name.toLowerCase();
+		const exactMatch = catalog.find((prof) => prof.name.toLowerCase() === lowered);
+		if (exactMatch) return exactMatch.slug;
+
+		const normalized = normalizeName(name);
+		const normalizedMatch = catalog.find((prof) => normalizeName(prof.name) === normalized);
+		if (normalizedMatch) return normalizedMatch.slug;
+
+		return slugify(name);
+	};
+
+	const getSuggestionSlug = (suggestion: ProfessorSuggestion) => suggestion.slug || getSlugForSuggestion(suggestion.name);
+
+	const handleSelectSuggestion = (side: Side, suggestion: ProfessorSuggestion) => {
+		const selectedSlug = getSuggestionSlug(suggestion);
+		if (side === 'a') {
+			if (selectedSlug === rightSlug) return;
+			setLeftQuery(suggestion.name);
+			setShowLeftSuggestions(false);
+			setLeftActiveIndex(-1);
+			handlePick('a', selectedSlug);
+			return;
+		}
+
+		if (selectedSlug === leftSlug) return;
+		setRightQuery(suggestion.name);
+		setShowRightSuggestions(false);
+		setRightActiveIndex(-1);
+		handlePick('b', selectedSlug);
+	};
+
+	useEffect(() => {
+		if (leftDebounceRef.current) clearTimeout(leftDebounceRef.current);
+
+		const trimmedQuery = leftQuery.trim();
+		if (trimmedQuery.length < 2) {
+			setLeftSuggestions([]);
+			setShowLeftSuggestions(false);
+			setLeftActiveIndex(-1);
+			return;
+		}
+
+		leftDebounceRef.current = setTimeout(async () => {
+			try {
+				const results = await fetchSearchSuggestions(trimmedQuery, 'Professor');
+				const professorResults = results
+					.filter((result): result is ProfessorSuggestion => result.type === 'professor')
+					.filter((result) => getSuggestionSlug(result) !== rightSlug)
+					.slice(0, 3);
+
+				setLeftSuggestions(professorResults);
+				setShowLeftSuggestions(professorResults.length > 0);
+				setLeftActiveIndex(-1);
+			} catch {
+				setLeftSuggestions([]);
+				setShowLeftSuggestions(false);
+			}
+		}, 200);
+
+		return () => {
+			if (leftDebounceRef.current) clearTimeout(leftDebounceRef.current);
+		};
+	}, [leftQuery, rightSlug, catalog]);
+
+	useEffect(() => {
+		if (rightDebounceRef.current) clearTimeout(rightDebounceRef.current);
+
+		const trimmedQuery = rightQuery.trim();
+		if (trimmedQuery.length < 2) {
+			setRightSuggestions([]);
+			setShowRightSuggestions(false);
+			setRightActiveIndex(-1);
+			return;
+		}
+
+		rightDebounceRef.current = setTimeout(async () => {
+			try {
+				const results = await fetchSearchSuggestions(trimmedQuery, 'Professor');
+				const professorResults = results
+					.filter((result): result is ProfessorSuggestion => result.type === 'professor')
+					.filter((result) => getSuggestionSlug(result) !== leftSlug)
+					.slice(0, 3);
+
+				setRightSuggestions(professorResults);
+				setShowRightSuggestions(professorResults.length > 0);
+				setRightActiveIndex(-1);
+			} catch {
+				setRightSuggestions([]);
+				setShowRightSuggestions(false);
+			}
+		}, 200);
+
+		return () => {
+			if (rightDebounceRef.current) clearTimeout(rightDebounceRef.current);
+		};
+	}, [rightQuery, leftSlug, catalog]);
+
+	useEffect(() => {
+		const handleOutsideClick = (event: MouseEvent) => {
+			if (leftWrapperRef.current && !leftWrapperRef.current.contains(event.target as Node)) {
+				setShowLeftSuggestions(false);
+			}
+			if (rightWrapperRef.current && !rightWrapperRef.current.contains(event.target as Node)) {
+				setShowRightSuggestions(false);
+			}
+		};
+
+		document.addEventListener('mousedown', handleOutsideClick);
+		return () => document.removeEventListener('mousedown', handleOutsideClick);
+	}, []);
+
+	const leftSnapshot = getRecentTraceSnapshot(leftProfile);
+	const rightSnapshot = getRecentTraceSnapshot(rightProfile);
+
+	const leftRmp = leftProfile?.rmpRating ?? leftCatalogProfessor?.rmpRating ?? null;
+	const rightRmp = rightProfile?.rmpRating ?? rightCatalogProfessor?.rmpRating ?? null;
+	const leftTrace = leftProfile?.traceRating ?? leftCatalogProfessor?.traceRating ?? null;
+	const rightTrace = rightProfile?.traceRating ?? rightCatalogProfessor?.traceRating ?? null;
+
+	const compareRows = [
+		{
+			label: 'Department',
+			left: leftCatalogProfessor ? `${leftCatalogProfessor.department} (${leftCatalogProfessor.college})` : 'N/A',
+			right: rightCatalogProfessor ? `${rightCatalogProfessor.department} (${rightCatalogProfessor.college})` : 'N/A',
+			winner: null,
+		},
+		{
+			label: 'Overall Rating',
+			left: formatMetric(leftProfile?.avgRating ?? leftCatalogProfessor?.avgRating),
+			right: formatMetric(rightProfile?.avgRating ?? rightCatalogProfessor?.avgRating),
+			winner: pickWinner(leftProfile?.avgRating ?? leftCatalogProfessor?.avgRating, rightProfile?.avgRating ?? rightCatalogProfessor?.avgRating),
+		},
+		{
+			label: 'RMP Rating',
+			left: formatMetric(leftRmp),
+			right: formatMetric(rightRmp),
+			winner: pickWinner(leftRmp, rightRmp),
+		},
+		{
+			label: 'TRACE Rating',
+			left: formatMetric(leftTrace),
+			right: formatMetric(rightTrace),
+			winner: pickWinner(leftTrace, rightTrace),
+		},
+		{
+			label: 'Difficulty',
+			left: formatMetric(leftProfile?.difficulty),
+			right: formatMetric(rightProfile?.difficulty),
+			leftClass: getDifficultyClass(leftProfile?.difficulty),
+			rightClass: getDifficultyClass(rightProfile?.difficulty),
+			winner: pickWinner(leftProfile?.difficulty, rightProfile?.difficulty, 'lower'),
+		},
+		{
+			label: 'Total Reviews',
+			left: leftProfile?.totalRatings?.toLocaleString() ?? leftCatalogProfessor?.totalReviews?.toLocaleString() ?? 'N/A',
+			right: rightProfile?.totalRatings?.toLocaleString() ?? rightCatalogProfessor?.totalReviews?.toLocaleString() ?? 'N/A',
+			winner: pickWinner(leftProfile?.totalRatings ?? leftCatalogProfessor?.totalReviews, rightProfile?.totalRatings ?? rightCatalogProfessor?.totalReviews),
+		},
+		{
+			label: 'Would Take Again',
+			left:
+				leftProfile?.wouldTakeAgainPct === null || leftProfile?.wouldTakeAgainPct === undefined
+					? 'N/A'
+					: `${leftProfile.wouldTakeAgainPct.toFixed(0)}%`,
+			right:
+				rightProfile?.wouldTakeAgainPct === null || rightProfile?.wouldTakeAgainPct === undefined
+					? 'N/A'
+					: `${rightProfile.wouldTakeAgainPct.toFixed(0)}%`,
+			winner: pickWinner(leftProfile?.wouldTakeAgainPct, rightProfile?.wouldTakeAgainPct),
+		},
+		{
+			label: 'Recent TRACE Snapshot',
+			left: leftSnapshot
+				? `${leftSnapshot.score.toFixed(2)} (${leftSnapshot.term})`
+				: leftProfile
+					? 'No TRACE overall score'
+					: 'N/A',
+			right: rightSnapshot
+				? `${rightSnapshot.score.toFixed(2)} (${rightSnapshot.term})`
+				: rightProfile
+					? 'No TRACE overall score'
+					: 'N/A',
+			footnoteLeft: leftSnapshot?.course,
+			footnoteRight: rightSnapshot?.course,
+			winner: pickWinner(leftSnapshot?.score, rightSnapshot?.score),
+		},
+	];
+
+	const bothSelected = Boolean(leftSlug) && Boolean(rightSlug);
+
+	return (
+		<>
+			<main className="compare-page">
+			<section className="compare-hero">
+				<div className="compare-hero-inner">
+					<p className="compare-kicker">Professor Compare</p>
+					<h1>Side-by-side comparison</h1>
+					<p className="compare-subtitle">
+						Pick two professors and compare rating quality, difficulty, review volume, and recent TRACE performance.
+					</p>
+				</div>
+			</section>
+
+			<section className="compare-controls" aria-label="Professor selection">
+				<div className="compare-control-card" ref={leftWrapperRef}>
+					<div className="compare-control-title-row">
+						<h2>Left Professor</h2>
+						{leftSlug && (
+							<button className="compare-inline-btn" onClick={() => handleClear('a')}>
+								Clear
+							</button>
+						)}
+					</div>
+					<input
+						className="compare-search"
+						placeholder="Search professor name or department"
+						value={leftQuery}
+						onChange={(e) => {
+							setLeftQuery(e.target.value);
+							if (e.target.value.trim().length < 2) {
+								setLeftSuggestions([]);
+								setShowLeftSuggestions(false);
+							}
+						}}
+						onFocus={() => {
+							if (leftSuggestions.length > 0) setShowLeftSuggestions(true);
+						}}
+						onKeyDown={(e) => {
+							if (!showLeftSuggestions || leftSuggestions.length === 0) return;
+
+							if (e.key === 'ArrowDown') {
+								e.preventDefault();
+								setLeftActiveIndex((prev) => (prev < leftSuggestions.length - 1 ? prev + 1 : 0));
+							} else if (e.key === 'ArrowUp') {
+								e.preventDefault();
+								setLeftActiveIndex((prev) => (prev > 0 ? prev - 1 : leftSuggestions.length - 1));
+							} else if (e.key === 'Enter' && leftActiveIndex >= 0) {
+								e.preventDefault();
+								handleSelectSuggestion('a', leftSuggestions[leftActiveIndex]);
+							} else if (e.key === 'Escape') {
+								setShowLeftSuggestions(false);
+							}
+						}}
+						aria-label="Search left professor"
+					/>
+					{showLeftSuggestions && (
+						<div className="compare-suggestion-list">
+							{leftSuggestions.map((prof, index) => {
+								const profSlug = getSuggestionSlug(prof);
+								return (
+									<button
+										key={prof.name}
+										className={`compare-suggestion ${leftSlug === profSlug || leftActiveIndex === index ? 'active' : ''}`}
+										onClick={() => handleSelectSuggestion('a', prof)}
+										type="button"
+									>
+										<span className="compare-suggestion-main">{prof.name}</span>
+										<span className="compare-suggestion-meta">
+											{prof.dept} • {prof.rating !== null ? prof.rating.toFixed(2) : 'N/A'}
+										</span>
+									</button>
+								);
+							})}
+						</div>
+					)}
+				</div>
+
+				<div className="compare-middle-actions">
+					<button
+						type="button"
+						className="compare-swap-btn"
+						onClick={handleSwap}
+						disabled={!leftSlug && !rightSlug}
+					>
+						Swap sides
+					</button>
+				</div>
+
+				<div className="compare-control-card" ref={rightWrapperRef}>
+					<div className="compare-control-title-row">
+						<h2>Right Professor</h2>
+						{rightSlug && (
+							<button className="compare-inline-btn" onClick={() => handleClear('b')}>
+								Clear
+							</button>
+						)}
+					</div>
+					<input
+						className="compare-search"
+						placeholder="Search professor name or department"
+						value={rightQuery}
+						onChange={(e) => {
+							setRightQuery(e.target.value);
+							if (e.target.value.trim().length < 2) {
+								setRightSuggestions([]);
+								setShowRightSuggestions(false);
+							}
+						}}
+						onFocus={() => {
+							if (rightSuggestions.length > 0) setShowRightSuggestions(true);
+						}}
+						onKeyDown={(e) => {
+							if (!showRightSuggestions || rightSuggestions.length === 0) return;
+
+							if (e.key === 'ArrowDown') {
+								e.preventDefault();
+								setRightActiveIndex((prev) => (prev < rightSuggestions.length - 1 ? prev + 1 : 0));
+							} else if (e.key === 'ArrowUp') {
+								e.preventDefault();
+								setRightActiveIndex((prev) => (prev > 0 ? prev - 1 : rightSuggestions.length - 1));
+							} else if (e.key === 'Enter' && rightActiveIndex >= 0) {
+								e.preventDefault();
+								handleSelectSuggestion('b', rightSuggestions[rightActiveIndex]);
+							} else if (e.key === 'Escape') {
+								setShowRightSuggestions(false);
+							}
+						}}
+						aria-label="Search right professor"
+					/>
+					{showRightSuggestions && (
+						<div className="compare-suggestion-list">
+							{rightSuggestions.map((prof, index) => {
+								const profSlug = getSuggestionSlug(prof);
+								return (
+									<button
+										key={prof.name}
+										className={`compare-suggestion ${rightSlug === profSlug || rightActiveIndex === index ? 'active' : ''}`}
+										onClick={() => handleSelectSuggestion('b', prof)}
+										type="button"
+									>
+										<span className="compare-suggestion-main">{prof.name}</span>
+										<span className="compare-suggestion-meta">
+											{prof.dept} • {prof.rating !== null ? prof.rating.toFixed(2) : 'N/A'}
+										</span>
+									</button>
+								);
+							})}
+						</div>
+					)}
+				</div>
+			</section>
+
+			{catalogLoading && <p className="compare-status">Loading professor catalog...</p>}
+			{catalogError && <p className="compare-status compare-status-error">{catalogError}</p>}
+
+			<section className="compare-panels" aria-live="polite">
+				<article className="compare-profile-card">
+					{leftLoading ? (
+						<p className="compare-status">Loading left profile...</p>
+					) : leftError ? (
+						<p className="compare-status compare-status-error">{leftError}</p>
+					) : leftCatalogProfessor ? (
+						<>
+							<div className="compare-avatar-wrap">
+								{leftProfile?.imageUrl ? (
+									<img src={leftProfile.imageUrl} alt={leftCatalogProfessor.name} className="compare-avatar-img" />
+								) : (
+									<div className="compare-avatar-fallback">{getInitials(leftCatalogProfessor.name)}</div>
+								)}
+							</div>
+							<h3>{leftCatalogProfessor.name}</h3>
+							<p>{leftCatalogProfessor.department}</p>
+							<div className="compare-rating-line">
+								<strong>{formatMetric(leftProfile?.avgRating ?? leftCatalogProfessor.avgRating)}</strong>
+								<StarRating rating={leftProfile?.avgRating ?? leftCatalogProfessor.avgRating ?? 0} size="sm" />
+							</div>
+							<Link className="compare-profile-link" to={`/professors/${leftCatalogProfessor.slug}`}>
+								View profile
+							</Link>
+						</>
+					) : (
+						<p className="compare-status">Pick a professor for the left side.</p>
+					)}
+				</article>
+
+				<article className="compare-profile-card">
+					{rightLoading ? (
+						<p className="compare-status">Loading right profile...</p>
+					) : rightError ? (
+						<p className="compare-status compare-status-error">{rightError}</p>
+					) : rightCatalogProfessor ? (
+						<>
+							<div className="compare-avatar-wrap">
+								{rightProfile?.imageUrl ? (
+									<img src={rightProfile.imageUrl} alt={rightCatalogProfessor.name} className="compare-avatar-img" />
+								) : (
+									<div className="compare-avatar-fallback">{getInitials(rightCatalogProfessor.name)}</div>
+								)}
+							</div>
+							<h3>{rightCatalogProfessor.name}</h3>
+							<p>{rightCatalogProfessor.department}</p>
+							<div className="compare-rating-line">
+								<strong>{formatMetric(rightProfile?.avgRating ?? rightCatalogProfessor.avgRating)}</strong>
+								<StarRating rating={rightProfile?.avgRating ?? rightCatalogProfessor.avgRating ?? 0} size="sm" />
+							</div>
+							<Link className="compare-profile-link" to={`/professors/${rightCatalogProfessor.slug}`}>
+								View profile
+							</Link>
+						</>
+					) : (
+						<p className="compare-status">Pick a professor for the right side.</p>
+					)}
+				</article>
+			</section>
+
+			<section className="compare-metrics">
+				<header className="compare-metrics-header">
+					<h2>Key Comparison Metrics</h2>
+					{!bothSelected && <p>Select both professors to unlock full comparison.</p>}
+				</header>
+
+				<div className="compare-table" role="table" aria-label="Professor metrics comparison table">
+					{compareRows.map((row) => (
+						<div className="compare-row" role="row" key={row.label}>
+							<div
+								className={`compare-cell compare-cell-left ${row.leftClass ?? ''} ${row.winner === 'left' ? 'compare-cell-winner' : ''}`}
+								role="cell"
+							>
+								<span>{row.left}</span>
+								{row.footnoteLeft && <small>{row.footnoteLeft}</small>}
+							</div>
+							<div className="compare-cell compare-cell-label" role="columnheader">
+								{row.label}
+							</div>
+							<div
+								className={`compare-cell compare-cell-right ${row.rightClass ?? ''} ${row.winner === 'right' ? 'compare-cell-winner' : ''}`}
+								role="cell"
+							>
+								<span>{row.right}</span>
+								{row.footnoteRight && <small>{row.footnoteRight}</small>}
+							</div>
+						</div>
+					))}
+				</div>
+			</section>
+
+			</main>
+			<Footer />
+			<ThemeToggle />
+		</>
+	);
+}
+
+export default Compare;

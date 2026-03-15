@@ -263,9 +263,14 @@
   margin-bottom: 12px;
 }
 
-.catalog-search {
+.catalog-search-wrap {
+  position: relative;
   width: 100%;
   max-width: 560px;
+}
+
+.catalog-search {
+  width: 100%;
   padding: 12px 14px;
   border-radius: 10px;
   border: 1.5px solid #e2e2e2;
@@ -280,6 +285,71 @@
 .catalog-search:focus {
   border-color: #d6394c;
   box-shadow: 0 0 0 3px rgba(214, 57, 76, 0.15);
+}
+
+.catalog-search-suggestions {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 6px 0;
+  list-style: none;
+  margin: 0;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.1);
+  z-index: 30;
+  overflow: hidden;
+}
+
+.catalog-suggestion-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.catalog-suggestion-item:hover,
+.catalog-suggestion-item.active {
+  background: #fef0f0;
+}
+
+.catalog-suggestion-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.catalog-suggestion-name {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.catalog-suggestion-dept {
+  font-size: 0.76rem;
+  color: #999;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.catalog-suggestion-rating {
+  flex-shrink: 0;
+  color: #d6394c;
+  background: #fef0f0;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  font-weight: 800;
 }
 
 .catalog-disclaimer {
@@ -706,6 +776,29 @@
 .dark .catalog-search:focus {
   border-color: #d6394c;
   box-shadow: 0 0 0 3px rgba(214, 57, 76, 0.2);
+}
+
+.dark .catalog-search-suggestions {
+  background: #232323;
+  border-color: #3a3a3a;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+
+.dark .catalog-suggestion-item:hover,
+.dark .catalog-suggestion-item.active {
+  background: #3a2020;
+}
+
+.dark .catalog-suggestion-name {
+  color: #e0e0e0;
+}
+
+.dark .catalog-suggestion-dept {
+  color: #7c7c7c;
+}
+
+.dark .catalog-suggestion-rating {
+  background: #3a2020;
 }
 
 .dark .catalog-disclaimer {

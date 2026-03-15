@@ -585,8 +585,8 @@ def random_professor():
 # Professors: merge RMP + TRACE so all instructors are searchable
 
 # RMP professors (already have avg_rating, trace_dept, etc.)
-rmp_for_search = rmp_profs[["name", "department", "trace_dept", "avg_rating", "total_reviews"]].copy()
-rmp_for_search["_name_lower"] = rmp_for_search["name"].apply(normalize_name)
+rmp_for_search = rmp_profs[["name", "_name_key", "department", "trace_dept", "avg_rating", "total_reviews"]].copy()
+rmp_for_search["_name_lower"] = rmp_for_search["_name_key"]
 # Use TRACE department if available, otherwise fall back to RMP department
 rmp_for_search["dept_display"] = rmp_for_search["trace_dept"].fillna(rmp_for_search["department"])
 
@@ -599,14 +599,15 @@ trace_only = trace_unique[~trace_unique["_name_lower"].isin(rmp_names)].copy()
 
 # Build proper name (title case) from the lowercase key
 trace_only["name"] = trace_only["_name_lower"].str.title()
+trace_only["_name_key"] = trace_only["_name_lower"]
 # Pull their TRACE rating and review counts from the lookups
 trace_only["avg_rating"] = trace_only["_name_lower"].map(trace_lookup).fillna(0.0)
 trace_only["total_reviews"] = trace_only["_name_lower"].map(trace_reviews_lookup).fillna(0).astype(int)
 
 # Combine
 prof_search = pd.concat([
-    rmp_for_search[["name", "_name_lower", "dept_display", "avg_rating", "total_reviews"]],
-    trace_only[["name", "_name_lower", "dept_display", "avg_rating", "total_reviews"]],
+    rmp_for_search[["name", "_name_key", "_name_lower", "dept_display", "avg_rating", "total_reviews"]],
+    trace_only[["name", "_name_key", "_name_lower", "dept_display", "avg_rating", "total_reviews"]],
 ], ignore_index=True)
 
 # Drop any without any department info
@@ -614,7 +615,7 @@ prof_search = prof_search[prof_search["dept_display"].notna()]
 
 # Split into individual name parts for whole-word matching (strip punctuation for better matching)
 prof_search["_name_parts"] = prof_search["_name_lower"].str.replace(r'[^\w\s]', '', regex=True).str.split()
-prof_search = prof_search.drop_duplicates(subset=["_name_lower"])
+prof_search = prof_search.drop_duplicates(subset=["_name_key"])
 
 print(f"[search] Indexed {len(prof_search)} professors ({len(rmp_for_search)} RMP + {len(trace_only)} TRACE-only)")
 
@@ -745,6 +746,7 @@ def search():
                 "name":   r["name"],
                 "dept":   r["dept_display"],
                 "rating": round(float(r["avg_rating"]), 2) if r["avg_rating"] > 0 else None,
+                "slug":   _name_to_slug(r["_name_key"]),
             })
         return jsonify(results)
 

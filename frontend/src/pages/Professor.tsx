@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } fr
 import { useParams, Link } from 'react-router-dom';
 import Footer from '../components/Footer';
 import NotFound from './NotFound';
-import FeedbackTab from '../components/FeedbackTab';
 import ThemeToggle from '../components/ThemeToggle';
 import Dropdown from '../components/Dropdown';
 import StarRating from '../components/StarRating';
@@ -612,7 +611,7 @@ const Professor = () => {
 
       <div className="prof-hero-actions-row">
         <Link 
-          to={`/compare?prof=${profile.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`} 
+          to={`/compare?a=${profile.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`} 
           className="prof-compare-btn"
         >
           Compare
@@ -863,7 +862,6 @@ const Professor = () => {
       </section>
 
       <Footer />
-      <FeedbackTab />
       <ThemeToggle />
       <button 
         className={`prof-back-to-top ${showBackToTop ? 'visible' : ''}`} 
