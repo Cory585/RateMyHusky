@@ -1072,9 +1072,20 @@ def professors_catalog():
         min_rating = 0.0
 
     try:
+        max_rating = float(request.args.get("maxRating", "5"))
+    except (ValueError, TypeError):
+        max_rating = 5.0
+
+    try:
         min_reviews = int(request.args.get("minReviews", "1"))
     except (ValueError, TypeError):
         min_reviews = 1
+
+    max_reviews_raw = request.args.get("maxReviews")
+    try:
+        max_reviews = int(max_reviews_raw) if max_reviews_raw is not None else None
+    except (ValueError, TypeError):
+        max_reviews = None
 
     # Always exclude professors with no rating data
     subset = catalog_df[catalog_df["avgRating"].notna()].copy()
@@ -1091,8 +1102,12 @@ def professors_catalog():
             subset = subset[subset["_name_lower"].str.contains(q, na=False)]
     if min_rating > 0:
         subset = subset[subset["avgRating"] >= min_rating]
+    if max_rating < 5:
+        subset = subset[subset["avgRating"] <= max_rating]
     if min_reviews > 1:
         subset = subset[subset["totalReviews"] >= min_reviews]
+    if max_reviews is not None:
+        subset = subset[subset["totalReviews"] <= max_reviews]
 
     if sort == "rating":
         subset = subset.sort_values("avgRating", ascending=False, na_position="last")

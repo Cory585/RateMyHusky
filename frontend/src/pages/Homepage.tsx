@@ -268,14 +268,37 @@ const Homepage = () => {
     return () => { cancelled = true; };
   }, [selectedCollege]);
 
+  const [slotResult, setSlotResult] = useState<{ name: string; dept: string; college: string; slug: string } | null>(null);
+  const [slotSpinning, setSlotSpinning] = useState(false);
+  const [slotNames, setSlotNames] = useState<string[]>([]);
+
   const handleShuffle = async () => {
     setShuffling(true);
+    setSlotResult(null);
+    setSlotSpinning(true);
+
+    // Start spinning placeholder names immediately
+    const placeholders = [
+      'Albert Einstein', 'Marie Curie', 'Isaac Newton', 'Ada Lovelace',
+      'Nikola Tesla', 'Grace Hopper', 'Alan Turing', 'Rosalind Franklin',
+      'Richard Feynman', 'Emmy Noether', 'Linus Torvalds', 'Barbara Liskov',
+    ];
+    // Shuffle them for variety
+    const shuffled = [...placeholders].sort(() => Math.random() - 0.5);
+    setSlotNames(shuffled);
+
     try {
       const prof = await fetchRandomProfessor();
       const slug = prof.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-      navigate(`/professors/${slug}`);
+
+      // Let the spin animation play for at least 1.5s
+      await new Promise(r => setTimeout(r, 1500));
+
+      setSlotSpinning(false);
+      setSlotResult({ name: prof.name, dept: prof.dept ?? '', college: prof.college ?? '', slug });
     } catch (err) {
       console.error('Failed to fetch random professor:', err);
+      setSlotSpinning(false);
     } finally {
       setShuffling(false);
     }
@@ -408,8 +431,44 @@ const Homepage = () => {
             </button>
           </div>
 
-          <div className="randomizer-visual">
-            <div className="randomizer-dice">🎰</div>
+          <div className="slot-machine">
+            <div className="slot-frame">
+              <div className="slot-window">
+                {!slotSpinning && !slotResult && (
+                  <div className="slot-idle">
+                    <span className="slot-idle-icon">🎰</span>
+                    <span className="slot-idle-text">Press shuffle!</span>
+                  </div>
+                )}
+                {slotSpinning && (
+                  <div className="slot-reel" key="spinning">
+                    {slotNames.concat(slotNames).map((name, i) => (
+                      <div key={i} className="slot-name">{name}</div>
+                    ))}
+                  </div>
+                )}
+                {!slotSpinning && slotResult && (
+                  <div
+                    className="slot-result"
+                    onClick={() => navigate(`/professors/${slotResult.slug}`)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={e => e.key === 'Enter' && navigate(`/professors/${slotResult.slug}`)}
+                  >
+                    <span className="slot-result-name">{slotResult.name}</span>
+                    <span className="slot-result-dept">{slotResult.dept}</span>
+                    <span className="slot-result-college">{slotResult.college}</span>
+                    <span className="slot-result-cta">View Profile →</span>
+                  </div>
+                )}
+              </div>
+              <div className="slot-shine" />
+            </div>
+            <div className="slot-base">
+              <div className="slot-base-stripe" />
+              <div className="slot-base-stripe" />
+              <div className="slot-base-stripe" />
+            </div>
           </div>
         </div>
       </section>
