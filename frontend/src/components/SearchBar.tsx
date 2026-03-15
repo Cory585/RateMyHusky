@@ -138,7 +138,7 @@ const SearchBar = () => {
   const handleSelect = (suggestion: SearchSuggestion) => {
     setShowSuggestions(false);
     if (suggestion.type === 'professor') {
-      const slug = suggestion.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const slug = suggestion.slug;
       navigate(`/professors/${slug}`);
     } else {
       const code = suggestion.code.toLowerCase();

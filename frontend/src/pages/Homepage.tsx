@@ -5,7 +5,6 @@ import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react
 import { useNavigate } from 'react-router-dom';
 import SearchBar from '../components/SearchBar';
 import Footer from '../components/Footer';
-import FeedbackTab from '../components/FeedbackTab';
 import ThemeToggle from '../components/ThemeToggle';
 import { fetchStats, fetchColleges, fetchGoatProfessors, fetchRandomProfessor } from '../api/api';
 import type { Stat, Professor } from '../api/api';
@@ -416,7 +415,6 @@ const Homepage = () => {
       </section>
 
       <Footer />
-      <FeedbackTab />
       <ThemeToggle />
     </div>
   );

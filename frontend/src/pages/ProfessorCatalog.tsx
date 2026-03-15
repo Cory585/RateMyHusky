@@ -1,10 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   fetchProfessorsCatalog,
   fetchColleges,
   fetchDepartments,
+  fetchSearchSuggestions,
   type CatalogProfessor,
+  type ProfessorSuggestion,
 } from '../api/api';
 import StarRating from '../components/StarRating';
 import RatingBadge from '../components/RatingBadge';
@@ -49,7 +51,7 @@ function getFiltersFromSearchParams(sp: URLSearchParams): Filters {
   const page = Number(sp.get('page') || '1');
 
   return {
-    q:          (sp.get('q') || '').trim(),
+    q:          sp.get('q') || '',
     college:    sp.get('college') || '',
     dept:       sp.get('dept') || '',
     minRating:  Number.isFinite(minRating) ? Math.max(0, Math.min(5, minRating)) : 0,
@@ -57,6 +59,18 @@ function getFiltersFromSearchParams(sp: URLSearchParams): Filters {
     sort,
     page:       Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1,
   };
+}
+
+function buildSearchParamsFromFilters(filters: Filters): URLSearchParams {
+  const next = new URLSearchParams();
+  if (filters.q) next.set('q', filters.q);
+  if (filters.college) next.set('college', filters.college);
+  if (filters.dept) next.set('dept', filters.dept);
+  if (filters.minRating > 0) next.set('minRating', String(filters.minRating));
+  if (filters.minReviews > 1) next.set('minReviews', String(filters.minReviews));
+  if (filters.sort !== 'alpha') next.set('sort', filters.sort);
+  if (filters.page > 1) next.set('page', String(filters.page));
+  return next;
 }
 
 function initials(name: string) {
@@ -79,6 +93,15 @@ export default function ProfessorCatalog() {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading]       = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [minRatingDraft, setMinRatingDraft] = useState(() => getFiltersFromSearchParams(searchParams).minRating);
+  const [minReviewsDraft, setMinReviewsDraft] = useState(() => getFiltersFromSearchParams(searchParams).minReviews);
+  const [searchSuggestions, setSearchSuggestions] = useState<ProfessorSuggestion[]>([]);
+  const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
+  const [activeSearchIndex, setActiveSearchIndex] = useState(-1);
+
+  const searchWrapperRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch colleges once
   useEffect(() => {
@@ -116,16 +139,38 @@ export default function ProfessorCatalog() {
 
   // Keep filters in the URL so the catalog view is shareable/bookmarkable.
   useEffect(() => {
-    const next = new URLSearchParams();
-    if (filters.q) next.set('q', filters.q);
-    if (filters.college) next.set('college', filters.college);
-    if (filters.dept) next.set('dept', filters.dept);
-    if (filters.minRating > 0) next.set('minRating', String(filters.minRating));
-    if (filters.minReviews > 1) next.set('minReviews', String(filters.minReviews));
-    if (filters.sort !== 'alpha') next.set('sort', filters.sort);
-    if (filters.page > 1) next.set('page', String(filters.page));
-    setSearchParams(next, { replace: true });
-  }, [filters, setSearchParams]);
+    const next = buildSearchParamsFromFilters(filters);
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [filters, searchParams, setSearchParams]);
+
+  // Keep in-memory filters synced when URL changes externally (back/forward/share links).
+  useEffect(() => {
+    const fromUrl = getFiltersFromSearchParams(searchParams);
+    setFilters(prev => {
+      if (
+        prev.q === fromUrl.q &&
+        prev.college === fromUrl.college &&
+        prev.dept === fromUrl.dept &&
+        prev.minRating === fromUrl.minRating &&
+        prev.minReviews === fromUrl.minReviews &&
+        prev.sort === fromUrl.sort &&
+        prev.page === fromUrl.page
+      ) {
+        return prev;
+      }
+      return fromUrl;
+    });
+  }, [searchParams]);
+
+  useEffect(() => {
+    setMinRatingDraft(filters.minRating);
+  }, [filters.minRating]);
+
+  useEffect(() => {
+    setMinReviewsDraft(filters.minReviews);
+  }, [filters.minReviews]);
 
   const updateFilter = useCallback(
     <K extends keyof Filters>(key: K, value: Filters[K]) => {
@@ -138,11 +183,83 @@ export default function ProfessorCatalog() {
     []
   );
 
+  // Debounce slider-based filter commits so the catalog doesn't reload on every drag step.
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (minRatingDraft !== filters.minRating) {
+        updateFilter('minRating', minRatingDraft);
+      }
+    }, 250);
+
+    return () => clearTimeout(timeoutId);
+  }, [minRatingDraft, filters.minRating, updateFilter]);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (minReviewsDraft !== filters.minReviews) {
+        updateFilter('minReviews', minReviewsDraft);
+      }
+    }, 250);
+
+    return () => clearTimeout(timeoutId);
+  }, [minReviewsDraft, filters.minReviews, updateFilter]);
+
   const setCollege = useCallback((college: string) => {
     setFilters(f => ({ ...f, college, dept: '', page: 1 }));
   }, []);
 
   const clearFilters = () => setFilters(DEFAULT_FILTERS);
+
+  const handleSearchSelect = useCallback((suggestion: ProfessorSuggestion) => {
+    updateFilter('q', suggestion.name);
+    setShowSearchSuggestions(false);
+    setActiveSearchIndex(-1);
+  }, [updateFilter]);
+
+  // Homepage-style debounced professor autocomplete for catalog search.
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+
+    const trimmedQuery = filters.q.trim();
+    if (trimmedQuery.length < 2) {
+      setSearchSuggestions([]);
+      setShowSearchSuggestions(false);
+      setActiveSearchIndex(-1);
+      return;
+    }
+
+    searchDebounceRef.current = setTimeout(async () => {
+      try {
+        const results = await fetchSearchSuggestions(trimmedQuery, 'Professor');
+        const professorResults = results
+          .filter((result): result is ProfessorSuggestion => result.type === 'professor')
+          .slice(0, 3);
+
+        setSearchSuggestions(professorResults);
+        const isFocused = document.activeElement === searchInputRef.current;
+        setShowSearchSuggestions(isFocused && professorResults.length > 0);
+        setActiveSearchIndex(-1);
+      } catch {
+        setSearchSuggestions([]);
+        setShowSearchSuggestions(false);
+      }
+    }, 200);
+
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [filters.q]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchWrapperRef.current && !searchWrapperRef.current.contains(e.target as Node)) {
+        setShowSearchSuggestions(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   const hasActiveFilters =
     !!filters.q || !!filters.college || !!filters.dept || filters.minRating > 0 || filters.minReviews > 1;
@@ -229,8 +346,8 @@ export default function ProfessorCatalog() {
               <p className="filter-label">
                 Min. Rating
                 <span className="slider-value">
-                  {filters.minRating > 0
-                    ? `${filters.minRating.toFixed(1)}+`
+                  {minRatingDraft > 0
+                    ? `${minRatingDraft.toFixed(1)}+`
                     : 'Any'}
                 </span>
               </p>
@@ -240,8 +357,8 @@ export default function ProfessorCatalog() {
                 min="0"
                 max="5"
                 step="0.5"
-                value={filters.minRating}
-                onChange={e => updateFilter('minRating', parseFloat(e.target.value))}
+                value={minRatingDraft}
+                onChange={e => setMinRatingDraft(parseFloat(e.target.value))}
               />
               <div className="slider-ticks">
                 <span>Any</span>
@@ -259,19 +376,19 @@ export default function ProfessorCatalog() {
                   min="1"
                   max="100"
                   step="1"
-                  value={filters.minReviews}
-                  onChange={e => updateFilter('minReviews', parseInt(e.target.value, 10))}
+                  value={minReviewsDraft}
+                  onChange={e => setMinReviewsDraft(parseInt(e.target.value, 10))}
                 />
                 <input
                   type="number"
                   className="reviews-number-input"
                   min="1"
                   max="999"
-                  value={filters.minReviews === 1 ? '' : filters.minReviews}
+                  value={minReviewsDraft === 1 ? '' : minReviewsDraft}
                   placeholder="Any"
                   onChange={e => {
                     const v = parseInt(e.target.value, 10);
-                    updateFilter('minReviews', isNaN(v) || v < 1 ? 1 : Math.min(v, 999));
+                    setMinReviewsDraft(isNaN(v) || v < 1 ? 1 : Math.min(v, 999));
                   }}
                 />
               </div>
@@ -292,13 +409,56 @@ export default function ProfessorCatalog() {
             </span>
           </div>
           <div className="catalog-search-row">
-            <input
-              type="text"
-              className="catalog-search"
-              placeholder="Search professor name…"
-              value={filters.q}
-              onChange={e => updateFilter('q', e.target.value)}
-            />
+            <div className="catalog-search-wrap" ref={searchWrapperRef}>
+              <input
+                ref={searchInputRef}
+                type="text"
+                className="catalog-search"
+                placeholder="Search professor name…"
+                value={filters.q}
+                onChange={e => updateFilter('q', e.target.value)}
+                onFocus={() => {
+                  if (searchSuggestions.length > 0) setShowSearchSuggestions(true);
+                }}
+                onKeyDown={(e) => {
+                  if (!showSearchSuggestions || searchSuggestions.length === 0) return;
+
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setActiveSearchIndex(prev => (prev < searchSuggestions.length - 1 ? prev + 1 : 0));
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setActiveSearchIndex(prev => (prev > 0 ? prev - 1 : searchSuggestions.length - 1));
+                  } else if (e.key === 'Enter' && activeSearchIndex >= 0) {
+                    e.preventDefault();
+                    handleSearchSelect(searchSuggestions[activeSearchIndex]);
+                  } else if (e.key === 'Escape') {
+                    setShowSearchSuggestions(false);
+                  }
+                }}
+              />
+
+              {showSearchSuggestions && (
+                <ul className="catalog-search-suggestions">
+                  {searchSuggestions.map((s, i) => (
+                    <li
+                      key={s.slug}
+                      className={`catalog-suggestion-item ${i === activeSearchIndex ? 'active' : ''}`}
+                      onClick={() => handleSearchSelect(s)}
+                      onMouseEnter={() => setActiveSearchIndex(i)}
+                    >
+                      <div className="catalog-suggestion-main">
+                        <span className="catalog-suggestion-name">{s.name}</span>
+                        <span className="catalog-suggestion-dept">{s.dept}</span>
+                      </div>
+                      <span className="catalog-suggestion-rating">
+                        {s.rating !== null ? s.rating.toFixed(2) : 'N/A'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
           <p className="catalog-disclaimer">
             Professors without any rating data are not shown.{' '}

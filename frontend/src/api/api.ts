@@ -120,6 +120,7 @@ export interface ProfessorSuggestion {
   name: string;
   dept: string;
   rating: number | null;
+  slug: string;
 }
 
 export interface CourseSuggestion {
