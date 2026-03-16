@@ -82,6 +82,7 @@ trace_scores["mean"] = trace_scores.apply(
 # ──────────────────────────────────────────────
 ALIAS_MAP = {
     "laney strange": "elena strange",
+    "ben tasker": "benjamin tasker",
 }
 
 def merge_rmp_aliases(df):
@@ -545,7 +546,7 @@ def goat_professors():
         has_rmp   = int(row["num_ratings"]) > 0 and row["rating"] > 0
         has_trace = pd.notna(row["trace_overall"]) and int(row["trace_reviews"]) > 0
         result.append({
-            "name":           row["name"],
+            "name":           trace_name_lookup.get(row["_name_key"], row["name"]),
             "dept":           row["trace_dept"] if pd.notna(row["trace_dept"]) else row["department"],
             "rmpRating":      round(float(row["rating"]), 2) if has_rmp else None,
             "traceRating":    round(float(row["trace_overall"]), 2) if has_trace else None,
@@ -566,7 +567,7 @@ def random_professor():
     has_rmp   = int(row["num_ratings"]) > 0 and row["rating"] > 0
     has_trace = pd.notna(row["trace_overall"]) and int(row["trace_reviews"]) > 0
     return jsonify({
-        "name":          row["name"],
+        "name":          trace_name_lookup.get(row["_name_key"], row["name"]),
         "dept":          row["trace_dept"] if pd.notna(row["trace_dept"]) else row["department"],
         "rmpRating":     round(float(row["rating"]), 2) if has_rmp else None,
         "traceRating":   round(float(row["trace_overall"]), 2) if has_trace else None,
@@ -742,7 +743,7 @@ def search():
         for _, r in matches.iterrows():
             results.append({
                 "type":   "professor",
-                "name":   r["name"],
+                "name":   trace_name_lookup.get(r["_name_lower"], r["name"]),
                 "dept":   r["dept_display"],
                 "rating": round(float(r["avg_rating"]), 2) if r["avg_rating"] > 0 else None,
             })
@@ -802,6 +803,17 @@ rmp_reviews["_rev_name_key"] = rmp_reviews["professor_name"].astype(str).str.str
 # ──────────────────────────────────────────────
 #  Build catalog DataFrame (all professors, for the browse page)
 # ──────────────────────────────────────────────
+
+# Build TRACE proper name lookup: lowercase key → "FirstName LastName" from TRACE
+# Use the most recent term's name (highest termId) for each instructor
+_trace_name_sorted = trace_courses.sort_values("termId", ascending=False).drop_duplicates(subset=["_full"])
+trace_name_lookup = {}
+for _, r in _trace_name_sorted.iterrows():
+    first = str(r["instructorFirstName"]).strip()
+    last = str(r["instructorLastName"]).strip()
+    if first and last:
+        trace_name_lookup[r["_full"]] = f"{first} {last}"
+
 def _build_catalog():
     rows = []
     rmp_name_keys = set(rmp_profs["_name_key"].values)
@@ -822,9 +834,12 @@ def _build_catalog():
         except (ValueError, TypeError):
             pass
 
+        # Prefer TRACE name over RMP name
+        display_name = trace_name_lookup.get(row["_name_key"], row["name"])
+
         avg = round(float(row["avg_rating"]), 2) if float(row["avg_rating"]) > 0 else None
         rows.append({
-            "name":              row["name"],
+            "name":              display_name,
             "slug":              _name_to_slug(row["_name_key"]),
             "department":        dept,
             "college":           row["college"],
@@ -842,12 +857,14 @@ def _build_catalog():
         nk = row["_name_lower"]
         if nk in rmp_name_keys:
             continue
+        # Use proper TRACE name
+        display_name = trace_name_lookup.get(nk, row["name"])
         dept = str(row["dept_display"]) if pd.notna(row["dept_display"]) else ""
         trace_rat = trace_lookup.get(nk)
         has_trace = trace_rat is not None and pd.notna(trace_rat)
         avg = round(float(trace_rat), 2) if has_trace else None
         rows.append({
-            "name":              row["name"],
+            "name":              display_name,
             "slug":              _name_to_slug(nk),
             "department":        dept,
             "college":           get_college(dept),
@@ -902,7 +919,7 @@ def professor_profile(slug):
                 pass
 
         profile = {
-            "name": row["name"],
+            "name": trace_name_lookup.get(row["_name_key"], row["name"]),
             "department": row["trace_dept"] if pd.notna(row["trace_dept"]) else row["department"],
             "rmpRating": round(float(row["rating"]), 2) if has_rmp else None,
             "traceRating": round(float(row["trace_overall"]), 2) if has_trace else None,
@@ -920,7 +937,7 @@ def professor_profile(slug):
         trace_rev = trace_reviews_lookup.get(name_key, 0)
         dept = trace_dept_lookup.get(name_key, "")
         profile = {
-            "name": name_key.title(),
+            "name": trace_name_lookup.get(name_key, name_key.title()),
             "department": dept,
             "rmpRating": None,
             "traceRating": round(float(trace_rating), 2) if trace_rating and pd.notna(trace_rating) else None,

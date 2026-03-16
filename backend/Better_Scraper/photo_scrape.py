@@ -1,11 +1,13 @@
 """
-NEU Faculty Headshot Scraper (v2 — Directory-First)
+NEU Faculty Headshot Scraper (v3 — Directory-First, Fast)
 
-Two-phase approach:
-  Phase 1: Scrape college directory listing pages (each page has ~10-50 people
-           with photos already embedded). ~220 pages covers ~3000+ faculty.
-  Phase 2: For professors not found in directories, fall back to slug-based
-           URL guessing across all college subdomains.
+Three-phase approach:
+  Phase 1: Scrape college directory listing pages (~220 pages → ~4700 faculty
+           with photos already embedded). Build multiple indexes for matching.
+  Phase 1.5: For directory-matched professors without photos, fetch their
+             known profile page directly (1 request each).
+  Phase 2: For remaining professors whose department maps to a known college,
+           try ONE slug-based URL on their department's subdomain only.
 
 Reads professor names from rmp_professors.csv and trace_courses.csv.
 Outputs: professor_photos.csv (name, image_url, source_page)
@@ -14,11 +16,11 @@ Usage:
     python photo_scrape.py
     python photo_scrape.py --workers 10
     python photo_scrape.py --limit 50
-    python photo_scrape.py --skip-directories   # slug-only mode (old behavior)
+    python photo_scrape.py --skip-directories   # slug-only mode
 """
 
 __author__ = "Benjamin"
-__version__ = "2.0.0"
+__version__ = "3.0.0"
 
 import csv
 import os
@@ -35,67 +37,55 @@ from tqdm import tqdm
 # ---------------------------------------------------------------------------
 # College directory configurations
 # ---------------------------------------------------------------------------
-# Each entry: subdomain, directory path prefix, people path prefix
-# Directory pages are paginated as {path}page/{n}/
 
 DIRECTORY_CONFIGS = [
-    {"subdomain": "www.khoury", "dir_path": "/people/",        "person_path": "/people/"},
-    {"subdomain": "cos",        "dir_path": "/people/",        "person_path": "/people/"},
-    {"subdomain": "damore-mckim","dir_path": "/people/",       "person_path": "/people/"},
-    {"subdomain": "camd",       "dir_path": "/people/",        "person_path": "/people/"},
-    {"subdomain": "bouve",      "dir_path": "/directory/",      "person_path": "/directory/"},
-    {"subdomain": "cssh",       "dir_path": "/faculty/",        "person_path": "/faculty/"},
-    {"subdomain": "law",        "dir_path": "/faculty/",        "person_path": "/faculty/"},
-    {"subdomain": "cps",        "dir_path": "/faculty/",        "person_path": "/faculty/"},
+    {"subdomain": "www.khoury", "dir_path": "/people/"},
+    {"subdomain": "cos",        "dir_path": "/people/"},
+    {"subdomain": "damore-mckim","dir_path": "/people/"},
+    {"subdomain": "camd",       "dir_path": "/people/"},
+    {"subdomain": "bouve",      "dir_path": "/directory/"},
+    {"subdomain": "cssh",       "dir_path": "/faculty/"},
+    {"subdomain": "law",        "dir_path": "/faculty/"},
+    {"subdomain": "cps",        "dir_path": "/faculty/"},
 ]
 
-# All subdomains to try for slug-based fallback (Phase 2)
-ALL_SUBDOMAINS = [
-    "www.khoury", "cos", "damore-mckim", "camd", "bouve", "cssh",
-    "law", "cps", "coe", "ece", "mie", "cee", "che", "bioe",
+# Department keyword → subdomain mapping (uses substring matching, not exact)
+# Each tuple: (keyword_in_department, [subdomains], path_pattern)
+DEPT_KEYWORD_MAP = [
+    # Khoury
+    (["computer sci", "information sci", "cybersec", "data sci", "computer eng",
+      "computer & info"], "www.khoury", "/people/"),
+    # COS
+    (["math", "physics", "chemistry", "chem", "biology", "biochem",
+      "environment", "marine", "neurosci", "interdisc studies - sci"], "cos", "/people/"),
+    # D'Amore-McKim
+    (["business", "finance", "account", "marketing", "management",
+      "entrepreneur", "supply chain"], "damore-mckim", "/people/"),
+    # CAMD
+    (["art", "communication", "journalism", "music", "design", "theater",
+      "theatre", "architecture", "media"], "camd", "/people/"),
+    # Bouve
+    (["health", "nursing", "pharmac", "physical therap", "speech",
+      "rehab", "counsel", "movem"], "bouve", "/directory/"),
+    # CSSH
+    (["politic", "econom", "history", "psychol", "sociol", "philosoph",
+      "english", "writing", "criminal", "linguist", "language", "anthropol",
+      "pub policy", "urban", "interdis", "cultural"], "cssh", "/faculty/"),
+    # Law
+    (["law"], "law", "/faculty/"),
+    # CPS
+    (["education", "professional", "special program"], "cps", "/faculty/"),
+    # Engineering
+    (["engineer", "mechanical", "electrical", "civil", "chemical", "bioengin",
+      "dean of eng"], "coe", "/people/"),
 ]
-
-# Department → preferred subdomains (tried first in Phase 2)
-DEPT_TO_SUBDOMAINS = {
-    "Computer Science": ["www.khoury"], "Information Science": ["www.khoury"],
-    "Cybersecurity": ["www.khoury"], "Data Science": ["www.khoury"],
-    "Computer Engineering": ["www.khoury"],
-    "Engineering": ["coe", "ece", "mie", "cee", "che", "bioe"],
-    "Electrical Engineering": ["ece", "coe"],
-    "Mechanical Engineering": ["mie", "coe"],
-    "Civil Engineering": ["cee", "coe"],
-    "Chemical Engineering": ["che", "coe"],
-    "Bioengineering": ["bioe", "coe"],
-    "Electrical & Computer Engr": ["ece", "coe"],
-    "Mechanical & Industrial Eng": ["mie", "coe"],
-    "Civil & Environmental Eng": ["cee", "coe"],
-    "Mathematics": ["cos"], "Physics": ["cos"], "Chemistry": ["cos"],
-    "Biology": ["cos"], "Biochemistry": ["cos"],
-    "Environmental Science": ["cos"], "Marine Sciences": ["cos"],
-    "Behavioral Neuroscience": ["cos"], "Math": ["cos"],
-    "Business": ["damore-mckim"], "Finance": ["damore-mckim"],
-    "Accounting": ["damore-mckim"], "Marketing": ["damore-mckim"],
-    "Management": ["damore-mckim"], "Business Administration": ["damore-mckim"],
-    "Entrepreneurship": ["damore-mckim"], "Supply Chain Management": ["damore-mckim"],
-    "Art": ["camd"], "Communication Studies": ["camd"], "Communication": ["camd"],
-    "Journalism": ["camd"], "Music": ["camd"], "Design": ["camd"],
-    "Theater": ["camd"], "Architecture": ["camd"],
-    "Health Science": ["bouve"], "Nursing": ["bouve"],
-    "Pharmacy": ["bouve"], "Physical Therapy": ["bouve"],
-    "Speech Language Pathology": ["bouve"],
-    "Political Science": ["cssh"], "Economics": ["cssh"], "History": ["cssh"],
-    "Psychology": ["cssh"], "Sociology": ["cssh"], "Philosophy": ["cssh"],
-    "English": ["cssh"], "Writing": ["cssh"], "Criminal Justice": ["cssh"],
-    "Linguistics": ["cssh"], "Languages": ["cssh"],
-    "Law": ["law"],
-    "Education": ["cps"],
-}
 
 # Images to skip — banners, placeholders, research images, etc.
 SKIP_PATTERNS = [
-    "placeholder", "default", "silhouette", "no-photo", "avatar",
+    "placeholder", "silhouette", "no-photo", "avatar",
     "generic", "blank", "mystery", "logo", "icon", "default-person",
     "person-banner", "notched-n", "behrakis", "headshot-placeholder",
+    "featured-nav", "nu_rgb",
 ]
 
 # ---------------------------------------------------------------------------
@@ -111,7 +101,7 @@ def normalize_name(name):
 
 
 def name_to_key(name):
-    """Create a matching key: sorted words, no punctuation."""
+    """Create a matching key: no punctuation."""
     s = normalize_name(name)
     s = re.sub(r'[^a-z0-9 ]', '', s)
     return s
@@ -125,21 +115,15 @@ def name_to_slug(name):
 
 
 def slug_variations(name):
-    """Generate multiple slug variations for a name.
-
-    E.g. 'David John Choffnes' → ['david-john-choffnes', 'david-choffnes']
-    'Mary O'Brien' → ['mary-obrien', 'mary-o-brien']
-    """
+    """Generate slug variations for a name."""
     slugs = set()
     base = name_to_slug(name)
     slugs.add(base)
 
     parts = normalize_name(name).split()
     if len(parts) >= 2:
-        # first-last (skip middle names)
         slugs.add(re.sub(r'[^a-z0-9]+', '-', f"{parts[0]} {parts[-1]}").strip('-'))
     if len(parts) >= 3:
-        # first-middle-last
         slugs.add(re.sub(r'[^a-z0-9]+', '-', f"{parts[0]} {parts[1]} {parts[-1]}").strip('-'))
 
     return list(slugs)
@@ -184,17 +168,21 @@ def make_session():
     return session
 
 
+def dept_to_subdomain(department):
+    """Map a department name to a subdomain + path using keyword matching."""
+    dept_lower = department.lower()
+    for keywords, subdomain, path in DEPT_KEYWORD_MAP:
+        if any(kw in dept_lower for kw in keywords):
+            return subdomain, path
+    return None, None
+
+
 # ---------------------------------------------------------------------------
 # Phase 1: Scrape directory listing pages
 # ---------------------------------------------------------------------------
 
 def _find_card_for_link(link):
-    """Walk up from a link to find its enclosing card container.
-
-    A valid card must be a block container (article/li/div) that is large
-    enough to contain both the person's name and image. We skip small
-    wrappers that match class keywords but only contain one element.
-    """
+    """Walk up from a link to find its enclosing card container."""
     container = link
     for _ in range(7):
         container = container.parent
@@ -210,8 +198,6 @@ def _find_card_for_link(link):
             'card' in cls or 'member' in cls or 'profile' in cls
         ):
             is_card = True
-        # For "person"-class divs, only match if they contain headings
-        # (to avoid matching small wrappers like person-line-thumbnail)
         elif container.name == 'div' and ('person' in cls or 'directory' in cls):
             if container.find(['h2', 'h3', 'h4']):
                 is_card = True
@@ -221,18 +207,17 @@ def _find_card_for_link(link):
 
 
 def scrape_directory_page(session, url):
-    """Scrape one directory listing page, returning list of people found.
+    """Scrape one directory listing page.
 
-    Returns list of dicts: {name, photo_url, profile_url}
+    Returns: (list of {name, photo_url, profile_url}, next_page_url or None)
     """
     try:
         resp = session.get(url, timeout=15, allow_redirects=True)
         if resp.status_code != 200:
-            return [], False
+            return [], None
 
-        # Detect redirects away from the college site (e.g. COE -> coeaway)
         if urlparse(resp.url).netloc != urlparse(url).netloc:
-            return [], False
+            return [], None
 
         soup = BeautifulSoup(resp.text, 'html.parser')
         people = []
@@ -253,27 +238,22 @@ def scrape_directory_page(session, url):
                 continue
             seen_urls.add(abs_href)
 
-            # Find the enclosing card container for this link
             card = _find_card_for_link(link)
 
             # --- Extract name ---
             name = ''
-            # Strategy 1: heading inside the link
             heading = link.find(['h2', 'h3', 'h4'])
             if heading:
                 name = heading.get_text(strip=True)
-            # Strategy 2: link text itself
             if not name:
                 name = link.get_text(strip=True)
 
-            # Clean up action phrases before checking if name is valid
             name = re.sub(
                 r'\b(Read\s+bio|View\s+(Bio|Profile|Path)|See\s+(Path|Bio))\b',
                 '', name, flags=re.I
             ).strip()
             name = name.replace('\u201c', '').replace('\u201d', '').replace('"', '')
 
-            # Strategy 3: if name is still empty/short, try heading in card
             if card and (not name or len(name) < 3):
                 for h in card.find_all(['h2', 'h3', 'h4']):
                     candidate = h.get_text(strip=True)
@@ -304,13 +284,12 @@ def scrape_directory_page(session, url):
                 'profile_url': abs_href,
             })
 
-        # Find the next page URL (different colleges use different formats)
+        # Find next page URL
         next_url = None
         next_link = (
             soup.find('a', class_=re.compile(r'\bnext\b', re.I))
             or soup.find('a', attrs={'aria-label': re.compile(r'next', re.I)})
         )
-        # Fallback: find link with "Next" in text
         if not next_link:
             for a in soup.find_all('a', href=True):
                 if re.search(r'^Next\b', a.get_text(strip=True), re.I):
@@ -326,32 +305,30 @@ def scrape_directory_page(session, url):
 
 
 def scrape_all_directories(session, workers=10):
-    """Scrape all college directory pages, returning name→{photo_url, profile_url} mapping.
+    """Scrape all college directory pages.
 
-    Uses threading to scrape multiple colleges in parallel.
+    Returns:
+        directory_map: name_key → {name, photo_url, profile_url}
+        slug_index:    slug → {name, photo_url, profile_url}
+        lastname_index: last_name → [{name, photo_url, profile_url}, ...]
     """
     print("\n  Phase 1: Scraping college directory pages...")
-    directory_map = {}  # normalized_name → {name, photo_url, profile_url}
 
     def scrape_one_college(config):
-        """Scrape all pages for one college directory."""
         subdomain = config['subdomain']
         dir_path = config['dir_path']
         url = f"https://{subdomain}.northeastern.edu{dir_path}"
         college_people = []
 
-        max_pages = 100  # safety limit
-        for _ in range(max_pages):
+        for _ in range(100):
             people, next_url = scrape_directory_page(session, url)
             college_people.extend(people)
-
             if not next_url or not people:
                 break
             url = next_url
-
+ 
         return subdomain, college_people
 
-    # Scrape all colleges in parallel
     college_results = []
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {executor.submit(scrape_one_college, c): c for c in DIRECTORY_CONFIGS}
@@ -365,28 +342,47 @@ def scrape_all_directories(session, workers=10):
             except Exception:
                 pass
             pbar.update(1)
-
         pbar.close()
 
-    # Build the mapping
+    # Build indexes
+    directory_map = {}   # name_key → entry
+    slug_index = {}      # slug_from_url → entry
+    lastname_index = {}  # last_name → [entries]
     total_people = 0
     total_with_photos = 0
-    for subdomain, people in college_results:
+
+    for _, people in college_results:
         for person in people:
             key = name_to_key(person['name'])
             if not key:
                 continue
             total_people += 1
-            # Prefer entries that have photos over those that don't
+
+            # Prefer entries with photos
             existing = directory_map.get(key)
             if existing and existing['photo_url'] and not person['photo_url']:
-                continue  # keep the one with a photo
+                continue
             directory_map[key] = person
             if person['photo_url']:
                 total_with_photos += 1
 
+            # Slug index: extract slug from profile URL
+            profile_path = urlparse(person['profile_url']).path.rstrip('/')
+            slug = profile_path.split('/')[-1] if profile_path else ''
+            if slug:
+                existing_slug = slug_index.get(slug)
+                if not existing_slug or (person['photo_url'] and not existing_slug['photo_url']):
+                    slug_index[slug] = person
+
+            # Last name index
+            name_parts = key.split()
+            if name_parts:
+                last = name_parts[-1]
+                lastname_index.setdefault(last, []).append(person)
+
     print(f"  Found {total_people} people in directories ({total_with_photos} with photos)")
-    return directory_map
+    print(f"  Built indexes: {len(slug_index)} slugs, {len(lastname_index)} last names")
+    return directory_map, slug_index, lastname_index
 
 
 # ---------------------------------------------------------------------------
@@ -396,96 +392,68 @@ def scrape_all_directories(session, workers=10):
 def extract_photo_from_profile(html, page_url):
     """Extract the professor headshot URL from an individual profile page."""
     soup = BeautifulSoup(html, 'html.parser')
-    candidates = []
 
     for img in soup.find_all('img'):
         src = img.get('src', '') or img.get('data-src', '')
         if not src:
             continue
 
-        # Must be an uploaded image (not theme assets)
         if 'wp-content/uploads' not in src and 'pcdn.co' not in src:
             continue
 
-        # Skip tiny images
         width = img.get('width')
         height = img.get('height')
         if width and height:
             try:
-                if int(width) < 100 or int(height) < 100:
+                w, h = int(width), int(height)
+                if w < 150 and h < 150:
                     continue
             except ValueError:
                 pass
 
-        # Skip nav/header/footer images
-        parent_classes = set()
-        for parent in img.parents:
-            for cls in (parent.get('class') or []):
-                parent_classes.add(cls.lower())
-            if parent.get('id'):
-                parent_classes.add(parent['id'].lower())
-
-        if {'nav', 'header', 'footer', 'menu', 'sidebar', 'featured-nav'} & parent_classes:
+        in_nav = False
+        for depth, parent in enumerate(img.parents):
+            if depth > 3:
+                break
+            if parent.name in ('nav', 'header', 'footer'):
+                in_nav = True
+                break
+        if in_nav:
             continue
 
         src = make_absolute(src, page_url)
         if not is_valid_photo(src):
             continue
 
-        score = 0
-        if {'main', 'content', 'entry', 'article', 'person', 'profile', 'bio', 'figure'} & parent_classes:
-            score += 10
-        if img.get('srcset'):
-            score += 5
-        # Images with person-related alt text get a boost
-        alt = (img.get('alt') or '').lower()
-        if alt and alt not in ('', 'image', 'photo'):
-            score += 3
+        return src
 
-        candidates.append((score, src))
-
-    if not candidates:
-        return None
-
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    return candidates[0][1]
+    return None
 
 
 def try_slug_lookup(session, name, department):
-    """Try to find a professor's photo via slug-based URL guessing.
+    """Try to find a professor's photo — ONE targeted request per slug.
 
-    Uses HEAD requests first to quickly filter 404s, then GET for 200s.
-    Only tries the professor's college subdomains + a small fallback set.
+    Only tries the professor's department subdomain with its path pattern.
     """
     slugs = slug_variations(name)
-    path_patterns = ["/people/{slug}/", "/faculty/{slug}/", "/directory/{slug}/"]
-
-    # Only try department-specific subdomains + the 3 biggest colleges as fallback
-    preferred = DEPT_TO_SUBDOMAINS.get(department, [])
-    fallback = [s for s in ["www.khoury", "cos", "cssh", "damore-mckim", "camd", "bouve"]
-                if s not in preferred]
-    subdomains = preferred + fallback
+    subdomain, path_pattern = dept_to_subdomain(department)
+    if not subdomain:
+        return None, None
 
     for slug in slugs:
-        for subdomain in subdomains:
-            for pattern in path_patterns:
-                url = f"https://{subdomain}.northeastern.edu{pattern.format(slug=slug)}"
-                try:
-                    head = session.head(url, timeout=5, allow_redirects=True)
-                    if head.status_code != 200:
-                        continue
-                    if urlparse(head.url).netloc != urlparse(url).netloc:
-                        continue
+        url = f"https://{subdomain}.northeastern.edu{path_pattern}{slug}/"
+        try:
+            resp = session.get(url, timeout=8, allow_redirects=True)
+            if resp.status_code != 200:
+                continue
+            if urlparse(resp.url).netloc != urlparse(url).netloc:
+                continue
 
-                    resp = session.get(url, timeout=10, allow_redirects=True)
-                    if resp.status_code != 200:
-                        continue
-
-                    photo_url = extract_photo_from_profile(resp.text, resp.url)
-                    if photo_url:
-                        return photo_url, resp.url
-                except Exception:
-                    continue
+            photo_url = extract_photo_from_profile(resp.text, resp.url)
+            if photo_url:
+                return photo_url, resp.url
+        except Exception:
+            continue
 
     return None, None
 
@@ -496,7 +464,7 @@ def try_slug_lookup(session, name, department):
 
 def load_professors(data_dir):
     """Load unique professor names + departments from CSVs."""
-    profs = {}  # name_key → {name, department}
+    profs = {}
 
     rmp_path = os.path.join(data_dir, "rmp_professors.csv")
     if os.path.exists(rmp_path):
@@ -525,7 +493,7 @@ def load_professors(data_dir):
     return list(profs.values())
 
 
-def match_prof_to_directory(prof, directory_map):
+def match_prof_to_directory(prof, directory_map, slug_index, lastname_index):
     """Try to match a professor to a directory entry using multiple strategies."""
     name = prof['name']
 
@@ -534,21 +502,53 @@ def match_prof_to_directory(prof, directory_map):
     if key in directory_map:
         return directory_map[key]
 
-    # Strategy 2: first-last match (skip middle names in our name)
     parts = normalize_name(name).split()
+
+    # Strategy 2: first-last match (skip middle names in our name)
     if len(parts) >= 3:
         first_last = re.sub(r'[^a-z0-9 ]', '', f"{parts[0]} {parts[-1]}")
         if first_last in directory_map:
             return directory_map[first_last]
 
-    # Strategy 3: Check if directory has an entry with middle name where we don't
-    # e.g., our "David Choffnes" matches directory's "David R Choffnes"
+    # Strategy 3: Slug match — check if any slug variation exists in the slug index
+    for slug in slug_variations(name):
+        if slug in slug_index:
+            return slug_index[slug]
+
+    # Strategy 4: Last name match with first-name initial or substring
+    # Catches: "Elena Strange" → "Laney Strange" (same last name, different first)
+    # Also: "Dan Metzger" → "Daniel Metzger"
+    if len(parts) >= 2:
+        first = parts[0]
+        last = parts[-1]
+        candidates = lastname_index.get(re.sub(r'[^a-z]', '', last), [])
+        for entry in candidates:
+            entry_parts = name_to_key(entry['name']).split()
+            if len(entry_parts) < 2:
+                continue
+            entry_first = entry_parts[0]
+            entry_last = entry_parts[-1]
+            if entry_last != re.sub(r'[^a-z]', '', last):
+                continue
+            # Same last name — check if first names are compatible
+            # Match if: one starts with the other (Dan/Daniel), or same initial
+            if (first.startswith(entry_first[:3]) or entry_first.startswith(first[:3])
+                    or first[0] == entry_first[0]):
+                return entry
+
+    # Strategy 5: Check if directory has entry with extra/fewer name parts
     if len(parts) == 2:
         first, last = parts[0], parts[-1]
+        first_clean = re.sub(r'[^a-z]', '', first)
+        last_clean = re.sub(r'[^a-z]', '', last)
         for dir_key, entry in directory_map.items():
             dir_parts = dir_key.split()
-            if len(dir_parts) >= 2 and dir_parts[0] == first and dir_parts[-1] == last:
-                return entry
+            if len(dir_parts) >= 2:
+                df = dir_parts[0]
+                dl = dir_parts[-1]
+                if dl == last_clean and (df == first_clean or df.startswith(first_clean[:3])
+                                          or first_clean.startswith(df[:3])):
+                    return entry
 
     return None
 
@@ -558,7 +558,7 @@ def match_prof_to_directory(prof, directory_map):
 # ---------------------------------------------------------------------------
 
 def scrape_photos(profs, workers=15, limit=None, skip_directories=False):
-    """Full two-phase scraping pipeline."""
+    """Full scraping pipeline."""
     if limit:
         profs = profs[:limit]
 
@@ -567,18 +567,20 @@ def scrape_photos(profs, workers=15, limit=None, skip_directories=False):
 
     # Phase 1: Directory scraping
     if not skip_directories:
-        directory_map = scrape_all_directories(session, workers=min(workers, 8))
+        directory_map, slug_index, lastname_index = scrape_all_directories(
+            session, workers=min(workers, 8)
+        )
     else:
-        directory_map = {}
+        directory_map, slug_index, lastname_index = {}, {}, {}
 
-    # Match professors against directory
-    unmatched = []         # no directory match at all
-    matched_no_photo = []  # matched but no photo in directory listing
+    # Match professors against directory indexes
+    unmatched = []
+    matched_no_photo = []
     dir_found = 0
 
     print(f"\n  Matching {len(profs)} professors against directory...")
     for prof in profs:
-        match = match_prof_to_directory(prof, directory_map)
+        match = match_prof_to_directory(prof, directory_map, slug_index, lastname_index)
         if match and match['photo_url']:
             results.append({
                 'name': prof['name'],
@@ -587,7 +589,6 @@ def scrape_photos(profs, workers=15, limit=None, skip_directories=False):
             })
             dir_found += 1
         elif match and match['profile_url']:
-            # Have profile URL but no photo — will fetch the profile page directly
             matched_no_photo.append((prof, match['profile_url']))
         else:
             unmatched.append(prof)
@@ -595,7 +596,7 @@ def scrape_photos(profs, workers=15, limit=None, skip_directories=False):
     print(f"  Phase 1 matched: {dir_found}/{len(profs)} professors with photos")
     print(f"  ({len(matched_no_photo)} matched without photo, {len(unmatched)} unmatched)")
 
-    # Phase 1.5: Fetch individual profile pages for directory-matched professors without photos
+    # Phase 1.5: Fetch profile pages for matched-but-no-photo professors
     if matched_no_photo:
         print(f"\n  Phase 1.5: Fetching {len(matched_no_photo)} known profile pages...")
         profile_found = 0
@@ -633,17 +634,22 @@ def scrape_photos(profs, workers=15, limit=None, skip_directories=False):
         pbar.close()
         print(f"  Phase 1.5 found: {profile_found} additional professors")
 
-    # Phase 2: Slug-based fallback for fully unmatched professors
-    if unmatched:
-        print(f"\n  Phase 2: Slug-based lookup for {len(unmatched)} remaining professors...")
+    # Phase 2: Targeted slug lookup — only try professor's OWN college subdomain
+    # Filter to only professors with a known department mapping
+    phase2_profs = [p for p in unmatched if dept_to_subdomain(p['department'])[0]]
+    skipped = len(unmatched) - len(phase2_profs)
+
+    if phase2_profs:
+        print(f"\n  Phase 2: Slug lookup for {len(phase2_profs)} professors "
+              f"(skipped {skipped} with unknown dept)...")
         slug_found = 0
-        pbar = tqdm(total=len(unmatched), desc="  Slug lookup", unit=" prof")
+        pbar = tqdm(total=len(phase2_profs), desc="  Slug lookup", unit=" prof")
 
         def lookup_one(prof):
             return prof, try_slug_lookup(session, prof['name'], prof['department'])
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {executor.submit(lookup_one, p): p for p in unmatched}
+            futures = {executor.submit(lookup_one, p): p for p in phase2_profs}
 
             for future in as_completed(futures):
                 try:
@@ -661,6 +667,8 @@ def scrape_photos(profs, workers=15, limit=None, skip_directories=False):
 
         pbar.close()
         print(f"  Phase 2 found: {slug_found} additional professors")
+    else:
+        print(f"\n  Phase 2: No professors with known departments to look up")
 
     total = len([r for r in results if r.get('image_url')])
     print(f"\n  Total: {total}/{len(profs)} professors with photos")
