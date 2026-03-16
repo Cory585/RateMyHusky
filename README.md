@@ -1,6 +1,6 @@
 ## Run
 
-Unzip trace_comments.zip in backend/Better_Scraper/output_data to output_data folder
+Unzip `trace_comments.zip` into the `backend/Better_Scraper/output_data/` directory.
 
 **Backend:**
 ```
