@@ -1,10 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   fetchProfessorsCatalog,
   fetchColleges,
   fetchDepartments,
+  fetchSearchSuggestions,
   type CatalogProfessor,
+  type ProfessorSuggestion,
 } from '../api/api';
 import StarRating from '../components/StarRating';
 import RatingBadge from '../components/RatingBadge';
@@ -18,12 +20,16 @@ const SORT_OPTIONS = [
   { value: 'reviews', label: 'Most Reviews' },
 ];
 
+const REVIEW_SLIDER_MAX = 100;
+
 interface Filters {
   q:          string;
   college:    string;
   dept:       string;
   minRating:  number;
+  maxRating:  number;
   minReviews: number;
+  maxReviews: number | null;
   sort:       string;
   page:       number;
 }
@@ -33,7 +39,9 @@ const DEFAULT_FILTERS: Filters = {
   college:    '',
   dept:       '',
   minRating:  0,
+  maxRating:  5,
   minReviews: 1,
+  maxReviews: null,
   sort:       'alpha',
   page:       1,
 };
@@ -45,18 +53,37 @@ function getFiltersFromSearchParams(sp: URLSearchParams): Filters {
     : 'alpha';
 
   const minRating = Number(sp.get('minRating') || '0');
+  const maxRating = Number(sp.get('maxRating') || '5');
   const minReviews = Number(sp.get('minReviews') || '1');
+  const maxReviewsRaw = sp.get('maxReviews');
+  const maxReviews = maxReviewsRaw !== null ? Number(maxReviewsRaw) : null;
   const page = Number(sp.get('page') || '1');
 
   return {
-    q:          (sp.get('q') || '').trim(),
+    q:          sp.get('q') || '',
     college:    sp.get('college') || '',
     dept:       sp.get('dept') || '',
     minRating:  Number.isFinite(minRating) ? Math.max(0, Math.min(5, minRating)) : 0,
+    maxRating:  Number.isFinite(maxRating) ? Math.max(0, Math.min(5, maxRating)) : 5,
     minReviews: Number.isFinite(minReviews) ? Math.max(1, Math.floor(minReviews)) : 1,
+    maxReviews: maxReviews !== null && Number.isFinite(maxReviews) ? Math.max(1, Math.floor(maxReviews)) : null,
     sort,
     page:       Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1,
   };
+}
+
+function buildSearchParamsFromFilters(filters: Filters): URLSearchParams {
+  const next = new URLSearchParams();
+  if (filters.q) next.set('q', filters.q);
+  if (filters.college) next.set('college', filters.college);
+  if (filters.dept) next.set('dept', filters.dept);
+  if (filters.minRating > 0) next.set('minRating', String(filters.minRating));
+  if (filters.maxRating < 5) next.set('maxRating', String(filters.maxRating));
+  if (filters.minReviews > 1) next.set('minReviews', String(filters.minReviews));
+  if (filters.maxReviews !== null) next.set('maxReviews', String(filters.maxReviews));
+  if (filters.sort !== 'alpha') next.set('sort', filters.sort);
+  if (filters.page > 1) next.set('page', String(filters.page));
+  return next;
 }
 
 function initials(name: string) {
@@ -79,6 +106,30 @@ export default function ProfessorCatalog() {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading]       = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [minRatingDraft, setMinRatingDraft] = useState(() => getFiltersFromSearchParams(searchParams).minRating);
+  const [maxRatingDraft, setMaxRatingDraft] = useState(() => getFiltersFromSearchParams(searchParams).maxRating);
+  const [minReviewsDraft, setMinReviewsDraft] = useState(() => getFiltersFromSearchParams(searchParams).minReviews);
+  const [maxReviewsDraft, setMaxReviewsDraft] = useState<number | null>(() => getFiltersFromSearchParams(searchParams).maxReviews);
+  const [searchSuggestions, setSearchSuggestions] = useState<ProfessorSuggestion[]>([]);
+  const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
+  const [activeSearchIndex, setActiveSearchIndex] = useState(-1);
+
+  const searchWrapperRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Responsive page size: fewer cards on smaller screens
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  const pageSize = useMemo(() => {
+    if (viewportWidth <= 480) return 6;
+    if (viewportWidth <= 768) return 9;
+    return 20;
+  }, [viewportWidth]);
 
   // Fetch colleges once
   useEffect(() => {
@@ -100,10 +151,12 @@ export default function ProfessorCatalog() {
       college:    filters.college    || undefined,
       dept:       filters.dept       || undefined,
       minRating:  filters.minRating  > 0 ? filters.minRating  : undefined,
+      maxRating:  filters.maxRating  < 5 ? filters.maxRating  : undefined,
       minReviews: filters.minReviews > 1 ? filters.minReviews : undefined,
+      maxReviews: filters.maxReviews ?? undefined,
       sort:       filters.sort as 'alpha' | 'rating' | 'reviews',
       page:       filters.page,
-      limit:      20,
+      limit:      pageSize,
     })
       .then(data => {
         setProfessors(data.professors);
@@ -112,20 +165,52 @@ export default function ProfessorCatalog() {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [filters]);
+  }, [filters, pageSize]);
 
   // Keep filters in the URL so the catalog view is shareable/bookmarkable.
   useEffect(() => {
-    const next = new URLSearchParams();
-    if (filters.q) next.set('q', filters.q);
-    if (filters.college) next.set('college', filters.college);
-    if (filters.dept) next.set('dept', filters.dept);
-    if (filters.minRating > 0) next.set('minRating', String(filters.minRating));
-    if (filters.minReviews > 1) next.set('minReviews', String(filters.minReviews));
-    if (filters.sort !== 'alpha') next.set('sort', filters.sort);
-    if (filters.page > 1) next.set('page', String(filters.page));
-    setSearchParams(next, { replace: true });
-  }, [filters, setSearchParams]);
+    const next = buildSearchParamsFromFilters(filters);
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [filters, searchParams, setSearchParams]);
+
+  // Keep in-memory filters synced when URL changes externally (back/forward/share links).
+  useEffect(() => {
+    const fromUrl = getFiltersFromSearchParams(searchParams);
+    setFilters(prev => {
+      if (
+        prev.q === fromUrl.q &&
+        prev.college === fromUrl.college &&
+        prev.dept === fromUrl.dept &&
+        prev.minRating === fromUrl.minRating &&
+        prev.maxRating === fromUrl.maxRating &&
+        prev.minReviews === fromUrl.minReviews &&
+        prev.maxReviews === fromUrl.maxReviews &&
+        prev.sort === fromUrl.sort &&
+        prev.page === fromUrl.page
+      ) {
+        return prev;
+      }
+      return fromUrl;
+    });
+  }, [searchParams]);
+
+  useEffect(() => {
+    setMinRatingDraft(filters.minRating);
+  }, [filters.minRating]);
+
+  useEffect(() => {
+    setMaxRatingDraft(filters.maxRating);
+  }, [filters.maxRating]);
+
+  useEffect(() => {
+    setMinReviewsDraft(filters.minReviews);
+  }, [filters.minReviews]);
+
+  useEffect(() => {
+    setMaxReviewsDraft(filters.maxReviews);
+  }, [filters.maxReviews]);
 
   const updateFilter = useCallback(
     <K extends keyof Filters>(key: K, value: Filters[K]) => {
@@ -138,14 +223,106 @@ export default function ProfessorCatalog() {
     []
   );
 
+  // Debounce slider-based filter commits so the catalog doesn't reload on every drag step.
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (minRatingDraft !== filters.minRating) {
+        updateFilter('minRating', minRatingDraft);
+      }
+    }, 200);
+
+    return () => clearTimeout(timeoutId);
+  }, [minRatingDraft, filters.minRating, updateFilter]);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (maxRatingDraft !== filters.maxRating) {
+        updateFilter('maxRating', maxRatingDraft);
+      }
+    }, 200);
+
+    return () => clearTimeout(timeoutId);
+  }, [maxRatingDraft, filters.maxRating, updateFilter]);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (minReviewsDraft !== filters.minReviews) {
+        updateFilter('minReviews', minReviewsDraft);
+      }
+    }, 200);
+
+    return () => clearTimeout(timeoutId);
+  }, [minReviewsDraft, filters.minReviews, updateFilter]);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (maxReviewsDraft !== filters.maxReviews) {
+        updateFilter('maxReviews', maxReviewsDraft);
+      }
+    }, 200);
+
+    return () => clearTimeout(timeoutId);
+  }, [maxReviewsDraft, filters.maxReviews, updateFilter]);
+
   const setCollege = useCallback((college: string) => {
     setFilters(f => ({ ...f, college, dept: '', page: 1 }));
   }, []);
 
   const clearFilters = () => setFilters(DEFAULT_FILTERS);
 
+  const handleSearchSelect = useCallback((suggestion: ProfessorSuggestion) => {
+    updateFilter('q', suggestion.name);
+    setShowSearchSuggestions(false);
+    setActiveSearchIndex(-1);
+  }, [updateFilter]);
+
+  // Homepage-style debounced professor autocomplete for catalog search.
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+
+    const trimmedQuery = filters.q.trim();
+    if (trimmedQuery.length < 2) {
+      setSearchSuggestions([]);
+      setShowSearchSuggestions(false);
+      setActiveSearchIndex(-1);
+      return;
+    }
+
+    searchDebounceRef.current = setTimeout(async () => {
+      try {
+        const results = await fetchSearchSuggestions(trimmedQuery, 'Professor');
+        const professorResults = results
+          .filter((result): result is ProfessorSuggestion => result.type === 'professor')
+          .slice(0, 3);
+
+        setSearchSuggestions(professorResults);
+        const isFocused = document.activeElement === searchInputRef.current;
+        setShowSearchSuggestions(isFocused && professorResults.length > 0);
+        setActiveSearchIndex(-1);
+      } catch {
+        setSearchSuggestions([]);
+        setShowSearchSuggestions(false);
+      }
+    }, 200);
+
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [filters.q]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchWrapperRef.current && !searchWrapperRef.current.contains(e.target as Node)) {
+        setShowSearchSuggestions(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
   const hasActiveFilters =
-    !!filters.q || !!filters.college || !!filters.dept || filters.minRating > 0 || filters.minReviews > 1;
+    !!filters.q || !!filters.college || !!filters.dept || filters.minRating > 0 || filters.maxRating < 5 || filters.minReviews > 1 || filters.maxReviews !== null;
 
   return (
     <div className="catalog-page">
@@ -224,60 +401,100 @@ export default function ProfessorCatalog() {
               />
             </div>
 
-            {/* Min Rating */}
+            {/* Rating Range */}
             <div className="filter-section">
               <p className="filter-label">
-                Min. Rating
+                Rating
                 <span className="slider-value">
-                  {filters.minRating > 0
-                    ? `${filters.minRating.toFixed(1)}+`
-                    : 'Any'}
+                  {minRatingDraft === 0 && maxRatingDraft === 5
+                    ? 'Any'
+                    : minRatingDraft === 0
+                      ? `≤ ${maxRatingDraft.toFixed(1)}`
+                      : maxRatingDraft === 5
+                        ? `${minRatingDraft.toFixed(1)}+`
+                        : `${minRatingDraft.toFixed(1)} – ${maxRatingDraft.toFixed(1)}`}
                 </span>
               </p>
-              <input
-                type="range"
-                className="rating-slider"
-                min="0"
-                max="5"
-                step="0.5"
-                value={filters.minRating}
-                onChange={e => updateFilter('minRating', parseFloat(e.target.value))}
+              <DualRangeSlider
+                min={0}
+                max={5}
+                step={0.5}
+                valueLow={minRatingDraft}
+                valueHigh={maxRatingDraft}
+                onChangeLow={v => setMinRatingDraft(v)}
+                onChangeHigh={v => setMaxRatingDraft(v)}
               />
-              <div className="slider-ticks">
-                <span>Any</span>
-                <span>5.0</span>
+              <div className="slider-tick-marks">
+                {Array.from({ length: 11 }, (_, i) => {
+                  const val = i * 0.5;
+                  return (
+                    <div key={val} className="tick-mark">
+                      <div className="tick-line" />
+                      <span className="tick-label">
+                        {val === 0 ? '0' : Number.isInteger(val) ? String(val) : ''}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
-            {/* Min Reviews */}
+            {/* Reviews Range */}
             <div className="filter-section">
-              <p className="filter-label">Min. Reviews</p>
+              <p className="filter-label">
+                Reviews
+                <span className="slider-value">
+                  {minReviewsDraft <= 1 && maxReviewsDraft === null
+                    ? 'Any'
+                    : minReviewsDraft <= 1
+                      ? `≤ ${maxReviewsDraft}`
+                      : maxReviewsDraft === null
+                        ? `${minReviewsDraft}+`
+                        : `${minReviewsDraft} – ${maxReviewsDraft}`}
+                </span>
+              </p>
+              <DualRangeSlider
+                min={1}
+                max={REVIEW_SLIDER_MAX}
+                step={1}
+                valueLow={minReviewsDraft}
+                valueHigh={maxReviewsDraft ?? REVIEW_SLIDER_MAX}
+                onChangeLow={v => setMinReviewsDraft(v)}
+                onChangeHigh={v => setMaxReviewsDraft(v >= REVIEW_SLIDER_MAX ? null : v)}
+              />
               <div className="reviews-input-row">
-                <input
-                  type="range"
-                  className="rating-slider"
-                  min="1"
-                  max="100"
-                  step="1"
-                  value={filters.minReviews}
-                  onChange={e => updateFilter('minReviews', parseInt(e.target.value, 10))}
-                />
                 <input
                   type="number"
                   className="reviews-number-input"
                   min="1"
-                  max="999"
-                  value={filters.minReviews === 1 ? '' : filters.minReviews}
-                  placeholder="Any"
+                  value={minReviewsDraft === 1 ? '' : minReviewsDraft}
+                  placeholder="Min"
                   onChange={e => {
                     const v = parseInt(e.target.value, 10);
-                    updateFilter('minReviews', isNaN(v) || v < 1 ? 1 : Math.min(v, 999));
+                    const clamped = isNaN(v) || v < 1 ? 1 : v;
+                    setMinReviewsDraft(clamped);
+                    if (maxReviewsDraft !== null && clamped > maxReviewsDraft) {
+                      setMaxReviewsDraft(clamped);
+                    }
                   }}
                 />
-              </div>
-              <div className="slider-ticks">
-                <span>Any</span>
-                <span>100</span>
+                <span className="reviews-separator">–</span>
+                <input
+                  type="number"
+                  className="reviews-number-input"
+                  min="1"
+                  value={maxReviewsDraft ?? ''}
+                  placeholder="Max"
+                  onChange={e => {
+                    const v = parseInt(e.target.value, 10);
+                    if (isNaN(v) || e.target.value === '') {
+                      setMaxReviewsDraft(null);
+                    } else {
+                      const clamped = Math.max(v, minReviewsDraft);
+                      setMaxReviewsDraft(clamped);
+                    }
+                  }}
+                />
               </div>
             </div>
           </div>
@@ -292,13 +509,56 @@ export default function ProfessorCatalog() {
             </span>
           </div>
           <div className="catalog-search-row">
-            <input
-              type="text"
-              className="catalog-search"
-              placeholder="Search professor name…"
-              value={filters.q}
-              onChange={e => updateFilter('q', e.target.value)}
-            />
+            <div className="catalog-search-wrap" ref={searchWrapperRef}>
+              <input
+                ref={searchInputRef}
+                type="text"
+                className="catalog-search"
+                placeholder="Search professor name…"
+                value={filters.q}
+                onChange={e => updateFilter('q', e.target.value)}
+                onFocus={() => {
+                  if (searchSuggestions.length > 0) setShowSearchSuggestions(true);
+                }}
+                onKeyDown={(e) => {
+                  if (!showSearchSuggestions || searchSuggestions.length === 0) return;
+
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setActiveSearchIndex(prev => (prev < searchSuggestions.length - 1 ? prev + 1 : 0));
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setActiveSearchIndex(prev => (prev > 0 ? prev - 1 : searchSuggestions.length - 1));
+                  } else if (e.key === 'Enter' && activeSearchIndex >= 0) {
+                    e.preventDefault();
+                    handleSearchSelect(searchSuggestions[activeSearchIndex]);
+                  } else if (e.key === 'Escape') {
+                    setShowSearchSuggestions(false);
+                  }
+                }}
+              />
+
+              {showSearchSuggestions && (
+                <ul className="catalog-search-suggestions">
+                  {searchSuggestions.map((s, i) => (
+                    <li
+                      key={s.slug}
+                      className={`catalog-suggestion-item ${i === activeSearchIndex ? 'active' : ''}`}
+                      onClick={() => handleSearchSelect(s)}
+                      onMouseEnter={() => setActiveSearchIndex(i)}
+                    >
+                      <div className="catalog-suggestion-main">
+                        <span className="catalog-suggestion-name">{s.name}</span>
+                        <span className="catalog-suggestion-dept">{s.dept}</span>
+                      </div>
+                      <span className="catalog-suggestion-rating">
+                        {s.rating !== null ? s.rating.toFixed(2) : 'N/A'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
           <p className="catalog-disclaimer">
             Professors without any rating data are not shown.{' '}
@@ -307,7 +567,7 @@ export default function ProfessorCatalog() {
 
           {loading ? (
             <div className="catalog-grid">
-              {Array.from({ length: 20 }).map((_, i) => (
+              {Array.from({ length: pageSize }).map((_, i) => (
                 <div key={i} className="prof-card skeleton" />
               ))}
             </div>
@@ -397,6 +657,70 @@ export default function ProfessorCatalog() {
           )}
         </main>
       </div>
+    </div>
+  );
+}
+
+// ── Dual-range slider sub-component ─────────────────────────────────────────
+
+function DualRangeSlider({
+  min,
+  max,
+  step,
+  valueLow,
+  valueHigh,
+  onChangeLow,
+  onChangeHigh,
+}: {
+  min: number;
+  max: number;
+  step: number;
+  valueLow: number;
+  valueHigh: number;
+  onChangeLow: (v: number) => void;
+  onChangeHigh: (v: number) => void;
+}) {
+  const [lastActive, setLastActive] = useState<'low' | 'high'>('low');
+  const range = max - min;
+  const lowPct = ((valueLow - min) / range) * 100;
+  const highPct = ((valueHigh - min) / range) * 100;
+
+  return (
+    <div className="dual-range">
+      <div className="dual-range-track">
+        <div
+          className="dual-range-fill"
+          style={{ left: `${lowPct}%`, width: `${highPct - lowPct}%` }}
+        />
+      </div>
+      <input
+        type="range"
+        className="dual-range-input"
+        style={{ zIndex: lastActive === 'low' ? 4 : 3 }}
+        min={min}
+        max={max}
+        step={step}
+        value={valueLow}
+        onPointerDown={() => setLastActive('low')}
+        onChange={e => {
+          const v = parseFloat(e.target.value);
+          onChangeLow(Math.min(v, valueHigh));
+        }}
+      />
+      <input
+        type="range"
+        className="dual-range-input"
+        style={{ zIndex: lastActive === 'high' ? 4 : 3 }}
+        min={min}
+        max={max}
+        step={step}
+        value={valueHigh}
+        onPointerDown={() => setLastActive('high')}
+        onChange={e => {
+          const v = parseFloat(e.target.value);
+          onChangeHigh(Math.max(v, valueLow));
+        }}
+      />
     </div>
   );
 }
