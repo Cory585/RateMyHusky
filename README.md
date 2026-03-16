@@ -1,3 +1,10 @@
+## Run
+
+Unzip `trace_comments.zip` into the `backend/Better_Scraper/output_data/` directory.
+
+**Backend:**
+```
+pip install flask flask-cors pandas numpy
 # RateMyHusky
 
 A full-stack web application for searching, browsing, and comparing Northeastern University professors. Aggregates ratings from **RateMyProfessors (RMP)** and **TRACE** (NEU's official course evaluations).
