@@ -1209,8 +1209,11 @@ def auth_google():
         "hd": "husky.neu.edu",
         "prompt": "select_account",
     }
+    is_popup = request.args.get("popup") == "1"
     resp = make_response(redirect(f"{GOOGLE_AUTH_URL}?{urlencode(params)}"))
     resp.set_cookie("auth_return_to", return_to, max_age=600, httponly=True, samesite="Lax")
+    if is_popup:
+        resp.set_cookie("auth_popup", "1", max_age=600, httponly=True, samesite="Lax")
     return resp
 
 
@@ -1258,15 +1261,28 @@ def auth_google_callback():
     }
     token = pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
-    # Set cookie and redirect to the page the user was on
-    return_to = request.cookies.get("auth_return_to", "/")
-    # Ensure returnTo is a safe relative path to prevent open redirect
-    from urllib.parse import urlparse
-    parsed = urlparse(return_to)
-    if parsed.scheme or parsed.netloc or not return_to.startswith("/"):
-        return_to = "/"
-    resp = make_response(redirect(f"{FRONTEND_URL}{return_to}"))
-    resp.delete_cookie("auth_return_to")
+    # Set auth cookie
+    is_popup = request.cookies.get("auth_popup") == "1"
+
+    if is_popup:
+        # Close popup and notify opener
+        resp = make_response("""
+        <html><body><script>
+          window.opener && window.opener.postMessage("auth_complete", "*");
+          window.close();
+        </script></body></html>
+        """)
+        resp.delete_cookie("auth_popup")
+    else:
+        # Fallback: redirect to the page the user was on
+        return_to = request.cookies.get("auth_return_to", "/")
+        from urllib.parse import urlparse
+        parsed = urlparse(return_to)
+        if parsed.scheme or parsed.netloc or not return_to.startswith("/"):
+            return_to = "/"
+        resp = make_response(redirect(f"{FRONTEND_URL}{return_to}"))
+        resp.delete_cookie("auth_return_to")
+
     resp.set_cookie(
         "auth_token",
         token,
