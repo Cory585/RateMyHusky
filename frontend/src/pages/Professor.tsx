@@ -113,6 +113,39 @@ const GRADE_COLORS: Record<string, string> = {
   'F':'#a50026','W':'#7f8c8d','WF':'#636e72','P':'#2980b9','NP':'#8e44ad','I':'#999',
 };
 
+/* ───────── near-duplicate detection ───────── */
+function normalizeText(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function deduplicateByText<T>(items: T[], getText: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const item of items) {
+    const raw = getText(item);
+    if (!raw.trim()) { result.push(item); continue; }
+    // Use a truncated normalized form as a fingerprint — catches exact and near-exact dupes
+    const norm = normalizeText(raw);
+    // Check exact match first
+    if (seen.has(norm)) continue;
+    // Check prefix-based match (catches 95%+ similar: same text with minor trailing differences)
+    const prefix = norm.slice(0, Math.floor(norm.length * 0.9));
+    let isDupe = false;
+    for (const s of seen) {
+      if (s.startsWith(prefix) || norm.startsWith(s.slice(0, Math.floor(s.length * 0.9)))) {
+        // Confirm length similarity (within 10%)
+        const ratio = Math.min(s.length, norm.length) / Math.max(s.length, norm.length);
+        if (ratio >= 0.9) { isDupe = true; break; }
+      }
+    }
+    if (!isDupe) {
+      seen.add(norm);
+      result.push(item);
+    }
+  }
+  return result;
+}
+
 /* ═══════════════════════════════════════ */
 const Professor = () => {
   const { slug } = useParams<{ slug: string }>();
@@ -262,7 +295,8 @@ const Professor = () => {
   }, [allCourseCodes]);
 
   const filteredRmpReviews = useMemo(() => {
-    return reviews.filter(r => selectedCourses.has(getFormattedCourseCode(r.course).toUpperCase()));
+    const filtered = reviews.filter(r => selectedCourses.has(getFormattedCourseCode(r.course).toUpperCase()));
+    return deduplicateByText(filtered, r => r.comment);
   }, [reviews, selectedCourses, getFormattedCourseCode]);
 
   const filteredTraceCourses = useMemo(() => {
@@ -452,6 +486,10 @@ const Professor = () => {
         groups[c.question].push(c);
       }
     });
+    // Deduplicate near-identical comments within each question group
+    for (const q of Object.keys(groups)) {
+      groups[q] = deduplicateByText(groups[q], c => c.comment);
+    }
     const searchLower = traceSearch.toLowerCase();
     return Object.entries(groups).map(([q, cs]) => ({
       question: q,
