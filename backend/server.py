@@ -1105,7 +1105,7 @@ def professors_catalog():
     dept       = request.args.get("dept", "")
     sort       = request.args.get("sort", "alpha")
     page       = int(request.args.get("page", "1"))
-    limit      = min(int(request.args.get("limit", "20")), 100)
+    limit      = min(int(request.args.get("limit", "20")), 10000)
 
     try:
         min_rating = float(request.args.get("minRating", "0"))

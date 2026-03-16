@@ -17,7 +17,7 @@ interface TraceSnapshot {
 
 type WinnerSide = 'left' | 'right' | null;
 
-const CATALOG_LIMIT = 5000;
+const CATALOG_LIMIT = 10000;
 
 const slugify = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
@@ -405,11 +405,22 @@ function Compare() {
 	const leftTrace = leftProfile?.traceRating ?? leftCatalogProfessor?.traceRating ?? null;
 	const rightTrace = rightProfile?.traceRating ?? rightCatalogProfessor?.traceRating ?? null;
 
+	const leftDept = leftCatalogProfessor
+		? `${leftCatalogProfessor.department} (${leftCatalogProfessor.college})`
+		: leftProfile?.department
+			? leftProfile.department
+			: 'N/A';
+	const rightDept = rightCatalogProfessor
+		? `${rightCatalogProfessor.department} (${rightCatalogProfessor.college})`
+		: rightProfile?.department
+			? rightProfile.department
+			: 'N/A';
+
 	const compareRows = [
 		{
 			label: 'Department',
-			left: leftCatalogProfessor ? `${leftCatalogProfessor.department} (${leftCatalogProfessor.college})` : 'N/A',
-			right: rightCatalogProfessor ? `${rightCatalogProfessor.department} (${rightCatalogProfessor.college})` : 'N/A',
+			left: leftDept,
+			right: rightDept,
 			winner: null,
 		},
 		{

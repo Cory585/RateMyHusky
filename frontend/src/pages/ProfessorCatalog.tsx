@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   fetchProfessorsCatalog,
@@ -118,6 +118,19 @@ export default function ProfessorCatalog() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Responsive page size: fewer cards on smaller screens
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  const pageSize = useMemo(() => {
+    if (viewportWidth <= 480) return 6;
+    if (viewportWidth <= 768) return 9;
+    return 20;
+  }, [viewportWidth]);
+
   // Fetch colleges once
   useEffect(() => {
     fetchColleges().then(setColleges).catch(console.error);
@@ -143,7 +156,7 @@ export default function ProfessorCatalog() {
       maxReviews: filters.maxReviews ?? undefined,
       sort:       filters.sort as 'alpha' | 'rating' | 'reviews',
       page:       filters.page,
-      limit:      20,
+      limit:      pageSize,
     })
       .then(data => {
         setProfessors(data.professors);
@@ -152,7 +165,7 @@ export default function ProfessorCatalog() {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [filters]);
+  }, [filters, pageSize]);
 
   // Keep filters in the URL so the catalog view is shareable/bookmarkable.
   useEffect(() => {
@@ -554,7 +567,7 @@ export default function ProfessorCatalog() {
 
           {loading ? (
             <div className="catalog-grid">
-              {Array.from({ length: 20 }).map((_, i) => (
+              {Array.from({ length: pageSize }).map((_, i) => (
                 <div key={i} className="prof-card skeleton" />
               ))}
             </div>
