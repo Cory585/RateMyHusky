@@ -1240,8 +1240,10 @@ def auth_google_callback():
 
     # Set cookie and redirect to the page the user was on
     return_to = request.cookies.get("auth_return_to", "/")
-    # Ensure returnTo is a relative path to prevent open redirect
-    if not return_to.startswith("/"):
+    # Ensure returnTo is a safe relative path to prevent open redirect
+    from urllib.parse import urlparse
+    parsed = urlparse(return_to)
+    if parsed.scheme or parsed.netloc or not return_to.startswith("/"):
         return_to = "/"
     resp = make_response(redirect(f"{FRONTEND_URL}{return_to}"))
     resp.delete_cookie("auth_return_to")
