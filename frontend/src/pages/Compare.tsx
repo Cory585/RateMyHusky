@@ -53,6 +53,7 @@ const pickWinner = (
 	leftValue: number | null | undefined,
 	rightValue: number | null | undefined,
 	mode: 'higher' | 'lower' = 'higher',
+	decimals = 2,
 ): WinnerSide => {
 	const left = parseMaybeNumber(leftValue);
 	const right = parseMaybeNumber(rightValue);
@@ -60,10 +61,15 @@ const pickWinner = (
 	if (left === null && right === null) return null;
 	if (left === null) return 'right';
 	if (right === null) return 'left';
-	if (left === right) return null;
 
-	if (mode === 'higher') return left > right ? 'left' : 'right';
-	return left < right ? 'left' : 'right';
+	// Round to displayed precision so ties match what the user sees
+	const factor = 10 ** decimals;
+	const l = Math.round(left * factor) / factor;
+	const r = Math.round(right * factor) / factor;
+	if (l === r) return null;
+
+	if (mode === 'higher') return l > r ? 'left' : 'right';
+	return l < r ? 'left' : 'right';
 };
 
 const getRecentTraceSnapshot = (profile: ProfessorProfile | null): TraceSnapshot | null => {
@@ -453,7 +459,7 @@ function Compare() {
 			label: 'Total Reviews',
 			left: leftProfile?.totalRatings?.toLocaleString() ?? leftCatalogProfessor?.totalReviews?.toLocaleString() ?? 'N/A',
 			right: rightProfile?.totalRatings?.toLocaleString() ?? rightCatalogProfessor?.totalReviews?.toLocaleString() ?? 'N/A',
-			winner: pickWinner(leftProfile?.totalRatings ?? leftCatalogProfessor?.totalReviews, rightProfile?.totalRatings ?? rightCatalogProfessor?.totalReviews),
+			winner: pickWinner(leftProfile?.totalRatings ?? leftCatalogProfessor?.totalReviews, rightProfile?.totalRatings ?? rightCatalogProfessor?.totalReviews, 'higher', 0),
 		},
 		{
 			label: 'Would Take Again',
@@ -465,7 +471,7 @@ function Compare() {
 				rightProfile?.wouldTakeAgainPct === null || rightProfile?.wouldTakeAgainPct === undefined
 					? 'N/A'
 					: `${rightProfile.wouldTakeAgainPct.toFixed(0)}%`,
-			winner: pickWinner(leftProfile?.wouldTakeAgainPct, rightProfile?.wouldTakeAgainPct),
+			winner: pickWinner(leftProfile?.wouldTakeAgainPct, rightProfile?.wouldTakeAgainPct, 'higher', 0),
 		},
 		{
 			label: 'Recent TRACE Snapshot',
@@ -486,6 +492,7 @@ function Compare() {
 	];
 
 	const bothSelected = Boolean(leftSlug) && Boolean(rightSlug);
+	const bothReady = bothSelected && !leftLoading && !rightLoading;
 
 	const renderProfileCard = (
 		slug: string,
@@ -698,9 +705,10 @@ function Compare() {
 				<header className="compare-metrics-header">
 					<h2>Key Comparison Metrics</h2>
 					{!bothSelected && <p>Select both professors to unlock full comparison.</p>}
+					{bothSelected && !bothReady && <p>Loading comparison...</p>}
 				</header>
 
-				<div className="compare-table" role="table" aria-label="Professor metrics comparison table">
+				{bothReady && <div className="compare-table" role="table" aria-label="Professor metrics comparison table">
 					{compareRows.map((row) => (
 						<div className="compare-row" role="row" key={row.label}>
 							<div
@@ -722,7 +730,7 @@ function Compare() {
 							</div>
 						</div>
 					))}
-				</div>
+				</div>}
 			</section>
 
 			</main>
