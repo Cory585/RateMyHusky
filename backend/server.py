@@ -12,6 +12,8 @@ import pandas as pd
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, redirect, make_response
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import jwt as pyjwt
 import requests as http_requests
 from urllib.parse import urlencode
@@ -32,6 +34,7 @@ def normalize_name(name):
 app = Flask(__name__)
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 CORS(app, supports_credentials=True, origins=[FRONTEND_URL])
+limiter = Limiter(get_remote_address, app=app, default_limits=["120 per minute"])
 
 # ──────────────────────────────────────────────
 #  Google OAuth config
@@ -1179,6 +1182,7 @@ def _get_redirect_uri():
 
 
 @app.route("/api/auth/google")
+@limiter.limit("10 per minute")
 def auth_google():
     """Redirect user to Google's consent screen (restricted to husky.neu.edu)."""
     return_to = request.args.get("returnTo", "/")
@@ -1196,6 +1200,7 @@ def auth_google():
 
 
 @app.route("/api/auth/google/callback")
+@limiter.limit("10 per minute")
 def auth_google_callback():
     """Exchange auth code for tokens, verify domain, set JWT cookie."""
     code = request.args.get("code")
@@ -1259,6 +1264,7 @@ def auth_google_callback():
 
 
 @app.route("/api/auth/me")
+@limiter.limit("30 per minute")
 def auth_me():
     """Return current user from JWT cookie, or 401."""
     token = request.cookies.get("auth_token")
@@ -1279,6 +1285,7 @@ def auth_me():
 
 
 @app.route("/api/auth/logout", methods=["POST"])
+@limiter.limit("10 per minute")
 def auth_logout():
     """Clear the auth cookie."""
     resp = make_response(jsonify({"ok": True}))
