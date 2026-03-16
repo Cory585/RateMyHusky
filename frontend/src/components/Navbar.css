@@ -111,6 +111,42 @@
   background: #b82e3f;
 }
 
+.signin-btn.signout {
+  background: transparent;
+  color: #d6394c;
+  border: 1.5px solid #d6394c;
+  padding: 5px 14px;
+  font-size: 0.78rem;
+}
+
+.signin-btn.signout:hover {
+  background: #d6394c;
+  color: #fff;
+}
+
+.navbar-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.navbar-user-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.navbar-user-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #333;
+}
+
+.dark .navbar-user-name {
+  color: #e0e0e0;
+}
+
 /* ---------- hamburger (hidden on desktop) ---------- */
 .hamburger {
   display: none;
@@ -264,6 +300,19 @@
     padding: 12px 20px;
     font-size: 1rem;
     border-radius: 12px;
+  }
+
+  .navbar-right .navbar-user {
+    margin-top: 20px;
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .navbar-right .navbar-user .signin-btn.signout {
+    width: 100%;
+    padding: 10px;
+    font-size: 0.9rem;
   }
 
   .navbar-overlay {

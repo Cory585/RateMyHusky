@@ -1,8 +1,10 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import './Navbar.css';
 
 const Navbar = () => {
+  const { user, loading: authLoading, login, logout } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [pillStyle, setPillStyle] = useState({ left: 0, width: 0, opacity: 0 });
   const [isReady, setIsReady] = useState(false);
@@ -110,7 +112,15 @@ const Navbar = () => {
             Compare
           </NavLink>
         </div>
-        <button className="signin-btn" onClick={() => setMenuOpen(false)}>Sign In</button>
+        {authLoading ? null : user ? (
+          <div className="navbar-user">
+            {user.picture && <img src={user.picture} alt="" className="navbar-user-avatar" referrerPolicy="no-referrer" />}
+            <span className="navbar-user-name">{user.name.split(' ')[0]}</span>
+            <button className="signin-btn signout" onClick={() => { logout(); setMenuOpen(false); }}>Sign Out</button>
+          </div>
+        ) : (
+          <button className="signin-btn" onClick={() => { login(); setMenuOpen(false); }}>Sign In</button>
+        )}
       </div>
 
       {/* Overlay behind mobile menu */}

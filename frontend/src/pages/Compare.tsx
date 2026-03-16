@@ -476,6 +476,60 @@ function Compare() {
 
 	const bothSelected = Boolean(leftSlug) && Boolean(rightSlug);
 
+	const renderProfileCard = (
+		slug: string,
+		catalogProf: CatalogProfessor | null,
+		profile: ProfessorProfile | null,
+		isLoading: boolean,
+		error: string | null,
+		slotLabel: string,
+	) => {
+		if (isLoading) return <p className="compare-status">Loading profile...</p>;
+		if (error && !profile && !catalogProf) return <p className="compare-status compare-status-error">{error}</p>;
+
+		const source = catalogProf || profile;
+		if (!source) return <p className="compare-status">Pick a professor for slot {slotLabel}.</p>;
+
+		const name = catalogProf?.name ?? profile?.name ?? '';
+		const dept = catalogProf?.department ?? profile?.department ?? '';
+		const imgUrl = profile?.imageUrl ?? catalogProf?.imageUrl ?? null;
+		const rating = profile?.avgRating ?? catalogProf?.avgRating ?? null;
+		const profSlug = catalogProf?.slug ?? slug;
+
+		return (
+			<>
+				<div className="compare-avatar-wrap">
+					{imgUrl ? (
+						<>
+							<img
+								src={imgUrl}
+								alt={name}
+								className="compare-avatar-img"
+								onError={(e) => {
+									e.currentTarget.style.display = 'none';
+									const fb = e.currentTarget.parentElement?.querySelector('.compare-avatar-fallback') as HTMLElement;
+									if (fb) fb.style.display = 'flex';
+								}}
+							/>
+							<div className="compare-avatar-fallback" style={{ display: 'none' }}>{getInitials(name)}</div>
+						</>
+					) : (
+						<div className="compare-avatar-fallback">{getInitials(name)}</div>
+					)}
+				</div>
+				<h3>{name}</h3>
+				<p>{dept}</p>
+				<div className="compare-rating-line">
+					<strong>{formatMetric(rating)}</strong>
+					<StarRating rating={rating ?? 0} size="sm" />
+				</div>
+				<Link className="compare-profile-link" to={`/professors/${profSlug}`}>
+					View profile
+				</Link>
+			</>
+		);
+	};
+
 	return (
 		<>
 			<main className="compare-page">
@@ -617,66 +671,15 @@ function Compare() {
 				</div>
 			</section>
 
-			{catalogLoading && <p className="compare-status">Loading professor catalog...</p>}
 			{catalogError && <p className="compare-status compare-status-error">{catalogError}</p>}
 
 			<section className="compare-panels" aria-live="polite">
 				<article className="compare-profile-card">
-					{leftLoading ? (
-						<p className="compare-status">Loading left profile...</p>
-					) : leftError ? (
-						<p className="compare-status compare-status-error">{leftError}</p>
-					) : leftCatalogProfessor ? (
-						<>
-							<div className="compare-avatar-wrap">
-								{leftProfile?.imageUrl ? (
-									<img src={leftProfile.imageUrl} alt={leftCatalogProfessor.name} className="compare-avatar-img" />
-								) : (
-									<div className="compare-avatar-fallback">{getInitials(leftCatalogProfessor.name)}</div>
-								)}
-							</div>
-							<h3>{leftCatalogProfessor.name}</h3>
-							<p>{leftCatalogProfessor.department}</p>
-							<div className="compare-rating-line">
-								<strong>{formatMetric(leftProfile?.avgRating ?? leftCatalogProfessor.avgRating)}</strong>
-								<StarRating rating={leftProfile?.avgRating ?? leftCatalogProfessor.avgRating ?? 0} size="sm" />
-							</div>
-							<Link className="compare-profile-link" to={`/professors/${leftCatalogProfessor.slug}`}>
-								View profile
-							</Link>
-						</>
-					) : (
-						<p className="compare-status">Pick a professor for slot A.</p>
-					)}
+					{renderProfileCard(leftSlug, leftCatalogProfessor, leftProfile, leftLoading, leftError, 'A')}
 				</article>
 
 				<article className="compare-profile-card">
-					{rightLoading ? (
-						<p className="compare-status">Loading right profile...</p>
-					) : rightError ? (
-						<p className="compare-status compare-status-error">{rightError}</p>
-					) : rightCatalogProfessor ? (
-						<>
-							<div className="compare-avatar-wrap">
-								{rightProfile?.imageUrl ? (
-									<img src={rightProfile.imageUrl} alt={rightCatalogProfessor.name} className="compare-avatar-img" />
-								) : (
-									<div className="compare-avatar-fallback">{getInitials(rightCatalogProfessor.name)}</div>
-								)}
-							</div>
-							<h3>{rightCatalogProfessor.name}</h3>
-							<p>{rightCatalogProfessor.department}</p>
-							<div className="compare-rating-line">
-								<strong>{formatMetric(rightProfile?.avgRating ?? rightCatalogProfessor.avgRating)}</strong>
-								<StarRating rating={rightProfile?.avgRating ?? rightCatalogProfessor.avgRating ?? 0} size="sm" />
-							</div>
-							<Link className="compare-profile-link" to={`/professors/${rightCatalogProfessor.slug}`}>
-								View profile
-							</Link>
-						</>
-					) : (
-						<p className="compare-status">Pick a professor for slot B.</p>
-					)}
+					{renderProfileCard(rightSlug, rightCatalogProfessor, rightProfile, rightLoading, rightError, 'B')}
 				</article>
 			</section>
 

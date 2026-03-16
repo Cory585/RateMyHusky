@@ -9,8 +9,15 @@ Run:           python backend/server.py
 import os, re, unicodedata
 import numpy as np
 import pandas as pd
-from flask import Flask, jsonify, request
+from dotenv import load_dotenv
+from flask import Flask, jsonify, request, redirect, make_response
 from flask_cors import CORS
+import jwt as pyjwt
+import requests as http_requests
+from urllib.parse import urlencode
+from datetime import datetime, timedelta, timezone
+
+load_dotenv()
 
 
 def normalize_name(name):
@@ -23,7 +30,18 @@ def normalize_name(name):
     return s
 
 app = Flask(__name__)
-CORS(app)
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+CORS(app, supports_credentials=True, origins=[FRONTEND_URL])
+
+# ──────────────────────────────────────────────
+#  Google OAuth config
+# ──────────────────────────────────────────────
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+JWT_SECRET = os.getenv("JWT_SECRET", "change-me")
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 
 # ──────────────────────────────────────────────
 #  Load CSVs once at startup
@@ -1148,6 +1166,112 @@ def professors_catalog():
         "page":       page,
         "totalPages": total_pages,
     })
+
+
+# ──────────────────────────────────────────────
+#  Google OAuth routes
+# ──────────────────────────────────────────────
+
+def _get_redirect_uri():
+    return request.host_url.rstrip("/") + "/api/auth/google/callback"
+
+
+@app.route("/api/auth/google")
+def auth_google():
+    """Redirect user to Google's consent screen (restricted to husky.neu.edu)."""
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": _get_redirect_uri(),
+        "response_type": "code",
+        "scope": "openid email profile",
+        "hd": "husky.neu.edu",
+        "prompt": "select_account",
+    }
+    return redirect(f"{GOOGLE_AUTH_URL}?{urlencode(params)}")
+
+
+@app.route("/api/auth/google/callback")
+def auth_google_callback():
+    """Exchange auth code for tokens, verify domain, set JWT cookie."""
+    code = request.args.get("code")
+    if not code:
+        return redirect(f"{FRONTEND_URL}?auth_error=no_code")
+
+    # Exchange code for tokens
+    token_resp = http_requests.post(GOOGLE_TOKEN_URL, data={
+        "code": code,
+        "client_id": GOOGLE_CLIENT_ID,
+        "client_secret": GOOGLE_CLIENT_SECRET,
+        "redirect_uri": _get_redirect_uri(),
+        "grant_type": "authorization_code",
+    })
+    if token_resp.status_code != 200:
+        return redirect(f"{FRONTEND_URL}?auth_error=token_exchange_failed")
+
+    access_token = token_resp.json().get("access_token")
+
+    # Fetch user info
+    user_resp = http_requests.get(GOOGLE_USERINFO_URL, headers={
+        "Authorization": f"Bearer {access_token}",
+    })
+    if user_resp.status_code != 200:
+        return redirect(f"{FRONTEND_URL}?auth_error=userinfo_failed")
+
+    user_info = user_resp.json()
+
+    # Restrict to husky.neu.edu
+    if user_info.get("hd") != "husky.neu.edu":
+        return redirect(f"{FRONTEND_URL}?auth_error=invalid_domain")
+
+    # Create JWT
+    payload = {
+        "sub": user_info["id"],
+        "email": user_info["email"],
+        "name": user_info.get("name", ""),
+        "picture": user_info.get("picture", ""),
+        "exp": datetime.now(timezone.utc) + timedelta(days=7),
+    }
+    token = pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
+
+    # Set cookie and redirect to frontend
+    resp = make_response(redirect(FRONTEND_URL))
+    resp.set_cookie(
+        "auth_token",
+        token,
+        httponly=True,
+        samesite="Lax",
+        max_age=7 * 24 * 3600,
+        secure=request.scheme == "https",
+    )
+    return resp
+
+
+@app.route("/api/auth/me")
+def auth_me():
+    """Return current user from JWT cookie, or 401."""
+    token = request.cookies.get("auth_token")
+    if not token:
+        return jsonify(None), 401
+
+    try:
+        payload = pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        return jsonify({
+            "email": payload["email"],
+            "name": payload["name"],
+            "picture": payload.get("picture", ""),
+        })
+    except pyjwt.ExpiredSignatureError:
+        return jsonify(None), 401
+    except pyjwt.InvalidTokenError:
+        return jsonify(None), 401
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def auth_logout():
+    """Clear the auth cookie."""
+    resp = make_response(jsonify({"ok": True}))
+    resp.delete_cookie("auth_token")
+    return resp
 
 
 if __name__ == "__main__":
