@@ -984,7 +984,8 @@
   }
 
   .stats-banner {
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 24px 40px;
     padding: 36px 24px;
   }
@@ -1024,6 +1025,33 @@
   .goat-leaderboard {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    position: relative;
+  }
+
+  .goat-leaderboard::after {
+    content: '';
+    position: sticky;
+    right: 0;
+    top: 0;
+    display: block;
+    width: 40px;
+    height: 100%;
+    pointer-events: none;
+    background: linear-gradient(to right, transparent, rgba(255,255,255,0.9));
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 2;
+    transition: opacity 0.3s;
+  }
+
+  .goat-leaderboard.scrolled-end::after {
+    opacity: 0;
+  }
+
+  .dark .goat-leaderboard::after {
+    background: linear-gradient(to right, transparent, rgba(30,30,30,0.9));
   }
 
   .goat-header-row,

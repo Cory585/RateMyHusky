@@ -473,15 +473,19 @@ def main():
         cur = conn.cursor()
 
     unique_instructors = tc[["instructor_first_name", "instructor_last_name", "name_key"]].drop_duplicates()
-    batch = []
     for i, (_, r) in enumerate(unique_instructors.iterrows()):
         cur.execute(
             "UPDATE trace_courses SET name_key = %s WHERE instructor_first_name = %s AND instructor_last_name = %s",
             (r["name_key"], r["instructor_first_name"], r["instructor_last_name"])
         )
-        if (i + 1) % 200 == 0:
+        if (i + 1) % 50 == 0:
             conn.commit()
-            print(f"    {i+1}/{len(unique_instructors)} instructors...")
+            if (i + 1) % 500 == 0:
+                print(f"    {i+1}/{len(unique_instructors)} instructors...")
+                # Reconnect to avoid GC threshold errors
+                conn.close()
+                conn = psycopg2.connect(CRDB_URL, sslmode="require")
+                cur = conn.cursor()
     conn.commit()
     try:
         cur.execute("CREATE INDEX idx_tc_name_key ON trace_courses (name_key)")
@@ -510,9 +514,13 @@ def main():
         nk = normalize_name(name)
         nk = ALIAS_MAP.get(nk, nk)
         cur.execute("UPDATE rmp_reviews SET name_key = %s WHERE professor_name = %s", (nk, name))
-        if (i + 1) % 200 == 0:
+        if (i + 1) % 50 == 0:
             conn.commit()
-            print(f"    {i+1}/{len(unique_rev_names)} review names...")
+            if (i + 1) % 500 == 0:
+                print(f"    {i+1}/{len(unique_rev_names)} review names...")
+                conn.close()
+                conn = psycopg2.connect(CRDB_URL, sslmode="require")
+                cur = conn.cursor()
     conn.commit()
     try:
         cur.execute("CREATE INDEX idx_rr_name_key ON rmp_reviews (name_key)")
@@ -535,22 +543,40 @@ def main():
         conn.rollback()
         cur = conn.cursor()
 
-    print("  Updating total_responses...")
-    cur.execute("""
-        UPDATE trace_scores SET
-            total_responses = COALESCE(count_1,0) + COALESCE(count_2,0) + COALESCE(count_3,0) + COALESCE(count_4,0) + COALESCE(count_5,0)
-    """)
-    conn.commit()
-    print("  Updating mean...")
-    cur.execute("""
-        UPDATE trace_scores SET
-            mean = CASE
-                WHEN total_responses > 0
-                THEN (1.0*COALESCE(count_1,0) + 2.0*COALESCE(count_2,0) + 3.0*COALESCE(count_3,0) + 4.0*COALESCE(count_4,0) + 5.0*COALESCE(count_5,0)) / total_responses
-                ELSE NULL
-            END
-    """)
-    conn.commit()
+    # Get distinct term_ids to batch by term
+    cur.execute("SELECT DISTINCT term_id FROM trace_scores ORDER BY term_id")
+    term_ids = [r[0] for r in cur.fetchall()]
+    print(f"  Updating total_responses across {len(term_ids)} terms...")
+    for i, tid in enumerate(term_ids):
+        cur.execute("""
+            UPDATE trace_scores SET
+                total_responses = COALESCE(count_1,0) + COALESCE(count_2,0) + COALESCE(count_3,0) + COALESCE(count_4,0) + COALESCE(count_5,0)
+            WHERE term_id = %s
+        """, (tid,))
+        conn.commit()
+        if (i + 1) % 10 == 0:
+            print(f"    {i+1}/{len(term_ids)} terms...")
+            conn.close()
+            conn = psycopg2.connect(CRDB_URL, sslmode="require")
+            cur = conn.cursor()
+
+    print(f"  Updating mean across {len(term_ids)} terms...")
+    for i, tid in enumerate(term_ids):
+        cur.execute("""
+            UPDATE trace_scores SET
+                mean = CASE
+                    WHEN total_responses > 0
+                    THEN (1.0*COALESCE(count_1,0) + 2.0*COALESCE(count_2,0) + 3.0*COALESCE(count_3,0) + 4.0*COALESCE(count_4,0) + 5.0*COALESCE(count_5,0)) / total_responses
+                    ELSE NULL
+                END
+            WHERE term_id = %s
+        """, (tid,))
+        conn.commit()
+        if (i + 1) % 10 == 0:
+            print(f"    {i+1}/{len(term_ids)} terms...")
+            conn.close()
+            conn = psycopg2.connect(CRDB_URL, sslmode="require")
+            cur = conn.cursor()
     try:
         cur.execute("CREATE INDEX idx_ts_ids ON trace_scores (course_id, instructor_id, term_id)")
         conn.commit()

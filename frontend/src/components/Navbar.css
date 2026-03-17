@@ -410,10 +410,15 @@
   .navbar-overlay {
     display: block;
     position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.35);
-    z-index: 102;
-    animation: fadeIn 0.2s ease;
+    top: 0;
+    left: 0;
+    width: calc(100vw - 260px);
+    height: 100vh;
+    background: transparent;
+    z-index: 106;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    cursor: pointer;
   }
 
   @keyframes fadeIn {

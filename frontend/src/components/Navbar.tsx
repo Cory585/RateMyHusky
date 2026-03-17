@@ -62,6 +62,21 @@ const Navbar = () => {
     };
   }, [updatePill]);
 
+  // Lock body scroll and close menu on scroll when mobile menu is open
+  useEffect(() => {
+    if (menuOpen) {
+      document.body.style.overflow = 'hidden';
+      const handleScroll = () => setMenuOpen(false);
+      window.addEventListener('scroll', handleScroll, { passive: true });
+      return () => {
+        document.body.style.overflow = '';
+        window.removeEventListener('scroll', handleScroll);
+      };
+    } else {
+      document.body.style.overflow = '';
+    }
+  }, [menuOpen]);
+
   // Close user dropdown on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -146,10 +161,15 @@ const Navbar = () => {
         )}
       </div>
 
-      {/* Overlay behind mobile menu */}
-      {menuOpen && <div className="navbar-overlay" onClick={() => setMenuOpen(false)} />}
-
     </nav>
+    {/* Overlay behind mobile menu — outside nav so it covers everything */}
+    {menuOpen && (
+      <div
+        className="navbar-overlay"
+        onClick={() => setMenuOpen(false)}
+        onTouchStart={() => setMenuOpen(false)}
+      />
+    )}
     <SignInModal open={showSignIn} onClose={() => setShowSignIn(false)} />
     </>
   );

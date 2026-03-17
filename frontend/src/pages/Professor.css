@@ -117,7 +117,8 @@
   transition: transform 0.2s, box-shadow 0.2s;
   animation: profCardIn 0.5s ease both;
 }
-.prof-stat-card:hover { transform: translateY(-3px); box-shadow: 0 8px 30px rgba(0,0,0,0.1); }
+.prof-stat-card { position: relative; }
+.prof-stat-card:hover { transform: translateY(-3px); box-shadow: 0 8px 30px rgba(0,0,0,0.1); z-index: 10; }
 .prof-stat-card:nth-child(1) { animation-delay: 0.1s; }
 .prof-stat-card:nth-child(2) { animation-delay: 0.15s; }
 .prof-stat-card:nth-child(3) { animation-delay: 0.2s; }
@@ -803,9 +804,9 @@
    ═══════════════════════════════════════ */
 @media (max-width: 768px) {
   .prof-hero { padding: 100px 20px 36px; }
-  .prof-hero-inner { flex-direction: column; align-items: center; text-align: center; }
-  .prof-avatar { width: 90px; height: 90px; font-size: 1.8rem; }
-  .prof-name { font-size: 1.7rem; }
+  .prof-hero-inner { flex-direction: row; align-items: center; text-align: left; gap: 16px; }
+  .prof-avatar { width: 72px; height: 72px; font-size: 1.6rem; }
+  .prof-name { font-size: 1.5rem; }
 
   .prof-hero-actions-row { padding: 0 20px; justify-content: center; }
 
@@ -815,8 +816,8 @@
   .prof-charts-row { grid-template-columns: 1fr; }
 
   .prof-reviews-header { flex-direction: column; align-items: flex-start; }
-  .prof-review-top { flex-direction: column; }
-  .prof-review-meta { flex-direction: row; align-items: center; }
+  .prof-review-top { flex-direction: row; }
+  .prof-review-meta { flex-direction: column; align-items: flex-end; gap: 4px; }
   .prof-reviews-filters { flex-direction: column; }
   .prof-reviews-filters .feedback-dropdown { width: 100%; min-width: unset; }
 
@@ -835,7 +836,7 @@
   .prof-hero { padding: 80px 16px 28px; }
   .prof-name { font-size: 1.4rem; }
   .prof-dept { font-size: 0.88rem; }
-  .prof-avatar { width: 76px; height: 76px; font-size: 1.5rem; }
+  .prof-avatar { width: 60px; height: 60px; font-size: 1.3rem; }
 
   .prof-hero-actions-row { padding: 0 16px; flex-direction: column; align-items: stretch; }
   .prof-compare-btn, .prof-rmp-btn { justify-content: center; }
