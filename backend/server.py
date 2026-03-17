@@ -340,12 +340,21 @@ def search():
 # ──────────────────────────────────────────────
 @app.route("/api/professors/<slug>")
 def professor_profile(slug):
-    # Check cache first
-    cache_key = f"prof:{slug}"
+    # Validate auth upfront for cache separation
+    is_authed = False
+    token = _get_auth_token()
+    if token:
+        try:
+            pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            is_authed = True
+        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+            pass
+
+    cache_key = f"prof:{slug}:{'a' if is_authed else 'u'}"
     cached = cache_get(cache_key)
     if cached:
         resp = jsonify(cached)
-        resp.headers["Cache-Control"] = "public, max-age=300"
+        resp.headers["Cache-Control"] = "private, max-age=300" if is_authed else "public, max-age=300"
         return resp
 
     # Look up professor from catalog
@@ -466,8 +475,8 @@ def professor_profile(slug):
         })
     profile["reviews"] = reviews
 
-    # ── TRACE comments ──
-    if trace_course_rows:
+    # ── TRACE comments (auth required) ──
+    if is_authed and trace_course_rows:
         url_patterns = set()
         for c in trace_course_rows:
             cid = str(int(c["course_id"]))

@@ -241,7 +241,7 @@ const Professor = () => {
     }
     load();
     return () => { cancelled = true; };
-  }, [slug]);
+  }, [slug, user]);
 
   /* ── back to top ── */
   useEffect(() => {
