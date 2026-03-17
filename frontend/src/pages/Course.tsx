@@ -7,11 +7,18 @@ import { fetchCourseData } from '../api/api';
 import type { CourseDetail } from '../api/api';
 import './Course.css';
 
+const INITIAL_INSTRUCTORS_VISIBLE = 5;
+const INSTRUCTORS_VISIBLE_STEP = 5;
+const INITIAL_SECTIONS_VISIBLE = 8;
+const SECTIONS_VISIBLE_STEP = 8;
+
 const Course = () => {
 	const { code = '' } = useParams<{ code: string }>();
 	const [course, setCourse] = useState<CourseDetail | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [notFound, setNotFound] = useState(false);
+	const [visibleInstructorCount, setVisibleInstructorCount] = useState(INITIAL_INSTRUCTORS_VISIBLE);
+	const [visibleSectionCount, setVisibleSectionCount] = useState(INITIAL_SECTIONS_VISIBLE);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -36,6 +43,11 @@ const Course = () => {
 		};
 	}, [code]);
 
+	useEffect(() => {
+		setVisibleInstructorCount(INITIAL_INSTRUCTORS_VISIBLE);
+		setVisibleSectionCount(INITIAL_SECTIONS_VISIBLE);
+	}, [course?.summary.code]);
+
 	const topQuestions = useMemo(() => {
 		if (!course) return [];
 		return course.questionScores
@@ -59,6 +71,10 @@ const Course = () => {
 	}
 
 	const summary = course.summary;
+	const visibleInstructors = course.instructors.slice(0, visibleInstructorCount);
+	const visibleSections = course.sections.slice(0, visibleSectionCount);
+	const hasMoreInstructors = visibleInstructorCount < course.instructors.length;
+	const hasMoreSections = visibleSectionCount < course.sections.length;
 
 	return (
 		<div className="course-page">
@@ -113,7 +129,7 @@ const Course = () => {
 								</tr>
 							</thead>
 							<tbody>
-								{course.instructors.map((row) => (
+								{visibleInstructors.map((row) => (
 									<tr key={row.name}>
 										<td>{row.name}</td>
 										<td>{row.avgRating != null ? row.avgRating.toFixed(2) : 'N/A'}</td>
@@ -125,6 +141,22 @@ const Course = () => {
 							</tbody>
 						</table>
 					</div>
+					{hasMoreInstructors && (
+						<button
+							type="button"
+							className="course-expand-btn"
+							aria-label="Show more instructors"
+							title="Show more instructors"
+							onClick={() =>
+								setVisibleInstructorCount((prev) =>
+									Math.min(prev + INSTRUCTORS_VISIBLE_STEP, course.instructors.length)
+								)
+							}
+						>
+							<span className="visually-hidden">Show more instructors</span>
+							<span className="course-expand-chevron" aria-hidden="true" />
+						</button>
+					)}
 				</section>
 
 				<section className="course-panel">
@@ -144,7 +176,7 @@ const Course = () => {
 								</tr>
 							</thead>
 							<tbody>
-								{course.sections.map((row) => (
+								{visibleSections.map((row) => (
 									<tr key={`${row.courseId}-${row.instructorId}-${row.termId}`}>
 										<td>{row.termTitle}</td>
 										<td>{row.section || '-'}</td>
@@ -157,6 +189,22 @@ const Course = () => {
 							</tbody>
 						</table>
 					</div>
+					{hasMoreSections && (
+						<button
+							type="button"
+							className="course-expand-btn"
+							aria-label="Show more sections"
+							title="Show more sections"
+							onClick={() =>
+								setVisibleSectionCount((prev) =>
+									Math.min(prev + SECTIONS_VISIBLE_STEP, course.sections.length)
+								)
+							}
+						>
+							<span className="visually-hidden">Show more sections</span>
+							<span className="course-expand-chevron" aria-hidden="true" />
+						</button>
+					)}
 				</section>
 
 				{topQuestions.length > 0 && (

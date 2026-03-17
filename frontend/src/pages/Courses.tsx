@@ -381,9 +381,6 @@ export default function Courses() {
 									onClick={() => navigate(`/courses/${course.code.toLowerCase()}`)}
 									onKeyDown={(e) => e.key === 'Enter' && navigate(`/courses/${course.code.toLowerCase()}`)}
 								>
-									<div className="prof-avatar course-avatar">
-										<span className="prof-avatar-initials">{course.code.slice(0, 2)}</span>
-									</div>
 									<div className="prof-body">
 										<div className="course-code">{course.code}</div>
 										<h3 className="prof-name">{course.name}</h3>
@@ -397,21 +394,6 @@ export default function Courses() {
 												</>
 											) : (
 												<span className="prof-avg na">N/A</span>
-											)}
-										</div>
-
-										<div className="prof-meta">
-											<span>{course.totalSections} section{course.totalSections !== 1 ? 's' : ''}</span>
-											<span className="meta-dot">·</span>
-											<span>{course.totalInstructors} instructor{course.totalInstructors !== 1 ? 's' : ''}</span>
-										</div>
-										<div className="prof-meta">
-											<span>{course.totalEnrollment.toLocaleString()} enrolled</span>
-											{course.latestTermTitle && (
-												<>
-													<span className="meta-dot">·</span>
-													<span>{course.latestTermTitle}</span>
-												</>
 											)}
 										</div>
 									</div>

@@ -2,8 +2,10 @@
 	gap: 2px;
 }
 
-.course-avatar {
-	background: linear-gradient(135deg, #2f7f6f, #1f5f58) !important;
+.course-card .prof-name {
+	font-size: 1.08rem;
+	font-weight: 800;
+	margin-bottom: 4px;
 }
 
 .course-code {
