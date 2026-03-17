@@ -75,6 +75,10 @@ const Course = () => {
 	const visibleSections = course.sections.slice(0, visibleSectionCount);
 	const hasMoreInstructors = visibleInstructorCount < course.instructors.length;
 	const hasMoreSections = visibleSectionCount < course.sections.length;
+	const canCollapseInstructors = visibleInstructorCount > INITIAL_INSTRUCTORS_VISIBLE;
+	const canCollapseSections = visibleSectionCount > INITIAL_SECTIONS_VISIBLE;
+	const hasExpandableInstructors = course.instructors.length > INITIAL_INSTRUCTORS_VISIBLE;
+	const hasExpandableSections = course.sections.length > INITIAL_SECTIONS_VISIBLE;
 
 	return (
 		<div className="course-page">
@@ -141,21 +145,35 @@ const Course = () => {
 							</tbody>
 						</table>
 					</div>
-					{hasMoreInstructors && (
-						<button
-							type="button"
-							className="course-expand-btn"
-							aria-label="Show more instructors"
-							title="Show more instructors"
-							onClick={() =>
-								setVisibleInstructorCount((prev) =>
-									Math.min(prev + INSTRUCTORS_VISIBLE_STEP, course.instructors.length)
-								)
-							}
-						>
-							<span className="visually-hidden">Show more instructors</span>
-							<span className="course-expand-chevron" aria-hidden="true" />
-						</button>
+					{hasExpandableInstructors && (
+						<div className="course-expand-controls" aria-label="Instructor table controls">
+							<button
+								type="button"
+								className="course-expand-btn"
+								aria-label="Collapse instructors"
+								title="Collapse instructors"
+								disabled={!canCollapseInstructors}
+								onClick={() => setVisibleInstructorCount(INITIAL_INSTRUCTORS_VISIBLE)}
+							>
+								<span className="visually-hidden">Collapse instructors</span>
+								<span className="course-expand-chevron up" aria-hidden="true" />
+							</button>
+							<button
+								type="button"
+								className="course-expand-btn"
+								aria-label="Show more instructors"
+								title="Show more instructors"
+								disabled={!hasMoreInstructors}
+								onClick={() =>
+									setVisibleInstructorCount((prev) =>
+										Math.min(prev + INSTRUCTORS_VISIBLE_STEP, course.instructors.length)
+									)
+								}
+							>
+								<span className="visually-hidden">Show more instructors</span>
+								<span className="course-expand-chevron down" aria-hidden="true" />
+							</button>
+						</div>
 					)}
 				</section>
 
@@ -189,21 +207,35 @@ const Course = () => {
 							</tbody>
 						</table>
 					</div>
-					{hasMoreSections && (
-						<button
-							type="button"
-							className="course-expand-btn"
-							aria-label="Show more sections"
-							title="Show more sections"
-							onClick={() =>
-								setVisibleSectionCount((prev) =>
-									Math.min(prev + SECTIONS_VISIBLE_STEP, course.sections.length)
-								)
-							}
-						>
-							<span className="visually-hidden">Show more sections</span>
-							<span className="course-expand-chevron" aria-hidden="true" />
-						</button>
+					{hasExpandableSections && (
+						<div className="course-expand-controls" aria-label="Section history controls">
+							<button
+								type="button"
+								className="course-expand-btn"
+								aria-label="Collapse sections"
+								title="Collapse sections"
+								disabled={!canCollapseSections}
+								onClick={() => setVisibleSectionCount(INITIAL_SECTIONS_VISIBLE)}
+							>
+								<span className="visually-hidden">Collapse sections</span>
+								<span className="course-expand-chevron up" aria-hidden="true" />
+							</button>
+							<button
+								type="button"
+								className="course-expand-btn"
+								aria-label="Show more sections"
+								title="Show more sections"
+								disabled={!hasMoreSections}
+								onClick={() =>
+									setVisibleSectionCount((prev) =>
+										Math.min(prev + SECTIONS_VISIBLE_STEP, course.sections.length)
+									)
+								}
+							>
+								<span className="visually-hidden">Show more sections</span>
+								<span className="course-expand-chevron down" aria-hidden="true" />
+							</button>
+						</div>
 					)}
 				</section>
 
