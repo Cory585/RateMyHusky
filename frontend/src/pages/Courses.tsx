@@ -8,6 +8,7 @@ import {
 	type CourseSuggestion,
 } from '../api/api';
 import Dropdown from '../components/Dropdown';
+import Footer from '../components/Footer';
 import StarRating from '../components/StarRating';
 import ThemeToggle from '../components/ThemeToggle';
 import './ProfessorCatalog.css';
@@ -407,6 +408,7 @@ export default function Courses() {
 					)}
 				</main>
 			</div>
+			<Footer />
 		</div>
 	);
 }

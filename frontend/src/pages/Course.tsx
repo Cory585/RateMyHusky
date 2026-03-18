@@ -5,6 +5,7 @@ import StarRating from '../components/StarRating';
 import NotFound from './NotFound';
 import { fetchCourseData } from '../api/api';
 import type { CourseDetail } from '../api/api';
+import Footer from '../components/Footer';
 import './Course.css';
 
 const INITIAL_INSTRUCTORS_VISIBLE = 5;
@@ -47,13 +48,6 @@ const Course = () => {
 		setVisibleInstructorCount(INITIAL_INSTRUCTORS_VISIBLE);
 		setVisibleSectionCount(INITIAL_SECTIONS_VISIBLE);
 	}, [course?.summary.code]);
-
-	const topQuestions = useMemo(() => {
-		if (!course) return [];
-		return course.questionScores
-			.filter((q) => q.avgRating !== null)
-			.slice(0, 6);
-	}, [course]);
 
 	const topInstructors = useMemo(() => {
 		if (!course) return [];
@@ -308,23 +302,8 @@ const Course = () => {
 					)}
 				</section>
 
-				{topQuestions.length > 0 && (
-					<section className="course-panel">
-						<div className="course-panel-header">
-							<h2>Top TRACE Questions</h2>
-						</div>
-						<div className="course-question-grid">
-							{topQuestions.map((q) => (
-								<article className="course-question-card" key={q.question}>
-									<p>{q.question}</p>
-									<strong>{q.avgRating != null ? q.avgRating.toFixed(2) : 'N/A'}</strong>
-									<span>{q.totalResponses} responses</span>
-								</article>
-							))}
-						</div>
-					</section>
-				)}
 			</div>
+			<Footer />
 		</div>
 	);
 };
