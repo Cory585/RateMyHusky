@@ -11,7 +11,7 @@ import {
 import StarRating from '../components/StarRating';
 import RatingBadge from '../components/RatingBadge';
 import Dropdown from '../components/Dropdown';
-import ThemeToggle from '../components/ThemeToggle';
+
 import './ProfessorCatalog.css';
 
 const SORT_OPTIONS = [
@@ -326,7 +326,6 @@ export default function ProfessorCatalog() {
 
   return (
     <div className="catalog-page">
-      <ThemeToggle />
       {/* Mobile sidebar toggle */}
       <button
         className="catalog-filter-toggle"

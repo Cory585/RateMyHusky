@@ -4,7 +4,7 @@ import { fetchProfessorData, fetchProfessorsCatalog, fetchSearchSuggestions } fr
 import type { CatalogProfessor, ProfessorProfile, ProfessorSuggestion } from '../api/api';
 import StarRating from '../components/StarRating';
 import Footer from '../components/Footer';
-import ThemeToggle from '../components/ThemeToggle';
+
 import './Compare.css';
 
 type Side = 'a' | 'b';
@@ -731,7 +731,6 @@ function Compare() {
 
 			</main>
 			<Footer />
-			<ThemeToggle />
 		</>
 	);
 }

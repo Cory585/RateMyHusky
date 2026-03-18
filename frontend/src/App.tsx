@@ -10,6 +10,7 @@ import Compare from './pages/Compare';
 import NotFound from './pages/NotFound';
 import Navbar from './components/Navbar';
 import FeedbackTab from './components/FeedbackTab';
+import ThemeToggle from './components/ThemeToggle';
 import './App.css';
 
 function ScrollToTop() {
@@ -34,6 +35,7 @@ function App() {
           <Route path="*" element={<NotFound />} />
         </Routes>
         <FeedbackTab />
+        <ThemeToggle />
       </Router>
       <Analytics />
       <SpeedInsights />

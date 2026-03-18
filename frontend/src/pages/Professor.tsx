@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } fr
 import { useParams, Link } from 'react-router-dom';
 import Footer from '../components/Footer';
 import NotFound from './NotFound';
-import ThemeToggle from '../components/ThemeToggle';
+
 import Dropdown from '../components/Dropdown';
 import StarRating from '../components/StarRating';
 import RatingBar from '../components/RatingBar';
@@ -558,7 +558,6 @@ const Professor = () => {
         <div className="prof-loading-spinner" />
         <p>Loading professor data…</p>
       </div>
-      <ThemeToggle />
     </div>
   );
 
@@ -916,7 +915,6 @@ const Professor = () => {
       </section>
 
       <Footer />
-      <ThemeToggle />
       <SignInModal open={showSignIn} onClose={() => setShowSignIn(false)} />
       <button
         className={`prof-back-to-top ${showBackToTop ? 'visible' : ''}`} 

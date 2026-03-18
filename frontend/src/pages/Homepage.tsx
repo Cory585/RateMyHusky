@@ -5,7 +5,7 @@ import { useState, useEffect, useRef, useCallback, useLayoutEffect, useMemo } fr
 import { useNavigate } from 'react-router-dom';
 import SearchBar from '../components/SearchBar';
 import Footer from '../components/Footer';
-import ThemeToggle from '../components/ThemeToggle';
+
 import { fetchStats, fetchColleges, fetchGoatProfessors, fetchRandomProfessor } from '../api/api';
 import type { Stat, Professor } from '../api/api';
 import neuIcon from '../assets/neu-circle-icon.png';
@@ -551,7 +551,6 @@ const Homepage = () => {
       </section>
 
       <Footer />
-      <ThemeToggle />
     </div>
   );
 };
