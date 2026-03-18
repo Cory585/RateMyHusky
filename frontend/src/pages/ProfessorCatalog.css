@@ -641,6 +641,59 @@
   gap: 14px;
 }
 
+/* 2-col on phones wider than 420px, tighter cards */
+@media (max-width: 700px) {
+  .catalog-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 10px;
+  }
+
+  .prof-card {
+    padding: 12px;
+    gap: 10px;
+    border-radius: 12px;
+  }
+
+  .catalog-page .prof-avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 0.78rem;
+  }
+
+  .catalog-page .prof-name {
+    font-size: 0.84rem;
+  }
+
+  .catalog-page .prof-dept {
+    font-size: 0.7rem;
+    margin-bottom: 4px;
+  }
+
+  .prof-college {
+    font-size: 0.6rem;
+    padding: 1px 5px;
+    margin-bottom: 6px;
+  }
+
+  .prof-rating-row {
+    gap: 4px;
+    margin-bottom: 6px;
+  }
+
+  .prof-avg {
+    font-size: 0.78rem;
+  }
+
+  .prof-badges {
+    gap: 4px;
+    margin-bottom: 6px;
+  }
+
+  .prof-meta {
+    font-size: 0.68rem;
+  }
+}
+
 /* ─── PROFESSOR CARD ───────────────────────────────────────── */
 
 .prof-card {
@@ -955,6 +1008,24 @@
 }
 
 @media (max-width: 540px) {
+  .catalog-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .prof-card {
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .catalog-page .prof-avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 0.72rem;
+  }
+}
+
+@media (max-width: 340px) {
   .catalog-grid {
     grid-template-columns: 1fr;
   }
