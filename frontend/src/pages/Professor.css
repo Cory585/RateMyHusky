@@ -41,7 +41,7 @@
 
 /* ═══════════ HERO ═══════════ */
 .prof-hero {
-  position: relative; padding: 36px 48px 52px;
+  position: relative; padding: 36px clamp(16px, 3vw, 48px) 52px;
   background: #f5f5f5; border-bottom: 1px solid #e8e8e8; overflow: hidden;
 }
 .prof-hero-bg {
@@ -56,7 +56,7 @@
   pointer-events: none; z-index: 0;
 }
 .prof-hero-inner {
-  position: relative; z-index: 1; max-width: 1200px; margin: 0 auto;
+  position: relative; z-index: 1;
   display: flex; align-items: flex-start; gap: 36px;
   animation: profFadeIn 0.5s ease both;
 }
@@ -84,7 +84,7 @@
 }
 
 .prof-hero-actions-row {
-  max-width: 1200px; margin: 20px auto 0; padding: 0 48px;
+  margin: 20px 0 0; padding: 0 clamp(16px, 3vw, 48px);
   display: flex; gap: 10px;
   animation: profSlideUp 0.5s 0.45s ease both;
 }
@@ -106,7 +106,7 @@
 
 /* ═══════════ STAT CARDS ═══════════ */
 .prof-stats {
-  max-width: 1200px; margin: 24px auto 0; padding: 0 48px;
+  margin: 24px 0 0; padding: 0 clamp(16px, 3vw, 48px);
   display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px;
   position: relative; z-index: 2;
 }
@@ -184,7 +184,7 @@
 .prof-difficulty-fill { height: 100%; border-radius: 3px; transition: width 1.2s cubic-bezier(0.4,0,0.2,1), background 0.5s ease; }
 
 /* ═══════════ SECTIONS ═══════════ */
-.prof-section { max-width: 1200px; margin: 0 auto; padding: 48px 48px 0; width: 100%; }
+.prof-section { padding: 48px clamp(16px, 3vw, 48px) 0; width: 100%; }
 .prof-section-header {
   display: flex;
   align-items: center;
@@ -836,15 +836,15 @@
    RESPONSIVE — TABLET (hide TOC)
    ═══════════════════════════════════════ */
 @media (max-width: 768px) {
-  .prof-hero { padding: 28px 20px 36px; }
+  .prof-hero { padding: 28px clamp(12px, 3vw, 20px) 36px; }
   .prof-hero-inner { flex-direction: row; align-items: center; text-align: left; gap: 16px; }
   .prof-avatar { width: 72px; height: 72px; font-size: 1.6rem; }
   .prof-name { font-size: 1.5rem; }
 
-  .prof-hero-actions-row { padding: 0 20px; justify-content: center; }
+  .prof-hero-actions-row { justify-content: center; }
 
-  .prof-stats { grid-template-columns: repeat(3, 1fr); padding: 0 20px; }
-  .prof-section { padding: 36px 20px 0; }
+  .prof-stats { grid-template-columns: repeat(3, 1fr); }
+  .prof-section { padding: 36px clamp(12px, 3vw, 20px) 0; }
 
   .prof-charts-row { grid-template-columns: 1fr; }
 
@@ -866,17 +866,17 @@
    RESPONSIVE — SMALL PHONE
    ═══════════════════════════════════════ */
 @media (max-width: 480px) {
-  .prof-hero { padding: 20px 16px 28px; }
+  .prof-hero { padding: 20px clamp(12px, 3vw, 16px) 28px; }
   .prof-name { font-size: 1.4rem; }
   .prof-dept { font-size: 0.88rem; }
   .prof-avatar { width: 60px; height: 60px; font-size: 1.3rem; }
 
-  .prof-hero-actions-row { padding: 0 16px; flex-direction: column; align-items: stretch; }
+  .prof-hero-actions-row { flex-direction: column; align-items: stretch; }
   .prof-compare-btn, .prof-rmp-btn { justify-content: center; }
 
-  .prof-stats { padding: 0 16px; grid-template-columns: repeat(2, 1fr); }
+  .prof-stats { grid-template-columns: repeat(2, 1fr); }
   .prof-stat-value { font-size: 1.5rem; }
-  .prof-section { padding: 28px 16px 0; }
+  .prof-section { padding: 28px clamp(12px, 3vw, 16px) 0; }
   .prof-section-title { font-size: 1.15rem; }
 
   .prof-review-card { padding: 16px 18px; }

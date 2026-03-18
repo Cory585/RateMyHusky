@@ -28,7 +28,7 @@
 
 .compare-hero {
 	position: relative;
-	padding: 48px 24px 28px;
+	padding: 48px clamp(16px, 3vw, 48px) 28px;
 	border-bottom: 1px solid #e7e7e7;
 	background:
 		radial-gradient(circle at 90% -20%, rgba(214, 57, 76, 0.14), transparent 45%),
@@ -48,8 +48,6 @@
 }
 
 .compare-hero-inner {
-	max-width: 1200px;
-	margin: 0 auto;
 	position: relative;
 	z-index: 1;
 	animation: compareFadeUp 0.45s ease both;
@@ -79,9 +77,8 @@
 }
 
 .compare-controls {
-	max-width: 1200px;
-	margin: 24px auto 0;
-	padding: 0 24px;
+	margin: 24px 0 0;
+	padding: 0 clamp(16px, 3vw, 48px);
 	display: grid;
 	grid-template-columns: 1fr 1fr;
 	gap: 14px;
@@ -224,9 +221,8 @@
 }
 
 .compare-status {
-	margin: 16px auto 0;
-	max-width: 1200px;
-	padding: 0 24px;
+	margin: 16px 0 0;
+	padding: 0 clamp(16px, 3vw, 48px);
 	color: #686868;
 	font-size: 0.9rem;
 }
@@ -243,9 +239,8 @@
 }
 
 .compare-panels {
-	max-width: 1200px;
-	margin: 18px auto 0;
-	padding: 0 24px;
+	margin: 18px 0 0;
+	padding: 0 clamp(16px, 3vw, 48px);
 	display: grid;
 	grid-template-columns: 1fr 1fr;
 	gap: 16px;
@@ -341,9 +336,8 @@
 }
 
 .compare-metrics {
-	max-width: 1200px;
-	margin: 20px auto 0;
-	padding: 0 24px 56px;
+	margin: 20px 0 0;
+	padding: 0 clamp(16px, 3vw, 48px) 56px;
 	animation: compareFadeUp 0.75s ease both;
 }
 
