@@ -583,6 +583,15 @@
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.5), inset 0 0 0 2px rgba(0, 0, 0, 0.12);
 }
 
+.wheel-spinner.idle .wheel-disc {
+  animation: wheelIdleSpin 20s linear infinite;
+}
+
+@keyframes wheelIdleSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
 .wheel-face {
   position: absolute;
   inset: 0;

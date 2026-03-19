@@ -510,12 +510,15 @@ const Homepage = () => {
             <div className="wheel-shell">
               <div
                 className="wheel-disc"
-                style={{
-                  transform: `rotate(${wheelRotation}deg)`,
-                  transition: wheelDurationMs > 0
-                    ? `transform ${wheelDurationMs}ms cubic-bezier(0.14, 0.78, 0.18, 1)`
-                    : 'none',
-                }}
+                style={wheelState === 'idle'
+                  ? undefined
+                  : {
+                      transform: `rotate(${wheelRotation}deg)`,
+                      transition: wheelDurationMs > 0
+                        ? `transform ${wheelDurationMs}ms cubic-bezier(0.14, 0.78, 0.18, 1)`
+                        : 'none',
+                    }
+                }
               >
                 <div className="wheel-face" />
                 {wheelNames.map((name, i) => (
