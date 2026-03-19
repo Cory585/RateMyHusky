@@ -14,10 +14,10 @@ if not DATABASE_URL:
     sys.exit("Missing CRDB_DATABASE_URL in backend/.env")
 
 import psycopg2
-import psycopg2.extras
+from psycopg2.extras import execute_values
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "Better_Scraper", "output_data")
-BATCH_SIZE = 5000
+BATCH_SIZE = 10000
 
 
 def get_connection():
@@ -40,9 +40,8 @@ def upload_csv(conn, table: str, columns: list[str], csv_path: str, transform=No
         batch = []
         total = 0
 
-        placeholders = ", ".join(["%s"] * len(columns))
         col_names = ", ".join(columns)
-        insert_sql = f"INSERT INTO {table} ({col_names}) VALUES ({placeholders})"
+        insert_sql = f"INSERT INTO {table} ({col_names}) VALUES %s"
 
         for row in reader:
             if transform:
@@ -53,7 +52,7 @@ def upload_csv(conn, table: str, columns: list[str], csv_path: str, transform=No
 
             if len(batch) >= BATCH_SIZE:
                 with conn.cursor() as cur:
-                    psycopg2.extras.execute_batch(cur, insert_sql, batch)
+                    execute_values(cur, insert_sql, batch, page_size=BATCH_SIZE)
                 conn.commit()
                 total += len(batch)
                 print(f"  Uploaded {total:,} rows...", end="\r")
@@ -61,7 +60,7 @@ def upload_csv(conn, table: str, columns: list[str], csv_path: str, transform=No
 
         if batch:
             with conn.cursor() as cur:
-                psycopg2.extras.execute_batch(cur, insert_sql, batch)
+                execute_values(cur, insert_sql, batch, page_size=BATCH_SIZE)
             conn.commit()
             total += len(batch)
 

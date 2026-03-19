@@ -153,10 +153,9 @@ def main():
     }, inplace=True)
 
     # ── Photo lookup ──
-    photo_lookup = {}
-    for _, row in photos.iterrows():
-        key = normalize_name(str(row['name']))
-        photo_lookup[key] = upgrade_image_url(str(row['image_url']))
+    photos["_key"] = photos["name"].astype(str).apply(normalize_name)
+    photos["_url"] = photos["image_url"].astype(str).apply(upgrade_image_url)
+    photo_lookup = dict(zip(photos["_key"], photos["_url"]))
 
     # ── Clean RMP data ──
     rmp_profs["rating"] = pd.to_numeric(rmp_profs["rating"], errors="coerce")
@@ -169,9 +168,7 @@ def main():
         ts[col] = pd.to_numeric(ts[col], errors="coerce").fillna(0).astype(int)
     ts["total_responses"] = ts["count_1"] + ts["count_2"] + ts["count_3"] + ts["count_4"] + ts["count_5"]
     ts["_weighted_sum"] = 1*ts["count_1"] + 2*ts["count_2"] + 3*ts["count_3"] + 4*ts["count_4"] + 5*ts["count_5"]
-    ts["mean"] = ts.apply(
-        lambda r: r["_weighted_sum"] / r["total_responses"] if r["total_responses"] > 0 else np.nan, axis=1
-    )
+    ts["mean"] = np.where(ts["total_responses"] > 0, ts["_weighted_sum"] / ts["total_responses"], np.nan)
 
     # ── Merge RMP aliases ──
     def merge_rmp_aliases(df):
@@ -219,12 +216,9 @@ def main():
 
     # ── TRACE proper name lookup ──
     name_sorted = tc.sort_values("term_id", ascending=False).drop_duplicates(subset=["name_key"])
-    trace_name_lookup = {}
-    for _, r in name_sorted.iterrows():
-        first = str(r["instructor_first_name"]).strip()
-        last = str(r["instructor_last_name"]).strip()
-        if first and last:
-            trace_name_lookup[r["name_key"]] = f"{first} {last}"
+    name_sorted["_full"] = name_sorted["instructor_first_name"].astype(str).str.strip() + " " + name_sorted["instructor_last_name"].astype(str).str.strip()
+    valid = name_sorted["instructor_first_name"].astype(str).str.strip().ne("") & name_sorted["instructor_last_name"].astype(str).str.strip().ne("")
+    trace_name_lookup = dict(zip(name_sorted.loc[valid, "name_key"], name_sorted.loc[valid, "_full"]))
 
     # ── TRACE overall rating (weighted avg of "overall" questions) ──
     ts["question"] = ts["question"].astype(str)
@@ -285,18 +279,15 @@ def main():
     rmp_profs["trace_reviews"] = rmp_profs["trace_reviews"].fillna(0).astype(int)
     rmp_profs["total_reviews"] = rmp_profs["num_ratings"].astype(int) + rmp_profs["trace_reviews"]
 
-    def compute_avg(r):
-        has_rmp = r["num_ratings"] > 0 and r["rating"] > 0
-        has_trace = pd.notna(r["trace_overall"]) and r["trace_reviews"] > 0
-        if has_rmp and has_trace:
-            return round((r["rating"] + r["trace_overall"]) / 2, 2)
-        elif has_trace:
-            return round(float(r["trace_overall"]), 2)
-        elif has_rmp:
-            return round(float(r["rating"]), 2)
-        return None
-
-    rmp_profs["avg_rating"] = rmp_profs.apply(compute_avg, axis=1)
+    has_rmp = (rmp_profs["num_ratings"] > 0) & (rmp_profs["rating"] > 0)
+    has_trace = rmp_profs["trace_overall"].notna() & (rmp_profs["trace_reviews"] > 0)
+    rmp_profs["avg_rating"] = np.where(
+        has_rmp & has_trace,
+        ((rmp_profs["rating"] + rmp_profs["trace_overall"]) / 2).round(2),
+        np.where(has_trace, rmp_profs["trace_overall"].round(2),
+                 np.where(has_rmp, rmp_profs["rating"].round(2), np.nan))
+    )
+    rmp_profs["avg_rating"] = rmp_profs["avg_rating"].where(rmp_profs["avg_rating"].notna(), other=None)
 
     # ── Build catalog rows ──
     catalog_rows = []
@@ -463,7 +454,7 @@ def main():
     conn = psycopg2.connect(CRDB_URL, sslmode="require")
     cur = conn.cursor()
 
-    # 4. Add name_key to trace_courses
+    # 4. Add name_key to trace_courses (batch via temp table)
     print("Adding name_key to trace_courses...")
     try:
         cur.execute("ALTER TABLE trace_courses ADD COLUMN name_key TEXT")
@@ -473,20 +464,21 @@ def main():
         cur = conn.cursor()
 
     unique_instructors = tc[["instructor_first_name", "instructor_last_name", "name_key"]].drop_duplicates()
-    for i, (_, r) in enumerate(unique_instructors.iterrows()):
-        cur.execute(
-            "UPDATE trace_courses SET name_key = %s WHERE instructor_first_name = %s AND instructor_last_name = %s",
-            (r["name_key"], r["instructor_first_name"], r["instructor_last_name"])
-        )
-        if (i + 1) % 50 == 0:
-            conn.commit()
-            if (i + 1) % 500 == 0:
-                print(f"    {i+1}/{len(unique_instructors)} instructors...")
-                # Reconnect to avoid GC threshold errors
-                conn.close()
-                conn = psycopg2.connect(CRDB_URL, sslmode="require")
-                cur = conn.cursor()
+    mapping_rows = [
+        (r["instructor_first_name"], r["instructor_last_name"], r["name_key"])
+        for _, r in unique_instructors.iterrows()
+    ]
+
+    cur.execute("CREATE TEMP TABLE _nk_map (first_name TEXT, last_name TEXT, name_key TEXT)")
+    chunk_insert(cur, "INSERT INTO _nk_map (first_name, last_name, name_key) VALUES %s", mapping_rows)
+    cur.execute("""
+        UPDATE trace_courses tc SET name_key = m.name_key
+        FROM _nk_map m
+        WHERE tc.instructor_first_name = m.first_name AND tc.instructor_last_name = m.last_name
+    """)
+    cur.execute("DROP TABLE _nk_map")
     conn.commit()
+
     try:
         cur.execute("CREATE INDEX idx_tc_name_key ON trace_courses (name_key)")
         conn.commit()
@@ -495,9 +487,8 @@ def main():
         cur = conn.cursor()
     print(f"  Updated {len(unique_instructors)} unique instructors")
 
-    # 5. Add name_key to rmp_reviews (with alias mapping)
+    # 5. Add name_key to rmp_reviews (batch via temp table)
     print("Adding name_key to rmp_reviews...")
-    # Reconnect again to avoid stale transaction
     conn.close()
     conn = psycopg2.connect(CRDB_URL, sslmode="require")
     cur = conn.cursor()
@@ -510,18 +501,22 @@ def main():
         cur = conn.cursor()
 
     unique_rev_names = rmp_reviews["professor_name"].dropna().unique()
-    for i, name in enumerate(unique_rev_names):
+    rev_mapping_rows = []
+    for name in unique_rev_names:
         nk = normalize_name(name)
         nk = ALIAS_MAP.get(nk, nk)
-        cur.execute("UPDATE rmp_reviews SET name_key = %s WHERE professor_name = %s", (nk, name))
-        if (i + 1) % 50 == 0:
-            conn.commit()
-            if (i + 1) % 500 == 0:
-                print(f"    {i+1}/{len(unique_rev_names)} review names...")
-                conn.close()
-                conn = psycopg2.connect(CRDB_URL, sslmode="require")
-                cur = conn.cursor()
+        rev_mapping_rows.append((name, nk))
+
+    cur.execute("CREATE TEMP TABLE _rev_nk_map (professor_name TEXT, name_key TEXT)")
+    chunk_insert(cur, "INSERT INTO _rev_nk_map (professor_name, name_key) VALUES %s", rev_mapping_rows)
+    cur.execute("""
+        UPDATE rmp_reviews r SET name_key = m.name_key
+        FROM _rev_nk_map m
+        WHERE r.professor_name = m.professor_name
+    """)
+    cur.execute("DROP TABLE _rev_nk_map")
     conn.commit()
+
     try:
         cur.execute("CREATE INDEX idx_rr_name_key ON rmp_reviews (name_key)")
         conn.commit()
@@ -530,7 +525,7 @@ def main():
         cur = conn.cursor()
     print(f"  Updated {len(unique_rev_names)} unique review names")
 
-    # 6. Fix trace_scores mean and add total_responses
+    # 6. Fix trace_scores mean and add total_responses (single SQL statements)
     print("Fixing trace_scores mean and adding total_responses...")
     conn.close()
     conn = psycopg2.connect(CRDB_URL, sslmode="require")
@@ -543,40 +538,25 @@ def main():
         conn.rollback()
         cur = conn.cursor()
 
-    # Get distinct term_ids to batch by term
-    cur.execute("SELECT DISTINCT term_id FROM trace_scores ORDER BY term_id")
-    term_ids = [r[0] for r in cur.fetchall()]
-    print(f"  Updating total_responses across {len(term_ids)} terms...")
-    for i, tid in enumerate(term_ids):
-        cur.execute("""
-            UPDATE trace_scores SET
-                total_responses = COALESCE(count_1,0) + COALESCE(count_2,0) + COALESCE(count_3,0) + COALESCE(count_4,0) + COALESCE(count_5,0)
-            WHERE term_id = %s
-        """, (tid,))
-        conn.commit()
-        if (i + 1) % 10 == 0:
-            print(f"    {i+1}/{len(term_ids)} terms...")
-            conn.close()
-            conn = psycopg2.connect(CRDB_URL, sslmode="require")
-            cur = conn.cursor()
+    print("  Updating total_responses (single batch)...")
+    cur.execute("""
+        UPDATE trace_scores SET
+            total_responses = COALESCE(count_1,0) + COALESCE(count_2,0) + COALESCE(count_3,0) + COALESCE(count_4,0) + COALESCE(count_5,0)
+    """)
+    conn.commit()
 
-    print(f"  Updating mean across {len(term_ids)} terms...")
-    for i, tid in enumerate(term_ids):
-        cur.execute("""
-            UPDATE trace_scores SET
-                mean = CASE
-                    WHEN total_responses > 0
-                    THEN (1.0*COALESCE(count_1,0) + 2.0*COALESCE(count_2,0) + 3.0*COALESCE(count_3,0) + 4.0*COALESCE(count_4,0) + 5.0*COALESCE(count_5,0)) / total_responses
-                    ELSE NULL
-                END
-            WHERE term_id = %s
-        """, (tid,))
-        conn.commit()
-        if (i + 1) % 10 == 0:
-            print(f"    {i+1}/{len(term_ids)} terms...")
-            conn.close()
-            conn = psycopg2.connect(CRDB_URL, sslmode="require")
-            cur = conn.cursor()
+    print("  Updating mean (single batch)...")
+    cur.execute("""
+        UPDATE trace_scores SET
+            mean = CASE
+                WHEN COALESCE(count_1,0) + COALESCE(count_2,0) + COALESCE(count_3,0) + COALESCE(count_4,0) + COALESCE(count_5,0) > 0
+                THEN (1.0*COALESCE(count_1,0) + 2.0*COALESCE(count_2,0) + 3.0*COALESCE(count_3,0) + 4.0*COALESCE(count_4,0) + 5.0*COALESCE(count_5,0))
+                     / (COALESCE(count_1,0) + COALESCE(count_2,0) + COALESCE(count_3,0) + COALESCE(count_4,0) + COALESCE(count_5,0))
+                ELSE NULL
+            END
+    """)
+    conn.commit()
+
     try:
         cur.execute("CREATE INDEX idx_ts_ids ON trace_scores (course_id, instructor_id, term_id)")
         conn.commit()

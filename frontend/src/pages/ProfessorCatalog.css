@@ -975,7 +975,7 @@
   }
 
   .catalog-layout {
-    padding: 0 16px 40px;
+    padding: 0 10px 40px;
   }
 
   .catalog-sidebar {
@@ -1008,9 +1008,17 @@
 }
 
 @media (max-width: 540px) {
+  .catalog-layout {
+    padding: 0 6px 32px;
+  }
+
+  .catalog-filter-toggle {
+    margin: 12px 6px 0;
+  }
+
   .catalog-grid {
     grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
+    gap: 6px;
   }
 
   .prof-card {
