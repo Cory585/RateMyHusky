@@ -3,7 +3,6 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { fetchProfessorData, fetchProfessorsCatalog, fetchSearchSuggestions } from '../api/api';
 import type { CatalogProfessor, ProfessorProfile, ProfessorSuggestion } from '../api/api';
 import StarRating from '../components/StarRating';
-import Breadcrumbs from '../components/Breadcrumbs';
 import Footer from '../components/Footer';
 
 import './Compare.css';
@@ -538,7 +537,11 @@ function Compare() {
 					<strong>{formatMetric(rating)}</strong>
 					<StarRating rating={rating ?? 0} size="sm" />
 				</div>
-				<Link className="compare-profile-link" to={`/professors/${profSlug}`}>
+				<Link
+					className="compare-profile-link"
+					to={`/professors/${profSlug}`}
+					state={{ fromPage: { label: 'Compare', url: `/compare?${searchParams.toString()}` } }}
+				>
 					View profile
 				</Link>
 			</>
@@ -548,7 +551,6 @@ function Compare() {
 	return (
 		<>
 			<main className="compare-page">
-			<Breadcrumbs items={[{ label: 'Compare' }]} />
 			<section className="compare-hero">
 				<div className="compare-hero-inner">
 					<p className="compare-kicker">Professor Compare</p>
@@ -702,7 +704,6 @@ function Compare() {
 			<section className="compare-metrics">
 				<header className="compare-metrics-header">
 					<h2>Key Comparison Metrics</h2>
-					{!bothSelected && <p>Select both professors to unlock full comparison.</p>}
 					{bothSelected && !bothReady && <p>Loading comparison...</p>}
 				</header>
 

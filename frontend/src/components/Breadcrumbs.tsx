@@ -13,14 +13,20 @@ interface BreadcrumbsProps {
 const Breadcrumbs = ({ items }: BreadcrumbsProps) => {
   const location = useLocation();
 
-  // Build the "Professors" link preserving any catalog filters the user came from
+  // If we came from a specific page (e.g. Compare), prepend that as the first breadcrumb
+  const fromPage = location.state?.fromPage as { label: string; url: string } | undefined;
+  // Preserve catalog filters when the first link points to /professors
   const catalogLink = location.state?.fromCatalog || '/professors';
+
+  const resolvedItems = fromPage
+    ? [{ label: fromPage.label, to: fromPage.url }, ...items.filter(item => item.to !== '/professors')]
+    : items;
 
   return (
     <nav className="breadcrumbs" aria-label="Breadcrumb">
       <ol className="breadcrumbs-list">
-        {items.map((item, i) => {
-          const isLast = i === items.length - 1;
+        {resolvedItems.map((item, i) => {
+          const isLast = i === resolvedItems.length - 1;
           const href = item.to === '/professors' ? catalogLink : item.to;
 
           return (

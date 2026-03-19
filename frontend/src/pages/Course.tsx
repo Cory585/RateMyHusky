@@ -133,6 +133,7 @@ const Course = () => {
 							{topInstructors.map((prof, index) => (
 								<Link
 									to={prof.slug ? `/professors/${prof.slug}` : '#'}
+									state={prof.slug ? { fromPage: { label: `${code.toUpperCase()} – ${summary.name}`, url: `/courses/${code}` } } : undefined}
 									className={`course-top-prof-card${prof.slug ? '' : ' disabled'}`}
 									key={`${prof.name}-${index}`}
 									aria-label={prof.slug ? `View ${prof.name}` : `${prof.name} profile unavailable`}
