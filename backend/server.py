@@ -425,13 +425,8 @@ def professor_profile(slug):
             score_params.extend([cid, iid, tid])
 
         all_scores = query(
-            f"SELECT course_id, instructor_id, term_id, question, median, std_dev, "
-            f"enrollment, completed, count_1, count_2, count_3, count_4, count_5, "
-            f"COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0) AS total_responses, "
-            f"CASE WHEN COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0) > 0 "
-            f"THEN CAST((1.0*COALESCE(count_1,0)+2.0*COALESCE(count_2,0)+3.0*COALESCE(count_3,0)+4.0*COALESCE(count_4,0)+5.0*COALESCE(count_5,0)) "
-            f"/ (COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0)) AS FLOAT4) "
-            f"ELSE mean END AS mean "
+            f"SELECT course_id, instructor_id, term_id, question, mean, median, std_dev, "
+            f"enrollment, completed, count_1, count_2, count_3, count_4, count_5 "
             f"FROM trace_scores WHERE {' OR '.join(or_clauses)}",
             score_params
         )
@@ -447,19 +442,29 @@ def professor_profile(slug):
 
         scores_list = []
         for s in scores_by_key.get((cid, iid, tid), []):
+            c1 = int(s["count_1"] or 0)
+            c2 = int(s["count_2"] or 0)
+            c3 = int(s["count_3"] or 0)
+            c4 = int(s["count_4"] or 0)
+            c5 = int(s["count_5"] or 0)
+            total_resp = c1 + c2 + c3 + c4 + c5
+            if total_resp > 0:
+                computed_mean = (1*c1 + 2*c2 + 3*c3 + 4*c4 + 5*c5) / total_resp
+            else:
+                computed_mean = float(s["mean"]) if s["mean"] else 0
             scores_list.append({
                 "question": str(s["question"] or ""),
-                "mean": round(float(s["mean"]), 2) if s["mean"] else 0,
+                "mean": round(computed_mean, 2),
                 "median": round(float(s["median"]), 2) if s["median"] else 0,
                 "stdDev": round(float(s["std_dev"]), 2) if s["std_dev"] else 0,
                 "enrollment": int(s["enrollment"] or 0),
                 "completed": int(s["completed"] or 0),
-                "totalResponses": int(s["total_responses"] or 0),
-                "count1": int(s["count_1"] or 0),
-                "count2": int(s["count_2"] or 0),
-                "count3": int(s["count_3"] or 0),
-                "count4": int(s["count_4"] or 0),
-                "count5": int(s["count_5"] or 0),
+                "totalResponses": total_resp,
+                "count1": c1,
+                "count2": c2,
+                "count3": c3,
+                "count4": c4,
+                "count5": c5,
             })
 
         trace_course_list.append({

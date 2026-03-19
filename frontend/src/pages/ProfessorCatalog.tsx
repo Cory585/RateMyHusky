@@ -8,6 +8,7 @@ import {
   type CatalogProfessor,
   type ProfessorSuggestion,
 } from '../api/api';
+import Footer from '../components/Footer';
 import StarRating from '../components/StarRating';
 import RatingBadge from '../components/RatingBadge';
 import Dropdown from '../components/Dropdown';
@@ -456,8 +457,8 @@ export default function ProfessorCatalog() {
                 min={1}
                 max={REVIEW_SLIDER_MAX}
                 step={1}
-                valueLow={minReviewsDraft}
-                valueHigh={maxReviewsDraft ?? REVIEW_SLIDER_MAX}
+                valueLow={Math.min(minReviewsDraft, REVIEW_SLIDER_MAX)}
+                valueHigh={Math.min(maxReviewsDraft ?? REVIEW_SLIDER_MAX, REVIEW_SLIDER_MAX)}
                 onChangeLow={v => setMinReviewsDraft(v)}
                 onChangeHigh={v => setMaxReviewsDraft(v >= REVIEW_SLIDER_MAX ? null : v)}
               />
@@ -722,6 +723,7 @@ export default function ProfessorCatalog() {
           )}
         </main>
       </div>
+      <Footer />
     </div>
   );
 }

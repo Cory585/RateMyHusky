@@ -243,6 +243,26 @@
 .prof-course-term-more { color: #999; background: #f0f0f0; font-style: italic; cursor: pointer; transition: background 0.15s, color 0.15s; }
 .prof-course-term-more:hover { background: #e4e4e4; color: #d6394c; }
 
+.prof-course-term-extra {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  width: 100%;
+}
+.prof-course-term-extra.open {
+  grid-template-rows: 1fr;
+}
+.prof-course-term-extra-inner {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.prof-course-term-extra.open .prof-course-term-extra-inner {
+  padding-top: 5px;
+}
+
 .prof-courses-extra {
   display: grid;
   grid-template-rows: 0fr;
