@@ -267,7 +267,7 @@ export default function ProfessorCatalog() {
   }, [maxReviewsDraft, filters.maxReviews, updateFilter]);
 
   const setCollege = useCallback((college: string) => {
-    setFilters(f => ({ ...f, college, dept: '', page: 1 }));
+    setFilters(f => ({ ...f, college, page: 1 }));
   }, []);
 
   const clearFilters = () => setFilters(DEFAULT_FILTERS);
@@ -372,29 +372,27 @@ export default function ProfessorCatalog() {
 
             {/* College */}
             <div className="filter-section">
-              <p className="filter-label">College</p>
-              <div className="college-pills">
-                <button
-                  className={`college-pill ${!filters.college ? 'active' : ''}`}
-                  onClick={() => setCollege('')}
-                >
-                  All
-                </button>
-                {colleges.map(c => (
-                  <button
-                    key={c}
-                    className={`college-pill ${filters.college === c ? 'active' : ''}`}
-                    onClick={() => setCollege(c)}
-                  >
-                    {c}
-                  </button>
-                ))}
-              </div>
+              <p className="filter-label">
+                College
+                {filters.college && (
+                  <button className="dept-clear-btn" onClick={() => setCollege('')}>Clear all</button>
+                )}
+              </p>
+              <CollegeFilter
+                colleges={colleges}
+                selected={filters.college}
+                onSelect={c => setCollege(c)}
+              />
             </div>
 
             {/* Department */}
             <div className="filter-section">
-              <p className="filter-label">Department</p>
+              <p className="filter-label">
+                Department
+                {filters.dept && (
+                  <button className="dept-clear-btn" onClick={() => updateFilter('dept', '')}>Clear all</button>
+                )}
+              </p>
               <DepartmentFilter
                 departments={departments}
                 selected={filters.dept}
@@ -792,6 +790,70 @@ function DualRangeSlider({
   );
 }
 
+// ── College filter sub-component ─────────────────────────────────────────────
+
+function CollegeFilter({
+  colleges,
+  selected,
+  onSelect,
+}: {
+  colleges: string[];
+  selected: string;
+  onSelect: (college: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedSet = useMemo(() => new Set(selected ? selected.split(',') : []), [selected]);
+
+  const toggleCollege = (c: string) => {
+    const next = new Set(selectedSet);
+    if (next.has(c)) next.delete(c);
+    else next.add(c);
+    onSelect([...next].join(','));
+  };
+
+  const label = selectedSet.size === 0
+    ? 'All colleges'
+    : selectedSet.size === 1
+      ? [...selectedSet][0]
+      : `${selectedSet.size} colleges`;
+
+  return (
+    <div className="dept-filter">
+      <button
+        className={`dept-toggle ${open ? 'open' : ''}`}
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+      >
+        <span className="dept-toggle-label">
+          {label}
+        </span>
+        <span className="dept-toggle-icon">
+          <span className="dept-bar" />
+          <span className="dept-bar" />
+          <span className="dept-bar" />
+        </span>
+      </button>
+
+      {open && (
+        <div className="dept-dropdown">
+          <div className="dept-list">
+            {colleges.map(c => (
+              <label key={c} className="dept-option">
+                <input
+                  type="checkbox"
+                  checked={selectedSet.has(c)}
+                  onChange={() => toggleCollege(c)}
+                />
+                <span>{c}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Department filter sub-component ──────────────────────────────────────────
 
 function DepartmentFilter({
@@ -808,6 +870,20 @@ function DepartmentFilter({
   const filtered = departments.filter(d =>
     d.toLowerCase().includes(search.toLowerCase())
   );
+  const selectedSet = useMemo(() => new Set(selected ? selected.split(',') : []), [selected]);
+
+  const toggleDept = (d: string) => {
+    const next = new Set(selectedSet);
+    if (next.has(d)) next.delete(d);
+    else next.add(d);
+    onSelect([...next].join(','));
+  };
+
+  const label = selectedSet.size === 0
+    ? 'All departments'
+    : selectedSet.size === 1
+      ? [...selectedSet][0]
+      : `${selectedSet.size} departments`;
 
   return (
     <div className="dept-filter">
@@ -817,7 +893,7 @@ function DepartmentFilter({
         aria-expanded={open}
       >
         <span className="dept-toggle-label">
-          {selected || 'All departments'}
+          {label}
         </span>
         <span className="dept-toggle-icon">
           <span className="dept-bar" />
@@ -837,22 +913,12 @@ function DepartmentFilter({
             autoFocus
           />
           <div className="dept-list">
-            <label className="dept-option">
-              <input
-                type="radio"
-                name="dept"
-                checked={!selected}
-                onChange={() => { onSelect(''); setOpen(false); }}
-              />
-              <span>All departments</span>
-            </label>
             {filtered.map(d => (
               <label key={d} className="dept-option">
                 <input
-                  type="radio"
-                  name="dept"
-                  checked={selected === d}
-                  onChange={() => { onSelect(d); setOpen(false); }}
+                  type="checkbox"
+                  checked={selectedSet.has(d)}
+                  onChange={() => toggleDept(d)}
                 />
                 <span>{d}</span>
               </label>

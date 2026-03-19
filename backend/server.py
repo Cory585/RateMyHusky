@@ -561,11 +561,19 @@ def professor_profile(slug):
 def departments():
     college = request.args.get("college", "")
     if college and college != "All":
-        rows = query("""
-            SELECT DISTINCT department FROM professors_catalog
-            WHERE avg_rating IS NOT NULL AND college = %s
-            ORDER BY department
-        """, (college,))
+        college_list = [c.strip() for c in college.split(",") if c.strip()]
+        if len(college_list) == 1:
+            rows = query("""
+                SELECT DISTINCT department FROM professors_catalog
+                WHERE avg_rating IS NOT NULL AND college = %s
+                ORDER BY department
+            """, (college_list[0],))
+        else:
+            rows = query("""
+                SELECT DISTINCT department FROM professors_catalog
+                WHERE avg_rating IS NOT NULL AND college IN (""" + ",".join(["%s"] * len(college_list)) + """)
+                ORDER BY department
+            """, tuple(college_list))
     else:
         rows = query("""
             SELECT DISTINCT department FROM professors_catalog
@@ -615,11 +623,21 @@ def professors_catalog():
     params = []
 
     if college and college != "All":
-        conditions.append("college = %s")
-        params.append(college)
+        college_list = [c.strip() for c in college.split(",") if c.strip()]
+        if len(college_list) == 1:
+            conditions.append("college = %s")
+            params.append(college_list[0])
+        elif college_list:
+            conditions.append("college IN (" + ",".join(["%s"] * len(college_list)) + ")")
+            params.extend(college_list)
     if dept and dept != "All":
-        conditions.append("department = %s")
-        params.append(dept)
+        dept_list = [d.strip() for d in dept.split(",") if d.strip()]
+        if len(dept_list) == 1:
+            conditions.append("department = %s")
+            params.append(dept_list[0])
+        elif dept_list:
+            conditions.append("department IN (" + ",".join(["%s"] * len(dept_list)) + ")")
+            params.extend(dept_list)
     if min_rating > 0:
         conditions.append("avg_rating >= %s")
         params.append(min_rating)
@@ -738,8 +756,13 @@ def courses_catalog():
     params = []
 
     if dept and dept != "All":
-        where_clauses.append("cc.department = %s")
-        params.append(dept)
+        dept_list = [d.strip() for d in dept.split(",") if d.strip()]
+        if len(dept_list) == 1:
+            where_clauses.append("cc.department = %s")
+            params.append(dept_list[0])
+        elif dept_list:
+            where_clauses.append("cc.department IN (" + ",".join(["%s"] * len(dept_list)) + ")")
+            params.extend(dept_list)
     if q:
         where_clauses.append("cc.search_text LIKE %s")
         params.append(f"%{q}%")
@@ -802,8 +825,13 @@ def courses_catalog():
     count_params = []
 
     if dept and dept != "All":
-        count_where.append("department = %s")
-        count_params.append(dept)
+        dept_list = [d.strip() for d in dept.split(",") if d.strip()]
+        if len(dept_list) == 1:
+            count_where.append("department = %s")
+            count_params.append(dept_list[0])
+        elif dept_list:
+            count_where.append("department IN (" + ",".join(["%s"] * len(dept_list)) + ")")
+            count_params.extend(dept_list)
     if q:
         count_where.append("search_text LIKE %s")
         count_params.append(f"%{q}%")

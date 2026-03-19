@@ -16,7 +16,7 @@
 /* ─── SIDEBAR ─────────────────────────────────────────────── */
 
 .catalog-sidebar {
-  width: 260px;
+  width: 290px;
   flex-shrink: 0;
   padding-top: 24px;
 }
@@ -113,6 +113,20 @@
 
 /* Department filter */
 
+.dept-clear-btn {
+  float: right;
+  background: none;
+  border: none;
+  color: #d6394c;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+.dept-clear-btn:hover {
+  text-decoration: underline;
+}
+
 .dept-filter {
   display: flex;
   flex-direction: column;
@@ -189,14 +203,20 @@
 
 /* ── dropdown panel ── */
 .dept-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 10;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 6px;
+  margin-top: 4px;
   padding: 8px;
   border-radius: 8px;
   border: 1px solid #e0e0e0;
   background: #fff;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
   animation: dept-slide-in 0.2s ease;
 }
 
@@ -255,7 +275,8 @@
   background: #f5f5f5;
 }
 
-.dept-option input[type='radio'] {
+.dept-option input[type='radio'],
+.dept-option input[type='checkbox'] {
   accent-color: #d6394c;
   cursor: pointer;
 }
@@ -1198,6 +1219,11 @@
 .dark .dept-dropdown {
   background: #1e1e1e;
   border-color: #444;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.dark .dept-clear-btn {
+  color: #e06070;
 }
 
 .dark .dept-search {
