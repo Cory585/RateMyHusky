@@ -5,6 +5,7 @@
   padding-top: 72px;
   background: #f7f8fa;
   font-family: 'Nunito', sans-serif;
+  overflow-x: hidden;
 }
 
 .catalog-layout {
@@ -1173,21 +1174,24 @@
 
 @media (max-width: 540px) {
   .catalog-layout {
-    padding: 0 6px 32px;
+    padding: 0 12px 32px;
+    width: 100%;
+    box-sizing: border-box;
   }
 
   .catalog-filter-toggle {
-    margin: 12px 6px 0;
+    margin: 12px 12px 0;
   }
 
   .catalog-grid {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 6px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
   }
 
   .prof-card {
     padding: 10px;
     gap: 8px;
+    min-width: 0;
   }
 
   .catalog-page .prof-avatar {
