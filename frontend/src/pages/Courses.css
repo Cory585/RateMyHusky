@@ -1,3 +1,12 @@
+.sidebar-inner.dept-open {
+	overflow: visible;
+	max-height: none;
+}
+
+.sidebar-inner.dept-open .dept-dropdown {
+	position: static;
+}
+
 .course-card .prof-body {
 	gap: 2px;
 }

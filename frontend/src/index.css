@@ -9,7 +9,7 @@
 html, body, #root {
   height: 100%;
   width: 100%;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 body {
@@ -23,7 +23,7 @@ body {
 
 /* Prevent horizontal overflow on mobile */
 #root {
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 /* Ensure images don't break layout */
