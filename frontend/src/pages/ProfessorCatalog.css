@@ -40,15 +40,6 @@
   overflow-y: auto;
 }
 
-.sidebar-inner.dept-open {
-  overflow: visible;
-  max-height: none;
-}
-
-.sidebar-inner.dept-open .dept-dropdown {
-  position: static;
-}
-
 .sidebar-header {
   display: flex;
   align-items: center;

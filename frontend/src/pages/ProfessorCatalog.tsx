@@ -701,11 +701,11 @@ export default function ProfessorCatalog() {
                     </div>
 
                     <div className="prof-meta">
-                      <span>{prof.totalReviews.toLocaleString()} Review{prof.totalReviews !== 1 ? 's' : ''}</span>
+                      <span>{prof.totalReviews.toLocaleString()} review{prof.totalReviews !== 1 ? 's' : ''}</span>
                       {prof.wouldTakeAgainPct != null && (
                         <>
                           <span className="meta-dot">·</span>
-                          <span>{prof.wouldTakeAgainPct}% Again</span>
+                          <span>{prof.wouldTakeAgainPct}% again</span>
                         </>
                       )}
                     </div>
