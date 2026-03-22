@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import logo from '../assets/logo.jpg';
 import Dropdown from './Dropdown';
 import './FeedbackTab.css';
@@ -18,6 +18,12 @@ const FeedbackTab = () => {
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    const handler = () => setIsOpen(true);
+    window.addEventListener('open-feedback', handler);
+    return () => window.removeEventListener('open-feedback', handler);
+  }, []);
 
   const handleSubmit = () => {
     if (!feedbackType || !description.trim()) {

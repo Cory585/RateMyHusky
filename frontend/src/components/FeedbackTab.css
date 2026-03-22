@@ -328,9 +328,7 @@
     display: none;
   }
   .feedback-fab {
-    display: flex;
-    width: 36px;
-    height: 36px;
+    display: none;
   }
 
   .feedback-fab svg {
