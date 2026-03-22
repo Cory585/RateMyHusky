@@ -830,35 +830,47 @@ function CollegeFilter({
 
   return (
     <div className="dept-filter" ref={ref}>
-      <button
-        className={`dept-toggle ${open ? 'open' : ''}`}
-        onClick={() => setOpen(o => !o)}
-        aria-expanded={open}
-      >
-        <span className="dept-toggle-label">
-          {label}
-        </span>
-        <span className="dept-toggle-icon">
-          <span className="dept-bar" />
-          <span className="dept-bar" />
-          <span className="dept-bar" />
-        </span>
-      </button>
+      <div className="dept-filter-trigger">
+        <button
+          className={`dept-toggle ${open ? 'open' : ''}`}
+          onClick={() => setOpen(o => !o)}
+          aria-expanded={open}
+        >
+          <span className="dept-toggle-label">
+            {label}
+          </span>
+          <span className="dept-toggle-icon">
+            <span className="dept-bar" />
+            <span className="dept-bar" />
+            <span className="dept-bar" />
+          </span>
+        </button>
 
-      {open && (
-        <div className="dept-dropdown">
-          <div className="dept-list">
-            {colleges.map(c => (
-              <label key={c} className="dept-option">
-                <input
-                  type="checkbox"
-                  checked={selectedSet.has(c)}
-                  onChange={() => toggleCollege(c)}
-                />
-                <span>{c}</span>
-              </label>
-            ))}
+        {open && (
+          <div className="dept-dropdown">
+            <div className="dept-list">
+              {colleges.map(c => (
+                <label key={c} className="dept-option">
+                  <input
+                    type="checkbox"
+                    checked={selectedSet.has(c)}
+                    onChange={() => toggleCollege(c)}
+                  />
+                  <span>{c}</span>
+                </label>
+              ))}
+            </div>
           </div>
+        )}
+      </div>
+
+      {selectedSet.size > 0 && (
+        <div className="filter-tags">
+          {[...selectedSet].map(c => (
+            <button key={c} className="filter-tag" onClick={() => toggleCollege(c)}>
+              {c} <span className="filter-tag-x">×</span>
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -908,46 +920,58 @@ function DepartmentFilter({
 
   return (
     <div className="dept-filter" ref={ref}>
-      <button
-        className={`dept-toggle ${open ? 'open' : ''}`}
-        onClick={() => setOpen(o => !o)}
-        aria-expanded={open}
-      >
-        <span className="dept-toggle-label">
-          {label}
-        </span>
-        <span className="dept-toggle-icon">
-          <span className="dept-bar" />
-          <span className="dept-bar" />
-          <span className="dept-bar" />
-        </span>
-      </button>
+      <div className="dept-filter-trigger">
+        <button
+          className={`dept-toggle ${open ? 'open' : ''}`}
+          onClick={() => setOpen(o => !o)}
+          aria-expanded={open}
+        >
+          <span className="dept-toggle-label">
+            {label}
+          </span>
+          <span className="dept-toggle-icon">
+            <span className="dept-bar" />
+            <span className="dept-bar" />
+            <span className="dept-bar" />
+          </span>
+        </button>
 
-      {open && (
-        <div className="dept-dropdown">
-          <input
-            className="dept-search"
-            type="text"
-            placeholder="Search departments…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            autoFocus
-          />
-          <div className="dept-list">
-            {filtered.map(d => (
-              <label key={d} className="dept-option">
-                <input
-                  type="checkbox"
-                  checked={selectedSet.has(d)}
-                  onChange={() => toggleDept(d)}
-                />
-                <span>{d}</span>
-              </label>
-            ))}
-            {filtered.length === 0 && (
-              <p className="dept-empty">No departments found</p>
-            )}
+        {open && (
+          <div className="dept-dropdown">
+            <input
+              className="dept-search"
+              type="text"
+              placeholder="Search departments…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              autoFocus
+            />
+            <div className="dept-list">
+              {filtered.map(d => (
+                <label key={d} className="dept-option">
+                  <input
+                    type="checkbox"
+                    checked={selectedSet.has(d)}
+                    onChange={() => toggleDept(d)}
+                  />
+                  <span>{d}</span>
+                </label>
+              ))}
+              {filtered.length === 0 && (
+                <p className="dept-empty">No departments found</p>
+              )}
+            </div>
           </div>
+        )}
+      </div>
+
+      {selectedSet.size > 0 && (
+        <div className="filter-tags">
+          {[...selectedSet].map(d => (
+            <button key={d} className="filter-tag" onClick={() => toggleDept(d)}>
+              {d} <span className="filter-tag-x">×</span>
+            </button>
+          ))}
         </div>
       )}
     </div>
