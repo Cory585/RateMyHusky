@@ -21,7 +21,7 @@ const SORT_OPTIONS = [
   { value: 'reviews', label: 'Most Reviews' },
 ];
 
-const REVIEW_SLIDER_MAX = 100;
+const REVIEW_SLIDER_MAX = 1000;
 const REVIEW_INPUT_MAX = 10000;
 
 interface Filters {
@@ -42,7 +42,7 @@ const DEFAULT_FILTERS: Filters = {
   dept:       '',
   minRating:  0,
   maxRating:  5,
-  minReviews: 1,
+  minReviews: 0,
   maxReviews: null,
   sort:       'alpha',
   page:       1,
@@ -56,7 +56,7 @@ function getFiltersFromSearchParams(sp: URLSearchParams): Filters {
 
   const minRating = Number(sp.get('minRating') || '0');
   const maxRating = Number(sp.get('maxRating') || '5');
-  const minReviews = Number(sp.get('minReviews') || '1');
+  const minReviews = Number(sp.get('minReviews') || '0');
   const maxReviewsRaw = sp.get('maxReviews');
   const maxReviews = maxReviewsRaw !== null ? Number(maxReviewsRaw) : null;
   const page = Number(sp.get('page') || '1');
@@ -67,8 +67,8 @@ function getFiltersFromSearchParams(sp: URLSearchParams): Filters {
     dept:       sp.get('dept') || '',
     minRating:  Number.isFinite(minRating) ? Math.max(0, Math.min(5, minRating)) : 0,
     maxRating:  Number.isFinite(maxRating) ? Math.max(0, Math.min(5, maxRating)) : 5,
-    minReviews: Number.isFinite(minReviews) ? Math.max(1, Math.floor(minReviews)) : 1,
-    maxReviews: maxReviews !== null && Number.isFinite(maxReviews) ? Math.max(1, Math.floor(maxReviews)) : null,
+    minReviews: Number.isFinite(minReviews) ? Math.max(0, Math.floor(minReviews)) : 0,
+    maxReviews: maxReviews !== null && Number.isFinite(maxReviews) ? Math.max(0, Math.floor(maxReviews)) : null,
     sort,
     page:       Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1,
   };
@@ -81,7 +81,7 @@ function buildSearchParamsFromFilters(filters: Filters): URLSearchParams {
   if (filters.dept) next.set('dept', filters.dept);
   if (filters.minRating > 0) next.set('minRating', String(filters.minRating));
   if (filters.maxRating < 5) next.set('maxRating', String(filters.maxRating));
-  if (filters.minReviews > 1) next.set('minReviews', String(filters.minReviews));
+  if (filters.minReviews > 0) next.set('minReviews', String(filters.minReviews));
   if (filters.maxReviews !== null) next.set('maxReviews', String(filters.maxReviews));
   if (filters.sort !== 'alpha') next.set('sort', filters.sort);
   if (filters.page > 1) next.set('page', String(filters.page));
@@ -108,6 +108,7 @@ export default function ProfessorCatalog() {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading]       = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [deptOpen, setDeptOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => (localStorage.getItem('catalog-view') as 'grid' | 'list') || 'grid');
   const [minRatingDraft, setMinRatingDraft] = useState(() => getFiltersFromSearchParams(searchParams).minRating);
   const [maxRatingDraft, setMaxRatingDraft] = useState(() => getFiltersFromSearchParams(searchParams).maxRating);
@@ -155,7 +156,7 @@ export default function ProfessorCatalog() {
       dept:       filters.dept       || undefined,
       minRating:  filters.minRating  > 0 ? filters.minRating  : undefined,
       maxRating:  filters.maxRating  < 5 ? filters.maxRating  : undefined,
-      minReviews: filters.minReviews > 1 ? filters.minReviews : undefined,
+      minReviews: filters.minReviews > 0 ? filters.minReviews : undefined,
       maxReviews: filters.maxReviews ?? undefined,
       sort:       filters.sort as 'alpha' | 'rating' | 'reviews',
       page:       filters.page,
@@ -350,7 +351,7 @@ export default function ProfessorCatalog() {
       <div className="catalog-layout">
         {/* ── Sidebar ── */}
         <aside className={`catalog-sidebar ${sidebarOpen ? 'open' : ''}`}>
-          <div className="sidebar-inner">
+          <div className={`sidebar-inner ${deptOpen ? 'dept-open' : ''}`}>
             <div className="sidebar-header">
               <span className="sidebar-title">Filters</span>
               {hasActiveFilters && (
@@ -397,6 +398,7 @@ export default function ProfessorCatalog() {
                 departments={departments}
                 selected={filters.dept}
                 onSelect={d => updateFilter('dept', d)}
+                onOpenChange={setDeptOpen}
               />
             </div>
 
@@ -443,9 +445,9 @@ export default function ProfessorCatalog() {
               <p className="filter-label">
                 Reviews
                 <span className="slider-value">
-                  {minReviewsDraft <= 1 && maxReviewsDraft === null
+                  {minReviewsDraft <= 0 && maxReviewsDraft === null
                     ? 'Any'
-                    : minReviewsDraft <= 1
+                    : minReviewsDraft <= 0
                       ? `≤ ${maxReviewsDraft}`
                       : maxReviewsDraft === null
                         ? `${minReviewsDraft}+`
@@ -453,9 +455,9 @@ export default function ProfessorCatalog() {
                 </span>
               </p>
               <DualRangeSlider
-                min={1}
+                min={0}
                 max={REVIEW_SLIDER_MAX}
-                step={1}
+                step={50}
                 valueLow={Math.min(minReviewsDraft, REVIEW_SLIDER_MAX)}
                 valueHigh={Math.min(maxReviewsDraft ?? REVIEW_SLIDER_MAX, REVIEW_SLIDER_MAX)}
                 onChangeLow={v => setMinReviewsDraft(v)}
@@ -465,12 +467,12 @@ export default function ProfessorCatalog() {
                 <input
                   type="number"
                   className="reviews-number-input"
-                  min="1"
-                  value={minReviewsDraft === 1 ? '' : minReviewsDraft}
+                  min="0"
+                  value={minReviewsDraft === 0 ? '' : minReviewsDraft}
                   placeholder="Min"
                   onChange={e => {
                     const v = parseInt(e.target.value, 10);
-                    const clamped = isNaN(v) || v < 1 ? 1 : Math.min(v, REVIEW_INPUT_MAX);
+                    const clamped = isNaN(v) || v < 0 ? 0 : Math.min(v, REVIEW_INPUT_MAX);
                     setMinReviewsDraft(clamped);
                     if (maxReviewsDraft !== null && clamped > maxReviewsDraft) {
                       setMaxReviewsDraft(clamped);
@@ -481,7 +483,7 @@ export default function ProfessorCatalog() {
                 <input
                   type="number"
                   className="reviews-number-input"
-                  min="1"
+                  min="0"
                   value={maxReviewsDraft ?? ''}
                   placeholder="Max"
                   onChange={e => {
@@ -882,12 +884,15 @@ function DepartmentFilter({
   departments,
   selected,
   onSelect,
+  onOpenChange,
 }: {
   departments: string[];
   selected: string;
   onSelect: (dept: string) => void;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const toggle = (o: boolean) => { setOpen(o); onOpenChange?.(o); };
   const [search, setSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
   const filtered = departments.filter(d =>
@@ -898,7 +903,7 @@ function DepartmentFilter({
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) toggle(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -921,7 +926,7 @@ function DepartmentFilter({
     <div className="dept-filter" ref={ref}>
       <button
         className={`dept-toggle ${open ? 'open' : ''}`}
-        onClick={() => setOpen(o => !o)}
+        onClick={() => toggle(!open)}
         aria-expanded={open}
       >
         <span className="dept-toggle-label">
