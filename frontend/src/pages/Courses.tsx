@@ -1,5 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
 	fetchCourseDepartments,
@@ -83,6 +82,7 @@ export default function Courses() {
 	const [totalPages, setTotalPages] = useState(1);
 	const [loading, setLoading] = useState(true);
 	const [sidebarOpen, setSidebarOpen] = useState(false);
+	const [deptOpen, setDeptOpen] = useState(false);
 
 	const [minRatingDraft, setMinRatingDraft] = useState(() => getFiltersFromSearchParams(searchParams).minRating);
 	const [maxRatingDraft, setMaxRatingDraft] = useState(() => getFiltersFromSearchParams(searchParams).maxRating);
@@ -94,34 +94,6 @@ export default function Courses() {
 	const searchInputRef = useRef<HTMLInputElement>(null);
 	const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-	const [searchFocused, setSearchFocused] = useState(false);
-	const [typingPlaceholder, setTypingPlaceholder] = useState('');
-	const courseExamples = useMemo(() => [
-		'CS 2500', 'CS 3500', 'ECON 1115', 'MATH 1341',
-		'CY 2550', 'PHYS 1161', 'ACCT 1201', 'BIOL 1111',
-	], []);
-	useEffect(() => {
-		if (searchFocused || filters.q) {
-			setTypingPlaceholder('Search course code or title...');
-			return;
-		}
-		let idx = Math.floor(Math.random() * courseExamples.length);
-		let text = '';
-		let deleting = false;
-		let speed = 100;
-		const tick = () => {
-			const full = courseExamples[idx];
-			if (deleting) { text = full.substring(0, text.length - 1); speed = 50; }
-			else          { text = full.substring(0, text.length + 1); speed = 100; }
-			setTypingPlaceholder(`Search for "${text}"`);
-			if (!deleting && text === full)   { deleting = true;  speed = 2000; }
-			else if (deleting && text === '') { deleting = false; idx = (idx + 1) % courseExamples.length; speed = 500; }
-			tid = setTimeout(tick, speed);
-		};
-		let tid = setTimeout(tick, speed);
-		return () => clearTimeout(tid);
-	}, [searchFocused, filters.q, courseExamples]);
-
 	const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
 	useEffect(() => {
 		const onResize = () => setViewportWidth(window.innerWidth);
@@ -130,7 +102,7 @@ export default function Courses() {
 	}, []);
 
 	const pageSize = useMemo(() => {
-		if (viewportWidth <= 480) return 6;
+		if (viewportWidth <= 480) return 8;
 		if (viewportWidth <= 768) return 9;
 		return 20;
 	}, [viewportWidth]);
@@ -271,7 +243,7 @@ export default function Courses() {
 
 			<div className="catalog-layout">
 				<aside className={`catalog-sidebar ${sidebarOpen ? 'open' : ''}`}>
-					<div className="sidebar-inner">
+					<div className={`sidebar-inner ${deptOpen ? 'dept-open' : ''}`}>
 						<div className="sidebar-header">
 							<span className="sidebar-title">Filters</span>
 							{hasActiveFilters && (
@@ -287,8 +259,13 @@ export default function Courses() {
 						</div>
 
 						<div className="filter-section">
-							<p className="filter-label">Department</p>
-							<DepartmentFilter departments={departments} selected={filters.dept} onSelect={(d) => updateFilter('dept', d)} />
+							<p className="filter-label">
+								Department
+								{filters.dept && (
+									<button className="dept-clear-btn" onClick={() => updateFilter('dept', '')}>Clear all</button>
+								)}
+							</p>
+							<DepartmentFilter departments={departments} selected={filters.dept} onSelect={(d) => updateFilter('dept', d)} onOpenChange={setDeptOpen} />
 						</div>
 
 						<div className="filter-section">
@@ -329,14 +306,12 @@ export default function Courses() {
 								ref={searchInputRef}
 								type="text"
 								className="catalog-search"
-								placeholder={typingPlaceholder}
+								placeholder="Search course code or title..."
 								value={filters.q}
 								onChange={(e) => updateFilter('q', e.target.value)}
 								onFocus={() => {
-									setSearchFocused(true);
 									if (searchSuggestions.length > 0) setShowSearchSuggestions(true);
 								}}
-								onBlur={() => setSearchFocused(false)}
 								onKeyDown={(e) => {
 									if (!showSearchSuggestions || searchSuggestions.length === 0) return;
 									if (e.key === 'ArrowDown') {
@@ -374,11 +349,7 @@ export default function Courses() {
 								</ul>
 							)}
 						</div>
-					<button
-						className="catalog-filter-toggle"
-						onClick={() => setSidebarOpen((o) => !o)}
-						aria-label="Toggle filters"
-					>
+					<button className="catalog-filter-toggle" onClick={() => setSidebarOpen((o) => !o)} aria-label="Toggle filters">
 						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
 							<line x1="4" y1="6" x2="20" y2="6" />
 							<line x1="4" y1="12" x2="20" y2="12" />
@@ -387,14 +358,14 @@ export default function Courses() {
 						Filters
 						{hasActiveFilters && <span className="filter-active-dot" />}
 					</button>
-				</div>
+					</div>
 
-				<p className="catalog-disclaimer">
-					Course cards currently use TRACE aggregate data only.
+					<p className="catalog-disclaimer">
+						Course cards currently use TRACE aggregate data only.
 					</p>
 
 					{loading ? (
-						<div className="catalog-grid courses-grid">
+						<div className="catalog-grid">
 							{Array.from({ length: pageSize }).map((_, i) => (
 								<div key={i} className="prof-card skeleton" />
 							))}
@@ -407,7 +378,7 @@ export default function Courses() {
 							</button>
 						</div>
 					) : (
-						<div className="catalog-grid courses-grid">
+						<div className="catalog-grid">
 							{courses.map((course) => (
 								<div
 									key={course.code}
@@ -511,34 +482,24 @@ function DepartmentFilter({
 	departments,
 	selected,
 	onSelect,
+	onOpenChange,
 }: {
 	departments: string[];
 	selected: string;
 	onSelect: (dept: string) => void;
+	onOpenChange?: (open: boolean) => void;
 }) {
 	const [open, setOpen] = useState(false);
+	const toggle = (o: boolean) => { setOpen(o); onOpenChange?.(o); };
 	const [search, setSearch] = useState('');
 	const ref = useRef<HTMLDivElement>(null);
-	const triggerRef = useRef<HTMLButtonElement>(null);
-	const dropdownRef = useRef<HTMLDivElement>(null);
-	const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
-	const selectedSet = useMemo(() => new Set(selected ? selected.split(',') : []), [selected]);
 	const filtered = departments.filter((d) => d.toLowerCase().includes(search.toLowerCase()));
-
-	useLayoutEffect(() => {
-		if (open && triggerRef.current) {
-			const r = triggerRef.current.getBoundingClientRect();
-			setDropdownPos({ top: r.bottom + 4, left: r.left, width: r.width });
-		}
-	}, [open]);
+	const selectedSet = useMemo(() => new Set(selected ? selected.split(',') : []), [selected]);
 
 	useEffect(() => {
 		if (!open) return;
 		const handler = (e: MouseEvent) => {
-			if (
-				ref.current && !ref.current.contains(e.target as Node) &&
-				dropdownRef.current && !dropdownRef.current.contains(e.target as Node)
-			) setOpen(false);
+			if (ref.current && !ref.current.contains(e.target as Node)) toggle(false);
 		};
 		document.addEventListener('mousedown', handler);
 		return () => document.removeEventListener('mousedown', handler);
@@ -560,58 +521,51 @@ function DepartmentFilter({
 
 	return (
 		<div className="dept-filter" ref={ref}>
-			<div className="dept-filter-trigger">
-				<button
-					ref={triggerRef}
-					className={`dept-toggle ${open ? 'open' : ''}`}
-					onClick={() => setOpen((o) => !o)}
-					aria-expanded={open}
-				>
-					<span className="dept-toggle-label">{label}</span>
-					<span className="dept-toggle-icon">
-						<span className="dept-bar" />
-						<span className="dept-bar" />
-						<span className="dept-bar" />
-					</span>
-				</button>
+			<button
+				className={`dept-toggle ${open ? 'open' : ''}`}
+				onClick={() => toggle(!open)}
+				aria-expanded={open}
+			>
+				<span className="dept-toggle-label">{label}</span>
+				<span className="dept-toggle-icon">
+					<span className="dept-bar" />
+					<span className="dept-bar" />
+					<span className="dept-bar" />
+				</span>
+			</button>
 
-				{open && createPortal(
-					<div
-						ref={dropdownRef}
-						className="dept-dropdown"
-						style={{ top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width }}
-					>
-						<input
-							className="dept-search"
-							type="text"
-							placeholder="Search departments…"
-							value={search}
-							onChange={(e) => setSearch(e.target.value)}
-							autoFocus
-						/>
-						<div className="dept-list">
-							{filtered.map((d) => (
-								<label key={d} className="dept-option">
-									<input
-										type="checkbox"
-										checked={selectedSet.has(d)}
-										onChange={() => toggleDept(d)}
-									/>
-									<span>{d}</span>
-								</label>
-							))}
-							{filtered.length === 0 && <p className="dept-empty">No departments found</p>}
-						</div>
-					</div>,
-					document.body
-				)}
-			</div>
+			{open && (
+				<div className="dept-dropdown">
+					<input
+						className="dept-search"
+						type="text"
+						placeholder="Search departments…"
+						value={search}
+						onChange={(e) => setSearch(e.target.value)}
+						autoFocus
+					/>
+					<div className="dept-list">
+						{filtered.map((d) => (
+							<label key={d} className="dept-option">
+								<input
+									type="checkbox"
+									checked={selectedSet.has(d)}
+									onChange={() => toggleDept(d)}
+								/>
+								<span>{d}</span>
+							</label>
+						))}
+						{filtered.length === 0 && <p className="dept-empty">No departments found</p>}
+					</div>
+				</div>
+			)}
 
-			{selectedSet.size > 0 && (
+			{!open && selectedSet.size > 0 && (
 				<div className="filter-tags">
 					{[...selectedSet].map((d) => (
 						<button key={d} className="filter-tag" onClick={() => toggleDept(d)}>
-							{d} <span className="filter-tag-x">×</span>
+							{d}
+							<span className="filter-tag-x">×</span>
 						</button>
 					))}
 				</div>
