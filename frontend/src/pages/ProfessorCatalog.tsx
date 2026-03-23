@@ -109,6 +109,7 @@ export default function ProfessorCatalog() {
   const [loading, setLoading]       = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [deptOpen, setDeptOpen] = useState(false);
+  const [collegeOpen, setCollegeOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => (localStorage.getItem('catalog-view') as 'grid' | 'list') || 'grid');
   const [minRatingDraft, setMinRatingDraft] = useState(() => getFiltersFromSearchParams(searchParams).minRating);
   const [maxRatingDraft, setMaxRatingDraft] = useState(() => getFiltersFromSearchParams(searchParams).maxRating);
@@ -351,7 +352,7 @@ export default function ProfessorCatalog() {
       <div className="catalog-layout">
         {/* ── Sidebar ── */}
         <aside className={`catalog-sidebar ${sidebarOpen ? 'open' : ''}`}>
-          <div className={`sidebar-inner ${deptOpen ? 'dept-open' : ''}`}>
+          <div className={`sidebar-inner ${deptOpen || collegeOpen ? 'dept-open' : ''}`}>
             <div className="sidebar-header">
               <span className="sidebar-title">Filters</span>
               {hasActiveFilters && (
@@ -383,6 +384,7 @@ export default function ProfessorCatalog() {
                 colleges={colleges}
                 selected={filters.college}
                 onSelect={c => setCollege(c)}
+                onOpenChange={setCollegeOpen}
               />
             </div>
 
@@ -799,19 +801,26 @@ function CollegeFilter({
   colleges,
   selected,
   onSelect,
+  onOpenChange,
 }: {
   colleges: string[];
   selected: string;
   onSelect: (college: string) => void;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const toggle = (o: boolean) => { setOpen(o); onOpenChange?.(o); };
+  const [search, setSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
   const selectedSet = useMemo(() => new Set(selected ? selected.split(',') : []), [selected]);
+  const filtered = colleges.filter(c =>
+    c.toLowerCase().includes(search.toLowerCase())
+  );
 
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) toggle(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -834,7 +843,7 @@ function CollegeFilter({
     <div className="dept-filter" ref={ref}>
       <button
         className={`dept-toggle ${open ? 'open' : ''}`}
-        onClick={() => setOpen(o => !o)}
+        onClick={() => toggle(!open)}
         aria-expanded={open}
       >
         <span className="dept-toggle-label">
@@ -849,8 +858,16 @@ function CollegeFilter({
 
       {open && (
         <div className="dept-dropdown">
+          <input
+            className="dept-search"
+            type="text"
+            placeholder="Search colleges…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            autoFocus
+          />
           <div className="dept-list">
-            {colleges.map(c => (
+            {filtered.map(c => (
               <label key={c} className="dept-option">
                 <input
                   type="checkbox"
@@ -860,6 +877,9 @@ function CollegeFilter({
                 <span>{c}</span>
               </label>
             ))}
+            {filtered.length === 0 && (
+              <p className="dept-empty">No colleges found</p>
+            )}
           </div>
         </div>
       )}
