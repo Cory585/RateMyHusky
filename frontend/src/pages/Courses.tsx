@@ -82,6 +82,7 @@ export default function Courses() {
 	const [totalPages, setTotalPages] = useState(1);
 	const [loading, setLoading] = useState(true);
 	const [sidebarOpen, setSidebarOpen] = useState(false);
+	const [deptOpen, setDeptOpen] = useState(false);
 
 	const [minRatingDraft, setMinRatingDraft] = useState(() => getFiltersFromSearchParams(searchParams).minRating);
 	const [maxRatingDraft, setMaxRatingDraft] = useState(() => getFiltersFromSearchParams(searchParams).maxRating);
@@ -101,7 +102,7 @@ export default function Courses() {
 	}, []);
 
 	const pageSize = useMemo(() => {
-		if (viewportWidth <= 480) return 6;
+		if (viewportWidth <= 480) return 8;
 		if (viewportWidth <= 768) return 9;
 		return 20;
 	}, [viewportWidth]);
@@ -237,21 +238,12 @@ export default function Courses() {
 	return (
 		<div className="catalog-page">
 			<ThemeToggle />
-			<button className="catalog-filter-toggle" onClick={() => setSidebarOpen((o) => !o)} aria-label="Toggle filters">
-				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-					<line x1="4" y1="6" x2="20" y2="6" />
-					<line x1="4" y1="12" x2="20" y2="12" />
-					<line x1="4" y1="18" x2="20" y2="18" />
-				</svg>
-				Filters
-				{hasActiveFilters && <span className="filter-active-dot" />}
-			</button>
 
 			{sidebarOpen && <div className="catalog-overlay" onClick={() => setSidebarOpen(false)} />}
 
 			<div className="catalog-layout">
 				<aside className={`catalog-sidebar ${sidebarOpen ? 'open' : ''}`}>
-					<div className="sidebar-inner">
+					<div className={`sidebar-inner ${deptOpen ? 'dept-open' : ''}`}>
 						<div className="sidebar-header">
 							<span className="sidebar-title">Filters</span>
 							{hasActiveFilters && (
@@ -267,8 +259,13 @@ export default function Courses() {
 						</div>
 
 						<div className="filter-section">
-							<p className="filter-label">Department</p>
-							<DepartmentFilter departments={departments} selected={filters.dept} onSelect={(d) => updateFilter('dept', d)} />
+							<p className="filter-label">
+								Department
+								{filters.dept && (
+									<button className="dept-clear-btn" onClick={() => updateFilter('dept', '')}>Clear all</button>
+								)}
+							</p>
+							<DepartmentFilter departments={departments} selected={filters.dept} onSelect={(d) => updateFilter('dept', d)} onOpenChange={setDeptOpen} />
 						</div>
 
 						<div className="filter-section">
@@ -352,6 +349,15 @@ export default function Courses() {
 								</ul>
 							)}
 						</div>
+					<button className="catalog-filter-toggle" onClick={() => setSidebarOpen((o) => !o)} aria-label="Toggle filters">
+						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+							<line x1="4" y1="6" x2="20" y2="6" />
+							<line x1="4" y1="12" x2="20" y2="12" />
+							<line x1="4" y1="18" x2="20" y2="18" />
+						</svg>
+						Filters
+						{hasActiveFilters && <span className="filter-active-dot" />}
+					</button>
 					</div>
 
 					<p className="catalog-disclaimer">
@@ -476,35 +482,94 @@ function DepartmentFilter({
 	departments,
 	selected,
 	onSelect,
+	onOpenChange,
 }: {
 	departments: string[];
 	selected: string;
 	onSelect: (dept: string) => void;
+	onOpenChange?: (open: boolean) => void;
 }) {
+	const [open, setOpen] = useState(false);
+	const toggle = (o: boolean) => { setOpen(o); onOpenChange?.(o); };
 	const [search, setSearch] = useState('');
+	const ref = useRef<HTMLDivElement>(null);
 	const filtered = departments.filter((d) => d.toLowerCase().includes(search.toLowerCase()));
+	const selectedSet = useMemo(() => new Set(selected ? selected.split(',') : []), [selected]);
+
+	useEffect(() => {
+		if (!open) return;
+		const handler = (e: MouseEvent) => {
+			if (ref.current && !ref.current.contains(e.target as Node)) toggle(false);
+		};
+		document.addEventListener('mousedown', handler);
+		return () => document.removeEventListener('mousedown', handler);
+	}, [open]);
+
+	const toggleDept = (d: string) => {
+		const next = new Set(selectedSet);
+		if (next.has(d)) next.delete(d);
+		else next.add(d);
+		onSelect([...next].join(','));
+	};
+
+	const label =
+		selectedSet.size === 0
+			? 'All departments'
+			: selectedSet.size === 1
+				? [...selectedSet][0]
+				: `${selectedSet.size} departments`;
 
 	return (
-		<div className="dept-filter">
-			<input
-				className="dept-search"
-				type="text"
-				placeholder="Search departments..."
-				value={search}
-				onChange={(e) => setSearch(e.target.value)}
-			/>
-			<div className="dept-list">
-				<label className="dept-option">
-					<input type="radio" name="dept" checked={!selected} onChange={() => onSelect('')} />
-					<span>All departments</span>
-				</label>
-				{filtered.map((d) => (
-					<label key={d} className="dept-option">
-						<input type="radio" name="dept" checked={selected === d} onChange={() => onSelect(d)} />
-						<span>{d}</span>
-					</label>
-				))}
-			</div>
+		<div className="dept-filter" ref={ref}>
+			<button
+				className={`dept-toggle ${open ? 'open' : ''}`}
+				onClick={() => toggle(!open)}
+				aria-expanded={open}
+			>
+				<span className="dept-toggle-label">{label}</span>
+				<span className="dept-toggle-icon">
+					<span className="dept-bar" />
+					<span className="dept-bar" />
+					<span className="dept-bar" />
+				</span>
+			</button>
+
+			{open && (
+				<div className="dept-dropdown">
+					<input
+						className="dept-search"
+						type="text"
+						placeholder="Search departments…"
+						value={search}
+						onChange={(e) => setSearch(e.target.value)}
+						autoFocus
+					/>
+					<div className="dept-list">
+						{filtered.map((d) => (
+							<label key={d} className="dept-option">
+								<input
+									type="checkbox"
+									checked={selectedSet.has(d)}
+									onChange={() => toggleDept(d)}
+								/>
+								<span>{d}</span>
+							</label>
+						))}
+						{filtered.length === 0 && <p className="dept-empty">No departments found</p>}
+					</div>
+				</div>
+			)}
+
+			{!open && selectedSet.size > 0 && (
+				<div className="filter-tags">
+					{[...selectedSet].map((d) => (
+						<button key={d} className="filter-tag" onClick={() => toggleDept(d)}>
+							{d}
+							<span className="filter-tag-x">×</span>
+						</button>
+					))}
+				</div>
+			)}
 		</div>
 	);
 }

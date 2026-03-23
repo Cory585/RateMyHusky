@@ -20,7 +20,7 @@ const SORT_OPTIONS = [
   { value: 'reviews', label: 'Most Reviews' },
 ];
 
-const REVIEW_SLIDER_MAX = 100;
+const REVIEW_SLIDER_MAX = 1000;
 const REVIEW_INPUT_MAX = 10000;
 
 interface Filters {
@@ -41,7 +41,7 @@ const DEFAULT_FILTERS: Filters = {
   dept:       '',
   minRating:  0,
   maxRating:  5,
-  minReviews: 1,
+  minReviews: 0,
   maxReviews: null,
   sort:       'alpha',
   page:       1,
@@ -55,7 +55,7 @@ function getFiltersFromSearchParams(sp: URLSearchParams): Filters {
 
   const minRating = Number(sp.get('minRating') || '0');
   const maxRating = Number(sp.get('maxRating') || '5');
-  const minReviews = Number(sp.get('minReviews') || '1');
+  const minReviews = Number(sp.get('minReviews') || '0');
   const maxReviewsRaw = sp.get('maxReviews');
   const maxReviews = maxReviewsRaw !== null ? Number(maxReviewsRaw) : null;
   const page = Number(sp.get('page') || '1');
@@ -66,8 +66,8 @@ function getFiltersFromSearchParams(sp: URLSearchParams): Filters {
     dept:       sp.get('dept') || '',
     minRating:  Number.isFinite(minRating) ? Math.max(0, Math.min(5, minRating)) : 0,
     maxRating:  Number.isFinite(maxRating) ? Math.max(0, Math.min(5, maxRating)) : 5,
-    minReviews: Number.isFinite(minReviews) ? Math.max(1, Math.floor(minReviews)) : 1,
-    maxReviews: maxReviews !== null && Number.isFinite(maxReviews) ? Math.max(1, Math.floor(maxReviews)) : null,
+    minReviews: Number.isFinite(minReviews) ? Math.max(0, Math.floor(minReviews)) : 0,
+    maxReviews: maxReviews !== null && Number.isFinite(maxReviews) ? Math.max(0, Math.floor(maxReviews)) : null,
     sort,
     page:       Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1,
   };
@@ -80,7 +80,7 @@ function buildSearchParamsFromFilters(filters: Filters): URLSearchParams {
   if (filters.dept) next.set('dept', filters.dept);
   if (filters.minRating > 0) next.set('minRating', String(filters.minRating));
   if (filters.maxRating < 5) next.set('maxRating', String(filters.maxRating));
-  if (filters.minReviews > 1) next.set('minReviews', String(filters.minReviews));
+  if (filters.minReviews > 0) next.set('minReviews', String(filters.minReviews));
   if (filters.maxReviews !== null) next.set('maxReviews', String(filters.maxReviews));
   if (filters.sort !== 'alpha') next.set('sort', filters.sort);
   if (filters.page > 1) next.set('page', String(filters.page));
@@ -107,6 +107,8 @@ export default function ProfessorCatalog() {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading]       = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [deptOpen, setDeptOpen] = useState(false);
+  const [collegeOpen, setCollegeOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => (localStorage.getItem('catalog-view') as 'grid' | 'list') || 'grid');
   const [minRatingDraft, setMinRatingDraft] = useState(() => getFiltersFromSearchParams(searchParams).minRating);
   const [maxRatingDraft, setMaxRatingDraft] = useState(() => getFiltersFromSearchParams(searchParams).maxRating);
@@ -128,10 +130,10 @@ export default function ProfessorCatalog() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
   const pageSize = useMemo(() => {
-    if (viewportWidth <= 480) return 6;
+    if (viewportWidth <= 480) return viewMode === 'list' ? 8 : 6;
     if (viewportWidth <= 768) return 9;
     return 20;
-  }, [viewportWidth]);
+  }, [viewportWidth, viewMode]);
 
   // Fetch colleges once
   useEffect(() => {
@@ -154,7 +156,7 @@ export default function ProfessorCatalog() {
       dept:       filters.dept       || undefined,
       minRating:  filters.minRating  > 0 ? filters.minRating  : undefined,
       maxRating:  filters.maxRating  < 5 ? filters.maxRating  : undefined,
-      minReviews: filters.minReviews > 1 ? filters.minReviews : undefined,
+      minReviews: filters.minReviews > 0 ? filters.minReviews : undefined,
       maxReviews: filters.maxReviews ?? undefined,
       sort:       filters.sort as 'alpha' | 'rating' | 'reviews',
       page:       filters.page,
@@ -326,21 +328,15 @@ export default function ProfessorCatalog() {
   const hasActiveFilters =
     !!filters.q || !!filters.college || !!filters.dept || filters.minRating > 0 || filters.maxRating < 5 || filters.minReviews > 1 || filters.maxReviews !== null;
 
+  const activeFilterCount =
+    (filters.q ? 1 : 0) +
+    (filters.college ? filters.college.split(',').filter(Boolean).length : 0) +
+    (filters.dept ? filters.dept.split(',').filter(Boolean).length : 0) +
+    (filters.minRating > 0 || filters.maxRating < 5 ? 1 : 0) +
+    (filters.minReviews > 1 || filters.maxReviews !== null ? 1 : 0);
+
   return (
     <div className="catalog-page">
-      {/* Mobile sidebar toggle */}
-      <button
-        className="catalog-filter-toggle"
-        onClick={() => setSidebarOpen(o => !o)}
-        aria-label="Toggle filters"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <line x1="4" y1="6" x2="20" y2="6" />
-          <line x1="4" y1="12" x2="20" y2="12" />
-          <line x1="4" y1="18" x2="20" y2="18" />
-        </svg>
-        Filters
-      </button>
 
       {sidebarOpen && (
         <div className="catalog-overlay" onClick={() => setSidebarOpen(false)} />
@@ -349,7 +345,7 @@ export default function ProfessorCatalog() {
       <div className="catalog-layout">
         {/* ── Sidebar ── */}
         <aside className={`catalog-sidebar ${sidebarOpen ? 'open' : ''}`}>
-          <div className="sidebar-inner">
+          <div className={`sidebar-inner ${deptOpen || collegeOpen ? 'dept-open' : ''}`}>
             <div className="sidebar-header">
               <span className="sidebar-title">Filters</span>
               {hasActiveFilters && (
@@ -381,6 +377,7 @@ export default function ProfessorCatalog() {
                 colleges={colleges}
                 selected={filters.college}
                 onSelect={c => setCollege(c)}
+                onOpenChange={setCollegeOpen}
               />
             </div>
 
@@ -396,6 +393,7 @@ export default function ProfessorCatalog() {
                 departments={departments}
                 selected={filters.dept}
                 onSelect={d => updateFilter('dept', d)}
+                onOpenChange={setDeptOpen}
               />
             </div>
 
@@ -442,9 +440,9 @@ export default function ProfessorCatalog() {
               <p className="filter-label">
                 Reviews
                 <span className="slider-value">
-                  {minReviewsDraft <= 1 && maxReviewsDraft === null
+                  {minReviewsDraft <= 0 && maxReviewsDraft === null
                     ? 'Any'
-                    : minReviewsDraft <= 1
+                    : minReviewsDraft <= 0
                       ? `≤ ${maxReviewsDraft}`
                       : maxReviewsDraft === null
                         ? `${minReviewsDraft}+`
@@ -452,9 +450,9 @@ export default function ProfessorCatalog() {
                 </span>
               </p>
               <DualRangeSlider
-                min={1}
+                min={0}
                 max={REVIEW_SLIDER_MAX}
-                step={1}
+                step={50}
                 valueLow={Math.min(minReviewsDraft, REVIEW_SLIDER_MAX)}
                 valueHigh={Math.min(maxReviewsDraft ?? REVIEW_SLIDER_MAX, REVIEW_SLIDER_MAX)}
                 onChangeLow={v => setMinReviewsDraft(v)}
@@ -464,12 +462,12 @@ export default function ProfessorCatalog() {
                 <input
                   type="number"
                   className="reviews-number-input"
-                  min="1"
-                  value={minReviewsDraft === 1 ? '' : minReviewsDraft}
+                  min="0"
+                  value={minReviewsDraft === 0 ? '' : minReviewsDraft}
                   placeholder="Min"
                   onChange={e => {
                     const v = parseInt(e.target.value, 10);
-                    const clamped = isNaN(v) || v < 1 ? 1 : Math.min(v, REVIEW_INPUT_MAX);
+                    const clamped = isNaN(v) || v < 0 ? 0 : Math.min(v, REVIEW_INPUT_MAX);
                     setMinReviewsDraft(clamped);
                     if (maxReviewsDraft !== null && clamped > maxReviewsDraft) {
                       setMaxReviewsDraft(clamped);
@@ -480,7 +478,7 @@ export default function ProfessorCatalog() {
                 <input
                   type="number"
                   className="reviews-number-input"
-                  min="1"
+                  min="0"
                   value={maxReviewsDraft ?? ''}
                   placeholder="Max"
                   onChange={e => {
@@ -579,6 +577,21 @@ export default function ProfessorCatalog() {
                 </ul>
               )}
             </div>
+          <button
+            className="catalog-filter-toggle"
+            onClick={() => setSidebarOpen(o => !o)}
+            aria-label="Toggle filters"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="4" y1="6" x2="20" y2="6" />
+              <line x1="4" y1="12" x2="20" y2="12" />
+              <line x1="4" y1="18" x2="20" y2="18" />
+            </svg>
+            Filters
+            {activeFilterCount > 0 && (
+              <span className="filter-active-badge">{activeFilterCount}</span>
+            )}
+          </button>
           </div>
           <p className="catalog-disclaimer">
             Professors without any rating data are not shown.{' '}
@@ -793,19 +806,26 @@ function CollegeFilter({
   colleges,
   selected,
   onSelect,
+  onOpenChange,
 }: {
   colleges: string[];
   selected: string;
   onSelect: (college: string) => void;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const toggle = (o: boolean) => { setOpen(o); onOpenChange?.(o); };
+  const [search, setSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
   const selectedSet = useMemo(() => new Set(selected ? selected.split(',') : []), [selected]);
+  const filtered = colleges.filter(c =>
+    c.toLowerCase().includes(search.toLowerCase())
+  );
 
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) toggle(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -828,7 +848,7 @@ function CollegeFilter({
     <div className="dept-filter" ref={ref}>
       <button
         className={`dept-toggle ${open ? 'open' : ''}`}
-        onClick={() => setOpen(o => !o)}
+        onClick={() => toggle(!open)}
         aria-expanded={open}
       >
         <span className="dept-toggle-label">
@@ -843,8 +863,16 @@ function CollegeFilter({
 
       {open && (
         <div className="dept-dropdown">
+          <input
+            className="dept-search"
+            type="text"
+            placeholder="Search colleges…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            autoFocus
+          />
           <div className="dept-list">
-            {colleges.map(c => (
+            {filtered.map(c => (
               <label key={c} className="dept-option">
                 <input
                   type="checkbox"
@@ -854,7 +882,21 @@ function CollegeFilter({
                 <span>{c}</span>
               </label>
             ))}
+            {filtered.length === 0 && (
+              <p className="dept-empty">No colleges found</p>
+            )}
           </div>
+        </div>
+      )}
+
+      {!open && selectedSet.size > 0 && (
+        <div className="filter-tags">
+          {[...selectedSet].map(c => (
+            <button key={c} className="filter-tag" onClick={() => toggleCollege(c)}>
+              {c}
+              <span className="filter-tag-x">×</span>
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -867,12 +909,15 @@ function DepartmentFilter({
   departments,
   selected,
   onSelect,
+  onOpenChange,
 }: {
   departments: string[];
   selected: string;
   onSelect: (dept: string) => void;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const toggle = (o: boolean) => { setOpen(o); onOpenChange?.(o); };
   const [search, setSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
   const filtered = departments.filter(d =>
@@ -883,7 +928,7 @@ function DepartmentFilter({
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) toggle(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -906,7 +951,7 @@ function DepartmentFilter({
     <div className="dept-filter" ref={ref}>
       <button
         className={`dept-toggle ${open ? 'open' : ''}`}
-        onClick={() => setOpen(o => !o)}
+        onClick={() => toggle(!open)}
         aria-expanded={open}
       >
         <span className="dept-toggle-label">
@@ -944,6 +989,17 @@ function DepartmentFilter({
               <p className="dept-empty">No departments found</p>
             )}
           </div>
+        </div>
+      )}
+
+      {!open && selectedSet.size > 0 && (
+        <div className="filter-tags">
+          {[...selectedSet].map(d => (
+            <button key={d} className="filter-tag" onClick={() => toggleDept(d)}>
+              {d}
+              <span className="filter-tag-x">×</span>
+            </button>
+          ))}
         </div>
       )}
     </div>
