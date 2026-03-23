@@ -114,7 +114,7 @@ const RatingCell = ({ prof, isOpen, onToggle }: {
       onClick={(e) => { e.stopPropagation(); onToggle(); }}
     >
       <Stars rating={prof.avgRating} />
-      <span className="goat-score">{prof.avgRating.toFixed(2)}</span>
+      <span className="goat-score">{prof.avgRating != null ? prof.avgRating.toFixed(2) : '—'}</span>
       <span className="goat-rating-hint">ⓘ</span>
 
       {isOpen && (
@@ -134,7 +134,7 @@ const RatingCell = ({ prof, isOpen, onToggle }: {
           <div className="tooltip-divider" />
           <div className="tooltip-row">
             <span className="tooltip-label">Avg Rating</span>
-            <span className="tooltip-value tooltip-blended">{prof.avgRating.toFixed(2)}</span>
+            <span className="tooltip-value tooltip-blended">{prof.avgRating != null ? prof.avgRating.toFixed(2) : '—'}</span>
           </div>
         </div>
       )}
