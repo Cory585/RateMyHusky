@@ -738,13 +738,15 @@ export default function ProfessorCatalog() {
                     </div>
                   </div>
                   <div className="prof-card-info">
+                    <div className="prof-card-info-top">
+                      <h3 className="prof-name">{stripPrefix(prof.name)}</h3>
+                      <div className="prof-card-rating-row">
+                        <span className="prof-avg-num">{prof.avgRating != null ? prof.avgRating.toFixed(1) : 'N/A'}</span>
+                        <StarRating rating={prof.avgRating ?? 0} size="sm" />
+                      </div>
+                    </div>
                     <span className="prof-college">{prof.college}</span>
                     <span className="prof-dept-label">{prof.department}</span>
-                    <h3 className="prof-name">{stripPrefix(prof.name)}</h3>
-                    <div className="prof-card-rating-row">
-                      <span className="prof-avg-num">{prof.avgRating != null ? prof.avgRating.toFixed(1) : 'N/A'}</span>
-                      <StarRating rating={prof.avgRating ?? 0} size="sm" />
-                    </div>
                     <div className="prof-sub-ratings">
                       <div className="sub-rating-item" data-color={ratingColor(prof.rmpRating)}>
                         <span className="sub-rating-val">{prof.rmpRating != null ? prof.rmpRating.toFixed(1) : '—'}</span>

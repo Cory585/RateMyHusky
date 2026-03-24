@@ -919,6 +919,13 @@
   flex: 1;
 }
 
+.prof-card-info-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+}
+
 .prof-college {
   display: block;
   font-size: 0.62rem;
@@ -946,15 +953,18 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  margin: 4px 0 2px;
+  margin: 0 0 2px;
   line-height: 1.3;
+  flex: 1;
+  min-width: 0;
 }
 
 .prof-card-rating-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 2px;
+  margin-top: 0;
+  flex-shrink: 0;
 }
 
 .prof-avg-num {
