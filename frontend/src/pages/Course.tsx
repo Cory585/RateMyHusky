@@ -20,6 +20,7 @@ const Course = () => {
 	const [notFound, setNotFound] = useState(false);
 	const [visibleInstructorCount, setVisibleInstructorCount] = useState(INITIAL_INSTRUCTORS_VISIBLE);
 	const [visibleSectionCount, setVisibleSectionCount] = useState(INITIAL_SECTIONS_VISIBLE);
+	const [showBackToTop, setShowBackToTop] = useState(false);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -48,6 +49,12 @@ const Course = () => {
 		setVisibleInstructorCount(INITIAL_INSTRUCTORS_VISIBLE);
 		setVisibleSectionCount(INITIAL_SECTIONS_VISIBLE);
 	}, [course?.summary.code]);
+
+	useEffect(() => {
+		const handler = () => setShowBackToTop(window.scrollY > 300);
+		window.addEventListener('scroll', handler, { passive: true });
+		return () => window.removeEventListener('scroll', handler);
+	}, []);
 
 	const topInstructors = useMemo(() => {
 		if (!course) return [];
@@ -304,7 +311,16 @@ const Course = () => {
 				</section>
 
 			</div>
-			<Footer />
+			<button
+			className={`back-to-top ${showBackToTop ? 'visible' : ''}`}
+			onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+			aria-label="Back to top"
+		>
+			<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+				<polyline points="18 15 12 9 6 15" />
+			</svg>
+		</button>
+		<Footer />
 		</div>
 	);
 };

@@ -159,6 +159,7 @@ const Homepage = () => {
   // Pill animation state
   const [pillStyle, setPillStyle] = useState({ left: 0, width: 0, opacity: 0 });
   const [isPillReady, setIsPillReady] = useState(false);
+  const [showBackToTop, setShowBackToTop] = useState(false);
 
   // Navigate to professor page
   const handleProfClick = (name: string) => {
@@ -266,6 +267,12 @@ const Homepage = () => {
 
     return () => { cancelled = true; };
   }, [selectedCollege]);
+
+  useEffect(() => {
+    const handler = () => setShowBackToTop(window.scrollY > 300);
+    window.addEventListener('scroll', handler, { passive: true });
+    return () => window.removeEventListener('scroll', handler);
+  }, []);
 
   const [slotResult, setSlotResult] = useState<{ name: string; dept: string; college: string; slug: string } | null>(null);
   const [wheelState, setWheelState] = useState<'idle' | 'spinning' | 'result'>('idle');
@@ -540,6 +547,15 @@ const Homepage = () => {
         </div>
       </section>
 
+      <button
+        className={`back-to-top ${showBackToTop ? 'visible' : ''}`}
+        onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        aria-label="Back to top"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="18 15 12 9 6 15" />
+        </svg>
+      </button>
       <Footer />
     </div>
   );
