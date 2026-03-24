@@ -832,72 +832,30 @@
   }
 
   .prof-card {
-    padding: 12px;
-    gap: 10px;
     border-radius: 12px;
   }
 
-  .catalog-page .prof-avatar {
-    width: 36px;
-    height: 36px;
-    font-size: 0.78rem;
+  .prof-card-photo {
+    height: 130px;
   }
 
   .catalog-page .prof-name {
     font-size: 0.84rem;
-  }
-
-  .catalog-page .prof-dept {
-    font-size: 0.7rem;
-    margin-bottom: 4px;
-  }
-
-  .prof-college {
-    font-size: 0.6rem;
-  }
-
-  .prof-rating-row {
-    gap: 4px;
-    margin-bottom: 6px;
-  }
-
-  .prof-avg {
-    font-size: 0.78rem;
-  }
-
-  .prof-badges {
-    gap: 4px;
-    margin-bottom: 6px;
-  }
-
-  .prof-meta {
-    font-size: 0.68rem;
   }
 }
 
 /* ─── PROFESSOR CARD ───────────────────────────────────────── */
 
 .prof-card {
-  position: relative;
   background: #fff;
   border: 1px solid #e8e8e8;
   border-radius: 14px;
-  padding: 18px;
-  padding-right: 92px;
+  overflow: hidden;
   cursor: pointer;
   display: flex;
-  gap: 14px;
-  align-items: flex-start;
+  flex-direction: column;
   transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
   text-align: left;
-}
-
-.prof-avatar-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
 }
 
 .prof-card:hover {
@@ -911,19 +869,26 @@
   outline-offset: 2px;
 }
 
-.catalog-page .prof-avatar {
-  width: 44px;
-  height: 44px;
+/* Photo section */
+.prof-card-photo {
+  width: 100%;
+  height: 160px;
   flex-shrink: 0;
-  border-radius: 50%;
+  overflow: hidden;
+}
+
+.catalog-page .prof-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
   background: linear-gradient(135deg, #d6394c, #a02030);
   color: #fff;
-  font-weight: 800;
-  font-size: 0.88rem;
+  font-weight: 900;
+  font-size: 2.2rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  letter-spacing: 0.5px;
+  letter-spacing: 1px;
   overflow: hidden;
   position: relative;
 }
@@ -932,7 +897,7 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: 50%;
+  border-radius: 0;
   image-rendering: -webkit-optimize-contrast;
   image-rendering: crisp-edges;
 }
@@ -945,65 +910,64 @@
   height: 100%;
 }
 
-.catalog-page .prof-body {
+/* Info section */
+.prof-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px;
   flex: 1;
-  min-width: 0;
+}
+
+.prof-college {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #d6394c;
+}
+
+.prof-dept-label {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: #bbb;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: -1px;
 }
 
 .catalog-page .prof-name {
-  font-size: 1rem;
+  font-size: 0.97rem;
   font-weight: 700;
   color: #1a1a1a;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  margin-bottom: 3px;
-}
-
-.catalog-page .prof-dept {
-  font-size: 0.62rem;
-  color: #aaa;
-  text-align: center;
-  word-break: break-word;
-  max-width: 56px;
-  margin: 0;
+  margin: 4px 0 2px;
   line-height: 1.3;
 }
 
-.prof-college {
-  display: block;
-  font-size: 0.67rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #d6394c;
-  margin-bottom: 3px;
-}
-
-.prof-rating-side {
+.prof-card-rating-row {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  min-width: 72px;
-  text-align: center;
+  gap: 6px;
+  margin-top: 2px;
 }
 
-.prof-avg-large {
-  font-size: 1.75rem;
+.prof-avg-num {
+  font-size: 1.1rem;
   font-weight: 800;
   color: #1a1a1a;
   line-height: 1;
-  margin-bottom: 3px;
 }
 
 .prof-rating-count {
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   color: #bbb;
-  margin-top: 2px;
-  margin-bottom: 8px;
+  margin-top: 4px;
 }
 
 .prof-sub-ratings {
@@ -1316,22 +1280,11 @@
   }
 
   .prof-card {
-    padding: 10px;
-    padding-right: 74px;
-    gap: 8px;
     min-width: 0;
   }
 
-  .prof-rating-row {
-    top: 10px;
-    right: 10px;
-    gap: 4px;
-  }
-
-  .catalog-page .prof-avatar {
-    width: 32px;
-    height: 32px;
-    font-size: 0.72rem;
+  .prof-card-photo {
+    height: 120px;
   }
 
   .catalog-list .prof-list-item {
@@ -1599,8 +1552,12 @@
   color: #e0e0e0;
 }
 
-.dark .catalog-page .prof-dept {
-  color: #777;
+.dark .prof-dept-label {
+  color: #555;
+}
+
+.dark .prof-avg-num {
+  color: #e0e0e0;
 }
 
 
@@ -1624,9 +1581,6 @@
   color: #e05060;
 }
 
-.dark .prof-avg-large {
-  color: #e0e0e0;
-}
 
 .dark .prof-rating-count {
   color: #555;

@@ -10,7 +10,6 @@ import {
 import Dropdown from '../components/Dropdown';
 import Footer from '../components/Footer';
 import StarRating from '../components/StarRating';
-import ThemeToggle from '../components/ThemeToggle';
 import './ProfessorCatalog.css';
 import './Courses.css';
 
@@ -281,8 +280,6 @@ export default function Courses() {
 
 	return (
 		<div className="catalog-page">
-			<ThemeToggle />
-
 			{sidebarOpen && <div className="catalog-overlay" onClick={() => setSidebarOpen(false)} />}
 
 			<div className="catalog-header">

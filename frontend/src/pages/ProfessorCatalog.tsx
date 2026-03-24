@@ -10,6 +10,8 @@ import {
 } from '../api/api';
 import Footer from '../components/Footer';
 import Dropdown from '../components/Dropdown';
+import StarRating from '../components/StarRating';
+import { getInitials, stripPrefix } from '../utils/nameUtils';
 
 import './ProfessorCatalog.css';
 
@@ -84,19 +86,6 @@ function buildSearchParamsFromFilters(filters: Filters): URLSearchParams {
   if (filters.sort !== 'alpha') next.set('sort', filters.sort);
   if (filters.page > 1) next.set('page', String(filters.page));
   return next;
-}
-
-function initials(name: string) {
-  return name
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map(n => n[0].toUpperCase())
-    .join('');
-}
-
-function stripPrefix(name: string) {
-  return name.replace(/^(Dr\.|Prof\.|Professor|Mr\.|Ms\.|Mrs\.|Mx\.)\s+/i, '').trim();
 }
 
 function ratingColor(v: number | null): 'high' | 'mid' | 'low' | 'neutral' {
@@ -699,7 +688,7 @@ export default function ProfessorCatalog() {
                       className="prof-avatar-initials"
                       style={prof.imageUrl ? { display: 'none' } : undefined}
                     >
-                      {initials(prof.name)}
+                      {getInitials(prof.name)}
                     </span>
                   </div>
                   <div className="prof-list-info">
@@ -725,7 +714,7 @@ export default function ProfessorCatalog() {
                     e.key === 'Enter' && navigate(`/professors/${prof.slug}`, { state: { fromCatalog: `/professors?${searchParams.toString()}` } })
                   }
                 >
-                  <div className="prof-avatar-col">
+                  <div className="prof-card-photo">
                     <div className="prof-avatar">
                       {prof.imageUrl ? (
                         <img
@@ -744,20 +733,18 @@ export default function ProfessorCatalog() {
                         className="prof-avatar-initials"
                         style={prof.imageUrl ? { display: 'none' } : undefined}
                       >
-                        {initials(stripPrefix(prof.name))}
+                        {getInitials(prof.name)}
                       </span>
                     </div>
-                    <p className="prof-dept">{prof.department}</p>
                   </div>
-                  <div className="prof-body">
-                    <h3 className="prof-name">{stripPrefix(prof.name)}</h3>
+                  <div className="prof-card-info">
                     <span className="prof-college">{prof.college}</span>
-                  </div>
-                  <div className="prof-rating-side">
-                    <div className="prof-avg-large">
-                      {prof.avgRating != null ? prof.avgRating.toFixed(1) : 'N/A'}
+                    <span className="prof-dept-label">{prof.department}</span>
+                    <h3 className="prof-name">{stripPrefix(prof.name)}</h3>
+                    <div className="prof-card-rating-row">
+                      <span className="prof-avg-num">{prof.avgRating != null ? prof.avgRating.toFixed(1) : 'N/A'}</span>
+                      <StarRating rating={prof.avgRating ?? 0} size="sm" />
                     </div>
-                    <span className="prof-rating-count">{prof.totalReviews.toLocaleString()} ratings</span>
                     <div className="prof-sub-ratings">
                       <div className="sub-rating-item" data-color={ratingColor(prof.rmpRating)}>
                         <span className="sub-rating-val">{prof.rmpRating != null ? prof.rmpRating.toFixed(1) : '—'}</span>
@@ -768,6 +755,7 @@ export default function ProfessorCatalog() {
                         <span className="sub-rating-lbl">TRACE</span>
                       </div>
                     </div>
+                    <span className="prof-rating-count">{prof.totalReviews.toLocaleString()} ratings</span>
                   </div>
                 </div>
               ))}

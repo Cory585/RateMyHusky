@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import ThemeToggle from '../components/ThemeToggle';
 import StarRating from '../components/StarRating';
 import NotFound from './NotFound';
 import { fetchCourseData } from '../api/api';
 import type { CourseDetail } from '../api/api';
 import Footer from '../components/Footer';
+import { getInitials } from '../utils/nameUtils';
 import './Course.css';
 
 const INITIAL_INSTRUCTORS_VISIBLE = 5;
@@ -73,7 +73,6 @@ const Course = () => {
 	if (loading) {
 		return (
 			<div className="course-page">
-				<ThemeToggle />
 				<div className="course-shell">
 					<div className="course-loading">Loading course data...</div>
 				</div>
@@ -97,7 +96,6 @@ const Course = () => {
 
 	return (
 		<div className="course-page">
-			<ThemeToggle />
 			<div className="course-shell">
 				<div className="course-breadcrumb">
 					<Link to="/courses">Courses</Link>
@@ -333,15 +331,6 @@ function StatCard({ label, value }: { label: string; value: string }) {
 			<strong>{value}</strong>
 		</article>
 	);
-}
-
-function getInitials(name: string): string {
-	return name
-		.split(' ')
-		.filter(Boolean)
-		.slice(0, 2)
-		.map((part) => part[0]?.toUpperCase() ?? '')
-		.join('');
 }
 
 export default Course;
