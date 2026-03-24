@@ -974,10 +974,15 @@
   line-height: 1;
 }
 
+.prof-card-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
 .prof-rating-count {
   font-size: 0.6rem;
   color: #bbb;
-  margin-top: 4px;
 }
 
 .prof-sub-ratings {

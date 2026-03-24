@@ -757,7 +757,10 @@ export default function ProfessorCatalog() {
                         <span className="sub-rating-lbl">TRACE</span>
                       </div>
                     </div>
-                    <span className="prof-rating-count">{prof.totalReviews.toLocaleString()} ratings</span>
+                    <div className="prof-card-footer">
+                      <span className="prof-rating-count">{prof.totalReviews.toLocaleString()} ratings</span>
+                      <span className="prof-rating-count">{prof.wouldTakeAgainPct != null ? `${Math.round(prof.wouldTakeAgainPct)}% again` : '—'}</span>
+                    </div>
                   </div>
                 </div>
               ))}
