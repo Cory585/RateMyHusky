@@ -121,7 +121,6 @@ if not CRDB_DATABASE_URL:
 
 pool = SimpleConnectionPool(5, 20, CRDB_DATABASE_URL, sslmode="require",
                             connect_timeout=5,
-                            options="-c statement_timeout=10000",
                             keepalives=1, keepalives_idle=30,
                             keepalives_interval=10, keepalives_count=3)
 
@@ -705,6 +704,11 @@ def professors_catalog():
     except (ValueError, TypeError):
         max_reviews = None
 
+    cache_key = f"profcat:{q}:{college}:{dept}:{sort}:{page}:{limit}:{min_rating}:{max_rating}:{min_reviews}:{max_reviews}"
+    cached = cache_get(cache_key)
+    if cached:
+        return jsonify(cached)
+
     # If there's a search query, get matching name_keys first
     matched_name_keys = None
     if q and len(q) >= 2:
@@ -835,12 +839,14 @@ def professors_catalog():
             "imageUrl": row["image_url"],
         })
 
-    return jsonify({
+    result = {
         "professors": professors,
         "total": total,
         "page": page,
         "totalPages": total_pages,
-    })
+    }
+    cache_set(cache_key, result)
+    return jsonify(result)
 
 
 @app.route("/api/course-departments")
