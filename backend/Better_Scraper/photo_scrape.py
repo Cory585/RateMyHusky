@@ -47,7 +47,7 @@ DIRECTORY_CONFIGS = [
     {"subdomain": "cssh",       "dir_path": "/faculty/"},
     {"subdomain": "law",        "dir_path": "/faculty/"},
     {"subdomain": "cps",        "dir_path": "/faculty/"},
-    {"subdomain": "coe",        "dir_path": "/people/"},
+    {"subdomain": "coe",        "dir_path": "/faculty-staff-directory/"},
 ]
 
 # Department keyword → subdomain mapping (uses substring matching, not exact)
@@ -127,15 +127,23 @@ def name_to_slug(name):
 
 
 def slug_variations(name):
-    """Generate slug variations for a name."""
+    """Generate slug variations for a name.
+
+    Includes both first-last and last-first formats since some colleges
+    (e.g., COE) use last-first URL slugs.
+    """
     slugs = set()
     base = name_to_slug(name)
     slugs.add(base)
 
     parts = normalize_name(name).split()
     if len(parts) >= 2:
+        # first-last (skip middle names)
         slugs.add(re.sub(r'[^a-z0-9]+', '-', f"{parts[0]} {parts[-1]}").strip('-'))
+        # last-first (COE format)
+        slugs.add(re.sub(r'[^a-z0-9]+', '-', f"{parts[-1]} {parts[0]}").strip('-'))
     if len(parts) >= 3:
+        # first-middle-last
         slugs.add(re.sub(r'[^a-z0-9]+', '-', f"{parts[0]} {parts[1]} {parts[-1]}").strip('-'))
 
     return list(slugs)

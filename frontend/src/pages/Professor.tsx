@@ -77,7 +77,6 @@ const sortOptions = [
 const traceSortOptions = [
   { value: 'popular', label: 'Most Popular' },
   { value: 'newest', label: 'Most Recent' },
-  { value: 'alphabetical', label: 'A-Z' },
 ];
 
 // Strictly extract "Season Year" from messy term titles
