@@ -122,7 +122,8 @@ pool = SimpleConnectionPool(5, 20, CRDB_DATABASE_URL, sslmode="require")
 # ──────────────────────────────────────────────
 _cache = {}
 _cache_lock = Lock()
-CACHE_TTL = 300  # 5 minutes
+CACHE_TTL = 300       # 5 minutes
+CACHE_MAX_SIZE = 5000
 
 
 def cache_get(key):
@@ -136,8 +137,7 @@ def cache_get(key):
 def cache_set(key, data):
     with _cache_lock:
         _cache[key] = {"data": data, "ts": time.time()}
-        # Evict old entries if cache gets too large
-        if len(_cache) > 2000:
+        if len(_cache) > CACHE_MAX_SIZE:
             cutoff = time.time() - CACHE_TTL
             expired = [k for k, v in _cache.items() if v["ts"] < cutoff]
             for k in expired:
@@ -277,13 +277,18 @@ def stats():
 
 @app.route("/api/colleges")
 def colleges():
+    cached = cache_get("colleges")
+    if cached:
+        return jsonify(cached)
     rows = query("""
         SELECT college, COUNT(*) as cnt FROM professors_catalog
         WHERE avg_rating IS NOT NULL
         GROUP BY college HAVING COUNT(*) >= 5
         ORDER BY college
     """)
-    return jsonify([r['college'] for r in rows if r['college'] != 'Other'])
+    result = [r['college'] for r in rows if r['college'] != 'Other']
+    cache_set("colleges", result)
+    return jsonify(result)
 
 
 NO_MIN_COLLEGES = {"Law", "Professional Studies"}
@@ -294,6 +299,11 @@ def goat_professors():
     college = request.args.get("college", "Khoury")
     limit = min(int(request.args.get("limit", "10")), 50)
     min_reviews = int(request.args.get("min_reviews", "100"))
+
+    cache_key = f"goat:{college}:{limit}:{min_reviews}"
+    cached = cache_get(cache_key)
+    if cached:
+        return jsonify(cached)
 
     if college in NO_MIN_COLLEGES:
         rows = query("""
@@ -323,6 +333,7 @@ def goat_professors():
             "totalReviews": row["total_reviews"],
             "url": row["professor_url"] or "",
         })
+    cache_set(cache_key, result)
     return jsonify(result)
 
 
@@ -625,6 +636,10 @@ def professor_profile(slug):
 @app.route("/api/departments")
 def departments():
     college = request.args.get("college", "")
+    cache_key = f"depts:{college or 'all'}"
+    cached = cache_get(cache_key)
+    if cached:
+        return jsonify(cached)
     if college and college != "All":
         college_list = [c.strip() for c in college.split(",") if c.strip()]
         if len(college_list) == 1:
@@ -645,7 +660,9 @@ def departments():
             WHERE avg_rating IS NOT NULL
             ORDER BY department
         """)
-    return jsonify([r['department'] for r in rows if r['department']])
+    result = [r['department'] for r in rows if r['department']]
+    cache_set(cache_key, result)
+    return jsonify(result)
 
 
 @app.route("/api/professors-catalog")
@@ -815,12 +832,17 @@ def professors_catalog():
 
 @app.route("/api/course-departments")
 def course_departments():
+    cached = cache_get("course_depts")
+    if cached:
+        return jsonify(cached)
     rows = query("""
         SELECT DISTINCT department FROM course_catalog
         WHERE department IS NOT NULL AND department != ''
         ORDER BY department
     """)
-    return jsonify([r["department"] for r in rows])
+    result = [r["department"] for r in rows]
+    cache_set("course_depts", result)
+    return jsonify(result)
 
 
 @app.route("/api/courses-catalog")
