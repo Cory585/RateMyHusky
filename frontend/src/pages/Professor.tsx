@@ -66,6 +66,41 @@ const AnimatedNumber = ({
   return <span ref={ref}>{display}</span>;
 };
 
+/* ───────── term collapse chevron ───────── */
+const TermCollapseChevron = () => {
+  const ref = useRef<SVGSVGElement>(null);
+  const [hasLeftSibling, setHasLeftSibling] = useState(false);
+
+  useLayoutEffect(() => {
+    const svg = ref.current;
+    if (!svg) return;
+    const wrapper = svg.parentElement;
+    if (!wrapper) return;
+    const check = () => {
+      const prev = wrapper.previousElementSibling as HTMLElement | null;
+      if (prev) {
+        const wTop = wrapper.getBoundingClientRect().top;
+        const prevTop = prev.getBoundingClientRect().top;
+        setHasLeftSibling(Math.abs(prevTop - wTop) < 5);
+      } else {
+        setHasLeftSibling(false);
+      }
+    };
+    check();
+    const frame = requestAnimationFrame(check);
+    const container = wrapper.parentElement;
+    const ro = container ? new ResizeObserver(check) : null;
+    if (container && ro) ro.observe(container);
+    return () => { ro?.disconnect(); cancelAnimationFrame(frame); };
+  });
+
+  return hasLeftSibling ? (
+    <svg ref={ref} className="prof-term-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+  ) : (
+    <svg ref={ref} className="prof-term-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15" /></svg>
+  );
+};
+
 /* ───────── sort / filter options ───────── */
 const sortOptions = [
   { value: 'newest', label: 'Newest First' },
@@ -606,13 +641,13 @@ const Professor = () => {
 
   return (
     <div className="prof-page">
-      <Breadcrumbs items={[
-        { label: 'Professors', to: '/professors' },
-        { label: profile.name },
-      ]} />
       <header className="prof-hero">
         <div className="prof-hero-bg" style={{ backgroundImage: `url(${neuIcon})` }} />
         <div className="prof-hero-glow" />
+        <Breadcrumbs items={[
+          { label: 'Professors', to: '/professors' },
+          { label: profile.name },
+        ]} />
         <div className="prof-hero-inner">
           <div
             className={`prof-avatar ${profile.imageUrl ? 'prof-avatar-clickable' : ''}`}
@@ -846,7 +881,7 @@ const Professor = () => {
                               }, hiddenTermCount * 40 + 200);
                             }}
                           >
-                            <svg className="prof-term-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15" /></svg>
+                            <TermCollapseChevron />
                           </span>
                         )}
                       </div>
@@ -914,7 +949,7 @@ const Professor = () => {
                                     }, hiddenTermCount * 40 + 200);
                                   }}
                                 >
-                                  <svg className="prof-term-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15" /></svg>
+                                  <TermCollapseChevron />
                                 </span>
                               )}
                             </div>
