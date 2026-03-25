@@ -9,7 +9,7 @@ Run:           python server.py
 import os, re, unicodedata, json, hashlib, random
 import html as _html
 import psycopg2
-from psycopg2.pool import SimpleConnectionPool
+from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.extras import RealDictCursor
 from functools import lru_cache
 from dotenv import load_dotenv
@@ -119,10 +119,16 @@ CRDB_DATABASE_URL = os.getenv("CRDB_DATABASE_URL")
 if not CRDB_DATABASE_URL:
     raise RuntimeError("CRDB_DATABASE_URL environment variable is required")
 
-pool = SimpleConnectionPool(5, 20, CRDB_DATABASE_URL, sslmode="require",
-                            connect_timeout=5,
-                            keepalives=1, keepalives_idle=30,
-                            keepalives_interval=10, keepalives_count=3)
+_pool = None
+
+def _get_pool():
+    global _pool
+    if _pool is None:
+        _pool = ThreadedConnectionPool(5, 20, CRDB_DATABASE_URL, sslmode="require",
+                                       connect_timeout=5,
+                                       keepalives=1, keepalives_idle=30,
+                                       keepalives_interval=10, keepalives_count=3)
+    return _pool
 
 # ──────────────────────────────────────────────
 #  Simple in-memory cache (TTL-based)
@@ -153,7 +159,7 @@ def cache_set(key, data):
 
 def get_db():
     if 'db' not in g:
-        g.db = pool.getconn()
+        g.db = _get_pool().getconn()
     return g.db
 
 
@@ -161,7 +167,7 @@ def get_db():
 def return_db(exc):
     db = g.pop('db', None)
     if db is not None:
-        pool.putconn(db)
+        _get_pool().putconn(db)
 
 
 def query(sql, params=None):
