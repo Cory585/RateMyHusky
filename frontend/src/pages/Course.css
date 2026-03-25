@@ -611,3 +611,36 @@
 .dark .course-expand-btn:hover .course-expand-chevron {
 	border-color: #f06d7d;
 }
+
+/* ── back to top ── */
+.back-to-top {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  z-index: 250;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: #d6394c;
+  color: #fff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(214,57,76,0.35);
+  opacity: 0;
+  transform: translateY(20px);
+  pointer-events: none;
+  transition: opacity 0.3s, transform 0.3s, background 0.2s;
+}
+.back-to-top.visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.back-to-top:hover {
+  background: #b82e3f;
+  box-shadow: 0 6px 24px rgba(214,57,76,0.45);
+}
+.back-to-top svg { width: 20px; height: 20px; }

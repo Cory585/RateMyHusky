@@ -10,7 +10,6 @@ import {
 import Dropdown from '../components/Dropdown';
 import Footer from '../components/Footer';
 import StarRating from '../components/StarRating';
-import ThemeToggle from '../components/ThemeToggle';
 import './ProfessorCatalog.css';
 import './Courses.css';
 
@@ -281,8 +280,6 @@ export default function Courses() {
 
 	return (
 		<div className="catalog-page">
-			<ThemeToggle />
-
 			{sidebarOpen && <div className="catalog-overlay" onClick={() => setSidebarOpen(false)} />}
 
 			<div className="catalog-header">
@@ -395,12 +392,12 @@ export default function Courses() {
 								</ul>
 							)}
 						</div>
-					<button className="catalog-filter-toggle" onClick={() => setSidebarOpen((o) => !o)} aria-label="Toggle filters">
-						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-							<line x1="4" y1="6" x2="20" y2="6" />
-							<line x1="4" y1="12" x2="20" y2="12" />
-							<line x1="4" y1="18" x2="20" y2="18" />
-						</svg>
+					<button className={`catalog-filter-toggle${sidebarOpen ? ' open' : ''}`} onClick={() => setSidebarOpen((o) => !o)} aria-label="Toggle filters">
+						<span className="filter-toggle-icon">
+							<span className="filter-toggle-bar" />
+							<span className="filter-toggle-bar" />
+							<span className="filter-toggle-bar" />
+						</span>
 						Filters
 						{hasActiveFilters && <span className="filter-active-dot" />}
 					</button>
@@ -434,16 +431,18 @@ export default function Courses() {
 									onClick={() => navigate(`/courses/${course.code.toLowerCase()}`)}
 									onKeyDown={(e) => e.key === 'Enter' && navigate(`/courses/${course.code.toLowerCase()}`)}
 								>
+									<div className="course-card-header">
+										<span className="course-card-code">{course.code}</span>
+									</div>
 									<div className="prof-body">
-										<div className="course-code">{course.code}</div>
 										<h3 className="prof-name">{course.name}</h3>
 										<p className="prof-dept">{course.department}</p>
 
 										<div className="prof-rating-row">
 											{course.avgRating != null ? (
 												<>
-													<StarRating rating={course.avgRating} size="sm" />
 													<span className="prof-avg">{course.avgRating.toFixed(2)}</span>
+													<StarRating rating={course.avgRating} size="sm" />
 												</>
 											) : (
 												<span className="prof-avg na">N/A</span>

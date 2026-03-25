@@ -16,11 +16,22 @@ const Navbar = () => {
   const location = useLocation();
   const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') === 'dark');
 
+  // Sync with floating ThemeToggle
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const dark = (e as CustomEvent<{ isDark: boolean }>).detail.isDark;
+      setIsDark(dark);
+    };
+    window.addEventListener('themechange', handler);
+    return () => window.removeEventListener('themechange', handler);
+  }, []);
+
   const toggleDark = () => {
     const next = !isDark;
     setIsDark(next);
-    localStorage.setItem('theme', next ? 'dark' : 'light');
     document.documentElement.classList.toggle('dark', next);
+    localStorage.setItem('theme', next ? 'dark' : 'light');
+    window.dispatchEvent(new CustomEvent('themechange', { detail: { isDark: next } }));
   };
 
   const updatePill = useCallback(() => {

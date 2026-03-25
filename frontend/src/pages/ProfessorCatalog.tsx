@@ -9,8 +9,9 @@ import {
   type ProfessorSuggestion,
 } from '../api/api';
 import Footer from '../components/Footer';
-import RatingBadge from '../components/RatingBadge';
 import Dropdown from '../components/Dropdown';
+import StarRating from '../components/StarRating';
+import { getInitials, stripPrefix } from '../utils/nameUtils';
 
 import './ProfessorCatalog.css';
 
@@ -87,13 +88,11 @@ function buildSearchParamsFromFilters(filters: Filters): URLSearchParams {
   return next;
 }
 
-function initials(name: string) {
-  return name
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map(n => n[0].toUpperCase())
-    .join('');
+function ratingColor(v: number | null): 'high' | 'mid' | 'low' | 'neutral' {
+  if (v === null) return 'neutral';
+  if (v >= 4) return 'high';
+  if (v >= 3) return 'mid';
+  return 'low';
 }
 
 export default function ProfessorCatalog() {
@@ -625,15 +624,15 @@ export default function ProfessorCatalog() {
               )}
             </div>
           <button
-            className="catalog-filter-toggle"
+            className={`catalog-filter-toggle${sidebarOpen ? ' open' : ''}`}
             onClick={() => setSidebarOpen(o => !o)}
             aria-label="Toggle filters"
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="4" y1="6" x2="20" y2="6" />
-              <line x1="4" y1="12" x2="20" y2="12" />
-              <line x1="4" y1="18" x2="20" y2="18" />
-            </svg>
+            <span className="filter-toggle-icon">
+              <span className="filter-toggle-bar" />
+              <span className="filter-toggle-bar" />
+              <span className="filter-toggle-bar" />
+            </span>
             Filters
             {activeFilterCount > 0 && (
               <span className="filter-active-badge">{activeFilterCount}</span>
@@ -689,7 +688,7 @@ export default function ProfessorCatalog() {
                       className="prof-avatar-initials"
                       style={prof.imageUrl ? { display: 'none' } : undefined}
                     >
-                      {initials(prof.name)}
+                      {getInitials(prof.name)}
                     </span>
                   </div>
                   <div className="prof-list-info">
@@ -715,53 +714,53 @@ export default function ProfessorCatalog() {
                     e.key === 'Enter' && navigate(`/professors/${prof.slug}`, { state: { fromCatalog: `/professors?${searchParams.toString()}` } })
                   }
                 >
-                  <div className="prof-avatar">
-                    {prof.imageUrl ? (
-                      <img
-                        src={prof.imageUrl}
-                        alt=""
-                        className="prof-avatar-img"
-                        onError={(e) => {
-                          const target = e.currentTarget;
-                          target.style.display = 'none';
-                          const fallback = target.parentElement?.querySelector('.prof-avatar-initials') as HTMLElement;
-                          if (fallback) fallback.style.display = 'flex';
-                        }}
-                      />
-                    ) : null}
-                    <span
-                      className="prof-avatar-initials"
-                      style={prof.imageUrl ? { display: 'none' } : undefined}
-                    >
-                      {initials(prof.name)}
-                    </span>
+                  <div className="prof-card-photo">
+                    <div className="prof-avatar">
+                      {prof.imageUrl ? (
+                        <img
+                          src={prof.imageUrl}
+                          alt=""
+                          className="prof-avatar-img"
+                          onError={(e) => {
+                            const target = e.currentTarget;
+                            target.style.display = 'none';
+                            const fallback = target.parentElement?.querySelector('.prof-avatar-initials') as HTMLElement;
+                            if (fallback) fallback.style.display = 'flex';
+                          }}
+                        />
+                      ) : null}
+                      <span
+                        className="prof-avatar-initials"
+                        style={prof.imageUrl ? { display: 'none' } : undefined}
+                      >
+                        {getInitials(prof.name)}
+                      </span>
+                    </div>
                   </div>
-                  <div className="prof-body">
-                    <h3 className="prof-name">{prof.name}</h3>
-                    <p className="prof-dept">{prof.department}</p>
+                  <div className="prof-card-info">
+                    <div className="prof-card-info-top">
+                      <h3 className="prof-name">{stripPrefix(prof.name)}</h3>
+                      <div className="prof-card-rating-row">
+                        <span className="prof-avg-num">{prof.avgRating != null ? prof.avgRating.toFixed(1) : 'N/A'}</span>
+                        <StarRating rating={prof.avgRating ?? 0} size="sm" />
+                      </div>
+                    </div>
                     <span className="prof-college">{prof.college}</span>
-
-                    <div className="prof-rating-row">
-                      {prof.avgRating != null ? (
-                        <span className="prof-avg">{prof.avgRating.toFixed(2)}</span>
-                      ) : (
-                        <span className="prof-avg na">N/A</span>
-                      )}
+                    <span className="prof-dept-label">{prof.department}</span>
+                    <div className="prof-sub-ratings">
+                      <div className="sub-rating-item" data-color={ratingColor(prof.rmpRating)}>
+                        <span className="sub-rating-val">{prof.rmpRating != null ? prof.rmpRating.toFixed(1) : '—'}</span>
+                        <span className="sub-rating-lbl">RMP</span>
+                      </div>
+                      <div className="sub-rating-item" data-color={ratingColor(prof.traceRating)}>
+                        <span className="sub-rating-val">{prof.traceRating != null ? prof.traceRating.toFixed(1) : '—'}</span>
+                        <span className="sub-rating-lbl">TRACE</span>
+                      </div>
                     </div>
-
-                    <div className="prof-badges">
-                      <RatingBadge label="RMP"   value={prof.rmpRating}   size="sm" />
-                      <RatingBadge label="TRACE" value={prof.traceRating} size="sm" />
-                    </div>
-
-                    <div className="prof-meta">
-                      <span>{prof.totalReviews.toLocaleString()} review{prof.totalReviews !== 1 ? 's' : ''}</span>
-                      {prof.wouldTakeAgainPct != null && (
-                        <>
-                          <span className="meta-dot">·</span>
-                          <span>{prof.wouldTakeAgainPct}% again</span>
-                        </>
-                      )}
+                    <div className="prof-card-footer">
+                      <span className="prof-rating-count">{prof.totalReviews.toLocaleString()} ratings</span>
+                      <span className="prof-rating-count prof-rating-count--center">{prof.totalComments.toLocaleString()} comments</span>
+                      <span className="prof-rating-count">{prof.wouldTakeAgainPct != null ? `${Math.round(prof.wouldTakeAgainPct)}% again` : '—'}</span>
                     </div>
                   </div>
                 </div>

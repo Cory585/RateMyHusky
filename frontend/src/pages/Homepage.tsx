@@ -267,6 +267,7 @@ const Homepage = () => {
     return () => { cancelled = true; };
   }, [selectedCollege]);
 
+
   const [slotResult, setSlotResult] = useState<{ name: string; dept: string; college: string; slug: string } | null>(null);
   const [wheelState, setWheelState] = useState<'idle' | 'spinning' | 'result'>('idle');
   const WHEEL_SLICES = 16;

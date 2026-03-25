@@ -705,6 +705,35 @@ def professors_catalog():
             params + [limit, offset]
         )
 
+    # Batch-count RMP + TRACE comments for this page
+    comment_counts = {}
+    if page_rows:
+        name_keys = [row["name_key"] for row in page_rows]
+        placeholders = ",".join(["%s"] * len(name_keys))
+
+        rmp_counts = query(
+            f"SELECT name_key, COUNT(*) as cnt FROM rmp_reviews "
+            f"WHERE name_key IN ({placeholders}) AND comment IS NOT NULL AND comment != '' "
+            f"GROUP BY name_key",
+            name_keys
+        )
+        for r in rmp_counts:
+            comment_counts[r["name_key"]] = comment_counts.get(r["name_key"], 0) + int(r["cnt"])
+
+        trace_counts = query(
+            f"SELECT tc2.name_key, COUNT(*) as cnt "
+            f"FROM trace_comments tc "
+            f"JOIN trace_courses tc2 ON tc.tc_course_id = tc2.course_id "
+            f"  AND tc.tc_instructor_id = tc2.instructor_id "
+            f"  AND tc.tc_term_id = tc2.term_id "
+            f"WHERE tc2.name_key IN ({placeholders}) "
+            f"AND tc.comment IS NOT NULL AND tc.comment != '' "
+            f"GROUP BY tc2.name_key",
+            name_keys
+        )
+        for r in trace_counts:
+            comment_counts[r["name_key"]] = comment_counts.get(r["name_key"], 0) + int(r["cnt"])
+
     professors = []
     for row in page_rows:
         professors.append({
@@ -716,6 +745,7 @@ def professors_catalog():
             "rmpRating": round(row["rmp_rating"], 2) if row["rmp_rating"] else None,
             "traceRating": round(row["trace_rating"], 2) if row["trace_rating"] else None,
             "totalReviews": row["total_reviews"],
+            "totalComments": comment_counts.get(row["name_key"], 0),
             "wouldTakeAgainPct": round(row["would_take_again_pct"], 1) if row["would_take_again_pct"] else None,
             "imageUrl": row["image_url"],
         })

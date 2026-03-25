@@ -150,6 +150,7 @@ export interface CatalogProfessor {
   rmpRating: number | null;
   traceRating: number | null;
   totalReviews: number;
+  totalComments: number;
   wouldTakeAgainPct: number | null;
   imageUrl: string | null;
 }
