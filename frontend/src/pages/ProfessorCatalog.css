@@ -977,12 +977,20 @@
 .prof-card-footer {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  position: relative;
   margin-top: 4px;
 }
 
 .prof-rating-count {
   font-size: 0.6rem;
   color: #bbb;
+}
+
+.prof-rating-count--center {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .prof-sub-ratings {
