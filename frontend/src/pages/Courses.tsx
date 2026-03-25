@@ -336,6 +336,19 @@ export default function Courses() {
 								onChangeLow={(v) => setMinRatingDraft(v)}
 								onChangeHigh={(v) => setMaxRatingDraft(v)}
 							/>
+							<div className="slider-tick-marks">
+								{Array.from({ length: 11 }, (_, i) => {
+									const val = i * 0.5;
+									return (
+										<div key={val} className="tick-mark">
+											<div className="tick-line" />
+											<span className="tick-label">
+												{val === 0 ? '0' : Number.isInteger(val) ? String(val) : ''}
+											</span>
+										</div>
+									);
+								})}
+							</div>
 						</div>
 					</div>
 				</aside>

@@ -47,6 +47,7 @@ DIRECTORY_CONFIGS = [
     {"subdomain": "cssh",       "dir_path": "/faculty/"},
     {"subdomain": "law",        "dir_path": "/faculty/"},
     {"subdomain": "cps",        "dir_path": "/faculty/"},
+    {"subdomain": "coe",        "dir_path": "/people/"},
 ]
 
 # Department keyword → subdomain mapping (uses substring matching, not exact)
@@ -80,12 +81,23 @@ DEPT_KEYWORD_MAP = [
       "dean of eng"], "coe", "/people/"),
 ]
 
-# Images to skip — banners, placeholders, research images, etc.
+# Images to skip — banners, placeholders, group/campus photos, etc.
 SKIP_PATTERNS = [
+    # Placeholders
     "placeholder", "silhouette", "no-photo", "avatar",
-    "generic", "blank", "mystery", "logo", "icon", "default-person",
-    "person-banner", "notched-n", "behrakis", "headshot-placeholder",
-    "featured-nav", "nu_rgb",
+    "generic", "blank", "mystery", "default-person", "headshot-placeholder",
+    # Logos and icons
+    "logo", "icon", "notched-n", "nu_rgb", "seal",
+    # Nav/banner images
+    "person-banner", "featured-nav", "banner", "hero-image",
+    # Group/event photos
+    "graduates", "graduation", "commencement", "ceremony", "group",
+    "class-of", "cohort",
+    # Campus/building photos
+    "centennial", "campus", "common", "building", "aerial", "quad",
+    "hall", "tulips", "entrance",
+    # Promotional/decorative
+    "promo", "graphic", "spiral",
 ]
 
 # ---------------------------------------------------------------------------
@@ -390,8 +402,23 @@ def scrape_all_directories(session, workers=10):
 # ---------------------------------------------------------------------------
 
 def extract_photo_from_profile(html, page_url):
-    """Extract the professor headshot URL from an individual profile page."""
+    """Extract the professor headshot URL from an individual profile page.
+
+    Only returns the first valid uploaded image that is:
+    - In wp-content/uploads (not theme assets)
+    - At least 150px on both sides
+    - NOT inside site nav/header/footer (by tag or site-level class)
+    - NOT a known placeholder, group photo, or campus image
+    """
     soup = BeautifulSoup(html, 'html.parser')
+
+    # Classes that indicate SITE-LEVEL nav/chrome (not content sections).
+    # We use word-boundary matching to avoid false positives like
+    # "single-people__header-figure" which is a content area.
+    skip_class_patterns = re.compile(
+        r'\b(site-header|site-footer|site-nav|mega-menu|main-menu'
+        r'|primary-nav|widget-area|sidebar)\b', re.I
+    )
 
     for img in soup.find_all('img'):
         src = img.get('src', '') or img.get('data-src', '')
@@ -411,14 +438,22 @@ def extract_photo_from_profile(html, page_url):
             except ValueError:
                 pass
 
-        in_nav = False
+        # Skip images inside site-level chrome.
+        # Only skip <nav> tags and elements with explicit site-level classes.
+        # Do NOT skip <header>/<footer> tags — many pages use these for content.
+        in_skip_section = False
         for depth, parent in enumerate(img.parents):
-            if depth > 3:
+            if depth > 4:
                 break
-            if parent.name in ('nav', 'header', 'footer'):
-                in_nav = True
+            if parent.name == 'nav':
+                in_skip_section = True
                 break
-        if in_nav:
+            parent_cls = ' '.join(parent.get('class') or []).lower()
+            parent_id = (parent.get('id') or '').lower()
+            if skip_class_patterns.search(parent_cls) or skip_class_patterns.search(parent_id):
+                in_skip_section = True
+                break
+        if in_skip_section:
             continue
 
         src = make_absolute(src, page_url)
@@ -515,40 +550,38 @@ def match_prof_to_directory(prof, directory_map, slug_index, lastname_index):
         if slug in slug_index:
             return slug_index[slug]
 
-    # Strategy 4: Last name match with first-name initial or substring
-    # Catches: "Elena Strange" → "Laney Strange" (same last name, different first)
-    # Also: "Dan Metzger" → "Daniel Metzger"
+    # Strategy 4: Last name match with first-name prefix (at least 3 chars)
+    # Catches: "Dan Metzger" → "Daniel Metzger", "Chris Lee" → "Christopher Lee"
+    # Requires first 3+ chars to match bidirectionally — NOT just same initial
     if len(parts) >= 2:
-        first = parts[0]
-        last = parts[-1]
-        candidates = lastname_index.get(re.sub(r'[^a-z]', '', last), [])
-        for entry in candidates:
-            entry_parts = name_to_key(entry['name']).split()
-            if len(entry_parts) < 2:
-                continue
-            entry_first = entry_parts[0]
-            entry_last = entry_parts[-1]
-            if entry_last != re.sub(r'[^a-z]', '', last):
-                continue
-            # Same last name — check if first names are compatible
-            # Match if: one starts with the other (Dan/Daniel), or same initial
-            if (first.startswith(entry_first[:3]) or entry_first.startswith(first[:3])
-                    or first[0] == entry_first[0]):
-                return entry
+        first = re.sub(r'[^a-z]', '', parts[0])
+        last = re.sub(r'[^a-z]', '', parts[-1])
+        if len(first) >= 3:
+            candidates = lastname_index.get(last, [])
+            for entry in candidates:
+                entry_parts = name_to_key(entry['name']).split()
+                if len(entry_parts) < 2:
+                    continue
+                entry_first = entry_parts[0]
+                entry_last = entry_parts[-1]
+                if entry_last != last:
+                    continue
+                # Require first 3 chars to match in at least one direction
+                if first[:3] == entry_first[:3]:
+                    return entry
 
     # Strategy 5: Check if directory has entry with extra/fewer name parts
     if len(parts) == 2:
-        first, last = parts[0], parts[-1]
-        first_clean = re.sub(r'[^a-z]', '', first)
-        last_clean = re.sub(r'[^a-z]', '', last)
-        for dir_key, entry in directory_map.items():
-            dir_parts = dir_key.split()
-            if len(dir_parts) >= 2:
-                df = dir_parts[0]
-                dl = dir_parts[-1]
-                if dl == last_clean and (df == first_clean or df.startswith(first_clean[:3])
-                                          or first_clean.startswith(df[:3])):
-                    return entry
+        first = re.sub(r'[^a-z]', '', parts[0])
+        last = re.sub(r'[^a-z]', '', parts[-1])
+        if len(first) >= 3:
+            for dir_key, entry in directory_map.items():
+                dir_parts = dir_key.split()
+                if len(dir_parts) >= 2:
+                    df = dir_parts[0]
+                    dl = dir_parts[-1]
+                    if dl == last and first[:3] == df[:3]:
+                        return entry
 
     return None
 
@@ -676,10 +709,28 @@ def scrape_photos(profs, workers=15, limit=None, skip_directories=False):
 
 
 def save_csv(results, output_path):
-    """Save results to CSV."""
+    """Save results to CSV, rejecting duplicate image URLs.
+
+    If the same image URL was assigned to multiple professors, it's almost
+    certainly a shared/wrong image (campus photo, nav image, etc.), so we
+    drop ALL entries with that URL.
+    """
     os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
 
     with_photos = [r for r in results if r['image_url']]
+
+    # Count how many professors share each image URL
+    from collections import Counter
+    url_counts = Counter(r['image_url'] for r in with_photos)
+    duplicate_urls = {url for url, count in url_counts.items() if count > 1}
+
+    if duplicate_urls:
+        before = len(with_photos)
+        with_photos = [r for r in with_photos if r['image_url'] not in duplicate_urls]
+        dropped = before - len(with_photos)
+        print(f"  Dropped {dropped} entries with duplicate image URLs "
+              f"({len(duplicate_urls)} shared URLs)")
+
     with open(output_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=['name', 'image_url', 'source_page'])
         writer.writeheader()
