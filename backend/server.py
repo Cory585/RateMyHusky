@@ -37,6 +37,45 @@ def normalize_name(name):
     return s
 
 
+# Maps RMP name variants → canonical trace names (normalized).
+# Must stay in sync with ALIAS_MAP in precompute.py.
+ALIAS_MAP = {
+    "laney strange": "elena strange",
+    "ben tasker": "benjamin tasker",
+    "alberto de la torre": "alberto de la torre duran",
+    "justin wang": "hsiao-an wang",
+    "sakib miazi": "md nazmus sakib miazi",
+    "nazmus miazi": "md nazmus sakib miazi",
+    "alex depaoli": "alexander depaoli",
+    "denisee spencer": "denise spencer",
+    "chris bruell": "christopher bruell",
+    "hande ondemir": "hande musdal ondemir",
+    "francis frank georges": "francis georges",
+    "isabel campos": "isabel sobral campos",
+    "mary sue potts-santone": "mary-susan potts-santone",
+    "ronald c. zullo": "ronald zullo",
+    "steve granelli": "steven granelli",
+    "william (bill) goldman": "william goldman",
+    "virgiliu pavlu": "virgil pavlu",
+    "zhiyuan (katherine) zhang": "zhiyuan zhang",
+}
+
+# Build a word-level mapping so partial/typeahead queries also resolve.
+# e.g. typing "virgiliu" (an RMP-only spelling) still finds "virgil".
+_WORD_ALIAS = {}
+for _from, _to in ALIAS_MAP.items():
+    _from_words = set(_from.split())
+    _to_words = set(_to.split())
+    for w in _from_words - _to_words:
+        # map each RMP-only word to all target words that aren't in the source
+        _WORD_ALIAS[w] = _to_words - _from_words
+
+
+def resolve_alias(q):
+    """Return the canonical (trace) query if q matches an alias, else q."""
+    return ALIAS_MAP.get(q, q)
+
+
 def sanitize(text: str) -> str:
     return _html.escape(_html.unescape(str(text)), quote=False)
 
@@ -148,16 +187,32 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 # ──────────────────────────────────────────────
 def _professor_search(q, limit=5):
     """Search professors with tiered relevance ranking."""
-    words = q.split()
+    # Resolve full-query alias first (e.g. "virgiliu pavlu" → "virgil pavlu")
+    q_resolved = resolve_alias(q)
+
+    words = q_resolved.split()
     if not words:
         return []
 
-    # Build WHERE: each word must appear somewhere in name_key
+    # Expand individual words through the word-level alias map so partial
+    # typeahead queries like "virgiliu" also match "virgil pavlu".
+    expanded_words = set(words)
+    for w in words:
+        if w in _WORD_ALIAS:
+            expanded_words.update(_WORD_ALIAS[w])
+
+    # Build WHERE: each *original* word must match, OR its alias expansion must
     conditions = []
     params = []
     for word in words:
-        conditions.append("name_key LIKE %s")
-        params.append(f"%{word}%")
+        alt_words = _WORD_ALIAS.get(word)
+        if alt_words:
+            group = [word] + list(alt_words)
+            conditions.append("(" + " OR ".join("name_key LIKE %s" for _ in group) + ")")
+            params.extend(f"%{w}%" for w in group)
+        else:
+            conditions.append("name_key LIKE %s")
+            params.append(f"%{word}%")
 
     where = " AND ".join(conditions)
     rows = query(
@@ -167,25 +222,28 @@ def _professor_search(q, limit=5):
         params
     )
 
-    # Rank in Python for proper tiered relevance
+    # Rank in Python for proper tiered relevance (use resolved query)
+    q_rank = q_resolved
+    words_rank = q_resolved.split()
+
     def rank_match(row):
         nk = row['name_key']
         parts = nk.split()
 
         # Tier 1: q matches a whole name part exactly
-        if q in parts:
+        if q_rank in parts:
             return 1
         # Tier 2: q matches the start of any name part
-        if any(p.startswith(q) for p in parts):
+        if any(p.startswith(q_rank) for p in parts):
             return 2
         # Tier 3: q is a substring of the full name
-        if q in nk:
+        if q_rank in nk:
             return 3
         # Tier 4: multi-word: each word prefixes a name part
-        if len(words) >= 2 and all(any(p.startswith(w) for p in parts) for w in words):
+        if len(words_rank) >= 2 and all(any(p.startswith(w) for p in parts) for w in words_rank):
             return 4
         # Tier 5: multi-word: each word is substring of any name part
-        if len(words) >= 2 and all(any(w in p for p in parts) for w in words):
+        if len(words_rank) >= 2 and all(any(w in p for p in parts) for w in words_rank):
             return 5
         return 6
 
