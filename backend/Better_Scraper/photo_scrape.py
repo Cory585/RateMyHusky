@@ -56,8 +56,11 @@ DEPT_KEYWORD_MAP = [
     # Khoury
     (["computer sci", "information sci", "cybersec", "data sci", "computer eng",
       "computer & info"], "www.khoury", "/people/"),
-    # COS
-    (["math", "physics", "chemistry", "chem", "biology", "biochem",
+    # Engineering — MUST be before COS so "Chemical Engineering" matches here
+    (["engineer", "mechanical", "electrical", "civil", "chemical eng",
+      "bioengin", "dean of eng"], "coe", "/people/"),
+    # COS — use "chemistry" not "chem" to avoid matching "Chemical Engineering"
+    (["math", "physics", "chemistry", "chem bio", "biology", "biochem",
       "environment", "marine", "neurosci", "interdisc studies - sci"], "cos", "/people/"),
     # D'Amore-McKim
     (["business", "finance", "account", "marketing", "management",
@@ -76,9 +79,6 @@ DEPT_KEYWORD_MAP = [
     (["law"], "law", "/faculty/"),
     # CPS
     (["education", "professional", "special program"], "cps", "/faculty/"),
-    # Engineering
-    (["engineer", "mechanical", "electrical", "civil", "chemical", "bioengin",
-      "dean of eng"], "coe", "/people/"),
 ]
 
 # Images to skip — banners, placeholders, group/campus photos, etc.
@@ -242,7 +242,7 @@ def scrape_directory_page(session, url):
         soup = BeautifulSoup(resp.text, 'html.parser')
         people = []
         profile_pattern = re.compile(
-            r'/(people|faculty|directory|person)/[a-z0-9][\w-]+/?$', re.I
+            r'/(people|faculty|directory|person|student)/[a-z0-9][\w-]+/?$', re.I
         )
 
         seen_urls = set()
@@ -530,7 +530,7 @@ def load_professors(data_dir):
                 last = str(row.get('instructorLastName', '')).strip()
                 dept = str(row.get('departmentName', '')).strip()
                 if first and last:
-                    name = f"{first} {last}"
+                    name = f"{first} {last}".title()
                     key = normalize_name(name)
                     if key not in profs:
                         profs[key] = {'name': name, 'department': dept}
