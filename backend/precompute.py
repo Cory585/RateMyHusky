@@ -41,6 +41,40 @@ ALIAS_MAP = {
     "justin wang": "hsiao-an wang",
     "sakib miazi": "md nazmus sakib miazi",
     "nazmus miazi": "md nazmus sakib miazi",
+    "alex depaoli": "alexander depaoli",
+    "denisee spencer": "denise spencer",
+    "chris bruell": "christopher bruell",
+    "hande ondemir": "hande musdal ondemir",
+    "francis frank georges": "francis georges",
+    "isabel campos": "isabel sobral campos",
+    "mary sue potts-santone": "mary-susan potts-santone",
+    "ronald c. zullo": "ronald zullo",
+    "steve granelli": "steven granelli",
+    "william (bill) goldman": "william goldman",
+    "virgiliu pavlu": "virgil pavlu",
+    "zhiyuan (katherine) zhang": "zhiyuan zhang",
+    "katherine zhang": "zhiyuan zhang",
+    "bill goldman": "william goldman",
+    "aarti sathyanaran": "aarti sathyanarayana",
+    "akash murty": "akash murthy",
+    "ali chaleshtari": "ali shirzadeh chaleshtari",
+    "sriram rajagopalan": "sriramasundarar rajagopalan",
+    "mauricio codesso": "mauricio mello codesso",
+    "magda cooney": "magdalena cooney",
+    "john lowery": "john lowrey",
+    "iesha karasik": "ieshia karasik",
+    "ifa khan": "iffat khan",
+    "h. david sherman": "h sherman",
+    "ganish krisnamoorthy": "ganesh krishnamoorthy",
+    "farena sultan": "fareena sultan",
+    "cathy merlo": "catherine merlo",
+    "ye yin": "yi yin",
+    "silvio amir": "silvio amir alves moreira",
+    "olin shivers": "olin shivers iii",
+    "rush sanghrajka": "rushit sanghrajka",
+    "john alexis gomez": "john alexis guerra gomez",
+    "ji yong shin": "ji-yong shin",
+    "ghita amor tijani": "ghita amor-tijani",
 }
 
 COLLEGE_MAP = {
@@ -377,7 +411,7 @@ def main():
     tc["_cname"] = tc["_parsed"].apply(lambda x: x[1])
     course_df = tc[tc["_code"].notna()][["_code", "_cname", "department_name"]].drop_duplicates(subset=["_code"])
     course_rows = [
-        (r["_code"], r["_cname"], r["department_name"], r["_code"].lower() + " " + str(r["_cname"]).lower())
+        (r["_code"], r["_cname"], str(r["department_name"]) if pd.notna(r["department_name"]) else "", r["_code"].lower() + " " + str(r["_cname"]).lower())
         for _, r in course_df.iterrows()
     ]
 
@@ -442,6 +476,7 @@ def main():
         )
     """)
     chunk_insert(cur, "INSERT INTO course_catalog (code, name, department, search_text) VALUES %s", course_rows)
+    cur.execute("CREATE INDEX idx_cc_dept ON course_catalog (department)")
     conn.commit()
     print(f"  Inserted {len(course_rows)} courses")
 
@@ -495,6 +530,31 @@ def main():
         conn.rollback()
         cur = conn.cursor()
     print(f"  Updated {len(unique_instructors)} unique instructors")
+
+    # 4b. Add precomputed course_code to trace_courses
+    print("Adding course_code to trace_courses...")
+    try:
+        cur.execute("ALTER TABLE trace_courses ADD COLUMN course_code TEXT")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE trace_courses SET course_code = UPPER(REGEXP_REPLACE(
+            SPLIT_PART(display_name, ':', 1), '[^A-Za-z0-9]', '', 'g'
+        ))
+        WHERE course_code IS NULL AND display_name IS NOT NULL
+    """)
+    conn.commit()
+
+    try:
+        cur.execute("CREATE INDEX idx_tc_course_code ON trace_courses (course_code)")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        cur = conn.cursor()
+    print("  Done")
 
     # 5. Add name_key to rmp_reviews (batch via temp table)
     print("Adding name_key to rmp_reviews...")
@@ -623,20 +683,29 @@ def main():
     chunk_insert(cur, "INSERT INTO _url_ids (course_url, cid, iid, tid) VALUES %s", mapping_rows)
     print(f"  Parsed {len(mapping_rows)} unique URLs")
 
-    # Batch join-update
+    # Batch join-update (smaller batches to avoid CockroachDB serialization failures)
+    COMMENT_BATCH = 5000
     while True:
-        cur.execute("""
-            UPDATE trace_comments tc SET
-                tc_course_id = m.cid,
-                tc_instructor_id = m.iid,
-                tc_term_id = m.tid
-            FROM _url_ids m
-            WHERE tc.course_url = m.course_url
-              AND tc.tc_course_id IS NULL
-            LIMIT %s
-        """, (BATCH_SIZE,))
-        updated = cur.rowcount
-        conn.commit()
+        try:
+            cur.execute("""
+                UPDATE trace_comments tc SET
+                    tc_course_id = m.cid,
+                    tc_instructor_id = m.iid,
+                    tc_term_id = m.tid
+                FROM _url_ids m
+                WHERE tc.course_url = m.course_url
+                  AND tc.tc_course_id IS NULL
+                LIMIT %s
+            """, (COMMENT_BATCH,))
+            updated = cur.rowcount
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            cur = conn.cursor()
+            if "restart transaction" in str(e).lower() or "serialization" in str(e).lower():
+                print(f"    retry (serialization conflict)...")
+                continue
+            raise
         if updated == 0:
             break
         print(f"    updated {updated} rows...")

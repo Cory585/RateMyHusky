@@ -6,15 +6,16 @@ Install deps:  pip install flask flask-cors flask-limiter psycopg2-binary pyjwt 
 Run:           python server.py
 """
 
-import os, re, unicodedata, json, hashlib
+import os, re, unicodedata, json, hashlib, random
 import html as _html
 import psycopg2
-from psycopg2.pool import SimpleConnectionPool
+from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.extras import RealDictCursor
 from functools import lru_cache
 from dotenv import load_dotenv
 from flask import Flask, g, jsonify, request, redirect, make_response
 from flask_cors import CORS
+from flask_compress import Compress
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import jwt as pyjwt
@@ -37,8 +38,72 @@ def normalize_name(name):
     return s
 
 
+# Maps RMP name variants → canonical trace names (normalized).
+# Must stay in sync with ALIAS_MAP in precompute.py.
+ALIAS_MAP = {
+    "laney strange": "elena strange",
+    "ben tasker": "benjamin tasker",
+    "alberto de la torre": "alberto de la torre duran",
+    "justin wang": "hsiao-an wang",
+    "sakib miazi": "md nazmus sakib miazi",
+    "nazmus miazi": "md nazmus sakib miazi",
+    "alex depaoli": "alexander depaoli",
+    "denisee spencer": "denise spencer",
+    "chris bruell": "christopher bruell",
+    "hande ondemir": "hande musdal ondemir",
+    "francis frank georges": "francis georges",
+    "isabel campos": "isabel sobral campos",
+    "mary sue potts-santone": "mary-susan potts-santone",
+    "ronald c. zullo": "ronald zullo",
+    "steve granelli": "steven granelli",
+    "william (bill) goldman": "william goldman",
+    "virgiliu pavlu": "virgil pavlu",
+    "zhiyuan (katherine) zhang": "zhiyuan zhang",
+    "katherine zhang": "zhiyuan zhang",
+    "bill goldman": "william goldman",
+    "aarti sathyanaran": "aarti sathyanarayana",
+    "akash murty": "akash murthy",
+    "ali chaleshtari": "ali shirzadeh chaleshtari",
+    "sriram rajagopalan": "sriramasundarar rajagopalan",
+    "mauricio codesso": "mauricio mello codesso",
+    "magda cooney": "magdalena cooney",
+    "john lowery": "john lowrey",
+    "iesha karasik": "ieshia karasik",
+    "ifa khan": "iffat khan",
+    "h. david sherman": "h sherman",
+    "ganish krisnamoorthy": "ganesh krishnamoorthy",
+    "farena sultan": "fareena sultan",
+    "cathy merlo": "catherine merlo",
+    "ye yin": "yi yin",
+    "silvio amir": "silvio amir alves moreira",
+    "olin shivers": "olin shivers iii",
+    "rush sanghrajka": "rushit sanghrajka",
+    "john alexis gomez": "john alexis guerra gomez",
+    "ji yong shin": "ji-yong shin",
+    "ghita amor tijani": "ghita amor-tijani",
+}
+
+# Build a word-level mapping so partial/typeahead queries also resolve.
+# e.g. typing "virgiliu" (an RMP-only spelling) still finds "virgil".
+_WORD_ALIAS = {}
+for _from, _to in ALIAS_MAP.items():
+    _from_words = set(_from.split())
+    _to_words = set(_to.split())
+    for w in _from_words - _to_words:
+        # Strip parens/punctuation so "(katherine)" becomes "katherine",
+        # "c." becomes "c", matching what normalize_name produces.
+        clean = re.sub(r'[^a-z0-9\-]', '', w)
+        if clean:
+            _WORD_ALIAS[clean] = _to_words - _from_words
+
+
+def resolve_alias(q):
+    """Return the canonical (trace) query if q matches an alias, else q."""
+    return ALIAS_MAP.get(q, q)
+
+
 def sanitize(text: str) -> str:
-    return _html.escape(str(text), quote=False)
+    return _html.unescape(str(text))
 
 
 def friendly_count(n: int) -> str:
@@ -56,6 +121,9 @@ def _name_to_slug(name: str) -> str:
 #  App setup
 # ──────────────────────────────────────────────
 app = Flask(__name__)
+app.config["COMPRESS_MIMETYPES"] = ["application/json", "text/html"]
+app.config["COMPRESS_MIN_SIZE"] = 256
+Compress(app)
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 CORS(app, supports_credentials=True, origins=[FRONTEND_URL])
 limiter = Limiter(get_remote_address, app=app, default_limits=["120 per minute"])
@@ -76,14 +144,24 @@ CRDB_DATABASE_URL = os.getenv("CRDB_DATABASE_URL")
 if not CRDB_DATABASE_URL:
     raise RuntimeError("CRDB_DATABASE_URL environment variable is required")
 
-pool = SimpleConnectionPool(1, 5, CRDB_DATABASE_URL, sslmode="require")
+_pool = None
+
+def _get_pool():
+    global _pool
+    if _pool is None:
+        _pool = ThreadedConnectionPool(5, 20, CRDB_DATABASE_URL, sslmode="require",
+                                       connect_timeout=5,
+                                       keepalives=1, keepalives_idle=30,
+                                       keepalives_interval=10, keepalives_count=3)
+    return _pool
 
 # ──────────────────────────────────────────────
 #  Simple in-memory cache (TTL-based)
 # ──────────────────────────────────────────────
 _cache = {}
 _cache_lock = Lock()
-CACHE_TTL = 300  # 5 minutes
+CACHE_TTL = 300       # 5 minutes
+CACHE_MAX_SIZE = 5000
 
 
 def cache_get(key):
@@ -97,8 +175,7 @@ def cache_get(key):
 def cache_set(key, data):
     with _cache_lock:
         _cache[key] = {"data": data, "ts": time.time()}
-        # Evict old entries if cache gets too large
-        if len(_cache) > 2000:
+        if len(_cache) > CACHE_MAX_SIZE:
             cutoff = time.time() - CACHE_TTL
             expired = [k for k, v in _cache.items() if v["ts"] < cutoff]
             for k in expired:
@@ -107,7 +184,7 @@ def cache_set(key, data):
 
 def get_db():
     if 'db' not in g:
-        g.db = pool.getconn()
+        g.db = _get_pool().getconn()
     return g.db
 
 
@@ -115,7 +192,7 @@ def get_db():
 def return_db(exc):
     db = g.pop('db', None)
     if db is not None:
-        pool.putconn(db)
+        _get_pool().putconn(db)
 
 
 def query(sql, params=None):
@@ -148,16 +225,32 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 # ──────────────────────────────────────────────
 def _professor_search(q, limit=5):
     """Search professors with tiered relevance ranking."""
-    words = q.split()
+    # Resolve full-query alias first (e.g. "virgiliu pavlu" → "virgil pavlu")
+    q_resolved = resolve_alias(q)
+
+    words = q_resolved.split()
     if not words:
         return []
 
-    # Build WHERE: each word must appear somewhere in name_key
+    # Expand individual words through the word-level alias map so partial
+    # typeahead queries like "virgiliu" also match "virgil pavlu".
+    expanded_words = set(words)
+    for w in words:
+        if w in _WORD_ALIAS:
+            expanded_words.update(_WORD_ALIAS[w])
+
+    # Build WHERE: each *original* word must match, OR its alias expansion must
     conditions = []
     params = []
     for word in words:
-        conditions.append("name_key LIKE %s")
-        params.append(f"%{word}%")
+        alt_words = _WORD_ALIAS.get(word)
+        if alt_words:
+            group = [word] + list(alt_words)
+            conditions.append("(" + " OR ".join("name_key LIKE %s" for _ in group) + ")")
+            params.extend(f"%{w}%" for w in group)
+        else:
+            conditions.append("name_key LIKE %s")
+            params.append(f"%{word}%")
 
     where = " AND ".join(conditions)
     rows = query(
@@ -167,25 +260,28 @@ def _professor_search(q, limit=5):
         params
     )
 
-    # Rank in Python for proper tiered relevance
+    # Rank in Python for proper tiered relevance (use resolved query)
+    q_rank = q_resolved
+    words_rank = q_resolved.split()
+
     def rank_match(row):
         nk = row['name_key']
         parts = nk.split()
 
         # Tier 1: q matches a whole name part exactly
-        if q in parts:
+        if q_rank in parts:
             return 1
         # Tier 2: q matches the start of any name part
-        if any(p.startswith(q) for p in parts):
+        if any(p.startswith(q_rank) for p in parts):
             return 2
         # Tier 3: q is a substring of the full name
-        if q in nk:
+        if q_rank in nk:
             return 3
         # Tier 4: multi-word: each word prefixes a name part
-        if len(words) >= 2 and all(any(p.startswith(w) for p in parts) for w in words):
+        if len(words_rank) >= 2 and all(any(p.startswith(w) for p in parts) for w in words_rank):
             return 4
         # Tier 5: multi-word: each word is substring of any name part
-        if len(words) >= 2 and all(any(w in p for p in parts) for w in words):
+        if len(words_rank) >= 2 and all(any(w in p for p in parts) for w in words_rank):
             return 5
         return 6
 
@@ -219,13 +315,18 @@ def stats():
 
 @app.route("/api/colleges")
 def colleges():
+    cached = cache_get("colleges")
+    if cached:
+        return jsonify(cached)
     rows = query("""
         SELECT college, COUNT(*) as cnt FROM professors_catalog
         WHERE avg_rating IS NOT NULL
         GROUP BY college HAVING COUNT(*) >= 5
         ORDER BY college
     """)
-    return jsonify([r['college'] for r in rows if r['college'] != 'Other'])
+    result = [r['college'] for r in rows if r['college'] != 'Other']
+    cache_set("colleges", result)
+    return jsonify(result)
 
 
 NO_MIN_COLLEGES = {"Law", "Professional Studies"}
@@ -236,6 +337,11 @@ def goat_professors():
     college = request.args.get("college", "Khoury")
     limit = min(int(request.args.get("limit", "10")), 50)
     min_reviews = int(request.args.get("min_reviews", "100"))
+
+    cache_key = f"goat:{college}:{limit}:{min_reviews}"
+    cached = cache_get(cache_key)
+    if cached:
+        return jsonify(cached)
 
     if college in NO_MIN_COLLEGES:
         rows = query("""
@@ -265,16 +371,22 @@ def goat_professors():
             "totalReviews": row["total_reviews"],
             "url": row["professor_url"] or "",
         })
+    cache_set(cache_key, result)
     return jsonify(result)
 
 
 @app.route("/api/random-professor")
 def random_professor():
+    count_row = query_one("SELECT COUNT(*) as cnt FROM professors_catalog WHERE num_ratings >= 3")
+    total = count_row["cnt"] if count_row else 0
+    if total == 0:
+        return jsonify({"error": "No professors found"}), 404
+    offset = random.randint(0, total - 1)
     row = query_one("""
         SELECT * FROM professors_catalog
         WHERE num_ratings >= 3
-        ORDER BY random() LIMIT 1
-    """)
+        LIMIT 1 OFFSET %s
+    """, (offset,))
     if not row:
         return jsonify({"error": "No professors found"}), 404
     return jsonify({
@@ -567,6 +679,10 @@ def professor_profile(slug):
 @app.route("/api/departments")
 def departments():
     college = request.args.get("college", "")
+    cache_key = f"depts:{college or 'all'}"
+    cached = cache_get(cache_key)
+    if cached:
+        return jsonify(cached)
     if college and college != "All":
         college_list = [c.strip() for c in college.split(",") if c.strip()]
         if len(college_list) == 1:
@@ -587,7 +703,9 @@ def departments():
             WHERE avg_rating IS NOT NULL
             ORDER BY department
         """)
-    return jsonify([r['department'] for r in rows if r['department']])
+    result = [r['department'] for r in rows if r['department']]
+    cache_set(cache_key, result)
+    return jsonify(result)
 
 
 @app.route("/api/professors-catalog")
@@ -616,6 +734,11 @@ def professors_catalog():
         max_reviews = int(max_reviews_raw) if max_reviews_raw is not None else None
     except (ValueError, TypeError):
         max_reviews = None
+
+    cache_key = f"profcat:{q}:{college}:{dept}:{sort}:{page}:{limit}:{min_rating}:{max_rating}:{min_reviews}:{max_reviews}"
+    cached = cache_get(cache_key)
+    if cached:
+        return jsonify(cached)
 
     # If there's a search query, get matching name_keys first
     matched_name_keys = None
@@ -711,28 +834,25 @@ def professors_catalog():
         name_keys = [row["name_key"] for row in page_rows]
         placeholders = ",".join(["%s"] * len(name_keys))
 
-        rmp_counts = query(
-            f"SELECT name_key, COUNT(*) as cnt FROM rmp_reviews "
-            f"WHERE name_key IN ({placeholders}) AND comment IS NOT NULL AND comment != '' "
-            f"GROUP BY name_key",
-            name_keys
+        combined_counts = query(
+            f"SELECT name_key, SUM(cnt) as cnt FROM ("
+            f"  SELECT name_key, COUNT(*) as cnt FROM rmp_reviews "
+            f"  WHERE name_key IN ({placeholders}) AND comment IS NOT NULL AND comment != '' "
+            f"  GROUP BY name_key"
+            f"  UNION ALL "
+            f"  SELECT tc2.name_key, COUNT(*) as cnt "
+            f"  FROM trace_comments tc "
+            f"  JOIN trace_courses tc2 ON tc.tc_course_id = tc2.course_id "
+            f"    AND tc.tc_instructor_id = tc2.instructor_id "
+            f"    AND tc.tc_term_id = tc2.term_id "
+            f"  WHERE tc2.name_key IN ({placeholders}) "
+            f"  AND tc.comment IS NOT NULL AND tc.comment != '' "
+            f"  GROUP BY tc2.name_key"
+            f") sub GROUP BY name_key",
+            name_keys + name_keys
         )
-        for r in rmp_counts:
-            comment_counts[r["name_key"]] = comment_counts.get(r["name_key"], 0) + int(r["cnt"])
-
-        trace_counts = query(
-            f"SELECT tc2.name_key, COUNT(*) as cnt "
-            f"FROM trace_comments tc "
-            f"JOIN trace_courses tc2 ON tc.tc_course_id = tc2.course_id "
-            f"  AND tc.tc_instructor_id = tc2.instructor_id "
-            f"  AND tc.tc_term_id = tc2.term_id "
-            f"WHERE tc2.name_key IN ({placeholders}) "
-            f"AND tc.comment IS NOT NULL AND tc.comment != '' "
-            f"GROUP BY tc2.name_key",
-            name_keys
-        )
-        for r in trace_counts:
-            comment_counts[r["name_key"]] = comment_counts.get(r["name_key"], 0) + int(r["cnt"])
+        for r in combined_counts:
+            comment_counts[r["name_key"]] = int(r["cnt"])
 
     professors = []
     for row in page_rows:
@@ -750,22 +870,29 @@ def professors_catalog():
             "imageUrl": row["image_url"],
         })
 
-    return jsonify({
+    result = {
         "professors": professors,
         "total": total,
         "page": page,
         "totalPages": total_pages,
-    })
+    }
+    cache_set(cache_key, result)
+    return jsonify(result)
 
 
 @app.route("/api/course-departments")
 def course_departments():
+    cached = cache_get("course_depts")
+    if cached:
+        return jsonify(cached)
     rows = query("""
         SELECT DISTINCT department FROM course_catalog
         WHERE department IS NOT NULL AND department != ''
         ORDER BY department
     """)
-    return jsonify([r["department"] for r in rows])
+    result = [r["department"] for r in rows]
+    cache_set("course_depts", result)
+    return jsonify(result)
 
 
 @app.route("/api/courses-catalog")
@@ -786,78 +913,12 @@ def courses_catalog():
     except (ValueError, TypeError):
         max_rating = 5.0
 
-    # Build the base query using course_catalog + trace aggregation
-    # course_catalog has: code, name, department, search_text
-    # We need to join with trace data for ratings/sections/enrollment
-    where_clauses = []
-    params = []
+    cache_key = f"coursecat:{q}:{dept}:{sort}:{page}:{limit}:{min_rating}:{max_rating}"
+    cached = cache_get(cache_key)
+    if cached:
+        return jsonify(cached)
 
-    if dept and dept != "All":
-        dept_list = [d.strip() for d in dept.split(",") if d.strip()]
-        if len(dept_list) == 1:
-            where_clauses.append("cc.department = %s")
-            params.append(dept_list[0])
-        elif dept_list:
-            where_clauses.append("cc.department IN (" + ",".join(["%s"] * len(dept_list)) + ")")
-            params.extend(dept_list)
-    if q:
-        where_clauses.append("cc.search_text LIKE %s")
-        params.append(f"%{q}%")
-
-    where_sql = (" AND " + " AND ".join(where_clauses)) if where_clauses else ""
-
-    # Aggregate course stats from trace_courses + trace_scores
-    catalog_sql = f"""
-        WITH course_sections AS (
-            SELECT DISTINCT ON (tc.course_id, tc.instructor_id, tc.term_id)
-                tc.course_id, tc.instructor_id, tc.term_id, tc.term_title,
-                tc.department_name, tc.display_name, tc.enrollment
-            FROM trace_courses tc
-            WHERE tc.display_name IS NOT NULL
-        ),
-        overall_scores AS (
-            SELECT ts.course_id, ts.instructor_id, ts.term_id,
-                   SUM(ts.mean * ts.total_responses) as weighted_sum,
-                   SUM(ts.total_responses) as total_responses
-            FROM trace_scores ts
-            WHERE lower(ts.question) LIKE '%%overall%%'
-            GROUP BY ts.course_id, ts.instructor_id, ts.term_id
-        ),
-        course_agg AS (
-            SELECT cc.code, cc.name, cc.department,
-                   COUNT(cs.course_id) as total_sections,
-                   COUNT(DISTINCT cs.instructor_id) as total_instructors,
-                   COALESCE(SUM(cs.enrollment), 0) as total_enrollment,
-                   COALESCE(SUM(os.total_responses), 0) as total_responses,
-                   CASE WHEN SUM(os.total_responses) > 0
-                        THEN SUM(os.weighted_sum) / SUM(os.total_responses)
-                        ELSE NULL END as avg_rating,
-                   MAX(cs.term_id) as latest_term_id,
-                   MAX(cs.term_title) as latest_term_title
-            FROM course_catalog cc
-            JOIN trace_courses tc ON upper(regexp_replace(
-                split_part(tc.display_name, ':', 1), '[^A-Za-z0-9]', '', 'g'
-            )) = cc.code
-            JOIN course_sections cs ON cs.course_id = tc.course_id
-                AND cs.instructor_id = tc.instructor_id AND cs.term_id = tc.term_id
-            LEFT JOIN overall_scores os ON os.course_id = cs.course_id
-                AND os.instructor_id = cs.instructor_id AND os.term_id = cs.term_id
-            WHERE 1=1 {where_sql}
-            GROUP BY cc.code, cc.name, cc.department
-            HAVING CASE WHEN SUM(os.total_responses) > 0
-                        THEN SUM(os.weighted_sum) / SUM(os.total_responses)
-                        ELSE NULL END IS NOT NULL
-        )
-        SELECT * FROM course_agg
-        {"WHERE avg_rating >= %s AND avg_rating <= %s" if min_rating > 0 or max_rating < 5 else ""}
-    """
-
-    if min_rating > 0 or max_rating < 5:
-        params.extend([min_rating, max_rating])
-
-    # This is complex — use a simpler approach: query course_catalog directly
-    # and do a second query for aggregates
-    # Simplified approach: use course_catalog for listing, compute stats per-request
+    # Query course_catalog for listing, then bulk-fetch ratings per page
     count_where = []
     count_params = []
 
@@ -904,7 +965,7 @@ def courses_catalog():
         placeholders = ",".join(["%s"] * len(codes))
         rating_rows = query(f"""
             SELECT
-                SPLIT_PART(tc.display_name, ':', 1) AS course_code,
+                tc.course_code,
                 SUM(CAST(ts.mean AS FLOAT) * CAST(ts.total_responses AS FLOAT)) AS weighted_sum,
                 SUM(CAST(ts.total_responses AS FLOAT)) AS total_responses
             FROM trace_courses tc
@@ -913,8 +974,8 @@ def courses_catalog():
                 AND tc.instructor_id = ts.instructor_id
                 AND tc.term_id = ts.term_id
             WHERE LOWER(ts.question) LIKE '%%overall%%'
-                AND SPLIT_PART(tc.display_name, ':', 1) IN ({placeholders})
-            GROUP BY course_code
+                AND tc.course_code IN ({placeholders})
+            GROUP BY tc.course_code
         """, codes)
         for rr in rating_rows:
             tr = _safe_float(rr["total_responses"])
@@ -937,12 +998,14 @@ def courses_catalog():
             "latestTermId": 0,
         })
 
-    return jsonify({
+    result = {
         "courses": courses,
         "total": total,
         "page": page,
         "totalPages": total_pages,
-    })
+    }
+    cache_set(cache_key, result)
+    return jsonify(result)
 
 
 @app.route("/api/courses/<code>")
@@ -1053,14 +1116,21 @@ def course_profile(code):
             instructor_data[name]["weighted"] += _safe_float(score_map[key]["weighted_sum"])
             instructor_data[name]["responses"] += _safe_int(score_map[key]["total_responses"])
 
-    # Look up instructor metadata from professors_catalog
+    # Look up instructor metadata from professors_catalog (batched)
+    name_key_map = {normalize_name(name): name for name in instructor_data}
+    name_keys = list(name_key_map.keys())
+    prof_map = {}
+    if name_keys:
+        placeholders = ",".join(["%s"] * len(name_keys))
+        prof_rows = query(
+            f"SELECT name_key, slug, image_url, total_reviews, would_take_again_pct, difficulty "
+            f"FROM professors_catalog WHERE name_key IN ({placeholders})", name_keys
+        )
+        prof_map = {r["name_key"]: r for r in prof_rows}
+
     instructor_rows = []
     for name, data in instructor_data.items():
-        name_key = normalize_name(name)
-        prof = query_one(
-            "SELECT slug, image_url, total_reviews, would_take_again_pct, difficulty "
-            "FROM professors_catalog WHERE name_key = %s", (name_key,)
-        )
+        prof = prof_map.get(normalize_name(name))
         meta_slug = prof["slug"] if prof else ""
         meta_image = prof["image_url"] if prof else None
         meta_reviews = prof["total_reviews"] if prof else 0
