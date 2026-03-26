@@ -116,6 +116,19 @@
   margin-bottom: 0;
 }
 
+.terms-section a {
+  color: #5b9bd5;
+  text-decoration: none;
+}
+
+.terms-section a:hover {
+  text-decoration: underline;
+}
+
+.dark .terms-section a {
+  color: #7ab3e0;
+}
+
 .terms-section code {
   font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
   font-size: 0.88em;
