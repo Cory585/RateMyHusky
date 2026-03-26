@@ -385,7 +385,7 @@ const Homepage = () => {
           Find the <span>right professor</span>, every semester
         </h1>
         <p className="hero-subtitle">
-          TRACE evaluations and RateMyProfessor ratings — all in one place.
+          TRACE evaluations and RateMyProfessor ratings, all in one place.
         </p>
 
         <SearchBar />

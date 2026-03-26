@@ -110,7 +110,16 @@ const Navbar = () => {
   return (
     <>
     <nav className="navbar">
-      <Link to="/" className="navbar-logo">
+      <Link
+        to="/"
+        className="navbar-logo"
+        onClick={(e) => {
+          if (location.pathname === '/') {
+            e.preventDefault();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        }}
+      >
         <span>Rate</span>MyHusky
       </Link>
 
