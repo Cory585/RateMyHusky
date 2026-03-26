@@ -18,7 +18,7 @@ const Terms = () => {
               <p>
                 RateMyHusky is a read-only aggregator of professor and course information for
                 Northeastern University students. Data displayed on this platform is sourced from
-                RateMyProfessors and Northeastern University's TRACE course evaluation system — it
+                RateMyProfessors and Northeastern University's TRACE course evaluation system; it
                 is not submitted by users of this site.
               </p>
               <p>
@@ -49,7 +49,7 @@ const Terms = () => {
               <p>
                 This information is encoded in a JWT (JSON Web Token) that is stored in your
                 browser's <code>localStorage</code>. The token expires after 7 days.
-                RateMyHusky does not maintain a persistent server-side user database — no account
+                RateMyHusky does not maintain a persistent server-side user database; no account
                 record is stored beyond the duration of your session token. Signing out deletes
                 the token from your browser.
               </p>
@@ -61,7 +61,7 @@ const Terms = () => {
               <ul>
                 <li>
                   <strong>From Google sign-in:</strong> your name, email address
-                  (<code>@husky.neu.edu</code>), and profile photo — stored only in your
+                  (<code>@husky.neu.edu</code>), and profile photo, stored only in your
                   browser-side JWT token.
                 </li>
                 <li>
@@ -96,20 +96,20 @@ const Terms = () => {
               <p>RateMyHusky integrates with the following third-party services:</p>
               <ul>
                 <li>
-                  <strong>Google OAuth 2.0</strong> — handles authentication. Your use of
+                  <strong>Google OAuth 2.0</strong>: handles authentication. Your use of
                   Google sign-in is subject to Google's Terms of Service and Privacy Policy.
                 </li>
                 <li>
-                  <strong>Vercel Analytics &amp; Speed Insights</strong> — collects anonymous
+                  <strong>Vercel Analytics &amp; Speed Insights</strong>: collects anonymous
                   performance and usage data to help improve the service.
                 </li>
                 <li>
-                  <strong>RateMyProfessors</strong> — professor ratings and review data are
+                  <strong>RateMyProfessors</strong>: professor ratings and review data are
                   sourced from RateMyProfessors. This data remains subject to RateMyProfessors'
                   own terms and usage policies.
                 </li>
                 <li>
-                  <strong>Northeastern TRACE</strong> — course evaluation scores and comments
+                  <strong>Northeastern TRACE</strong>: course evaluation scores and comments
                   are sourced from Northeastern University's TRACE system.
                 </li>
               </ul>

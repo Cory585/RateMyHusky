@@ -34,7 +34,7 @@ const Privacy = () => {
                   <strong>Google Sign-In:</strong> when you authenticate with your{' '}
                   <code>@husky.neu.edu</code> Google account, we receive your name, email
                   address, and profile photo from Google. This information is encoded in a
-                  JWT token stored in your browser — it is never written to a server-side
+                  JWT token stored in your browser; it is never written to a server-side
                   database.
                 </li>
                 <li>
@@ -75,7 +75,7 @@ const Privacy = () => {
               <p>
                 Your sign-in information is encoded in a JWT (JSON Web Token) stored in your
                 browser's <code>localStorage</code>. The token expires automatically after
-                7 days. RateMyHusky does not maintain a persistent server-side user database —
+                7 days. RateMyHusky does not maintain a persistent server-side user database;
                 no account record is stored beyond the duration of your session token.
               </p>
               <p>
@@ -89,7 +89,7 @@ const Privacy = () => {
                 collect data under their own privacy policies:</p>
               <ul>
                 <li>
-                  <strong>Google OAuth 2.0</strong> — handles authentication. Your use of
+                  <strong>Google OAuth 2.0</strong>: handles authentication. Your use of
                   Google sign-in is governed by{' '}
                   <a
                     href="https://policies.google.com/privacy"
@@ -100,7 +100,7 @@ const Privacy = () => {
                   </a>.
                 </li>
                 <li>
-                  <strong>Vercel Analytics &amp; Speed Insights</strong> — collects anonymous
+                  <strong>Vercel Analytics &amp; Speed Insights</strong>: collects anonymous
                   page view and performance metrics. No personally identifiable information is
                   included. Subject to{' '}
                   <a
@@ -112,7 +112,7 @@ const Privacy = () => {
                   </a>.
                 </li>
                 <li>
-                  <strong>RateMyProfessors &amp; Northeastern TRACE</strong> — these are data
+                  <strong>RateMyProfessors &amp; Northeastern TRACE</strong>: these are data
                   sources only. We do not send any user data to these services.
                 </li>
               </ul>
@@ -146,7 +146,7 @@ const Privacy = () => {
                   session token and any stored preferences.
                 </li>
                 <li>
-                  There is no account to delete — once your token is cleared, no personal data
+                  There is no account to delete. Once your token is cleared, no personal data
                   remains in our systems.
                 </li>
               </ul>
