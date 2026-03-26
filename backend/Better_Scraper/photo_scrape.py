@@ -97,7 +97,7 @@ SKIP_PATTERNS = [
     "centennial", "campus", "common", "building", "aerial", "quad",
     "hall", "tulips", "entrance",
     # Promotional/decorative
-    "promo", "graphic", "spiral",
+    "promo", "graphic", "spiral", "cover-",
 ]
 
 # ---------------------------------------------------------------------------
@@ -564,15 +564,19 @@ def match_prof_to_directory(prof, directory_map, slug_index, lastname_index):
         if slug in slug_index:
             return slug_index[slug]
 
-    # Strategy 4: Last name match with first-name prefix (at least 3 chars)
-    # Catches: "Dan Metzger" → "Daniel Metzger", "Chris Lee" → "Christopher Lee"
-    # Also: nickname matches when the directory name is short (≤4 chars) and
-    # shares the first letter — e.g., "Denise Spencer" → "Dee Spencer"
+    # Strategy 4: Last name match with first-name similarity.
+    # For common last names (>3 candidates), ONLY allow exact first-name matches
+    # to avoid false positives (Xiaotao→Xiaoping, Zhehui→Zheng, etc.)
+    # For uncommon last names (≤3 candidates), allow prefix/nickname matching.
     if len(parts) >= 2:
         first = re.sub(r'[^a-z]', '', parts[0])
         last = re.sub(r'[^a-z]', '', parts[-1])
         if len(first) >= 2:
             candidates = lastname_index.get(last, [])
+            is_common = len(candidates) > 3
+
+            best = None
+            best_score = 0
             for entry in candidates:
                 entry_parts = name_to_key(entry['name']).split()
                 if len(entry_parts) < 2:
@@ -581,14 +585,24 @@ def match_prof_to_directory(prof, directory_map, slug_index, lastname_index):
                 entry_last = entry_parts[-1]
                 if entry_last != last:
                     continue
-                # Strong match: first 3 chars match
-                if len(first) >= 3 and first[:3] == entry_first[:3]:
-                    return entry
-                # Nickname match: same first letter AND one name is short (≤4 chars)
-                # e.g., Dee/Denise, Bob/Robert won't match (B≠R), but Dee/Denise will
-                if (first[0] == entry_first[0]
-                        and (len(entry_first) <= 4 or len(first) <= 4)):
-                    return entry
+
+                score = 0
+                if first == entry_first:
+                    score = 100  # exact match — always allowed
+                elif not is_common:
+                    # Only do fuzzy matching for uncommon last names
+                    if first.startswith(entry_first) or entry_first.startswith(first):
+                        score = 50 + min(len(first), len(entry_first))
+                    elif (first[0] == entry_first[0]
+                            and (len(entry_first) <= 4 or len(first) <= 4)):
+                        score = 10  # nickname: Dee/Denise
+
+                if score > best_score:
+                    best_score = score
+                    best = entry
+
+            if best and best_score >= 10:
+                return best
 
     # Strategy 5: Check if directory has entry with extra/fewer name parts
     if len(parts) == 2:
@@ -739,32 +753,32 @@ def save_csv(results, output_path):
 
     with_photos = [r for r in results if r['image_url']]
 
-    # Drop image URLs shared by professors with DIFFERENT last names.
-    # Same person listed twice (e.g., "William Goldman" & "William (Bill) Goldman",
-    # or "Mary Potts" & "Mary Potts-Santone") legitimately shares the same photo.
-    # We check if last names share a common root (any substring overlap ≥4 chars).
-    from collections import defaultdict
+    # Drop image URLs shared by multiple professors.
+    # - 3+ professors sharing a URL = always wrong (group/campus/promo image)
+    # - 2 professors sharing a URL = only OK if same person (name variant)
+    from collections import defaultdict, Counter
+    url_counts = Counter(r['image_url'] for r in with_photos)
+
+    # For URLs shared by exactly 2, check if it's the same person
     url_lastnames = defaultdict(set)
     for r in with_photos:
-        parts = normalize_name(r['name']).split()
-        # Use last name with hyphens stripped to a base form
-        last = re.sub(r'[^a-z]', '', parts[-1]) if parts else ''
-        url_lastnames[r['image_url']].add(last)
+        if url_counts[r['image_url']] == 2:
+            parts = normalize_name(r['name']).split()
+            last = re.sub(r'[^a-z]', '', parts[-1]) if parts else ''
+            url_lastnames[r['image_url']].add(last)
 
-    def names_are_same_person(name_set):
-        """Check if a set of last names likely belong to the same person."""
-        names = list(name_set)
-        if len(names) <= 1:
-            return True
-        # Check if any name is a substring of another (potts in pottssantone)
-        for i, a in enumerate(names):
-            for b in names[i+1:]:
-                if a in b or b in a:
-                    return True
-        return False
-
-    bad_urls = {url for url, names in url_lastnames.items()
-                if len(names) > 1 and not names_are_same_person(names)}
+    bad_urls = set()
+    for url, count in url_counts.items():
+        if count >= 3:
+            # 3+ professors = always a shared/wrong image
+            bad_urls.add(url)
+        elif count == 2:
+            # 2 professors = check if last names are related
+            names = list(url_lastnames.get(url, set()))
+            if len(names) == 2:
+                a, b = names
+                if a not in b and b not in a:
+                    bad_urls.add(url)
 
     if bad_urls:
         before = len(with_photos)
