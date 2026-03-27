@@ -785,7 +785,7 @@ function Compare() {
 							<p className="compare-verdict-title">It's a tie</p>
 							<p className="compare-verdict-body">
 								{recommendation.leftName} and {recommendation.rightName} are evenly matched
-								across the key metrics. Both are solid choices — consider factors like course availability or teaching style.
+								across the key metrics. Both are solid choices, so consider factors like course availability or teaching style.
 							</p>
 						</>
 					) : (
