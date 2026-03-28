@@ -7,7 +7,7 @@ import Dropdown from '../components/Dropdown';
 import StarRating from '../components/StarRating';
 import RatingBar from '../components/RatingBar';
 import Breadcrumbs from '../components/Breadcrumbs';
-import { fetchProfessorData } from '../api/api';
+import { fetchProfessorData, fetchProfessorReviews } from '../api/api';
 import type { ProfessorProfile, ProfessorReview, TraceComment } from '../api/api';
 import { useAuth } from '../context/AuthContext';
 import SignInModal from '../components/SignInModal';
@@ -203,6 +203,7 @@ const Professor = () => {
   const [reviews, setReviews] = useState<ProfessorReview[]>([]);
   const [traceComments, setTraceComments] = useState<TraceComment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [reviewsLoading, setReviewsLoading] = useState(true);
   const [error, setError] = useState('');
   const [reviewTabRestored] = useState(() => sessionStorage.getItem('prof_review_tab') === 'trace');
   const [reviewTab, setReviewTab] = useState<'rmp' | 'trace'>(() => {
@@ -270,7 +271,7 @@ const Professor = () => {
     };
   }, [updateReviewPill, loading]);
 
-  /* ── data loading ── */
+  /* ── profile loading ── */
   useEffect(() => {
     if (!slug) {
       setLoading(false);
@@ -285,15 +286,33 @@ const Professor = () => {
         if (cancelled) return;
         if (!data) {
           setError('Professor not found.');
-        } else { 
-          setProfile(data); 
-          setReviews(data.reviews || []); 
-          setTraceComments(data.traceComments || []); 
+        } else {
+          setProfile(data);
         }
       } catch { if (!cancelled) setError('Failed to load professor data.'); }
       finally { if (!cancelled) setLoading(false); }
     }
     load();
+    return () => { cancelled = true; };
+  }, [slug]);
+
+  /* ── reviews loading (re-runs on auth change to pick up comment text) ── */
+  useEffect(() => {
+    if (!slug) return;
+    let cancelled = false;
+    async function loadReviews() {
+      setReviewsLoading(true);
+      try {
+        const data = await fetchProfessorReviews(slug!);
+        if (cancelled) return;
+        if (data) {
+          setReviews(data.reviews || []);
+          setTraceComments(data.traceComments || []);
+        }
+      } catch { /* reviews are non-critical */ }
+      finally { if (!cancelled) setReviewsLoading(false); }
+    }
+    loadReviews();
     return () => { cancelled = true; };
   }, [slug, user]);
 
@@ -365,9 +384,18 @@ const Professor = () => {
 
   const hasInitializedSelection = useRef(false);
   useEffect(() => {
-    if (allCourseCodes.length > 0 && !hasInitializedSelection.current) {
+    if (allCourseCodes.length === 0) return;
+    if (!hasInitializedSelection.current) {
       setSelectedCourses(new Set(allCourseCodes));
       hasInitializedSelection.current = true;
+    } else {
+      // Merge any new course codes from reviews into the existing selection
+      setSelectedCourses(prev => {
+        const next = new Set(prev);
+        let changed = false;
+        allCourseCodes.forEach(c => { if (!next.has(c)) { next.add(c); changed = true; } });
+        return changed ? next : prev;
+      });
     }
   }, [allCourseCodes]);
 
@@ -1066,7 +1094,13 @@ const Professor = () => {
           </div>
         </div>
 
-        {reviewTab === 'rmp' && (
+        {reviewsLoading && (
+          <div className="prof-loading" style={{ padding: '2rem 0' }}>
+            <div className="prof-loading-spinner" />
+          </div>
+        )}
+
+        {!reviewsLoading && reviewTab === 'rmp' && (
           <>
             <div className="prof-reviews-filters">
               <Dropdown className="feedback-dropdown" options={sortOptions} value={sortBy} onChange={setSortBy} placeholder="Sort by…" />
@@ -1121,7 +1155,7 @@ const Professor = () => {
           </>
         )}
 
-        {reviewTab === 'trace' && (
+        {!reviewsLoading && reviewTab === 'trace' && (
           <div className="prof-trace-container">
             {user && (
               <div className="prof-trace-controls">

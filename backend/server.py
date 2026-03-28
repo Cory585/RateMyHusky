@@ -634,6 +634,41 @@ def professor_profile(slug):
 
     profile["traceCourses"] = trace_course_list
 
+    cache_set(cache_key, profile)
+    resp = jsonify(profile)
+    resp.headers["Cache-Control"] = "private, max-age=300" if is_authed else "public, max-age=300"
+    resp.headers["Vary"] = "Authorization"
+    return resp
+
+
+@app.route("/api/professors/<slug>/reviews")
+def professor_reviews(slug):
+    is_authed = False
+    token = _get_auth_token()
+    if token:
+        try:
+            pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            is_authed = True
+        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+            pass
+
+    cache_key = f"prof_reviews:{slug}:{'a' if is_authed else 'u'}"
+    cached = cache_get(cache_key)
+    if cached:
+        resp = jsonify(cached)
+        resp.headers["Cache-Control"] = "private, max-age=300" if is_authed else "public, max-age=300"
+        resp.headers["Vary"] = "Authorization"
+        return resp
+
+    prof = query_one("SELECT name_key FROM professors_catalog WHERE slug = %s", (slug,))
+    if not prof:
+        name_key = slug.strip().lower().replace("-", " ")
+        prof = query_one("SELECT name_key FROM professors_catalog WHERE name_key = %s", (name_key,))
+    if not prof:
+        return jsonify({"error": "Professor not found"}), 404
+
+    name_key = prof["name_key"]
+
     # ── RMP reviews ──
     review_rows = query("""
         SELECT professor_name, department, overall_rating, course,
@@ -659,17 +694,18 @@ def professor_profile(slug):
             "online_class": str(r["online_class"] or ""),
             "comment": sanitize(r["comment"]) if r["comment"] else "",
         })
-    profile["reviews"] = reviews
 
     # ── TRACE comments ──
-    # Always fetch question + counts; only include comment text when authed
+    trace_course_rows = query(
+        "SELECT course_id, term_id, instructor_id FROM trace_courses WHERE name_key = %s",
+        (name_key,)
+    )
+
+    comments = []
     if trace_course_rows:
         keys = set()
         for c in trace_course_rows:
-            cid = int(c["course_id"])
-            iid = int(c["instructor_id"])
-            tid = int(c["term_id"]) if c["term_id"] else 0
-            keys.add((cid, iid, tid))
+            keys.add((int(c["course_id"]), int(c["instructor_id"]), int(c["term_id"]) if c["term_id"] else 0))
 
         or_conditions = []
         or_params = []
@@ -682,13 +718,10 @@ def professor_profile(slug):
                 f"SELECT course_url, question, comment FROM trace_comments WHERE {' OR '.join(or_conditions)}",
                 or_params
             )
-
-            comments = []
             for c in comment_rows:
                 comment_text = sanitize(c["comment"]) if c["comment"] else ""
                 if not comment_text.strip():
                     continue
-
                 url = str(c["course_url"] or "")
                 term_id = 0
                 try:
@@ -697,21 +730,16 @@ def professor_profile(slug):
                         term_id = int(sp_matches[2])
                 except (ValueError, IndexError):
                     pass
-
                 comments.append({
                     "courseUrl": url,
                     "question": str(c["question"] or ""),
                     "comment": comment_text if is_authed else "",
                     "termId": term_id,
                 })
-            profile["traceComments"] = comments
-        else:
-            profile["traceComments"] = []
-    else:
-        profile["traceComments"] = []
 
-    cache_set(cache_key, profile)
-    resp = jsonify(profile)
+    result = {"reviews": reviews, "traceComments": comments}
+    cache_set(cache_key, result)
+    resp = jsonify(result)
     resp.headers["Cache-Control"] = "private, max-age=300" if is_authed else "public, max-age=300"
     resp.headers["Vary"] = "Authorization"
     return resp
