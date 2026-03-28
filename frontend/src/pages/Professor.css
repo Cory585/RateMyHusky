@@ -117,17 +117,16 @@
   background: #fff; border-radius: 16px; padding: 22px 18px 20px;
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-  border-top: 3px solid transparent;
-  transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+  transition: transform 0.2s, box-shadow 0.2s;
   animation: profCardIn 0.5s ease both;
   position: relative;
 }
-.prof-stat-card:nth-child(1) { border-top-color: #f39c12; animation-delay: 0.05s; }
-.prof-stat-card:nth-child(2) { border-top-color: #e74c3c; animation-delay: 0.10s; }
-.prof-stat-card:nth-child(3) { border-top-color: #27ae60; animation-delay: 0.15s; }
-.prof-stat-card:nth-child(4) { border-top-color: #3498db; animation-delay: 0.20s; }
-.prof-stat-card:nth-child(5) { border-top-color: #9b59b6; animation-delay: 0.25s; }
-.prof-stat-card:nth-child(6) { border-top-color: #e67e22; animation-delay: 0.30s; }
+.prof-stat-card:nth-child(1) { animation-delay: 0.05s; }
+.prof-stat-card:nth-child(2) { animation-delay: 0.10s; }
+.prof-stat-card:nth-child(3) { animation-delay: 0.15s; }
+.prof-stat-card:nth-child(4) { animation-delay: 0.20s; }
+.prof-stat-card:nth-child(5) { animation-delay: 0.25s; }
+.prof-stat-card:nth-child(6) { animation-delay: 0.30s; }
 .prof-stat-card:hover { transform: translateY(-3px); box-shadow: 0 8px 28px rgba(0,0,0,0.1); z-index: 10; }
 @keyframes profCardIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 
