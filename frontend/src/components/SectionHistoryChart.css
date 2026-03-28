@@ -1,0 +1,91 @@
+/* ── CSS variables (light defaults) ── */
+.sh-chart-wrap {
+	--sh-grid: #e8e8e8;
+	--sh-axis: #7c7c7c;
+	--sh-tooltip-bg: #fff;
+	--sh-tooltip-border: #e0e0e0;
+	--sh-tooltip-text: #222;
+	--sh-toggle-bg: #f0f0f0;
+	--sh-toggle-active-bg: #d6394c;
+	--sh-toggle-active-text: #fff;
+	--sh-toggle-text: #555;
+	--sh-select-bg: #f5f5f5;
+	--sh-select-border: #d0d0d0;
+	--sh-select-text: #333;
+}
+
+.dark .sh-chart-wrap {
+	--sh-grid: #333;
+	--sh-axis: #8a8a8a;
+	--sh-tooltip-bg: #2a2a2a;
+	--sh-tooltip-border: #444;
+	--sh-tooltip-text: #e0e0e0;
+	--sh-toggle-bg: #2a2a2a;
+	--sh-toggle-active-bg: #d6394c;
+	--sh-toggle-active-text: #fff;
+	--sh-toggle-text: #aaa;
+	--sh-select-bg: #2a2a2a;
+	--sh-select-border: #444;
+	--sh-select-text: #d0d0d0;
+}
+
+/* ── Controls row ── */
+.sh-chart-controls {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 16px;
+	flex-wrap: wrap;
+}
+
+/* ── Toggle pills ── */
+.sh-toggle {
+	display: inline-flex;
+	border-radius: 8px;
+	overflow: hidden;
+	background: var(--sh-toggle-bg);
+}
+
+.sh-toggle-btn {
+	padding: 6px 16px;
+	border: none;
+	background: transparent;
+	color: var(--sh-toggle-text);
+	font-size: 0.82rem;
+	font-weight: 600;
+	cursor: pointer;
+	transition: background 0.2s, color 0.2s;
+}
+
+.sh-toggle-btn.active {
+	background: var(--sh-toggle-active-bg);
+	color: var(--sh-toggle-active-text);
+}
+
+.sh-toggle-btn:hover:not(.active) {
+	opacity: 0.8;
+}
+
+/* ── Range dropdown ── */
+.sh-range-select {
+	padding: 5px 10px;
+	border-radius: 6px;
+	border: 1px solid var(--sh-select-border);
+	background: var(--sh-select-bg);
+	color: var(--sh-select-text);
+	font-size: 0.82rem;
+	cursor: pointer;
+}
+
+/* ── Chart container ── */
+.sh-chart-container {
+	width: 100%;
+	min-height: 300px;
+}
+
+/* ── Recharts legend override ── */
+.sh-chart-wrap .recharts-legend-item-text {
+	font-size: 0.8rem !important;
+	color: var(--sh-axis) !important;
+}

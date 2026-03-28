@@ -1229,7 +1229,7 @@ def course_profile(code):
     if name_keys:
         placeholders = ",".join(["%s"] * len(name_keys))
         prof_rows = query(
-            f"SELECT name_key, slug, image_url, total_reviews, would_take_again_pct, difficulty "
+            f"SELECT name_key, slug, image_url, total_reviews, would_take_again_pct, difficulty, rmp_rating "
             f"FROM professors_catalog WHERE name_key IN ({placeholders})", name_keys
         )
         prof_map = {r["name_key"]: r for r in prof_rows}
@@ -1265,18 +1265,22 @@ def course_profile(code):
         sc = score_map.get(key)
         fname = (s["instructor_first_name"] or "").strip()
         lname = (s["instructor_last_name"] or "").strip()
+        name = f"{fname} {lname}".strip()
         overall_mean = None
         if sc and _safe_int(sc["total_responses"]) > 0:
             overall_mean = round(_safe_float(sc["weighted_sum"]) / _safe_int(sc["total_responses"]), 2)
+        prof = prof_map.get(normalize_name(name))
+        rmp_rating = round(prof["rmp_rating"], 2) if prof and prof.get("rmp_rating") else None
         section_rows.append({
             "courseId": _safe_int(s["course_id"]),
             "instructorId": _safe_int(s["instructor_id"]),
             "termId": _safe_int(s["term_id"]),
             "termTitle": s["term_title"] or "",
             "section": s["section"] or "",
-            "instructor": f"{fname} {lname}".strip(),
+            "instructor": name,
             "enrollment": _safe_int(s["enrollment"]),
             "overallRating": overall_mean,
+            "rmpRating": rmp_rating,
             "totalResponses": _safe_int(sc["total_responses"]) if sc else 0,
             "completed": _safe_int(sc["completed"]) if sc else 0,
         })

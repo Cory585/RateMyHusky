@@ -218,6 +218,7 @@ export interface CourseSection {
   instructor: string;
   enrollment: number;
   overallRating: number | null;
+  rmpRating: number | null;
   totalResponses: number;
   completed: number;
 }
