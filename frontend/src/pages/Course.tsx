@@ -7,6 +7,7 @@ import type { CourseDetail } from '../api/api';
 import Footer from '../components/Footer';
 import { getInitials } from '../utils/nameUtils';
 import SectionHistoryChart from '../components/SectionHistoryChart';
+import Breadcrumbs from '../components/Breadcrumbs';
 import './Course.css';
 
 const INITIAL_INSTRUCTORS_VISIBLE = 5;
@@ -90,11 +91,10 @@ const Course = () => {
 	return (
 		<div className="course-page">
 			<div className="course-shell">
-				<div className="course-breadcrumb">
-					<Link to="/courses">Courses</Link>
-					<span>/</span>
-					<span>{summary.code}</span>
-				</div>
+				<Breadcrumbs items={[
+					{ label: 'Courses', to: '/courses' },
+					{ label: summary.code },
+				]} />
 
 				<header className="course-hero">
 					<div>

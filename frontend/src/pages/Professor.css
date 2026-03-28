@@ -247,6 +247,9 @@
 .prof-course-term-tag { font-size: 0.72rem; font-weight: 700; color: #d6394c; background: #fef0f0; padding: 2px 8px; border-radius: 8px; white-space: nowrap; }
 .prof-course-term-more { color: #999; background: #f0f0f0; font-style: italic; cursor: pointer; transition: background 0.15s, color 0.15s; }
 .prof-course-term-more:hover { background: #e4e4e4; color: #d6394c; }
+.prof-course-view { display: flex; justify-content: flex-end; margin-top: 8px; }
+.prof-course-view-btn { font-size: 0.78rem; font-weight: 700; color: #d6394c; text-decoration: none; padding: 4px 10px; border-radius: 6px; border: 1.5px solid #d6394c; transition: background 0.15s, color 0.15s; }
+.prof-course-view-btn:hover { background: #d6394c; color: #fff; }
 
 .prof-course-term-hidden {
   display: none;
@@ -833,6 +836,8 @@
 .dark .prof-course-term-tag { color: #e06070; background: #3a2020; }
 .dark .prof-course-term-more { color: #777; background: #333; }
 .dark .prof-course-term-more:hover { background: #3a3a3a; color: #e06070; }
+.dark .prof-course-view-btn { color: #e06070; border-color: #e06070; }
+.dark .prof-course-view-btn:hover { background: #e06070; color: #1a1a1a; }
 .dark .prof-courses-toggle { border-top-color: #333; color: #e06070; }
 .dark .prof-courses-toggle:hover { background: #2d2020; }
 .dark .trace-comment-term { color: #e06070; background: #3a2020; }

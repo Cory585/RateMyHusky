@@ -185,16 +185,6 @@ function ProfessorFilter({
 				</div>
 			)}
 
-			{!open && !allSelected && selected.size > 0 && (
-				<div className="sh-filter-tags">
-					{[...selected].map(p => (
-						<button key={p} type="button" className="sh-filter-tag" onClick={() => toggle(p)}>
-							{p}
-							<span className="sh-filter-tag-x">×</span>
-						</button>
-					))}
-				</div>
-			)}
 		</div>
 	);
 }

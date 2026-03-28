@@ -933,6 +933,16 @@ const Professor = () => {
                         )}
                       </div>
                     )}
+                    <div className="prof-course-view">
+                      <Link
+                        to={`/courses/${code.toLowerCase()}`}
+                        state={{ fromPage: { label: profile.name, url: `/professors/${slug}` } }}
+                        className="prof-course-view-btn"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        View Course
+                      </Link>
+                    </div>
                   </div>
                 );
               })}
@@ -1001,6 +1011,16 @@ const Professor = () => {
                               )}
                             </div>
                           )}
+                          <div className="prof-course-view">
+                            <Link
+                              to={`/courses/${code.toLowerCase()}`}
+                              state={{ fromPage: { label: profile.name, url: `/professors/${slug}` } }}
+                              className="prof-course-view-btn"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              View Course
+                            </Link>
+                          </div>
                         </div>
                       );
                     })}</div>
