@@ -116,12 +116,17 @@ const traceSortOptions = [
 
 // Strictly extract "Season Year" from messy term titles
 const cleanTerm = (t: string): string => {
+  // Match terms like "Fall 2025", "Fall A 2025", "Summer 2 2025"
+  const fullMatch = t.match(/(Spring|Fall|Summer|Winter)\s*([A-Z0-9]*)\s*(20\d{2})/i);
+  if (fullMatch) {
+    const season = fullMatch[1].charAt(0).toUpperCase() + fullMatch[1].slice(1).toLowerCase();
+    const modifier = fullMatch[2].trim();
+    const year = fullMatch[3];
+    return modifier ? `${season} ${modifier} ${year}` : `${season} ${year}`;
+  }
   const seasonMatch = t.match(/(Spring|Fall|Summer|Winter)/i);
   if (!seasonMatch) return t.trim();
   const season = seasonMatch[1].charAt(0).toUpperCase() + seasonMatch[1].slice(1).toLowerCase();
-  // Try standard 4-digit year first (e.g. "Fall 2019")
-  const yearMatch = t.match(/\b(20\d{2})\b/);
-  if (yearMatch) return `${season} ${yearMatch[1]}`;
   // Fallback: extract year from 6-digit term codes like "202130" → "2021"
   const termCodeMatch = t.match(/(20\d{2})\d{2}/);
   if (termCodeMatch) return `${season} ${termCodeMatch[1]}`;

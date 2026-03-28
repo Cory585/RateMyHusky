@@ -200,7 +200,13 @@ def return_db(exc):
     db = g.pop('db', None)
     key = g.pop('db_key', None)
     if db is not None:
-        _get_pool().putconn(db, key=key)
+        try:
+            _get_pool().putconn(db, key=key)
+        except KeyError:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def query(sql, params=None):
