@@ -117,10 +117,10 @@ const traceSortOptions = [
 // Strictly extract "Season Year" from messy term titles
 const cleanTerm = (t: string): string => {
   // Match terms like "Fall 2025", "Fall A 2025", "Summer 2 2025"
-  const fullMatch = t.match(/(Spring|Fall|Summer|Winter)\s*([A-Z0-9]*)\s*(20\d{2})/i);
+  const fullMatch = t.match(/(Spring|Fall|Summer|Winter)\s*([A-Z]|\d)?\s*(20\d{2})/i);
   if (fullMatch) {
     const season = fullMatch[1].charAt(0).toUpperCase() + fullMatch[1].slice(1).toLowerCase();
-    const modifier = fullMatch[2].trim();
+    const modifier = (fullMatch[2] ?? '').trim();
     const year = fullMatch[3];
     return modifier ? `${season} ${modifier} ${year}` : `${season} ${year}`;
   }
