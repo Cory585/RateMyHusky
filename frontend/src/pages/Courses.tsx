@@ -430,7 +430,8 @@ export default function Courses() {
 					</div>
 
 					<p className="catalog-disclaimer">
-						Course cards currently use TRACE aggregate data only.
+						Courses without any rating data are not shown.{' '}
+						<span>They may still have a page if found via search.</span>
 					</p>
 
 					{loading ? (
@@ -439,7 +440,7 @@ export default function Courses() {
 								<div key={i} className="prof-card skeleton" />
 							))}
 						</div>
-					) : courses.length === 0 ? (
+					) : courses.filter((c) => c.avgRating != null).length === 0 ? (
 						<div className="catalog-empty">
 							<p>No courses match your filters.</p>
 							<button className="clear-btn prominent" onClick={clearFilters}>
@@ -448,7 +449,7 @@ export default function Courses() {
 						</div>
 					) : (
 						<div className="catalog-grid" ref={gridRef}>
-							{courses.map((course) => (
+							{courses.filter((c) => c.avgRating != null).map((course) => (
 								<div
 									key={course.code}
 									className="prof-card course-card"

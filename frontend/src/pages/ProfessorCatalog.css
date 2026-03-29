@@ -875,6 +875,18 @@
   .catalog-page .prof-name {
     font-size: 0.84rem;
   }
+
+  .prof-card-info {
+    padding: 10px 12px;
+  }
+
+  .prof-card-footer {
+    margin-top: 6px;
+  }
+
+  .prof-rating-count {
+    font-size: 0.56rem;
+  }
 }
 
 /* ─── PROFESSOR CARD ───────────────────────────────────────── */
@@ -1011,19 +1023,22 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  position: relative;
+  gap: 2px;
   margin-top: 4px;
 }
 
 .prof-rating-count {
   font-size: 0.6rem;
   color: #bbb;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .prof-rating-count--center {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  text-align: center;
 }
 
 .prof-sub-ratings {
@@ -1349,6 +1364,28 @@
 
   .prof-card-photo {
     height: 120px;
+  }
+
+  .prof-card-info {
+    padding: 10px;
+    gap: 4px;
+  }
+
+  .prof-sub-ratings {
+    gap: 4px;
+    margin-top: 4px;
+  }
+
+  .sub-rating-item {
+    padding: 4px 2px;
+  }
+
+  .prof-card-footer {
+    margin-top: 6px;
+  }
+
+  .prof-rating-count {
+    font-size: 0.55rem;
   }
 
   .catalog-list .prof-list-item {
