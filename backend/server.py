@@ -783,7 +783,8 @@ def departments():
             WHERE avg_rating IS NOT NULL
             ORDER BY department
         """)
-    result = [r['department'] for r in rows if r['department']]
+    BAD_DEPTS = {"Computer amp Informational Tech.", "Computer  Informational Tech.", "Counseling amp Educational Psych", "Counseling  Educational Psych"}
+    result = [r['department'] for r in rows if r['department'] and r['department'] not in BAD_DEPTS]
     cache_set(cache_key, result)
     return jsonify(result)
 
@@ -840,14 +841,22 @@ def professors_catalog():
         elif college_list:
             conditions.append("college IN (" + ",".join(["%s"] * len(college_list)) + ")")
             params.extend(college_list)
+    DEPT_ALIASES = {
+        "Computer & Informational Tech.": ["Computer amp Informational Tech.", "Computer  Informational Tech."],
+        "Counseling & Educational Psych": ["Counseling amp Educational Psych", "Counseling  Educational Psych"],
+    }
     if dept and dept != "All":
         dept_list = [d.strip() for d in dept.split(",") if d.strip()]
-        if len(dept_list) == 1:
+        expanded = []
+        for d in dept_list:
+            expanded.append(d)
+            expanded.extend(DEPT_ALIASES.get(d, []))
+        if len(expanded) == 1:
             conditions.append("department = %s")
-            params.append(dept_list[0])
-        elif dept_list:
-            conditions.append("department IN (" + ",".join(["%s"] * len(dept_list)) + ")")
-            params.extend(dept_list)
+            params.append(expanded[0])
+        elif expanded:
+            conditions.append("department IN (" + ",".join(["%s"] * len(expanded)) + ")")
+            params.extend(expanded)
     if min_rating > 0:
         conditions.append("avg_rating >= %s")
         params.append(min_rating)
