@@ -187,12 +187,35 @@ def cache_set(key, data):
                 del _cache[k]
 
 
+def _acquire_fresh_conn():
+    key = id(g._get_current_object() if hasattr(g, '_get_current_object') else g)
+    g.db_key = key
+    g.db = _get_pool().getconn(key=key)
+    return g.db
+
+
+def _discard_db_conn():
+    """Return the current request's connection to the pool and mark it closed."""
+    db = g.pop('db', None)
+    key = g.pop('db_key', None)
+    if db is not None:
+        try:
+            _get_pool().putconn(db, key=key, close=True)
+        except Exception:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+
 def get_db():
     if 'db' not in g:
-        key = id(g._get_current_object() if hasattr(g, '_get_current_object') else g)
-        g.db_key = key
-        g.db = _get_pool().getconn(key=key)
-    return g.db
+        return _acquire_fresh_conn()
+    conn = g.db
+    if conn.closed:
+        _discard_db_conn()
+        return _acquire_fresh_conn()
+    return conn
 
 
 @app.teardown_appcontext
@@ -210,10 +233,18 @@ def return_db(exc):
 
 
 def query(sql, params=None):
-    conn = get_db()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute(sql, params or ())
-    return cur.fetchall()
+    try:
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(sql, params or ())
+        return cur.fetchall()
+    except (psycopg2.InterfaceError, psycopg2.OperationalError):
+        # Connection was stale — discard it and retry once with a fresh one
+        _discard_db_conn()
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(sql, params or ())
+        return cur.fetchall()
 
 
 def query_one(sql, params=None):
