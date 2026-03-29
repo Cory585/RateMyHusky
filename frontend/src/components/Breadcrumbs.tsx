@@ -20,7 +20,7 @@ const Breadcrumbs = ({ items }: BreadcrumbsProps) => {
   const catalogLink = location.state?.fromCatalog || '/professors';
 
   const resolvedItems = fromPage
-    ? [{ label: fromPage.label, to: fromPage.url }, ...items.filter(item => item.to !== '/professors')]
+    ? [{ label: fromPage.label, to: fromPage.url }, ...items.filter(item => item.to !== '/professors' && item.to !== '/courses')]
     : items;
 
   return (
