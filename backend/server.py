@@ -1253,57 +1253,46 @@ def course_profile(code):
     if not sections:
         return jsonify({"error": "Course not found"}), 404
 
-    # Get overall scores for these sections
-    if sections:
-        section_keys = tuple((s["course_id"], s["instructor_id"], s["term_id"]) for s in sections)
-        overall_scores = query(
-            "SELECT course_id, instructor_id, term_id, "
-            "SUM(CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT)) as weighted_sum, "
-            "SUM(total_responses) as total_responses, "
-            "SUM(completed) as completed "
-            "FROM trace_scores "
-            "WHERE (course_id, instructor_id, term_id) IN %s AND lower(question) LIKE '%%overall%%' "
-            "GROUP BY course_id, instructor_id, term_id",
-            (section_keys,)
-        )
-        challenging_scores = query(
-            "SELECT course_id, instructor_id, term_id, "
-            "SUM(CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT)) as weighted_sum, "
-            "SUM(total_responses) as total_responses "
-            "FROM trace_scores "
-            "WHERE (course_id, instructor_id, term_id) IN %s AND lower(question) LIKE '%%challeng%%' "
-            "GROUP BY course_id, instructor_id, term_id",
-            (section_keys,)
-        )
-        hours_scores = query(
-            "SELECT course_id, instructor_id, term_id, "
-            "SUM(CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT)) as weighted_sum, "
-            "SUM(total_responses) as total_responses "
-            "FROM trace_scores "
-            "WHERE (course_id, instructor_id, term_id) IN %s AND lower(question) LIKE '%%hours%%' "
-            "GROUP BY course_id, instructor_id, term_id",
-            (section_keys,)
-        )
-    else:
-        overall_scores = []
-        challenging_scores = []
-        hours_scores = []
+    # Single query for all score types using conditional aggregation (replaces 3 separate queries)
+    section_keys = tuple((s["course_id"], s["instructor_id"], s["term_id"]) for s in sections)
+    combined_scores = query(
+        "SELECT course_id, instructor_id, term_id, "
+        "SUM(CASE WHEN lower(question) LIKE '%%overall%%' THEN CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT) ELSE 0 END) as overall_weighted, "
+        "SUM(CASE WHEN lower(question) LIKE '%%overall%%' THEN CAST(total_responses AS INT) ELSE 0 END) as overall_responses, "
+        "SUM(CASE WHEN lower(question) LIKE '%%overall%%' THEN completed ELSE 0 END) as overall_completed, "
+        "SUM(CASE WHEN lower(question) LIKE '%%challeng%%' THEN CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT) ELSE 0 END) as challeng_weighted, "
+        "SUM(CASE WHEN lower(question) LIKE '%%challeng%%' THEN CAST(total_responses AS INT) ELSE 0 END) as challeng_responses, "
+        "SUM(CASE WHEN lower(question) LIKE '%%hours%%' THEN CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT) ELSE 0 END) as hours_weighted, "
+        "SUM(CASE WHEN lower(question) LIKE '%%hours%%' THEN CAST(total_responses AS INT) ELSE 0 END) as hours_responses "
+        "FROM trace_scores "
+        "WHERE (course_id, instructor_id, term_id) IN %s "
+        "AND (lower(question) LIKE '%%overall%%' OR lower(question) LIKE '%%challeng%%' OR lower(question) LIKE '%%hours%%') "
+        "GROUP BY course_id, instructor_id, term_id",
+        (section_keys,)
+    )
 
-    # Build score lookup
+    # Build score maps from combined result
     score_map = {}
-    for os_row in overall_scores:
-        key = (os_row["course_id"], os_row["instructor_id"], os_row["term_id"])
-        score_map[key] = os_row
-
     challenging_map = {}
-    for row in challenging_scores:
-        key = (row["course_id"], row["instructor_id"], row["term_id"])
-        challenging_map[key] = row
-
     hours_map = {}
-    for row in hours_scores:
+    for row in combined_scores:
         key = (row["course_id"], row["instructor_id"], row["term_id"])
-        hours_map[key] = row
+        if row["overall_responses"]:
+            score_map[key] = {
+                "weighted_sum": row["overall_weighted"],
+                "total_responses": row["overall_responses"],
+                "completed": row["overall_completed"],
+            }
+        if row["challeng_responses"]:
+            challenging_map[key] = {
+                "weighted_sum": row["challeng_weighted"],
+                "total_responses": row["challeng_responses"],
+            }
+        if row["hours_responses"]:
+            hours_map[key] = {
+                "weighted_sum": row["hours_weighted"],
+                "total_responses": row["hours_responses"],
+            }
 
     # Compute summary
     total_weighted = 0.0
@@ -1464,23 +1453,22 @@ def course_profile(code):
 
     # Get question-level scores
     question_rows = []
-    if sections:
-        q_scores = query(
-            "SELECT question, "
-            "SUM(CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT)) as weighted_sum, "
-            "SUM(total_responses) as total_responses "
-            "FROM trace_scores "
-            "WHERE (course_id, instructor_id, term_id) IN %s "
-            "GROUP BY question",
-            (section_keys,)
-        )
-        for qs in q_scores:
-            resp = _safe_int(qs["total_responses"])
-            question_rows.append({
-                "question": qs["question"],
-                "avgRating": round(_safe_float(qs["weighted_sum"]) / resp, 2) if resp > 0 else None,
-                "totalResponses": resp,
-            })
+    q_scores = query(
+        "SELECT question, "
+        "SUM(CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT)) as weighted_sum, "
+        "SUM(total_responses) as total_responses "
+        "FROM trace_scores "
+        "WHERE (course_id, instructor_id, term_id) IN %s "
+        "GROUP BY question",
+        (section_keys,)
+    )
+    for qs in q_scores:
+        resp = _safe_int(qs["total_responses"])
+        question_rows.append({
+            "question": qs["question"],
+            "avgRating": round(_safe_float(qs["weighted_sum"]) / resp, 2) if resp > 0 else None,
+            "totalResponses": resp,
+        })
     question_rows.sort(key=lambda r: (-r["totalResponses"], r["question"].lower()))
 
     return jsonify({
