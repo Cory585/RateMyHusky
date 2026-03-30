@@ -67,7 +67,7 @@
 
 .course-stats-grid {
 	display: grid;
-	grid-template-columns: repeat(3, 1fr);
+	grid-template-columns: repeat(2, 1fr);
 	gap: 14px;
 	margin-bottom: 18px;
 	position: relative;
@@ -75,7 +75,7 @@
 }
 
 @media (min-width: 1280px) {
-	.course-stats-grid { grid-template-columns: repeat(6, 1fr); }
+	.course-stats-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 .course-stat-card {
@@ -405,7 +405,7 @@
 
 .instructor-header-row span,
 .instructor-row span {
-	text-align: left;
+	text-align: left !important;
 }
 
 .course-expand-controls {

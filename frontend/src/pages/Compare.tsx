@@ -119,6 +119,8 @@ function Compare() {
 	const rightWrapperRef = useRef<HTMLDivElement>(null);
 	const leftDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const rightDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const leftFetchGenRef = useRef(0);
+	const rightFetchGenRef = useRef(0);
 
 	const [leftProfile, setLeftProfile] = useState<ProfessorProfile | null>(null);
 	const [rightProfile, setRightProfile] = useState<ProfessorProfile | null>(null);
@@ -335,9 +337,12 @@ function Compare() {
 			return;
 		}
 
+		leftFetchGenRef.current += 1;
+		const gen = leftFetchGenRef.current;
 		leftDebounceRef.current = setTimeout(async () => {
 			try {
 				const results = await fetchSearchSuggestions(trimmedQuery, 'Professor');
+				if (gen !== leftFetchGenRef.current) return;
 				const professorResults = results
 					.filter((result): result is ProfessorSuggestion => result.type === 'professor')
 					.filter((result) => getSuggestionSlug(result) !== rightSlug)
@@ -347,6 +352,7 @@ function Compare() {
 				setShowLeftSuggestions(professorResults.length > 0);
 				setLeftActiveIndex(-1);
 			} catch {
+				if (gen !== leftFetchGenRef.current) return;
 				setLeftSuggestions([]);
 				setShowLeftSuggestions(false);
 			}
@@ -368,9 +374,12 @@ function Compare() {
 			return;
 		}
 
+		rightFetchGenRef.current += 1;
+		const gen = rightFetchGenRef.current;
 		rightDebounceRef.current = setTimeout(async () => {
 			try {
 				const results = await fetchSearchSuggestions(trimmedQuery, 'Professor');
+				if (gen !== rightFetchGenRef.current) return;
 				const professorResults = results
 					.filter((result): result is ProfessorSuggestion => result.type === 'professor')
 					.filter((result) => getSuggestionSlug(result) !== leftSlug)
@@ -380,6 +389,7 @@ function Compare() {
 				setShowRightSuggestions(professorResults.length > 0);
 				setRightActiveIndex(-1);
 			} catch {
+				if (gen !== rightFetchGenRef.current) return;
 				setRightSuggestions([]);
 				setShowRightSuggestions(false);
 			}
@@ -760,7 +770,7 @@ function Compare() {
 						return (
 							<div className="compare-row" role="row" key={row.label}>
 								<div
-									className={`compare-cell compare-cell-left ${showLeft ? (row.leftClass ?? '') : ''} ${showLeft && row.winner === 'left' ? 'compare-cell-winner' : ''}`}
+									className={`compare-cell compare-cell-left ${showLeft ? (row.leftClass ?? '') : ''} ${bothSelected && showLeft && row.winner === 'left' ? 'compare-cell-winner' : ''}`}
 									role="cell"
 								>
 									<span>{showLeft ? row.left : '—'}</span>
@@ -770,7 +780,7 @@ function Compare() {
 									{row.label}
 								</div>
 								<div
-									className={`compare-cell compare-cell-right ${showRight ? (row.rightClass ?? '') : ''} ${showRight && row.winner === 'right' ? 'compare-cell-winner' : ''}`}
+									className={`compare-cell compare-cell-right ${showRight ? (row.rightClass ?? '') : ''} ${bothSelected && showRight && row.winner === 'right' ? 'compare-cell-winner' : ''}`}
 									role="cell"
 								>
 									<span>{showRight ? row.right : '—'}</span>
