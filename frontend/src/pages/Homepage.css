@@ -1079,13 +1079,19 @@
     font-size: 1.1rem;
   }
 
+  .goat-col-name {
+    padding-left: 6px;
+  }
+
   .goat-col-dept {
     font-size: 0.72rem;
+    padding-left: 12px;
   }
 
   .goat-col-reviews {
     font-size: 0.75rem;
     text-align: left;
+    padding-left: 12px;
   }
 
   .randomizer-desc {

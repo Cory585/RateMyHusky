@@ -142,13 +142,11 @@ const Course = () => {
 
 				<section className="course-stats-grid">
 					<StatCard label="Avg Rating" value={summary.avgRating != null ? summary.avgRating.toFixed(2) : 'N/A'} />
-					<StatCard label="Avg Difficulty" value={avgDifficulty != null ? `${avgDifficulty.toFixed(2)} / 5` : 'N/A'} />
+					<DifficultyStatCard value={avgDifficulty} />
 					<StatCard label="Avg Hrs / Week" value={avgHoursPerWeek != null ? `${avgHoursPerWeek.toFixed(1)}h` : 'N/A'} />
-					<StatCard label="Sections" value={summary.totalSections.toLocaleString()} />
 					<StatCard label="Instructors" value={summary.totalInstructors.toLocaleString()} />
-					<StatCard label="Enrollment" value={summary.totalEnrollment.toLocaleString()} />
-					<StatCard label="Responses" value={summary.totalResponses.toLocaleString()} />
-					<StatCard label="Latest Term" value={summary.latestTermTitle || 'Unknown'} />
+					<StatCard label="Avg Enrollment" value={summary.totalSections > 0 ? Math.round(summary.totalEnrollment / summary.totalSections).toLocaleString() : 'N/A'} />
+					<StatCard label="Last Taught" value={summary.latestTermTitle || 'Unknown'} />
 				</section>
 
 				{recentInstructors.length > 0 && (
@@ -293,8 +291,27 @@ const Course = () => {
 function StatCard({ label, value }: { label: string; value: string }) {
 	return (
 		<article className="course-stat-card">
-			<span>{label}</span>
-			<strong>{value}</strong>
+			<strong className="course-stat-value">{value}</strong>
+			<span className="course-stat-label">{label}</span>
+		</article>
+	);
+}
+
+function DifficultyStatCard({ value }: { value: number | null }) {
+	const color = value == null ? '#eee'
+		: value <= 1.5 ? '#27ae60'
+		: value <= 2.5 ? '#66bd63'
+		: value <= 3.0 ? '#f39c12'
+		: value <= 3.5 ? '#e67e22'
+		: value <= 4.0 ? '#e74c3c'
+		: '#c0392b';
+	return (
+		<article className="course-stat-card">
+			<strong className="course-stat-value">{value != null ? value.toFixed(2) : '—'}</strong>
+			<span className="course-stat-label">Avg Difficulty</span>
+			<div className="course-difficulty-bar">
+				<div className="course-difficulty-fill" style={{ width: `${((value ?? 0) / 5) * 100}%`, background: color }} />
+			</div>
 		</article>
 	);
 }
