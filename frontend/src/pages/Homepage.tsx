@@ -166,6 +166,25 @@ const Homepage = () => {
   const tabsRef = useRef<HTMLDivElement>(null);
   const [tabsAtEnd, setTabsAtEnd] = useState(false);
   const [tabsAtStart, setTabsAtStart] = useState(true);
+  const leaderboardRef = useRef<HTMLDivElement>(null);
+  const [leaderFade, setLeaderFade] = useState({ left: false, right: false });
+
+  const updateLeaderFade = useCallback(() => {
+    const el = leaderboardRef.current;
+    if (!el) return;
+    setLeaderFade({
+      left: el.scrollLeft > 0,
+      right: el.scrollLeft + el.clientWidth < el.scrollWidth - 1,
+    });
+  }, []);
+
+  useEffect(() => {
+    const el = leaderboardRef.current;
+    if (!el) return;
+    updateLeaderFade();
+    el.addEventListener('scroll', updateLeaderFade, { passive: true });
+    return () => el.removeEventListener('scroll', updateLeaderFade);
+  }, [profs, updateLeaderFade]);
 
   // Pill animation state
   const [pillStyle, setPillStyle] = useState({ left: 0, width: 0, opacity: 0 });
@@ -494,7 +513,8 @@ const Homepage = () => {
           ))}
         </div>
 
-        <div className={`goat-leaderboard ${profsLoading ? 'goat-loading' : ''}`}>
+        <div className={`goat-scroll-wrap${leaderFade.left ? ' fade-left' : ''}${leaderFade.right ? ' fade-right' : ''}`}>
+        <div ref={leaderboardRef} className={`goat-leaderboard ${profsLoading ? 'goat-loading' : ''}`}>
           <div className="goat-header-row">
             <span className="goat-col-rank">#</span>
             <span className="goat-col-name">Professor</span>
@@ -532,6 +552,7 @@ const Homepage = () => {
               </div>
             ))
           )}
+        </div>
         </div>
 
         {selectedCollege && (

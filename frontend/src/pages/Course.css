@@ -70,6 +70,8 @@
 	grid-template-columns: repeat(3, 1fr);
 	gap: 14px;
 	margin-bottom: 18px;
+	position: relative;
+	z-index: 2;
 }
 
 @media (min-width: 1280px) {
@@ -129,6 +131,7 @@
 .course-stat-card:hover {
 	transform: translateY(-3px);
 	box-shadow: 0 8px 28px rgba(0, 0, 0, 0.1);
+	z-index: 10;
 }
 
 .course-stat-card:nth-child(1) { animation-delay: 0.05s; }
