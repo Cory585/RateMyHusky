@@ -1266,14 +1266,44 @@ def course_profile(code):
             "GROUP BY course_id, instructor_id, term_id",
             (section_keys,)
         )
+        challenging_scores = query(
+            "SELECT course_id, instructor_id, term_id, "
+            "SUM(CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT)) as weighted_sum, "
+            "SUM(total_responses) as total_responses "
+            "FROM trace_scores "
+            "WHERE (course_id, instructor_id, term_id) IN %s AND lower(question) LIKE '%%challeng%%' "
+            "GROUP BY course_id, instructor_id, term_id",
+            (section_keys,)
+        )
+        hours_scores = query(
+            "SELECT course_id, instructor_id, term_id, "
+            "SUM(CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT)) as weighted_sum, "
+            "SUM(total_responses) as total_responses "
+            "FROM trace_scores "
+            "WHERE (course_id, instructor_id, term_id) IN %s AND lower(question) LIKE '%%hours%%' "
+            "GROUP BY course_id, instructor_id, term_id",
+            (section_keys,)
+        )
     else:
         overall_scores = []
+        challenging_scores = []
+        hours_scores = []
 
     # Build score lookup
     score_map = {}
     for os_row in overall_scores:
         key = (os_row["course_id"], os_row["instructor_id"], os_row["term_id"])
         score_map[key] = os_row
+
+    challenging_map = {}
+    for row in challenging_scores:
+        key = (row["course_id"], row["instructor_id"], row["term_id"])
+        challenging_map[key] = row
+
+    hours_map = {}
+    for row in hours_scores:
+        key = (row["course_id"], row["instructor_id"], row["term_id"])
+        hours_map[key] = row
 
     # Compute summary
     total_weighted = 0.0
@@ -1322,13 +1352,24 @@ def course_profile(code):
         if not name:
             continue
         if name not in instructor_data:
-            instructor_data[name] = {"sections": 0, "enrollment": 0, "weighted": 0.0, "responses": 0}
+            instructor_data[name] = {
+                "sections": 0, "enrollment": 0,
+                "weighted": 0.0, "responses": 0,
+                "challeng_weighted": 0.0, "challeng_responses": 0,
+                "hours_weighted": 0.0, "hours_responses": 0,
+            }
         instructor_data[name]["sections"] += 1
         instructor_data[name]["enrollment"] += _safe_int(s["enrollment"])
         key = (s["course_id"], s["instructor_id"], s["term_id"])
         if key in score_map:
             instructor_data[name]["weighted"] += _safe_float(score_map[key]["weighted_sum"])
             instructor_data[name]["responses"] += _safe_int(score_map[key]["total_responses"])
+        if key in challenging_map:
+            instructor_data[name]["challeng_weighted"] += _safe_float(challenging_map[key]["weighted_sum"])
+            instructor_data[name]["challeng_responses"] += _safe_int(challenging_map[key]["total_responses"])
+        if key in hours_map:
+            instructor_data[name]["hours_weighted"] += _safe_float(hours_map[key]["weighted_sum"])
+            instructor_data[name]["hours_responses"] += _safe_int(hours_map[key]["total_responses"])
 
     # Look up instructor metadata from professors_catalog (batched)
     name_key_map = {normalize_name(name): name for name in instructor_data}
@@ -1374,6 +1415,9 @@ def course_profile(code):
         meta_comments = comment_counts.get(nk, 0)
 
         resp = data["responses"]
+        challeng_resp = data["challeng_responses"]
+        hours_resp = data["hours_responses"]
+        course_diff = round(data["challeng_weighted"] / challeng_resp, 2) if challeng_resp > 0 else meta_diff
         instructor_rows.append({
             "name": name,
             "slug": meta_slug,
@@ -1386,6 +1430,8 @@ def course_profile(code):
             "totalEnrollment": data["enrollment"],
             "totalResponses": resp,
             "avgRating": round(data["weighted"] / resp, 2) if resp > 0 else None,
+            "courseAvgDifficulty": course_diff,
+            "courseAvgHoursPerWeek": round(data["hours_weighted"] / hours_resp, 2) if hours_resp > 0 else None,
         })
     instructor_rows.sort(key=lambda r: (r["avgRating"] is None, -(r["avgRating"] or 0), -r["sections"]))
 

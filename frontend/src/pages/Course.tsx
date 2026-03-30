@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import StarRating from '../components/StarRating';
 import NotFound from './NotFound';
@@ -21,6 +21,9 @@ const Course = () => {
 	const [notFound, setNotFound] = useState(false);
 	const [visibleInstructorCount, setVisibleInstructorCount] = useState(INITIAL_INSTRUCTORS_VISIBLE);
 	const [showBackToTop, setShowBackToTop] = useState(false);
+	const tableWrapRef = useRef<HTMLDivElement>(null);
+	const [tableAtStart, setTableAtStart] = useState(true);
+	const [tableAtEnd, setTableAtEnd] = useState(false);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -55,6 +58,22 @@ const Course = () => {
 		handler();
 		return () => window.removeEventListener('scroll', handler);
 	}, []);
+
+	useEffect(() => {
+		const el = tableWrapRef.current;
+		if (!el) return;
+		const check = () => {
+			setTableAtStart(el.scrollLeft <= 10);
+			setTableAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 10);
+		};
+		check();
+		el.addEventListener('scroll', check, { passive: true });
+		window.addEventListener('resize', check);
+		return () => {
+			el.removeEventListener('scroll', check);
+			window.removeEventListener('resize', check);
+		};
+	}, [course]);
 
 	const recentInstructors = useMemo(() => {
 		if (!course) return [];
@@ -216,15 +235,17 @@ const Course = () => {
 					<div className="course-panel-header">
 						<h2>Instructor Breakdown</h2>
 					</div>
-					<div className="course-table-wrap">
+					<div
+						className={`course-table-wrap${tableAtStart ? ' scroll-start' : ''}${tableAtEnd ? ' scroll-end' : ''}`}
+						ref={tableWrapRef}
+					>
 						<table className="course-table instructor-table">
 							<thead>
 								<tr>
-									<th>Instructor</th>
-									<th>Avg Rating</th>
-									<th>Sections</th>
-									<th>Enrollment</th>
-									<th>Responses</th>
+									<th>Professor Name</th>
+									<th>Rating</th>
+									<th>Difficulty</th>
+									<th>Hrs / Week</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -232,9 +253,8 @@ const Course = () => {
 									<tr key={row.name}>
 										<td>{row.name}</td>
 										<td>{row.avgRating != null ? row.avgRating.toFixed(2) : 'N/A'}</td>
-										<td>{row.sections}</td>
-										<td>{row.totalEnrollment}</td>
-										<td>{row.totalResponses}</td>
+										<td>{row.courseAvgDifficulty != null ? row.courseAvgDifficulty.toFixed(2) : 'N/A'}</td>
+										<td>{row.courseAvgHoursPerWeek != null ? `${row.courseAvgHoursPerWeek.toFixed(1)}h` : 'N/A'}</td>
 									</tr>
 								))}
 							</tbody>

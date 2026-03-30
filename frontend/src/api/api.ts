@@ -268,6 +268,8 @@ export interface CourseInstructorBreakdown {
   totalEnrollment: number;
   totalResponses: number;
   avgRating: number | null;
+  courseAvgDifficulty: number | null;
+  courseAvgHoursPerWeek: number | null;
 }
 
 export interface CourseSection {
