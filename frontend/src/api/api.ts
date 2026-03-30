@@ -88,7 +88,7 @@ export interface ProfessorReview {
 }
 
 export interface TraceComment {
-  courseUrl: string;
+  courseId: number;
   question: string;
   comment: string;
   termId: number;

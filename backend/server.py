@@ -734,7 +734,7 @@ def professor_reviews(slug):
 
         if or_conditions:
             comment_rows = query(
-                f"SELECT tc_term_id, tc_course_id, course_url, question, comment FROM trace_comments WHERE {' OR '.join(or_conditions)}",
+                f"SELECT tc_term_id, tc_course_id, question, comment FROM trace_comments WHERE {' OR '.join(or_conditions)}",
                 or_params
             )
             for c in comment_rows:
@@ -742,10 +742,10 @@ def professor_reviews(slug):
                 if not comment_text.strip():
                     continue
                 comments.append({
-                    "courseUrl": str(c["course_url"] or ""),
                     "question": str(c["question"] or ""),
                     "comment": comment_text if is_authed else "",
                     "termId": int(c["tc_term_id"]) if c["tc_term_id"] else 0,
+                    "courseId": int(c["tc_course_id"]) if c["tc_course_id"] else 0,
                 })
 
     result = {"reviews": reviews, "traceComments": comments}

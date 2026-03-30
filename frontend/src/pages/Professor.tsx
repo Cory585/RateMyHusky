@@ -558,35 +558,19 @@ const Professor = () => {
     return map;
   }, [profile]);
 
-  // Map courseUrl → course code for TRACE comments
+  // Map courseId → course code for TRACE comments
   const commentCourseMap = useMemo(() => {
-    const map = new Map<string, string>();
+    const map = new Map<number, string>();
     if (!profile?.traceCourses) return map;
 
-    // Build courseId → code lookup
-    const idToCode = new Map<number, string>();
     profile.traceCourses.forEach(c => {
       const m = c.displayName.match(/^([A-Z]+\d+)/i);
       const code = m ? m[1].toUpperCase() : '';
-      if (code) idToCode.set(c.courseId, code);
-    });
-
-    // For each trace comment, extract courseId from URL and map to code
-    traceComments.forEach(c => {
-      if (c.courseUrl) {
-        const spMatches = c.courseUrl.match(/sp=(\d+)/g);
-        if (spMatches && spMatches.length >= 1) {
-          const courseId = parseInt(spMatches[0].replace('sp=', ''));
-          const code = idToCode.get(courseId);
-          if (code) {
-            map.set(c.courseUrl, code);
-          }
-        }
-      }
+      if (code) map.set(c.courseId, code);
     });
 
     return map;
-  }, [profile, traceComments]);
+  }, [profile]);
 
   const groupedTrace = useMemo(() => {
     const groups: Record<string, TraceComment[]> = {};
@@ -1218,7 +1202,7 @@ const Professor = () => {
                             <div className="trace-comment-meta">
                               {hasYear && <span className="trace-comment-term">{term}</span>}
                               {(() => {
-                                const courseCode = commentCourseMap.get(c.courseUrl || '') || commentCourseMap.get(String(c.termId)) || '';
+                                const courseCode = commentCourseMap.get(c.courseId) || '';
                                 return courseCode ? <span className="trace-comment-course">{courseCode}</span> : null;
                               })()}
                             </div>
