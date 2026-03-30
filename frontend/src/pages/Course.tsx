@@ -55,17 +55,42 @@ const Course = () => {
 		return () => window.removeEventListener('scroll', handler);
 	}, []);
 
-	const topInstructors = useMemo(() => {
+	const recentInstructors = useMemo(() => {
 		if (!course) return [];
-		return [...course.instructors]
+		const cutoffYear = new Date().getFullYear() - 2;
+		const recentNames = new Set<string>();
+		const instructorLatestTermId = new Map<string, number>();
+		for (const section of course.sections) {
+			const yearMatch = section.termTitle.match(/\b(20\d{2})\b/);
+			if (yearMatch && parseInt(yearMatch[1]) >= cutoffYear) {
+				recentNames.add(section.instructor);
+				const prev = instructorLatestTermId.get(section.instructor) ?? 0;
+				if (section.termId > prev) instructorLatestTermId.set(section.instructor, section.termId);
+			}
+		}
+		return course.instructors
+			.filter(inst => recentNames.has(inst.name))
 			.sort((a, b) => {
+				const aTermId = instructorLatestTermId.get(a.name) ?? 0;
+				const bTermId = instructorLatestTermId.get(b.name) ?? 0;
+				if (bTermId !== aTermId) return bTermId - aTermId;
 				const aRating = a.avgRating ?? -1;
 				const bRating = b.avgRating ?? -1;
-				if (bRating !== aRating) return bRating - aRating;
-				if (b.totalResponses !== a.totalResponses) return b.totalResponses - a.totalResponses;
-				return b.sections - a.sections;
-			})
-			.slice(0, 10);
+				return bRating - aRating;
+			});
+	}, [course]);
+
+	const avgDifficulty = useMemo(() => {
+		if (!course) return null;
+		const valid = course.instructors.filter(i => i.difficulty != null);
+		if (!valid.length) return null;
+		return valid.reduce((sum, i) => sum + i.difficulty!, 0) / valid.length;
+	}, [course]);
+
+	const avgHoursPerWeek = useMemo(() => {
+		if (!course) return null;
+		const q = course.questionScores.find(s => s.question.toLowerCase().includes('hours per week'));
+		return q?.avgRating ?? null;
 	}, [course]);
 
 	if (loading) {
@@ -116,6 +141,9 @@ const Course = () => {
 				</header>
 
 				<section className="course-stats-grid">
+					<StatCard label="Avg Rating" value={summary.avgRating != null ? summary.avgRating.toFixed(2) : 'N/A'} />
+					<StatCard label="Avg Difficulty" value={avgDifficulty != null ? `${avgDifficulty.toFixed(2)} / 5` : 'N/A'} />
+					<StatCard label="Avg Hrs / Week" value={avgHoursPerWeek != null ? `${avgHoursPerWeek.toFixed(1)}h` : 'N/A'} />
 					<StatCard label="Sections" value={summary.totalSections.toLocaleString()} />
 					<StatCard label="Instructors" value={summary.totalInstructors.toLocaleString()} />
 					<StatCard label="Enrollment" value={summary.totalEnrollment.toLocaleString()} />
@@ -123,13 +151,13 @@ const Course = () => {
 					<StatCard label="Latest Term" value={summary.latestTermTitle || 'Unknown'} />
 				</section>
 
-				{topInstructors.length > 0 && (
+				{recentInstructors.length > 0 && (
 					<section className="course-panel">
 						<div className="course-panel-header">
-							<h2>Top 10 Professors Who Teach This Class</h2>
+							<h2>Recent Professors <span className="course-panel-subheader">(Last 2 Years)</span></h2>
 						</div>
 						<div className="course-top-prof-grid">
-							{topInstructors.map((prof, index) => (
+							{recentInstructors.map((prof, index) => (
 								<Link
 									to={prof.slug ? `/professors/${prof.slug}` : '#'}
 									state={prof.slug ? { fromPage: { label: `${code.toUpperCase()} – ${summary.name}`, url: `/courses/${code}` } } : undefined}
@@ -140,7 +168,7 @@ const Course = () => {
 										if (!prof.slug) e.preventDefault();
 									}}
 								>
-									<div className="course-top-prof-rank">#{index + 1}</div>
+									{index === 0 && <div className="course-top-prof-rank">Most Recent</div>}
 									{prof.imageUrl ? (
 										<img
 											className="course-top-prof-avatar course-top-prof-photo"
