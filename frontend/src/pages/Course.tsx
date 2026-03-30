@@ -5,7 +5,7 @@ import NotFound from './NotFound';
 import { fetchCourseData } from '../api/api';
 import type { CourseDetail } from '../api/api';
 import Footer from '../components/Footer';
-import { getInitials } from '../utils/nameUtils';
+import { getInitials, splitProfName, stripPrefix } from '../utils/nameUtils';
 import { termSortKey } from '../utils/termUtils';
 import SectionHistoryChart from '../components/SectionHistoryChart';
 import Breadcrumbs from '../components/Breadcrumbs';
@@ -192,33 +192,43 @@ const Course = () => {
 										if (!prof.slug) e.preventDefault();
 									}}
 								>
+									<div className="course-top-prof-photo">
 										{prof.imageUrl ? (
-										<img
-											className="course-top-prof-avatar course-top-prof-photo"
-											src={prof.imageUrl}
-											alt={prof.name}
-										/>
-									) : (
-										<div className="course-top-prof-avatar" aria-hidden="true">
-											{getInitials(prof.name)}
-										</div>
-									)}
+											<img
+												className="course-top-prof-img"
+												src={prof.imageUrl}
+												alt={prof.name}
+											/>
+										) : (
+											<div className="course-top-prof-avatar" aria-hidden="true">
+												{getInitials(prof.name)}
+											</div>
+										)}
+										<span className="course-top-prof-rank">#{index + 1}</span>
+									</div>
 									<div className="course-top-prof-body">
-										<h3 className="course-top-prof-name">{prof.name}</h3>
-										<div className="course-top-prof-rating">
-											{prof.avgRating != null ? (
-												<>
-													<span className="prof-avg-num">{prof.avgRating.toFixed(2)}</span>
-													<StarRating rating={prof.avgRating} size="sm" />
-												</>
-											) : (
-												<span>N/A</span>
-											)}
+										<div className="course-top-prof-body-top">
+											<h3 className="course-top-prof-name">
+											{(() => {
+												const [first, rest] = splitProfName(stripPrefix(prof.name));
+												return rest ? <>{first}<br />{rest}</> : first;
+											})()}
+										</h3>
+											<div className="course-top-prof-rating">
+												{prof.avgRating != null ? (
+													<>
+														<span className="course-top-prof-avg">{prof.avgRating.toFixed(1)}</span>
+														<StarRating rating={prof.avgRating} size="sm" />
+													</>
+												) : (
+													<span className="course-top-prof-avg">N/A</span>
+												)}
+											</div>
 										</div>
-										<div className="course-top-prof-meta">
+										<div className="course-top-prof-footer">
 											<span>{prof.totalReviews.toLocaleString()} ratings</span>
 											<span>{prof.totalComments.toLocaleString()} comments</span>
-											<span>{prof.wouldTakeAgainPct != null ? `${Math.round(prof.wouldTakeAgainPct)}% would take again` : '—'}</span>
+											<span>{prof.wouldTakeAgainPct != null ? `${Math.round(prof.wouldTakeAgainPct)}% again` : '—'}</span>
 										</div>
 									</div>
 								</Link>
@@ -231,30 +241,23 @@ const Course = () => {
 					<div className="course-panel-header">
 						<h2>Instructor Breakdown</h2>
 					</div>
-					<div
-						className={`course-table-wrap${tableAtStart ? ' scroll-start' : ''}${tableAtEnd ? ' scroll-end' : ''}`}
-						ref={tableWrapRef}
-					>
-						<table className="course-table instructor-table">
-							<thead>
-								<tr>
-									<th>Professor Name</th>
-									<th>Rating</th>
-									<th>Difficulty</th>
-									<th>Hrs / Week</th>
-								</tr>
-							</thead>
-							<tbody>
-								{visibleInstructors.map((row) => (
-									<tr key={row.name}>
-										<td>{row.name}</td>
-										<td>{row.avgRating != null ? row.avgRating.toFixed(2) : 'N/A'}</td>
-										<td>{row.courseAvgDifficulty != null ? row.courseAvgDifficulty.toFixed(2) : 'N/A'}</td>
-										<td>{row.courseAvgHoursPerWeek != null ? `${row.courseAvgHoursPerWeek.toFixed(1)}h` : 'N/A'}</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
+					<div className={`instructor-scroll-wrap${!tableAtStart ? ' fade-left' : ''}${!tableAtEnd ? ' fade-right' : ''}`}>
+						<div className="instructor-scroll-inner" ref={tableWrapRef}>
+							<div className="instructor-header-row">
+								<span>Professor Name</span>
+								<span>Rating</span>
+								<span>Difficulty</span>
+								<span>Hrs / Week</span>
+							</div>
+							{visibleInstructors.map((row) => (
+								<div key={row.name} className="instructor-row">
+									<span>{row.name}</span>
+									<span>{row.avgRating != null ? row.avgRating.toFixed(2) : 'N/A'}</span>
+									<span>{row.courseAvgDifficulty != null ? row.courseAvgDifficulty.toFixed(2) : 'N/A'}</span>
+									<span>{row.courseAvgHoursPerWeek != null ? `${row.courseAvgHoursPerWeek.toFixed(1)}h` : 'N/A'}</span>
+								</div>
+							))}
+						</div>
 					</div>
 					{hasExpandableInstructors && (
 						<div className="course-expand-controls">

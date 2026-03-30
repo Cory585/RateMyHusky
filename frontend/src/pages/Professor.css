@@ -1140,7 +1140,9 @@
   }
   .prof-radar-metric-info:last-child:nth-child(odd) {
     grid-column: 1 / -1;
-    max-width: 50%;
+    width: fit-content;
     margin: 0 auto;
+    text-align: center;
+    align-items: center;
   }
 }
