@@ -64,32 +64,6 @@
 	animation: courseSlideUp 0.5s 0.2s ease both;
 }
 
-.course-rating-box {
-	min-width: 180px;
-	background: #f4f8f7;
-	border: 1px solid #dcebe7;
-	border-radius: 12px;
-	padding: 14px;
-	display: flex;
-	flex-direction: column;
-	align-items: flex-end;
-	gap: 6px;
-}
-
-.course-rating-value {
-	font-size: 1.1rem;
-	font-weight: 900;
-	color: #1f5f58;
-}
-
-.course-rating-value.na {
-	color: #999;
-}
-
-.course-rating-label {
-	font-size: 0.78rem;
-	color: #788f8b;
-}
 
 .course-stats-grid {
 	display: grid;
@@ -113,6 +87,43 @@
 	box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
 	transition: transform 0.2s, box-shadow 0.2s;
 	animation: courseCardIn 0.5s ease both;
+	position: relative;
+}
+
+.course-stat-breakdown {
+	position: absolute;
+	bottom: 0;
+	left: 50%;
+	transform: translateX(-50%) translateY(100%);
+	background: #333;
+	color: #fff;
+	padding: 8px 12px;
+	border-radius: 6px;
+	font-size: 0.8rem;
+	display: flex;
+	gap: 12px;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.2s, transform 0.2s;
+	white-space: nowrap;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+	z-index: 10;
+}
+
+.course-stat-breakdown::before {
+	content: '';
+	position: absolute;
+	top: -4px;
+	left: 50%;
+	transform: translateX(-50%);
+	border-width: 0 5px 5px 5px;
+	border-style: solid;
+	border-color: transparent transparent #333 transparent;
+}
+
+.course-stat-card:hover .course-stat-breakdown {
+	opacity: 1;
+	transform: translateX(-50%) translateY(85%);
 }
 
 .course-stat-card:hover {
@@ -463,10 +474,6 @@
 		flex-direction: column;
 	}
 
-	.course-rating-box {
-		width: 100%;
-		align-items: flex-start;
-	}
 }
 
 @media (max-width: 540px) {
@@ -601,12 +608,16 @@
 	color: #d0d0d0;
 }
 
-.dark .course-rating-box {
-	background: #1f2c29;
-	border-color: #2f4540;
+.dark .course-stat-breakdown {
+	background: #444;
+	color: #e0e0e0;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
-.dark .course-rating-value,
+.dark .course-stat-breakdown::before {
+	border-color: transparent transparent #444 transparent;
+}
+
 .dark .course-question-card strong,
 .dark .course-code {
 	color: #89d7c6;

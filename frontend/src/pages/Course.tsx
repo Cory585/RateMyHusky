@@ -127,21 +127,10 @@ const Course = () => {
 						<h1>{summary.name}</h1>
 						<p className="course-dept">{summary.department}</p>
 					</div>
-					<div className="course-rating-box">
-						{summary.avgRating != null ? (
-							<>
-								<StarRating rating={summary.avgRating} size="md" />
-								<span className="course-rating-value">{summary.avgRating.toFixed(2)}</span>
-							</>
-						) : (
-							<span className="course-rating-value na">N/A</span>
-						)}
-						<span className="course-rating-label">TRACE aggregate</span>
-					</div>
 				</header>
 
 				<section className="course-stats-grid">
-					<StatCard label="Avg Rating" value={summary.avgRating != null ? summary.avgRating.toFixed(2) : 'N/A'} />
+					<RatingStatCard avgRating={summary.avgRating} />
 					<DifficultyStatCard value={avgDifficulty} />
 					<StatCard label="Avg Hrs / Week" value={avgHoursPerWeek != null ? `${avgHoursPerWeek.toFixed(1)}h` : 'N/A'} />
 					<StatCard label="Instructors" value={summary.totalInstructors.toLocaleString()} />
@@ -287,6 +276,26 @@ const Course = () => {
 		</div>
 	);
 };
+
+function RatingStatCard({ avgRating }: { avgRating: number | null }) {
+	return (
+		<article className="course-stat-card">
+			<strong className="course-stat-value">{avgRating != null ? avgRating.toFixed(2) : '—'}</strong>
+			<span className="course-stat-label" style={{ display: 'block', textAlign: 'center', position: 'relative' }}>
+				Overall Rating
+				{avgRating != null && (
+					<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', marginLeft: '4px', opacity: 0.6 }}><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+				)}
+			</span>
+			<StarRating rating={avgRating ?? 0} size="lg" />
+			{avgRating != null && (
+				<div className="course-stat-breakdown">
+					<span>TRACE: {avgRating.toFixed(2)}</span>
+				</div>
+			)}
+		</article>
+	);
+}
 
 function StatCard({ label, value }: { label: string; value: string }) {
 	return (
