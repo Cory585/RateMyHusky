@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import logo from '../assets/logo.jpg';
 import Dropdown from './Dropdown';
+import { submitFeedback } from '../api/api';
 import './FeedbackTab.css';
 
 const feedbackOptions = [
@@ -17,6 +18,7 @@ const FeedbackTab = () => {
   const [description, setDescription] = useState('');
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -25,24 +27,39 @@ const FeedbackTab = () => {
     return () => window.removeEventListener('open-feedback', handler);
   }, []);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!feedbackType || !description.trim()) {
       setError('Please select a feedback type and enter a description.');
       return;
     }
     setError('');
-    setSubmitted(true);
+    setLoading(true);
+    try {
+      await submitFeedback({ feedbackType, description, email: email || undefined });
+      setSubmitted(true);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('429') || msg.includes('limit')) {
+        setError('Daily feedback limit reached. Please try again tomorrow.');
+      } else if (msg.includes('Invalid email')) {
+        setError('Please enter a valid email address.');
+      } else {
+        setError('Failed to send feedback. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleClose = () => {
     setIsOpen(false);
-    // Reset after close animation
     setTimeout(() => {
       setSubmitted(false);
       setFeedbackType('');
       setDescription('');
       setEmail('');
       setError('');
+      setLoading(false);
     }, 300);
   };
 
@@ -134,7 +151,9 @@ const FeedbackTab = () => {
                   onChange={(e) => setEmail(e.target.value)}
                 />
 
-                <button className="feedback-submit" onClick={handleSubmit}>Submit</button>
+                <button className="feedback-submit" onClick={handleSubmit} disabled={loading}>
+                  {loading ? 'Sending...' : 'Submit'}
+                </button>
               </>
             )}
           </div>

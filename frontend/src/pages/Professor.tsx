@@ -7,7 +7,7 @@ import Dropdown from '../components/Dropdown';
 import StarRating from '../components/StarRating';
 import RatingBar from '../components/RatingBar';
 import Breadcrumbs from '../components/Breadcrumbs';
-import { fetchProfessorData, fetchProfessorReviews } from '../api/api';
+import { fetchProfessorFull, fetchProfessorReviews } from '../api/api';
 import type { ProfessorProfile, ProfessorReview, TraceComment } from '../api/api';
 import { useAuth } from '../context/AuthContext';
 import SignInModal from '../components/SignInModal';
@@ -272,6 +272,7 @@ const Professor = () => {
   }, [updateReviewPill, loading]);
 
   /* ── profile loading ── */
+  /* ── combined profile + reviews load (single round-trip) ── */
   useEffect(() => {
     if (!slug) {
       setLoading(false);
@@ -280,24 +281,28 @@ const Professor = () => {
     }
     let cancelled = false;
     async function load() {
-      setLoading(true); setError('');
+      setLoading(true); setReviewsLoading(true); setError('');
       try {
-        const data = await fetchProfessorData(slug!);
+        const data = await fetchProfessorFull(slug!);
         if (cancelled) return;
         if (!data) {
           setError('Professor not found.');
         } else {
           setProfile(data);
+          setReviews(data.reviews || []);
+          setTraceComments(data.traceComments || []);
         }
       } catch { if (!cancelled) setError('Failed to load professor data.'); }
-      finally { if (!cancelled) setLoading(false); }
+      finally { if (!cancelled) { setLoading(false); setReviewsLoading(false); } }
     }
     load();
     return () => { cancelled = true; };
   }, [slug]);
 
-  /* ── reviews loading (re-runs on auth change to pick up comment text) ── */
+  /* ── re-fetch reviews on auth change to pick up comment text ── */
+  const isInitialMount = useRef(true);
   useEffect(() => {
+    if (isInitialMount.current) { isInitialMount.current = false; return; }
     if (!slug) return;
     let cancelled = false;
     async function loadReviews() {
@@ -558,35 +563,19 @@ const Professor = () => {
     return map;
   }, [profile]);
 
-  // Map courseUrl → course code for TRACE comments
+  // Map courseId → course code for TRACE comments
   const commentCourseMap = useMemo(() => {
-    const map = new Map<string, string>();
+    const map = new Map<number, string>();
     if (!profile?.traceCourses) return map;
 
-    // Build courseId → code lookup
-    const idToCode = new Map<number, string>();
     profile.traceCourses.forEach(c => {
       const m = c.displayName.match(/^([A-Z]+\d+)/i);
       const code = m ? m[1].toUpperCase() : '';
-      if (code) idToCode.set(c.courseId, code);
-    });
-
-    // For each trace comment, extract courseId from URL and map to code
-    traceComments.forEach(c => {
-      if (c.courseUrl) {
-        const spMatches = c.courseUrl.match(/sp=(\d+)/g);
-        if (spMatches && spMatches.length >= 1) {
-          const courseId = parseInt(spMatches[0].replace('sp=', ''));
-          const code = idToCode.get(courseId);
-          if (code) {
-            map.set(c.courseUrl, code);
-          }
-        }
-      }
+      if (code) map.set(c.courseId, code);
     });
 
     return map;
-  }, [profile, traceComments]);
+  }, [profile]);
 
   const groupedTrace = useMemo(() => {
     const groups: Record<string, TraceComment[]> = {};
@@ -1218,7 +1207,7 @@ const Professor = () => {
                             <div className="trace-comment-meta">
                               {hasYear && <span className="trace-comment-term">{term}</span>}
                               {(() => {
-                                const courseCode = commentCourseMap.get(c.courseUrl || '') || commentCourseMap.get(String(c.termId)) || '';
+                                const courseCode = commentCourseMap.get(c.courseId) || '';
                                 return courseCode ? <span className="trace-comment-course">{courseCode}</span> : null;
                               })()}
                             </div>

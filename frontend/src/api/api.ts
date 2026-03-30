@@ -88,7 +88,7 @@ export interface ProfessorReview {
 }
 
 export interface TraceComment {
-  courseUrl: string;
+  courseId: number;
   question: string;
   comment: string;
   termId: number;
@@ -98,6 +98,9 @@ export interface TraceComment {
 const _profCache = new Map<string, ProfessorProfile>();
 const _profReviewsCache = new Map<string, ProfessorReviews>();
 const _courseCache = new Map<string, CourseDetail>();
+
+type ProfessorFull = ProfessorProfile & ProfessorReviews;
+const _profFullCache = new Map<string, ProfessorFull>();
 
 /* ---- Fetchers ---- */
 async function get<T>(path: string): Promise<T> {
@@ -121,6 +124,22 @@ export const fetchGoatProfessors = (college: string, limit = 10) =>
 export const fetchRandomProfessor = () => get<RandomProfessor>("/api/random-professor");
 
 /* ---- Professor page fetchers ---- */
+export async function fetchProfessorFull(slug: string): Promise<ProfessorFull | null> {
+  const token = localStorage.getItem('auth_token');
+  const key = `${slug}:${token ?? 'u'}`;
+  if (_profFullCache.has(key)) return _profFullCache.get(key)!;
+  try {
+    const data = await get<ProfessorFull>(`/api/professors/${encodeURIComponent(slug)}/full`);
+    _profFullCache.set(key, data);
+    // Also populate individual caches so Compare page hits don't re-fetch
+    _profCache.set(slug, data);
+    _profReviewsCache.set(key, data);
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchProfessorData(slug: string): Promise<ProfessorProfile | null> {
   if (_profCache.has(slug)) return _profCache.get(slug)!;
   try {
@@ -228,6 +247,7 @@ export interface CourseInstructorBreakdown {
   difficulty: number | null;
   wouldTakeAgainPct: number | null;
   totalReviews: number;
+  totalComments: number;
   sections: number;
   totalEnrollment: number;
   totalResponses: number;
@@ -313,6 +333,22 @@ export function fetchCoursesCatalog(params: {
   if (params.page) sp.set('page', String(params.page));
   if (params.limit) sp.set('limit', String(params.limit));
   return get<CourseCatalogResponse>(`/api/courses-catalog?${sp.toString()}`);
+}
+
+export async function submitFeedback(payload: {
+  feedbackType: string;
+  description: string;
+  email?: string;
+}): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `API ${res.status}`);
+  }
 }
 
 export async function fetchCourseData(code: string): Promise<CourseDetail | null> {

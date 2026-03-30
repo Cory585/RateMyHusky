@@ -165,8 +165,14 @@ def _get_pool():
 # ──────────────────────────────────────────────
 _cache = {}
 _cache_lock = Lock()
-CACHE_TTL = 300       # 5 minutes
+CACHE_TTL = 3600      # 1 hour
 CACHE_MAX_SIZE = 5000
+
+_feedback_lock = Lock()
+_feedback_count = 0
+_feedback_date = None   # "YYYY-MM-DD" UTC, resets counter each day
+FEEDBACK_DAILY_LIMIT = 300
+
 
 
 def cache_get(key):
@@ -398,7 +404,7 @@ def goat_professors():
     else:
         rows = query("""
             SELECT * FROM professors_catalog
-            WHERE college = %s AND total_reviews >= %s AND trace_rating IS NOT NULL
+            WHERE college = %s AND total_reviews >= %s
             ORDER BY avg_rating DESC NULLS LAST, total_reviews DESC
             LIMIT %s
         """, (college, min_reviews, limit))
@@ -549,7 +555,7 @@ def professor_profile(slug):
     cached = cache_get(cache_key)
     if cached:
         resp = jsonify(cached)
-        resp.headers["Cache-Control"] = "public, max-age=300"
+        resp.headers["Cache-Control"] = "public, max-age=3600"
         return resp
 
     # Look up professor from catalog
@@ -591,18 +597,13 @@ def professor_profile(slug):
     # Batch-fetch all scores for this professor's courses in one query
     scores_by_key = {}
     if trace_course_rows:
-        keys = [(int(c["course_id"]), int(c["instructor_id"]), int(c["term_id"] or 0)) for c in trace_course_rows]
-        or_clauses = []
-        score_params = []
-        for cid, iid, tid in keys:
-            or_clauses.append("(course_id = %s AND instructor_id = %s AND term_id = %s)")
-            score_params.extend([cid, iid, tid])
+        keys = tuple((int(c["course_id"]), int(c["instructor_id"]), int(c["term_id"] or 0)) for c in trace_course_rows)
 
         all_scores = query(
-            f"SELECT course_id, instructor_id, term_id, question, mean, median, std_dev, "
-            f"enrollment, completed, count_1, count_2, count_3, count_4, count_5 "
-            f"FROM trace_scores WHERE {' OR '.join(or_clauses)}",
-            score_params
+            "SELECT course_id, instructor_id, term_id, question, mean, median, std_dev, "
+            "enrollment, completed, count_1, count_2, count_3, count_4, count_5 "
+            "FROM trace_scores WHERE (course_id, instructor_id, term_id) IN %s",
+            (keys,)
         )
         for s in all_scores:
             k = (int(s["course_id"]), int(s["instructor_id"]), int(s["term_id"] or 0))
@@ -656,7 +657,7 @@ def professor_profile(slug):
 
     cache_set(cache_key, profile)
     resp = jsonify(profile)
-    resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Cache-Control"] = "public, max-age=3600"
     return resp
 
 
@@ -675,7 +676,7 @@ def professor_reviews(slug):
     cached = cache_get(cache_key)
     if cached:
         resp = jsonify(cached)
-        resp.headers["Cache-Control"] = "private, max-age=300" if is_authed else "public, max-age=300"
+        resp.headers["Cache-Control"] = "private, max-age=3600" if is_authed else "public, max-age=3600"
         resp.headers["Vary"] = "Authorization"
         return resp
 
@@ -726,32 +727,59 @@ def professor_reviews(slug):
         for c in trace_course_rows:
             keys.add((int(c["course_id"]), int(c["instructor_id"]), int(c["term_id"]) if c["term_id"] else 0))
 
-        or_conditions = []
-        or_params = []
-        for cid, iid, tid in keys:
-            or_conditions.append("(tc_course_id = %s AND tc_instructor_id = %s AND tc_term_id = %s)")
-            or_params.extend([cid, iid, tid])
-
-        if or_conditions:
+        if keys:
             comment_rows = query(
-                f"SELECT tc_term_id, tc_course_id, course_url, question, comment FROM trace_comments WHERE {' OR '.join(or_conditions)}",
-                or_params
+                "SELECT tc_term_id, tc_course_id, question, comment FROM trace_comments "
+                "WHERE (tc_course_id, tc_instructor_id, tc_term_id) IN %s",
+                (tuple(keys),)
             )
             for c in comment_rows:
                 comment_text = sanitize(c["comment"]) if c["comment"] else ""
                 if not comment_text.strip():
                     continue
                 comments.append({
-                    "courseUrl": str(c["course_url"] or ""),
                     "question": str(c["question"] or ""),
                     "comment": comment_text if is_authed else "",
                     "termId": int(c["tc_term_id"]) if c["tc_term_id"] else 0,
+                    "courseId": int(c["tc_course_id"]) if c["tc_course_id"] else 0,
                 })
 
     result = {"reviews": reviews, "traceComments": comments}
     cache_set(cache_key, result)
     resp = jsonify(result)
-    resp.headers["Cache-Control"] = "private, max-age=300" if is_authed else "public, max-age=300"
+    resp.headers["Cache-Control"] = "private, max-age=3600" if is_authed else "public, max-age=3600"
+    resp.headers["Vary"] = "Authorization"
+    return resp
+
+
+@app.route("/api/professors/<slug>/full")
+def professor_full(slug):
+    """Combined profile + reviews in one request to halve round-trips."""
+    profile_resp = professor_profile(slug)
+    if isinstance(profile_resp, tuple):
+        return profile_resp  # propagate 404/errors
+
+    reviews_resp = professor_reviews(slug)
+    if isinstance(reviews_resp, tuple):
+        reviews_data = {"reviews": [], "traceComments": []}
+    else:
+        reviews_data = reviews_resp.get_json()
+
+    profile_data = profile_resp.get_json()
+    profile_data["reviews"] = reviews_data.get("reviews", [])
+    profile_data["traceComments"] = reviews_data.get("traceComments", [])
+
+    is_authed = False
+    token = _get_auth_token()
+    if token:
+        try:
+            pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            is_authed = True
+        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+            pass
+
+    resp = jsonify(profile_data)
+    resp.headers["Cache-Control"] = "private, max-age=3600" if is_authed else "public, max-age=3600"
     resp.headers["Vary"] = "Authorization"
     return resp
 
@@ -783,7 +811,8 @@ def departments():
             WHERE avg_rating IS NOT NULL
             ORDER BY department
         """)
-    result = [r['department'] for r in rows if r['department']]
+    BAD_DEPTS = {"Computer amp Informational Tech.", "Computer  Informational Tech.", "Counseling amp Educational Psych", "Counseling  Educational Psych"}
+    result = [r['department'] for r in rows if r['department'] and r['department'] not in BAD_DEPTS]
     cache_set(cache_key, result)
     return jsonify(result)
 
@@ -840,14 +869,22 @@ def professors_catalog():
         elif college_list:
             conditions.append("college IN (" + ",".join(["%s"] * len(college_list)) + ")")
             params.extend(college_list)
+    DEPT_ALIASES = {
+        "Computer & Informational Tech.": ["Computer amp Informational Tech.", "Computer  Informational Tech."],
+        "Counseling & Educational Psych": ["Counseling amp Educational Psych", "Counseling  Educational Psych"],
+    }
     if dept and dept != "All":
         dept_list = [d.strip() for d in dept.split(",") if d.strip()]
-        if len(dept_list) == 1:
+        expanded = []
+        for d in dept_list:
+            expanded.append(d)
+            expanded.extend(DEPT_ALIASES.get(d, []))
+        if len(expanded) == 1:
             conditions.append("department = %s")
-            params.append(dept_list[0])
-        elif dept_list:
-            conditions.append("department IN (" + ",".join(["%s"] * len(dept_list)) + ")")
-            params.extend(dept_list)
+            params.append(expanded[0])
+        elif expanded:
+            conditions.append("department IN (" + ",".join(["%s"] * len(expanded)) + ")")
+            params.extend(expanded)
     if min_rating > 0:
         conditions.append("avg_rating >= %s")
         params.append(min_rating)
@@ -1171,41 +1208,32 @@ def course_profile(code):
     if not course:
         return jsonify({"error": "Course not found"}), 404
 
-    # Parse course code pattern to match trace_courses display_name
-    # display_name format: "CS2500:01 (Fundamentals ...)"
-    code_pattern = f"{code_norm}:%"
-
-    # Get all sections for this course from trace_courses
+    # Get all sections for this course from trace_courses using indexed course_code column
     sections = query("""
         SELECT DISTINCT ON (tc.course_id, tc.instructor_id, tc.term_id)
             tc.course_id, tc.instructor_id, tc.term_id, tc.term_title,
             tc.department_name, tc.display_name, tc.section, tc.enrollment,
             tc.instructor_first_name, tc.instructor_last_name
         FROM trace_courses tc
-        WHERE tc.display_name LIKE %s
+        WHERE tc.course_code = %s
         ORDER BY tc.course_id, tc.instructor_id, tc.term_id, tc.term_id DESC
-    """, (code_pattern,))
+    """, (code_norm,))
 
     if not sections:
         return jsonify({"error": "Course not found"}), 404
 
     # Get overall scores for these sections
     if sections:
-        or_clauses = []
-        score_params = []
-        for s in sections:
-            or_clauses.append("(course_id = %s AND instructor_id = %s AND term_id = %s)")
-            score_params.extend([s["course_id"], s["instructor_id"], s["term_id"]])
-
+        section_keys = tuple((s["course_id"], s["instructor_id"], s["term_id"]) for s in sections)
         overall_scores = query(
-            f"SELECT course_id, instructor_id, term_id, "
-            f"SUM(CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT)) as weighted_sum, "
-            f"SUM(total_responses) as total_responses, "
-            f"SUM(completed) as completed "
-            f"FROM trace_scores "
-            f"WHERE ({' OR '.join(or_clauses)}) AND lower(question) LIKE '%%overall%%' "
-            f"GROUP BY course_id, instructor_id, term_id",
-            score_params
+            "SELECT course_id, instructor_id, term_id, "
+            "SUM(CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT)) as weighted_sum, "
+            "SUM(total_responses) as total_responses, "
+            "SUM(completed) as completed "
+            "FROM trace_scores "
+            "WHERE (course_id, instructor_id, term_id) IN %s AND lower(question) LIKE '%%overall%%' "
+            "GROUP BY course_id, instructor_id, term_id",
+            (section_keys,)
         )
     else:
         overall_scores = []
@@ -1272,6 +1300,7 @@ def course_profile(code):
     name_key_map = {normalize_name(name): name for name in instructor_data}
     name_keys = list(name_key_map.keys())
     prof_map = {}
+    comment_counts = {}
     if name_keys:
         placeholders = ",".join(["%s"] * len(name_keys))
         prof_rows = query(
@@ -1279,15 +1308,36 @@ def course_profile(code):
             f"FROM professors_catalog WHERE name_key IN ({placeholders})", name_keys
         )
         prof_map = {r["name_key"]: r for r in prof_rows}
+        combined_counts = query(
+            f"SELECT name_key, SUM(cnt) as cnt FROM ("
+            f"  SELECT name_key, COUNT(*) as cnt FROM rmp_reviews "
+            f"  WHERE name_key IN ({placeholders}) AND comment IS NOT NULL AND comment != '' "
+            f"  GROUP BY name_key"
+            f"  UNION ALL "
+            f"  SELECT tc2.name_key, COUNT(*) as cnt "
+            f"  FROM trace_comments tc "
+            f"  JOIN trace_courses tc2 ON tc.tc_course_id = tc2.course_id "
+            f"    AND tc.tc_instructor_id = tc2.instructor_id "
+            f"    AND tc.tc_term_id = tc2.term_id "
+            f"  WHERE tc2.name_key IN ({placeholders}) "
+            f"  AND tc.comment IS NOT NULL AND tc.comment != '' "
+            f"  GROUP BY tc2.name_key"
+            f") sub GROUP BY name_key",
+            name_keys + name_keys
+        )
+        for r in combined_counts:
+            comment_counts[r["name_key"]] = int(r["cnt"])
 
     instructor_rows = []
     for name, data in instructor_data.items():
         prof = prof_map.get(normalize_name(name))
+        nk = normalize_name(name)
         meta_slug = prof["slug"] if prof else ""
         meta_image = prof["image_url"] if prof else None
         meta_reviews = prof["total_reviews"] if prof else 0
         meta_wta = round(prof["would_take_again_pct"], 1) if prof and prof["would_take_again_pct"] else None
         meta_diff = round(prof["difficulty"], 2) if prof and prof["difficulty"] else None
+        meta_comments = comment_counts.get(nk, 0)
 
         resp = data["responses"]
         instructor_rows.append({
@@ -1297,6 +1347,7 @@ def course_profile(code):
             "difficulty": meta_diff,
             "wouldTakeAgainPct": meta_wta,
             "totalReviews": meta_reviews or 0,
+            "totalComments": meta_comments,
             "sections": data["sections"],
             "totalEnrollment": data["enrollment"],
             "totalResponses": resp,
@@ -1334,20 +1385,14 @@ def course_profile(code):
     # Get question-level scores
     question_rows = []
     if sections:
-        or_clauses = []
-        q_params = []
-        for s in sections:
-            or_clauses.append("(course_id = %s AND instructor_id = %s AND term_id = %s)")
-            q_params.extend([s["course_id"], s["instructor_id"], s["term_id"]])
-
         q_scores = query(
-            f"SELECT question, "
-            f"SUM(CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT)) as weighted_sum, "
-            f"SUM(total_responses) as total_responses "
-            f"FROM trace_scores "
-            f"WHERE {' OR '.join(or_clauses)} "
-            f"GROUP BY question",
-            q_params
+            "SELECT question, "
+            "SUM(CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT)) as weighted_sum, "
+            "SUM(total_responses) as total_responses "
+            "FROM trace_scores "
+            "WHERE (course_id, instructor_id, term_id) IN %s "
+            "GROUP BY question",
+            (section_keys,)
         )
         for qs in q_scores:
             resp = _safe_int(qs["total_responses"])
@@ -1494,6 +1539,81 @@ def auth_logout():
     resp = make_response(jsonify({"ok": True}))
     resp.delete_cookie("auth_token")
     return resp
+
+
+@app.route("/api/feedback", methods=["POST"])
+@limiter.limit("10 per day")
+def submit_feedback():
+    global _feedback_count, _feedback_date
+
+    data = request.get_json(silent=True) or {}
+    feedback_type = data.get("feedbackType", "").strip()
+    description = data.get("description", "").strip()
+    reply_email = data.get("email", "").strip()
+
+    if not feedback_type or not description:
+        return jsonify({"error": "feedbackType and description are required"}), 400
+
+    if reply_email and not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', reply_email):
+        return jsonify({"error": "Invalid email address"}), 400
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with _feedback_lock:
+        if _feedback_date != today:
+            _feedback_date = today
+            _feedback_count = 0
+        if _feedback_count >= FEEDBACK_DAILY_LIMIT:
+            return jsonify({"error": "Daily feedback limit reached. Please try again tomorrow."}), 429
+        _feedback_count += 1
+
+    resend_api_key = os.getenv("RESEND_API_KEY")
+    if not resend_api_key:
+        print("[feedback] RESEND_API_KEY not configured")
+        return jsonify({"error": "Email service not configured"}), 500
+
+    type_labels = {
+        "bug": "Bug Report",
+        "feature": "Feature Request",
+        "missing": "Missing Data",
+        "incorrectdata": "Incorrect Data",
+        "general": "General Feedback",
+    }
+    type_label = type_labels.get(feedback_type, feedback_type)
+    submitted_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    lines = [
+        f"Submitted:   {submitted_at}",
+        f"Type:        {type_label}",
+    ]
+    if reply_email:
+        lines.append(f"From:        {reply_email}")
+    lines += ["", "Description:", description]
+    body = "\n".join(lines)
+
+    payload = {
+        "from": "RateMyHusky <feedback@ratemyhusky.com>",
+        "to": ["feedback@ratemyhusky.com"],
+        "subject": f"[RateMyHusky] {type_label}",
+        "text": body,
+    }
+    if reply_email:
+        payload["reply_to"] = reply_email
+
+    try:
+        resp = http_requests.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {resend_api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=10,
+        )
+        if not resp.ok:
+            print(f"[feedback] Resend error {resp.status_code}: {resp.text}")
+            return jsonify({"error": "Failed to send email"}), 500
+    except Exception as e:
+        print(f"[feedback] Resend request error: {e}")
+        return jsonify({"error": "Failed to send email"}), 500
+
+    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":

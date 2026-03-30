@@ -237,6 +237,38 @@
   color: #fff !important;
 }
 
+.goat-scroll-wrap {
+  position: relative;
+}
+
+.goat-scroll-wrap::before,
+.goat-scroll-wrap::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 72px;
+  pointer-events: none;
+  z-index: 3;
+  opacity: 0;
+  transition: opacity 0.2s;
+  border-radius: 16px;
+  display: none;
+}
+
+.goat-scroll-wrap::before {
+  left: 0;
+  background: linear-gradient(to right, rgba(255,255,255,0.97) 20%, transparent);
+}
+
+.goat-scroll-wrap::after {
+  right: 0;
+  background: linear-gradient(to left, rgba(255,255,255,0.97) 20%, transparent);
+}
+
+.goat-scroll-wrap.fade-left::before  { opacity: 1; }
+.goat-scroll-wrap.fade-right::after  { opacity: 1; }
+
 .goat-leaderboard {
   background: #fff;
   border-radius: 16px;
@@ -290,7 +322,7 @@
 
 .goat-header-row {
   display: grid;
-  grid-template-columns: 36px 2fr 1.5fr 1.5fr 0.8fr;
+  grid-template-columns: 36px 1.6fr 2.2fr 1.4fr 0.7fr;
   align-items: center;
   padding: 0 24px;
   height: 48px;
@@ -307,12 +339,11 @@
   font-size: inherit;
   font-weight: inherit;
   color: inherit;
-  padding: 0;
 }
 
 .goat-row {
   display: grid;
-  grid-template-columns: 36px 2fr 1.5fr 1.5fr 0.8fr;
+  grid-template-columns: 36px 1.6fr 2.2fr 1.4fr 0.7fr;
   align-items: center;
   padding: 0 24px;
   height: 56px;
@@ -379,6 +410,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   padding-right: 24px;
 }
 
@@ -798,6 +830,14 @@
   box-shadow: 0 2px 12px rgba(0,0,0,0.2);
 }
 
+.dark .goat-scroll-wrap::before {
+  background: linear-gradient(to right, rgba(36,36,36,0.97) 20%, transparent);
+}
+
+.dark .goat-scroll-wrap::after {
+  background: linear-gradient(to left, rgba(36,36,36,0.97) 20%, transparent);
+}
+
 .dark .goat-leaderboard.goat-loading::after {
   border-color: rgba(214, 57, 76, 0.15);
   border-top-color: #d6394c;
@@ -980,9 +1020,14 @@
     -webkit-overflow-scrolling: touch;
   }
 
+  .goat-scroll-wrap::before,
+  .goat-scroll-wrap::after {
+    display: block;
+  }
+
   .goat-header-row,
   .goat-row {
-    min-width: 600px;
+    min-width: 660px;
     padding: 0 16px;
     height: 50px;
   }
@@ -994,6 +1039,18 @@
   .goat-tab {
     padding: 6px 14px;
     font-size: 0.78rem;
+  }
+
+  .goat-col-name {
+    padding-left: 6px;
+  }
+
+  .goat-col-dept {
+    padding-left: 12px;
+  }
+
+  .goat-col-reviews {
+    padding-left: 12px;
   }
 
   .goat-name-text {
@@ -1062,7 +1119,7 @@
 
   .goat-header-row,
   .goat-row {
-    min-width: 560px;
+    min-width: 620px;
     padding: 0 12px;
     height: 48px;
   }
@@ -1079,13 +1136,19 @@
     font-size: 1.1rem;
   }
 
+  .goat-col-name {
+    padding-left: 6px;
+  }
+
   .goat-col-dept {
     font-size: 0.72rem;
+    padding-left: 12px;
   }
 
   .goat-col-reviews {
     font-size: 0.75rem;
     text-align: left;
+    padding-left: 12px;
   }
 
   .randomizer-desc {

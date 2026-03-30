@@ -55,17 +55,55 @@ const Course = () => {
 		return () => window.removeEventListener('scroll', handler);
 	}, []);
 
-	const topInstructors = useMemo(() => {
+	const recentInstructors = useMemo(() => {
 		if (!course) return [];
-		return [...course.instructors]
-			.sort((a, b) => {
-				const aRating = a.avgRating ?? -1;
-				const bRating = b.avgRating ?? -1;
-				if (bRating !== aRating) return bRating - aRating;
-				if (b.totalResponses !== a.totalResponses) return b.totalResponses - a.totalResponses;
-				return b.sections - a.sections;
-			})
-			.slice(0, 10);
+		const currentYear = new Date().getFullYear();
+		const instructorLatestTermId = new Map<string, number>();
+
+		const getInstructorsWithinYears = (yearsBack: number) => {
+			const cutoffYear = currentYear - yearsBack;
+			const recentNames = new Set<string>();
+			for (const section of course.sections) {
+				const yearMatch = section.termTitle.match(/\b(20\d{2})\b/);
+				if (yearMatch && parseInt(yearMatch[1]) >= cutoffYear) {
+					recentNames.add(section.instructor);
+					const prev = instructorLatestTermId.get(section.instructor) ?? 0;
+					if (section.termId > prev) instructorLatestTermId.set(section.instructor, section.termId);
+				}
+			}
+			return course.instructors.filter(inst => recentNames.has(inst.name));
+		};
+
+		// Start with 1 year, expand until at least 5 or no more data
+		let result = getInstructorsWithinYears(1);
+		let yearsBack = 1;
+		const maxYear = currentYear - 2000 + 1; // won't go past year 2000
+		while (result.length < 5 && yearsBack < maxYear) {
+			yearsBack++;
+			result = getInstructorsWithinYears(yearsBack);
+		}
+
+		return result.sort((a, b) => {
+			const aTermId = instructorLatestTermId.get(a.name) ?? 0;
+			const bTermId = instructorLatestTermId.get(b.name) ?? 0;
+			if (bTermId !== aTermId) return bTermId - aTermId;
+			const aRating = a.avgRating ?? -1;
+			const bRating = b.avgRating ?? -1;
+			return bRating - aRating;
+		});
+	}, [course]);
+
+	const avgDifficulty = useMemo(() => {
+		if (!course) return null;
+		const valid = course.instructors.filter(i => i.difficulty != null);
+		if (!valid.length) return null;
+		return valid.reduce((sum, i) => sum + i.difficulty!, 0) / valid.length;
+	}, [course]);
+
+	const avgHoursPerWeek = useMemo(() => {
+		if (!course) return null;
+		const q = course.questionScores.find(s => s.question.toLowerCase().includes('hours per week'));
+		return q?.avgRating ?? null;
 	}, [course]);
 
 	if (loading) {
@@ -102,34 +140,24 @@ const Course = () => {
 						<h1>{summary.name}</h1>
 						<p className="course-dept">{summary.department}</p>
 					</div>
-					<div className="course-rating-box">
-						{summary.avgRating != null ? (
-							<>
-								<StarRating rating={summary.avgRating} size="md" />
-								<span className="course-rating-value">{summary.avgRating.toFixed(2)}</span>
-							</>
-						) : (
-							<span className="course-rating-value na">N/A</span>
-						)}
-						<span className="course-rating-label">TRACE aggregate</span>
-					</div>
 				</header>
 
 				<section className="course-stats-grid">
-					<StatCard label="Sections" value={summary.totalSections.toLocaleString()} />
+					<RatingStatCard avgRating={summary.avgRating} />
+					<DifficultyStatCard value={avgDifficulty} />
+					<StatCard label="Avg Hrs / Week" value={avgHoursPerWeek != null ? `${avgHoursPerWeek.toFixed(1)}h` : 'N/A'} />
 					<StatCard label="Instructors" value={summary.totalInstructors.toLocaleString()} />
-					<StatCard label="Enrollment" value={summary.totalEnrollment.toLocaleString()} />
-					<StatCard label="Responses" value={summary.totalResponses.toLocaleString()} />
-					<StatCard label="Latest Term" value={summary.latestTermTitle || 'Unknown'} />
+					<StatCard label="Avg Enrollment" value={summary.totalSections > 0 ? Math.round(summary.totalEnrollment / summary.totalSections).toLocaleString() : 'N/A'} />
+					<StatCard label="Last Taught" value={summary.latestTermTitle || 'Unknown'} />
 				</section>
 
-				{topInstructors.length > 0 && (
+				{recentInstructors.length > 0 && (
 					<section className="course-panel">
 						<div className="course-panel-header">
-							<h2>Top 10 Professors Who Teach This Class</h2>
+							<h2>Recent Professors</h2>
 						</div>
 						<div className="course-top-prof-grid">
-							{topInstructors.map((prof, index) => (
+							{recentInstructors.map((prof, index) => (
 								<Link
 									to={prof.slug ? `/professors/${prof.slug}` : '#'}
 									state={prof.slug ? { fromPage: { label: `${code.toUpperCase()} – ${summary.name}`, url: `/courses/${code}` } } : undefined}
@@ -140,8 +168,7 @@ const Course = () => {
 										if (!prof.slug) e.preventDefault();
 									}}
 								>
-									<div className="course-top-prof-rank">#{index + 1}</div>
-									{prof.imageUrl ? (
+										{prof.imageUrl ? (
 										<img
 											className="course-top-prof-avatar course-top-prof-photo"
 											src={prof.imageUrl}
@@ -157,21 +184,17 @@ const Course = () => {
 										<div className="course-top-prof-rating">
 											{prof.avgRating != null ? (
 												<>
+													<span className="prof-avg-num">{prof.avgRating.toFixed(2)}</span>
 													<StarRating rating={prof.avgRating} size="sm" />
-													<span>{prof.avgRating.toFixed(2)}</span>
 												</>
 											) : (
 												<span>N/A</span>
 											)}
 										</div>
 										<div className="course-top-prof-meta">
-											<span>
-												Difficulty: {prof.difficulty != null ? `${prof.difficulty.toFixed(2)}/5` : 'N/A'}
-											</span>
-											<span>
-												Would Take Again: {prof.wouldTakeAgainPct != null ? `${prof.wouldTakeAgainPct.toFixed(1)}%` : 'N/A'}
-											</span>
-											<span>Total Reviews: {prof.totalReviews.toLocaleString()}</span>
+											<span>{prof.totalReviews.toLocaleString()} ratings</span>
+											<span>{prof.totalComments.toLocaleString()} comments</span>
+											<span>{prof.wouldTakeAgainPct != null ? `${Math.round(prof.wouldTakeAgainPct)}% would take again` : '—'}</span>
 										</div>
 									</div>
 								</Link>
@@ -262,11 +285,50 @@ const Course = () => {
 	);
 };
 
+function RatingStatCard({ avgRating }: { avgRating: number | null }) {
+	return (
+		<article className="course-stat-card">
+			<strong className="course-stat-value">{avgRating != null ? avgRating.toFixed(2) : '—'}</strong>
+			<span className="course-stat-label" style={{ display: 'block', textAlign: 'center', position: 'relative' }}>
+				Overall Rating
+				{avgRating != null && (
+					<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', marginLeft: '4px', opacity: 0.6 }}><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+				)}
+			</span>
+			<StarRating rating={avgRating ?? 0} size="lg" />
+			{avgRating != null && (
+				<div className="course-stat-breakdown">
+					<span>TRACE: {avgRating.toFixed(2)}</span>
+				</div>
+			)}
+		</article>
+	);
+}
+
 function StatCard({ label, value }: { label: string; value: string }) {
 	return (
 		<article className="course-stat-card">
-			<span>{label}</span>
-			<strong>{value}</strong>
+			<strong className="course-stat-value">{value}</strong>
+			<span className="course-stat-label">{label}</span>
+		</article>
+	);
+}
+
+function DifficultyStatCard({ value }: { value: number | null }) {
+	const color = value == null ? '#eee'
+		: value <= 1.5 ? '#27ae60'
+		: value <= 2.5 ? '#66bd63'
+		: value <= 3.0 ? '#f39c12'
+		: value <= 3.5 ? '#e67e22'
+		: value <= 4.0 ? '#e74c3c'
+		: '#c0392b';
+	return (
+		<article className="course-stat-card">
+			<strong className="course-stat-value">{value != null ? value.toFixed(2) : '—'}</strong>
+			<span className="course-stat-label">Avg Difficulty</span>
+			<div className="course-difficulty-bar">
+				<div className="course-difficulty-fill" style={{ width: `${((value ?? 0) / 5) * 100}%`, background: color }} />
+			</div>
 		</article>
 	);
 }
