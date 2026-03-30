@@ -184,21 +184,17 @@ const Course = () => {
 										<div className="course-top-prof-rating">
 											{prof.avgRating != null ? (
 												<>
+													<span className="prof-avg-num">{prof.avgRating.toFixed(2)}</span>
 													<StarRating rating={prof.avgRating} size="sm" />
-													<span>{prof.avgRating.toFixed(2)}</span>
 												</>
 											) : (
 												<span>N/A</span>
 											)}
 										</div>
 										<div className="course-top-prof-meta">
-											<span>
-												Difficulty: {prof.difficulty != null ? `${prof.difficulty.toFixed(2)}/5` : 'N/A'}
-											</span>
-											<span>
-												Would Take Again: {prof.wouldTakeAgainPct != null ? `${prof.wouldTakeAgainPct.toFixed(1)}%` : 'N/A'}
-											</span>
-											<span>Total Reviews: {prof.totalReviews.toLocaleString()}</span>
+											<span>{prof.totalReviews.toLocaleString()} ratings</span>
+											<span>{prof.totalComments.toLocaleString()} comments</span>
+											<span>{prof.wouldTakeAgainPct != null ? `${Math.round(prof.wouldTakeAgainPct)}% would take again` : '—'}</span>
 										</div>
 									</div>
 								</Link>

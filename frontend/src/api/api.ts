@@ -247,6 +247,7 @@ export interface CourseInstructorBreakdown {
   difficulty: number | null;
   wouldTakeAgainPct: number | null;
   totalReviews: number;
+  totalComments: number;
   sections: number;
   totalEnrollment: number;
   totalResponses: number;
@@ -332,6 +333,19 @@ export function fetchCoursesCatalog(params: {
   if (params.page) sp.set('page', String(params.page));
   if (params.limit) sp.set('limit', String(params.limit));
   return get<CourseCatalogResponse>(`/api/courses-catalog?${sp.toString()}`);
+}
+
+export async function submitFeedback(payload: {
+  feedbackType: string;
+  description: string;
+  email?: string;
+}): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`API ${res.status}`);
 }
 
 export async function fetchCourseData(code: string): Promise<CourseDetail | null> {

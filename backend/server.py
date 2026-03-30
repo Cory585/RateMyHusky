@@ -8,6 +8,9 @@ Run:           python server.py
 
 import os, re, unicodedata, json, hashlib, random
 import html as _html
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import psycopg2
 from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.extras import RealDictCursor
@@ -167,6 +170,7 @@ _cache = {}
 _cache_lock = Lock()
 CACHE_TTL = 3600      # 1 hour
 CACHE_MAX_SIZE = 5000
+
 
 
 def cache_get(key):
@@ -1294,6 +1298,7 @@ def course_profile(code):
     name_key_map = {normalize_name(name): name for name in instructor_data}
     name_keys = list(name_key_map.keys())
     prof_map = {}
+    comment_counts = {}
     if name_keys:
         placeholders = ",".join(["%s"] * len(name_keys))
         prof_rows = query(
@@ -1301,15 +1306,36 @@ def course_profile(code):
             f"FROM professors_catalog WHERE name_key IN ({placeholders})", name_keys
         )
         prof_map = {r["name_key"]: r for r in prof_rows}
+        combined_counts = query(
+            f"SELECT name_key, SUM(cnt) as cnt FROM ("
+            f"  SELECT name_key, COUNT(*) as cnt FROM rmp_reviews "
+            f"  WHERE name_key IN ({placeholders}) AND comment IS NOT NULL AND comment != '' "
+            f"  GROUP BY name_key"
+            f"  UNION ALL "
+            f"  SELECT tc2.name_key, COUNT(*) as cnt "
+            f"  FROM trace_comments tc "
+            f"  JOIN trace_courses tc2 ON tc.tc_course_id = tc2.course_id "
+            f"    AND tc.tc_instructor_id = tc2.instructor_id "
+            f"    AND tc.tc_term_id = tc2.term_id "
+            f"  WHERE tc2.name_key IN ({placeholders}) "
+            f"  AND tc.comment IS NOT NULL AND tc.comment != '' "
+            f"  GROUP BY tc2.name_key"
+            f") sub GROUP BY name_key",
+            name_keys + name_keys
+        )
+        for r in combined_counts:
+            comment_counts[r["name_key"]] = int(r["cnt"])
 
     instructor_rows = []
     for name, data in instructor_data.items():
         prof = prof_map.get(normalize_name(name))
+        nk = normalize_name(name)
         meta_slug = prof["slug"] if prof else ""
         meta_image = prof["image_url"] if prof else None
         meta_reviews = prof["total_reviews"] if prof else 0
         meta_wta = round(prof["would_take_again_pct"], 1) if prof and prof["would_take_again_pct"] else None
         meta_diff = round(prof["difficulty"], 2) if prof and prof["difficulty"] else None
+        meta_comments = comment_counts.get(nk, 0)
 
         resp = data["responses"]
         instructor_rows.append({
@@ -1319,6 +1345,7 @@ def course_profile(code):
             "difficulty": meta_diff,
             "wouldTakeAgainPct": meta_wta,
             "totalReviews": meta_reviews or 0,
+            "totalComments": meta_comments,
             "sections": data["sections"],
             "totalEnrollment": data["enrollment"],
             "totalResponses": resp,
@@ -1510,6 +1537,63 @@ def auth_logout():
     resp = make_response(jsonify({"ok": True}))
     resp.delete_cookie("auth_token")
     return resp
+
+
+@app.route("/api/feedback", methods=["POST"])
+@limiter.limit("10 per day")
+def submit_feedback():
+    data = request.get_json(silent=True) or {}
+    feedback_type = data.get("feedbackType", "").strip()
+    description = data.get("description", "").strip()
+    reply_email = data.get("email", "").strip()
+
+    if not feedback_type or not description:
+        return jsonify({"error": "feedbackType and description are required"}), 400
+
+    smtp_host = os.getenv("SMTP_HOST")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user = os.getenv("SMTP_USER")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+
+    if not smtp_host or not smtp_user or not smtp_password:
+        return jsonify({"error": "Email service not configured"}), 500
+
+    type_labels = {
+        "bug": "Bug Report",
+        "feature": "Feature Request",
+        "missing": "Missing Data",
+        "incorrectdata": "Incorrect Data",
+        "general": "General Feedback",
+    }
+    type_label = type_labels.get(feedback_type, feedback_type)
+    submitted_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    lines = [
+        f"Submitted:   {submitted_at}",
+        f"Type:        {type_label}",
+    ]
+    if reply_email:
+        lines.append(f"From:        {reply_email}")
+    lines += ["", "Description:", description]
+    body = "\n".join(lines)
+
+    msg = MIMEMultipart()
+    msg["From"] = smtp_user
+    msg["To"] = "feedback@ratemyhusky.com"
+    msg["Subject"] = f"[RateMyHusky] {type_label}"
+    if reply_email:
+        msg["Reply-To"] = reply_email
+    msg.attach(MIMEText(body, "plain"))
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+    except Exception:
+        return jsonify({"error": "Failed to send email"}), 500
+
+    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":
