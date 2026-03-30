@@ -265,10 +265,11 @@ TABLES = {
                 mean REAL,
                 median REAL,
                 std_dev REAL,
+                dept_mean REAL,
                 UNIQUE (course_id, instructor_id, term_id, question)
             );
         """,
-        "columns": ["course_id", "instructor_id", "term_id", "enrollment", "completed", "question", "count_5", "count_4", "count_3", "count_2", "count_1", "mean", "median", "std_dev"],
+        "columns": ["course_id", "instructor_id", "term_id", "enrollment", "completed", "question", "count_5", "count_4", "count_3", "count_2", "count_1", "mean", "median", "std_dev", "dept_mean"],
         # Lightweight proxy: skip by section-level key, avoids fetching question text
         "key_columns": ["course_id", "instructor_id", "term_id"],
         "key_query": "SELECT DISTINCT course_id, instructor_id, term_id FROM trace_scores",
@@ -289,6 +290,7 @@ TABLES = {
             "mean": float(row["mean"]) if row.get("mean") else None,
             "median": float(row["median"]) if row.get("median") else None,
             "std_dev": float(row["std_dev"]) if row.get("std_dev") else None,
+            "dept_mean": float(row["dept_mean"]) if row.get("dept_mean") else None,
         },
     },
     "professor_photos": {

@@ -631,7 +631,7 @@ def professor_profile(slug):
 
         all_scores = query(
             "SELECT course_id, instructor_id, term_id, question, mean, median, std_dev, "
-            "enrollment, completed, count_1, count_2, count_3, count_4, count_5 "
+            "enrollment, completed, count_1, count_2, count_3, count_4, count_5, dept_mean "
             "FROM trace_scores WHERE (course_id, instructor_id, term_id) IN %s",
             (keys,)
         )
@@ -670,6 +670,7 @@ def professor_profile(slug):
                 "count3": c3,
                 "count4": c4,
                 "count5": c5,
+                "deptMean": round(float(s["dept_mean"]), 2) if s["dept_mean"] else None,
             })
 
         trace_course_list.append({

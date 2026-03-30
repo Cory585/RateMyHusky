@@ -258,6 +258,7 @@ def process_csv(csv_path: str, term_override: str = None):
                                     "mean": mean_val,
                                     "median": "",
                                     "std_dev": "",
+                                    "dept_mean": "",
                                 })
                         except (json.JSONDecodeError, TypeError):
                             pass
@@ -282,6 +283,7 @@ def process_csv(csv_path: str, term_override: str = None):
                 )
 
             median_val = safe_float(row.get("Course Median"))
+            dept_mean_val = safe_float(row.get("Dept. Mean"))
 
             # Map section categories to shorter question labels matching existing data
             full_question = question
@@ -308,6 +310,7 @@ def process_csv(csv_path: str, term_override: str = None):
                 "mean": mean_val if mean_val is not None else "",
                 "median": median_val if median_val is not None else "",
                 "std_dev": "",
+                "dept_mean": dept_mean_val if dept_mean_val is not None else "",
             })
 
     return list(courses.values()), scores, comments
@@ -403,7 +406,7 @@ def main():
     score_fields = [
         "courseId", "instructorId", "termId", "enrollment", "completed",
         "question", "count_5", "count_4", "count_3", "count_2", "count_1",
-        "mean", "median", "std_dev"
+        "mean", "median", "std_dev", "dept_mean"
     ]
     comment_fields = ["course_url", "question", "comment"]
 

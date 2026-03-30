@@ -432,20 +432,24 @@ const Professor = () => {
     // Pick the most recent term that actually has score data
     for (const termTitle of termTitles) {
       const termCourses = filteredTraceCourses.filter(c => c.termTitle === termTitle);
-      const scoreMap = new Map<string, { sum: number; weight: number }>();
+      const scoreMap = new Map<string, { sum: number; weight: number; deptSum: number; deptWeight: number }>();
       for (const course of termCourses) {
         for (const s of course.scores) {
-          if (!scoreMap.has(s.question)) scoreMap.set(s.question, { sum: 0, weight: 0 });
+          if (!scoreMap.has(s.question)) scoreMap.set(s.question, { sum: 0, weight: 0, deptSum: 0, deptWeight: 0 });
           const w = (s.totalResponses != null ? s.totalResponses : s.completed) || 0;
           if (w > 0) {
             scoreMap.get(s.question)!.sum += s.mean * w;
             scoreMap.get(s.question)!.weight += w;
+            if (s.deptMean != null) {
+              scoreMap.get(s.question)!.deptSum += s.deptMean * w;
+              scoreMap.get(s.question)!.deptWeight += w;
+            }
           }
         }
       }
-      const scores: { question: string; mean: number }[] = [];
-      for (const [question, { sum, weight }] of scoreMap.entries()) {
-        if (weight > 0) scores.push({ question, mean: sum / weight });
+      const scores: { question: string; mean: number; deptMean?: number }[] = [];
+      for (const [question, { sum, weight, deptSum, deptWeight }] of scoreMap.entries()) {
+        if (weight > 0) scores.push({ question, mean: sum / weight, deptMean: deptWeight > 0 ? deptSum / deptWeight : undefined });
       }
       if (scores.length > 0) {
         return {
@@ -532,10 +536,15 @@ const Professor = () => {
   const radarData = useMemo(() => {
     if (!mostRecentTermData) return null;
     const profScores = mostRecentTermData.scores;
-    const deptScores = deptAvg.map(d => ({ question: d.question, mean: d.avgMean }));
+    // For newer terms (901+) dept_mean is stored per score row; for older terms use fetched deptAvg
+    const useDeptMeanFromScores = deptAvg.length === 0 && profScores.some(s => s.deptMean != null);
+    const deptScores = useDeptMeanFromScores
+      ? profScores.map(s => ({ question: s.question, mean: s.deptMean! }))
+      : deptAvg.map(d => ({ question: d.question, mean: d.avgMean }));
+    const hasDept = useDeptMeanFromScores || deptAvg.length > 0;
     const points = RADAR_METRICS.map(m => {
       const profVal = getMetricValue(profScores, m.patterns);
-      const deptVal = deptAvg.length > 0 ? getMetricValue(deptScores, m.patterns) : null;
+      const deptVal = hasDept ? getMetricValue(deptScores, m.patterns) : null;
       return {
         metric: m.short,
         // Use 0 for missing values so the polygon closes; tooltip will show "N/A"
@@ -1016,7 +1025,7 @@ const Professor = () => {
                   dot={{ r: 3, fill: '#d6394c', strokeWidth: 0 }}
                 />
                 {/* Department average — gray, rendered on top */}
-                {deptAvg.length > 0 && (
+                {radarData && radarData.some(p => !p.deptMissing) && (
                   <Radar
                     name="Dept. Average"
                     dataKey="department"

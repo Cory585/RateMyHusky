@@ -37,6 +37,7 @@ export interface TraceCourseScore {
   count3?: number;
   count4?: number;
   count5?: number;
+  deptMean?: number;
 }
 
 export interface TraceCourse {
