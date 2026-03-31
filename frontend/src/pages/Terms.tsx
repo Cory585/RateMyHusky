@@ -9,7 +9,7 @@ const Terms = () => {
           <header className="terms-header">
             <span className="terms-kicker">Legal</span>
             <h1>Terms &amp; Conditions</h1>
-            <p className="terms-meta">Effective March 26, 2025 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective March 31, 2025 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -218,8 +218,18 @@ const Terms = () => {
               </p>
             </section>
 
+            <section className="terms-section">
+              <h2>16. Severability</h2>
+              <p>
+                If any provision of these Terms is found to be unenforceable or invalid under
+                applicable law, that provision will be modified to the minimum extent necessary
+                to make it enforceable, or severed if modification is not possible. The remaining
+                provisions will continue in full force and effect.
+              </p>
+            </section>
+
             <section className="terms-section terms-section--last">
-              <h2>16. Contact</h2>
+              <h2>17. Contact</h2>
               <p>
                 If you have questions about these Terms or want to report an issue, please email
                 us at <a href="mailto:support@ratemyhusky.com">support@ratemyhusky.com</a>.
