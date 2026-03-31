@@ -37,6 +37,9 @@ def upgrade_image_url(url):
 
 ALIAS_MAP = {
     "ant woodall": "anthony woodall",
+    "dan matthew": "daniel matthew",
+    "ben boossarangsi": "benjamin boossarangsi",
+    "cali collin": "cali-ryan collin",
     "stephani laverdiere": "stephanie laverdiere",
     "dan grindle": "daniel grindle",
     "mary kate dodgson": "mary dodgson",

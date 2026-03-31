@@ -67,15 +67,15 @@
 
 .course-stats-grid {
 	display: grid;
-	grid-template-columns: repeat(2, 1fr);
+	grid-template-columns: repeat(3, 1fr);
 	gap: 14px;
 	margin-bottom: 18px;
 	position: relative;
 	z-index: 2;
 }
 
-@media (min-width: 1280px) {
-	.course-stats-grid { grid-template-columns: repeat(2, 1fr); }
+@media (min-width: 768px) {
+	.course-stats-grid { grid-template-columns: repeat(6, 1fr); }
 }
 
 .course-stat-card {
@@ -158,6 +158,17 @@
 	color: #aaa;
 	text-align: center;
 	margin-top: 2px;
+}
+
+.course-stats-grid > article:nth-child(n+4) .course-stat-label {
+	margin-top: auto;
+}
+
+.course-stat-last-taught .course-stat-value {
+	white-space: normal;
+	overflow-wrap: break-word;
+	text-align: center;
+	font-size: clamp(0.9rem, 2.5vw, 1.8rem);
 }
 
 .course-difficulty-bar {
@@ -377,7 +388,7 @@
 .instructor-row {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: 24px;
 	padding: 0 8px;
 	border-bottom: 1px solid #efefef;
 }
@@ -591,9 +602,9 @@
 		font-size: 1rem;
 	}
 
-	/* Stats: 2 compact columns */
+	/* Stats: 3 columns on small screens */
 	.course-stats-grid {
-		grid-template-columns: repeat(2, 1fr);
+		grid-template-columns: repeat(3, 1fr);
 		gap: 10px;
 	}
 

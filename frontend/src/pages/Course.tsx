@@ -172,7 +172,7 @@ const Course = () => {
 					<StatCard label="Avg Hrs / Week" value={avgHoursPerWeek != null ? `${avgHoursPerWeek.toFixed(1)}h` : 'N/A'} />
 					<StatCard label="Instructors" value={summary.totalInstructors.toLocaleString()} />
 					<StatCard label="Avg Enrollment" value={summary.totalSections > 0 ? Math.round(summary.totalEnrollment / summary.totalSections).toLocaleString() : 'N/A'} />
-					<StatCard label="Last Taught" value={summary.latestTermTitle || 'Unknown'} />
+					<StatCard label="Last Taught" value={summary.latestTermTitle || 'Unknown'} className="course-stat-last-taught" />
 				</section>
 
 				{recentInstructors.length > 0 && (
@@ -320,9 +320,9 @@ function RatingStatCard({ avgRating }: { avgRating: number | null }) {
 	);
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatCard({ label, value, className }: { label: string; value: string; className?: string }) {
 	return (
-		<article className="course-stat-card">
+		<article className={`course-stat-card${className ? ` ${className}` : ''}`}>
 			<strong className="course-stat-value">{value}</strong>
 			<span className="course-stat-label">{label}</span>
 		</article>
