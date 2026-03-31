@@ -16,6 +16,12 @@ const Terms = () => {
             <section className="terms-section">
               <h2>1. About the Service</h2>
               <p>
+                By accessing or using RateMyHusky, you agree to be bound by these Terms and
+                our{' '}
+                <a href="/privacy">Privacy Policy</a>. If you do not agree, do not use the
+                service.
+              </p>
+              <p>
                 RateMyHusky is a read-only aggregator of professor and course information for
                 Northeastern University students. Data displayed on this platform is sourced from
                 RateMyProfessors and Northeastern University's TRACE course evaluation system; it

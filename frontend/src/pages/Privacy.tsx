@@ -9,7 +9,7 @@ const Privacy = () => {
           <header className="terms-header">
             <span className="terms-kicker">Legal</span>
             <h1>Privacy Policy</h1>
-            <p className="terms-meta">Effective March 26, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective March 31, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -18,7 +18,9 @@ const Privacy = () => {
               <p>
                 RateMyHusky is an aggregator of professor and course information for
                 Northeastern University students. This Privacy Policy describes what information
-                we collect, how we use it, and the choices you have.
+                we collect, how we use it, and the choices you have. By using RateMyHusky,
+                you also agree to our{' '}
+                <a href="/terms">Terms &amp; Conditions</a>.
               </p>
               <p>
                 RateMyHusky is an independent student project and is not affiliated with,
@@ -182,10 +184,9 @@ const Privacy = () => {
               <h2>9. Changes to This Policy</h2>
               <p>
                 We may update this Privacy Policy from time to time. The effective date at the
-                top of this page will be updated when changes are made. We will make
-                reasonable efforts to notify users of material changes via a notice on the
-                site. Continued use of RateMyHusky after changes are posted constitutes your
-                acceptance of the revised Policy.
+                top of this page will be updated when changes are made. Continued use of
+                RateMyHusky after changes are posted constitutes your acceptance of the
+                revised Policy.
               </p>
             </section>
 
