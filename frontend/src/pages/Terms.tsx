@@ -175,8 +175,8 @@ const Terms = () => {
             <section className="terms-section terms-section--last">
               <h2>12. Contact</h2>
               <p>
-                If you have questions about these Terms or want to report an issue, please use
-                the feedback form available at the bottom-right of any page on RateMyHusky.
+                If you have questions about these Terms or want to report an issue, please email
+                us at <a href="mailto:support@ratemyhusky.com">support@ratemyhusky.com</a>.
               </p>
             </section>
           </div>
