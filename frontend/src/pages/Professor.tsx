@@ -562,6 +562,18 @@ const Professor = () => {
     return hasData ? points : null;
   }, [mostRecentTermData, deptAvg, RADAR_METRICS, getMetricValue]);
 
+  const radarDomainMin = useMemo(() => {
+    if (!radarData) return 4;
+    const allVals = radarData.flatMap(p => [
+      p.profMissing ? null : p.professor,
+      p.deptMissing ? null : p.department,
+    ]).filter((v): v is number => v !== null && v > 0);
+    const min = allVals.length > 0 ? Math.min(...allVals) : 4;
+    if (min < 3) return 2;
+    if (min < 4) return 3;
+    return 4;
+  }, [radarData]);
+
   const stats = useMemo(() => {
     if (!profile) return null;
 
@@ -998,8 +1010,9 @@ const Professor = () => {
                     const { x, y, cy, payload, textAnchor } = props;
                     const point = radarData?.find(p => p.metric === payload.value);
                     const rating = point && !point.profMissing ? point.professor.toFixed(2) : null;
-                    // Shift the whole label up when it's above center so the rating line doesn't overlap the chart
-                    const adjustedY = rating && y < cy ? y - 10 : y;
+                    // Shift the whole label up when it's above center; extra offset for the topmost label
+                    const isTop = y < cy;
+                    const adjustedY = rating && isTop ? y - (payload.value === 'Teaching' ? 22 : 10) : y;
                     return (
                       <text x={x} y={adjustedY} textAnchor={textAnchor} fill="var(--radar-label, #555)" fontFamily="Nunito, sans-serif">
                         <tspan x={x} fontSize={12} fontWeight={600}>{payload.value}</tspan>
@@ -1011,10 +1024,16 @@ const Professor = () => {
                   }}
                 />
                 <PolarRadiusAxis
-                  domain={[0, 5]}
-                  tick={false}
+                  domain={[radarDomainMin, 5]}
+                  tick={(props: any) => {
+                    const { x, y, payload } = props;
+                    return (
+                      <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={600} fontFamily="Nunito, sans-serif" fill="#444" stroke="#fff" strokeWidth={2} paintOrder="stroke">{payload.value}</text>
+                    );
+                  }}
                   axisLine={false}
-                  tickCount={6}
+                  ticks={radarDomainMin === 2 ? [2, 3, 4, 5] : radarDomainMin === 3 ? [3, 4, 5] : [4, 5]}
+                  angle={90}
                 />
                 <RechartsTooltip
                   contentStyle={{
