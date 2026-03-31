@@ -9,16 +9,18 @@ const Privacy = () => {
           <header className="terms-header">
             <span className="terms-kicker">Legal</span>
             <h1>Privacy Policy</h1>
-            <p className="terms-meta">Effective March 26, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective March 31, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
             <section className="terms-section">
               <h2>1. Introduction</h2>
               <p>
-                RateMyHusky is a read-only aggregator of professor and course information for
+                RateMyHusky is an aggregator of professor and course information for
                 Northeastern University students. This Privacy Policy describes what information
-                we collect, how we use it, and the choices you have.
+                we collect, how we use it, and the choices you have. By using RateMyHusky,
+                you also agree to our{' '}
+                <a href="/terms">Terms &amp; Conditions</a>.
               </p>
               <p>
                 RateMyHusky is an independent student project and is not affiliated with,
@@ -45,8 +47,8 @@ const Privacy = () => {
                 <li>
                   <strong>Feedback form:</strong> the feedback form collects a message type,
                   description, and an optional email address. At this time, submissions are
-                  not transmitted to or stored on our servers. If this changes, this Policy
-                  will be updated.
+                  not stored server-side. If this changes, this Policy will be updated before
+                  any such storage begins.
                 </li>
               </ul>
               <p>
@@ -73,10 +75,13 @@ const Privacy = () => {
             <section className="terms-section">
               <h2>4. How We Store Your Information</h2>
               <p>
-                Your sign-in information is encoded in a JWT (JSON Web Token) stored in your
-                browser's <code>localStorage</code>. The token expires automatically after
-                7 days. RateMyHusky does not maintain a persistent server-side user database;
-                no account record is stored beyond the duration of your session token.
+                Your sign-in information is encoded in a JWT (JSON Web Token). During the
+                Google OAuth handshake, a short-lived <code>httpOnly</code> cookie is used
+                to facilitate the flow; once complete, the resulting JWT is stored in your
+                browser's <code>localStorage</code> and the handshake cookie is cleared.
+                The token expires automatically after 7 days. RateMyHusky does not maintain
+                a persistent server-side user database; no account record is stored beyond
+                the duration of your session token.
               </p>
               <p>
                 Signing out deletes the token from your browser immediately.
@@ -116,14 +121,26 @@ const Privacy = () => {
                   sources only. We do not send any user data to these services.
                 </li>
               </ul>
+              <p>
+                Our hosting provider (Vercel) may log standard server-side request data such
+                as IP addresses and user-agent strings as part of normal infrastructure
+                operation. This is subject to{' '}
+                <a
+                  href="https://vercel.com/legal/privacy-policy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Vercel's Privacy Policy
+                </a>.
+              </p>
             </section>
 
             <section className="terms-section">
               <h2>6. Cookies &amp; Local Storage</h2>
               <p>
                 RateMyHusky does not use tracking cookies. During the Google OAuth sign-in
-                flow, a short-lived, <code>httpOnly</code> cookie may be set to facilitate
-                the authentication handshake; it is not used for tracking and is cleared after
+                flow, a short-lived <code>httpOnly</code> cookie is set to facilitate the
+                authentication handshake; it is not used for tracking and is cleared after
                 sign-in completes.
               </p>
               <p>
@@ -155,10 +172,11 @@ const Privacy = () => {
             <section className="terms-section">
               <h2>8. Children's Privacy</h2>
               <p>
-                RateMyHusky is intended for Northeastern University students and is not directed
-                at children under the age of 13. We do not knowingly collect personal information
-                from children under 13. If you believe a child has provided us with personal
-                information, please contact us using the feedback form.
+                RateMyHusky is intended for Northeastern University students (aged 18 and
+                older) and is not directed at children. We do not knowingly collect personal
+                information from anyone under the age of 18. If you believe a minor has
+                provided us with personal information, please contact us at{' '}
+                <a href="mailto:support@ratemyhusky.com">support@ratemyhusky.com</a>.
               </p>
             </section>
 
@@ -176,8 +194,9 @@ const Privacy = () => {
               <h2>10. Contact</h2>
               <p>
                 If you have questions about this Privacy Policy or want to report a concern,
-                please use the feedback form available at the bottom-right of any page on
-                RateMyHusky.
+                please email us at{' '}
+                <a href="mailto:support@ratemyhusky.com">support@ratemyhusky.com</a> or use
+                the feedback form available at the bottom-right of any page on RateMyHusky.
               </p>
             </section>
           </div>

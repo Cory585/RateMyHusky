@@ -9,12 +9,18 @@ const Terms = () => {
           <header className="terms-header">
             <span className="terms-kicker">Legal</span>
             <h1>Terms &amp; Conditions</h1>
-            <p className="terms-meta">Effective March 26, 2025 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective March 31, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
             <section className="terms-section">
               <h2>1. About the Service</h2>
+              <p>
+                By accessing or using RateMyHusky, you agree to be bound by these Terms and
+                our{' '}
+                <a href="/privacy">Privacy Policy</a>. If you do not agree, do not use the
+                service.
+              </p>
               <p>
                 RateMyHusky is a read-only aggregator of professor and course information for
                 Northeastern University students. Data displayed on this platform is sourced from
@@ -24,6 +30,8 @@ const Terms = () => {
               <p>
                 RateMyHusky is an independent student project and is not affiliated with,
                 endorsed by, or officially connected to Northeastern University or RateMyProfessors.
+                "Husky" in "RateMyHusky" refers to the dog breed and is not intended to imply
+                any association with Northeastern University's trademarks or branding.
               </p>
             </section>
 
@@ -35,8 +43,9 @@ const Terms = () => {
                 Northeastern University Google account (<code>@husky.neu.edu</code>).
               </p>
               <p>
-                By signing in, you confirm that you are authorized to use the Google account
-                you provide. Access may be revoked at any time if the service is misused.
+                By signing in, you confirm that you are at least 18 years of age and that you
+                are authorized to use the Google account you provide. Access may be revoked at
+                any time if the service is misused.
               </p>
             </section>
 
@@ -172,11 +181,64 @@ const Terms = () => {
               </p>
             </section>
 
-            <section className="terms-section terms-section--last">
-              <h2>12. Contact</h2>
+            <section className="terms-section">
+              <h2>12. Indemnification</h2>
               <p>
-                If you have questions about these Terms or want to report an issue, please use
-                the feedback form available at the bottom-right of any page on RateMyHusky.
+                You agree to defend, indemnify, and hold harmless RateMyHusky and its developers
+                from and against any claims, damages, losses, or expenses (including reasonable
+                legal fees) arising out of or related to your use of the service, your violation
+                of these Terms, or your violation of any third-party rights.
+              </p>
+            </section>
+
+            <section className="terms-section">
+              <h2>13. Termination</h2>
+              <p>
+                We reserve the right to suspend or terminate your access to RateMyHusky at any
+                time, with or without notice, if we believe you have violated these Terms or are
+                misusing the service. Upon termination, your right to use the service ceases
+                immediately.
+              </p>
+            </section>
+
+            <section className="terms-section">
+              <h2>14. DMCA &amp; Content Removal</h2>
+              <p>
+                RateMyHusky aggregates publicly available data from third-party sources. If you
+                believe content displayed on this platform infringes your copyright or should be
+                removed for another legal reason, please contact us at{' '}
+                <a href="mailto:support@ratemyhusky.com">support@ratemyhusky.com</a> with a
+                description of the content and the basis for your removal request. We will
+                review and respond in good faith.
+              </p>
+            </section>
+
+            <section className="terms-section">
+              <h2>15. Governing Law</h2>
+              <p>
+                These Terms are governed by the laws of the Commonwealth of Massachusetts,
+                without regard to conflict of law principles. Any disputes arising from these
+                Terms or your use of RateMyHusky shall be resolved exclusively in the state or
+                federal courts located in Suffolk County, Massachusetts, and you consent to
+                personal jurisdiction in those courts.
+              </p>
+            </section>
+
+            <section className="terms-section">
+              <h2>16. Severability</h2>
+              <p>
+                If any provision of these Terms is found to be unenforceable or invalid under
+                applicable law, that provision will be modified to the minimum extent necessary
+                to make it enforceable, or severed if modification is not possible. The remaining
+                provisions will continue in full force and effect.
+              </p>
+            </section>
+
+            <section className="terms-section terms-section--last">
+              <h2>17. Contact</h2>
+              <p>
+                If you have questions about these Terms or want to report an issue, please email
+                us at <a href="mailto:support@ratemyhusky.com">support@ratemyhusky.com</a>.
               </p>
             </section>
           </div>
