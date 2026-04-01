@@ -496,12 +496,12 @@ function Compare() {
 			left: leftSnapshot
 				? `${leftSnapshot.score.toFixed(2)} (${leftSnapshot.term})`
 				: leftProfile
-					? 'No TRACE overall score'
+					? 'Sign in to read'
 					: 'N/A',
 			right: rightSnapshot
 				? `${rightSnapshot.score.toFixed(2)} (${rightSnapshot.term})`
 				: rightProfile
-					? 'No TRACE overall score'
+					? 'Sign in to read'
 					: 'N/A',
 			footnoteLeft: leftSnapshot?.course,
 			footnoteRight: rightSnapshot?.course,
