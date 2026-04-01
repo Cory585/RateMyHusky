@@ -169,6 +169,7 @@
 
 .course-difficulty-bar {
 	width: 100%;
+	align-self: stretch;
 	height: 8px;
 	background: #eee;
 	border-radius: 3px;

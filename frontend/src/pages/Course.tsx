@@ -131,7 +131,11 @@ const Course = () => {
 	const avgHoursPerWeek = useMemo(() => {
 		if (!course) return null;
 		const q = course.questionScores.find(s => s.question.toLowerCase().includes('hours per week'));
-		return q?.avgRating ?? null;
+		if (q?.avgRating != null) return q.avgRating;
+		// Fallback: average instructor-level courseAvgHoursPerWeek
+		const valid = course.instructors.filter(i => i.courseAvgHoursPerWeek != null);
+		if (!valid.length) return null;
+		return valid.reduce((sum, i) => sum + i.courseAvgHoursPerWeek!, 0) / valid.length;
 	}, [course]);
 
 	if (loading) {
@@ -173,9 +177,9 @@ const Course = () => {
 				<section className="course-stats-grid">
 					<RatingStatCard avgRating={summary.avgRating} />
 					<DifficultyStatCard value={avgDifficulty} />
-					<StatCard label="Avg Hrs / Week" value={avgHoursPerWeek != null ? `${avgHoursPerWeek.toFixed(1)}h` : 'N/A'} />
+					<StatCard label="Avg Hrs / Week" value={avgHoursPerWeek != null ? `${avgHoursPerWeek.toFixed(1)}h` : '—'} />
 					<StatCard label="Instructors" value={summary.totalInstructors.toLocaleString()} />
-					<StatCard label="Avg Enrollment" value={summary.totalSections > 0 ? Math.round(summary.totalEnrollment / summary.totalSections).toLocaleString() : 'N/A'} />
+					<StatCard label="Avg Enrollment" value={summary.totalSections > 0 ? Math.round(summary.totalEnrollment / summary.totalSections).toLocaleString() : '—'} />
 					<StatCard label="Last Taught" value={summary.latestTermTitle || 'Unknown'} className="course-stat-last-taught" />
 				</section>
 
@@ -219,7 +223,7 @@ const Course = () => {
 														<StarRating rating={prof.avgRating} size="sm" />
 													</>
 												) : (
-													<span className="course-top-prof-avg">N/A</span>
+													<span className="course-top-prof-avg">—</span>
 												)}
 											</div>
 											<h3 className="course-top-prof-name">
@@ -253,9 +257,9 @@ const Course = () => {
 							{visibleInstructors.map((row) => (
 								<div key={row.name} className="instructor-row">
 									<span>{row.name}</span>
-									<span>{row.avgRating != null ? row.avgRating.toFixed(2) : 'N/A'}</span>
-									<span>{row.courseAvgDifficulty != null ? row.courseAvgDifficulty.toFixed(2) : 'N/A'}</span>
-									<span>{row.courseAvgHoursPerWeek != null ? `${row.courseAvgHoursPerWeek.toFixed(1)}h` : 'N/A'}</span>
+											<span>{row.avgRating != null ? row.avgRating.toFixed(2) : '—'}</span>
+											<span>{row.courseAvgDifficulty != null ? row.courseAvgDifficulty.toFixed(2) : '—'}</span>
+											<span>{row.courseAvgHoursPerWeek != null ? `${row.courseAvgHoursPerWeek.toFixed(1)}h` : '—'}</span>
 								</div>
 							))}
 						</div>

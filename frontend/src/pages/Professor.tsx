@@ -902,7 +902,7 @@ const Professor = () => {
           )}
         </div>
         <div className="prof-stat-card">
-          <span className="prof-stat-value"><AnimatedNumber value={stats.difficulty} /></span>
+          <span className="prof-stat-value">{stats.difficulty > 0 ? <AnimatedNumber value={stats.difficulty} /> : '—'}</span>
           <span className="prof-stat-label">Difficulty</span>
           <div className="prof-difficulty-bar">
             <div className="prof-difficulty-fill" style={{ 
@@ -920,7 +920,7 @@ const Professor = () => {
           </div>
         </div>
         <div className="prof-stat-card">
-          <span className="prof-stat-value green">
+          <span className={`prof-stat-value ${stats.wouldTakeAgainPct !== null ? 'green' : ''}`}>
             {stats.wouldTakeAgainPct !== null ? <AnimatedNumber value={stats.wouldTakeAgainPct} decimals={0} suffix="%" /> : '—'}
           </span>
           <span className="prof-stat-label">Would Take Again</span>
