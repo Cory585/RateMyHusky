@@ -473,9 +473,9 @@ function Compare() {
 		},
 		{
 			label: 'Total Reviews',
-			left: leftProfile?.totalRatings?.toLocaleString() ?? leftCatalogProfessor?.totalReviews?.toLocaleString() ?? 'N/A',
-			right: rightProfile?.totalRatings?.toLocaleString() ?? rightCatalogProfessor?.totalReviews?.toLocaleString() ?? 'N/A',
-			winner: pickWinner(leftProfile?.totalRatings ?? leftCatalogProfessor?.totalReviews, rightProfile?.totalRatings ?? rightCatalogProfessor?.totalReviews, 'higher', 0),
+			left: leftProfile?.totalComments?.toLocaleString() ?? leftCatalogProfessor?.totalComments?.toLocaleString() ?? 'N/A',
+			right: rightProfile?.totalComments?.toLocaleString() ?? rightCatalogProfessor?.totalComments?.toLocaleString() ?? 'N/A',
+			winner: pickWinner(leftProfile?.totalComments ?? leftCatalogProfessor?.totalComments, rightProfile?.totalComments ?? rightCatalogProfessor?.totalComments, 'higher', 0),
 			weight: 0.5,
 		},
 		{
