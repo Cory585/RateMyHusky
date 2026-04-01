@@ -825,3 +825,73 @@
 		grid-template-columns: 1fr;
 	}
 }
+
+/* ── Rating History Paywall ── */
+.course-rating-history-paywall {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	text-align: center;
+	padding: 48px 24px;
+	background: #fff;
+	border-radius: 16px;
+	border: 1.5px dashed #e0e0e0;
+	margin-top: 8px;
+}
+
+.course-rating-history-paywall .paywall-lock-icon {
+	width: 40px;
+	height: 40px;
+	color: #d6394c;
+	margin-bottom: 16px;
+}
+
+.course-rating-history-paywall h3 {
+	font-size: 1.1rem;
+	font-weight: 800;
+	color: #1a1a1a;
+	margin-bottom: 8px;
+}
+
+.course-rating-history-paywall p {
+	font-size: 0.88rem;
+	color: #888;
+	line-height: 1.5;
+	max-width: 340px;
+	margin-bottom: 20px;
+}
+
+.course-rating-history-paywall p strong {
+	color: #d6394c;
+	font-weight: 800;
+}
+
+.course-rating-history-paywall .paywall-signin-btn {
+	background: #d6394c;
+	color: #fff;
+	border: none;
+	padding: 11px 32px;
+	border-radius: 12px;
+	font-size: 0.9rem;
+	font-weight: 700;
+	cursor: pointer;
+	transition: background 0.15s, transform 0.15s;
+}
+
+.course-rating-history-paywall .paywall-signin-btn:hover {
+	background: #b82e3f;
+	transform: scale(1.03);
+}
+
+.dark .course-rating-history-paywall {
+	background: #1e1e1e;
+	border-color: #333;
+}
+
+.dark .course-rating-history-paywall h3 {
+	color: #e0e0e0;
+}
+
+.dark .course-rating-history-paywall p {
+	color: #777;
+}

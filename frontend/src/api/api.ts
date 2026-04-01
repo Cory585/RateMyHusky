@@ -371,10 +371,12 @@ export async function submitFeedback(payload: {
 }
 
 export async function fetchCourseData(code: string): Promise<CourseDetail | null> {
-  if (_courseCache.has(code)) return _courseCache.get(code)!;
+  const token = localStorage.getItem('auth_token');
+  const key = `${code}:${token ?? 'u'}`;
+  if (_courseCache.has(key)) return _courseCache.get(key)!;
   try {
     const data = await get<CourseDetail>(`/api/courses/${encodeURIComponent(code)}`);
-    _courseCache.set(code, data);
+    _courseCache.set(key, data);
     return data;
   } catch {
     return null;

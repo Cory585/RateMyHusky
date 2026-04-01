@@ -1234,7 +1234,16 @@ def course_profile(code):
     if not code_norm:
         return jsonify({"error": "Course not found"}), 404
 
-    cache_key = f"course:{code_norm}"
+    is_authed = False
+    token = _get_auth_token()
+    if token:
+        try:
+            pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            is_authed = True
+        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+            pass
+
+    cache_key = f"course:{code_norm}:{'a' if is_authed else 'u'}"
     cached = cache_get(cache_key)
     if cached:
         resp = jsonify(cached)
@@ -1452,8 +1461,8 @@ def course_profile(code):
             "section": s["section"] or "",
             "instructor": name,
             "enrollment": _safe_int(s["enrollment"]),
-            "overallRating": overall_mean,
-            "rmpRating": rmp_rating,
+            "overallRating": overall_mean if is_authed else None,
+            "rmpRating": rmp_rating if is_authed else None,
             "totalResponses": _safe_int(sc["total_responses"]) if sc else 0,
             "completed": _safe_int(sc["completed"]) if sc else 0,
         })

@@ -9,6 +9,8 @@ import { getInitials, stripPrefix } from '../utils/nameUtils';
 import { termSortKey } from '../utils/termUtils';
 import SectionHistoryChart from '../components/SectionHistoryChart';
 import Breadcrumbs from '../components/Breadcrumbs';
+import { useAuth } from '../context/AuthContext';
+import SignInModal from '../components/SignInModal';
 import './Course.css';
 
 const INITIAL_INSTRUCTORS_VISIBLE = 5;
@@ -16,11 +18,13 @@ const INSTRUCTORS_VISIBLE_STEP = 5;
 
 const Course = () => {
 	const { code = '' } = useParams<{ code: string }>();
+	const { user } = useAuth();
 	const [course, setCourse] = useState<CourseDetail | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [notFound, setNotFound] = useState(false);
 	const [visibleInstructorCount, setVisibleInstructorCount] = useState(INITIAL_INSTRUCTORS_VISIBLE);
 	const [showBackToTop, setShowBackToTop] = useState(false);
+	const [showSignIn, setShowSignIn] = useState(false);
 	const tableWrapRef = useRef<HTMLDivElement>(null);
 	const [tableAtStart, setTableAtStart] = useState(true);
 	const [tableAtEnd, setTableAtEnd] = useState(false);
@@ -282,10 +286,22 @@ const Course = () => {
 					<div className="course-panel-header">
 						<h2>Rating History</h2>
 					</div>
-					<SectionHistoryChart sections={course.sections} />
+					{!user ? (
+						<div className="course-rating-history-paywall">
+							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="paywall-lock-icon">
+								<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+								<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+							</svg>
+							<p>Sign in with your <strong>husky.neu.edu</strong> account to view historical rating trends.</p>
+							<button className="paywall-signin-btn" onClick={() => setShowSignIn(true)}>Sign In</button>
+						</div>
+					) : (
+						<SectionHistoryChart sections={course.sections} />
+					)}
 				</section>
 
 			</div>
+			<SignInModal open={showSignIn} onClose={() => setShowSignIn(false)} />
 			<button
 			className={`back-to-top ${showBackToTop ? 'visible' : ''}`}
 			onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
