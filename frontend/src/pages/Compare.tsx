@@ -100,6 +100,25 @@ const getRecentTraceSnapshot = (profile: ProfessorProfile | null): TraceSnapshot
 	return null;
 };
 
+const getBlendedDifficulty = (profile: ProfessorProfile | null): number | null => {
+	if (!profile) return null;
+	const rmpDiff = profile.difficulty;
+	let challSum = 0, challWeight = 0;
+	profile.traceCourses?.forEach(c => {
+		const challeng = c.scores.find(s => s.question.toLowerCase().includes('challeng'));
+		if (challeng) {
+			const w = challeng.totalResponses ?? challeng.completed ?? 0;
+			if (w > 0) {
+				challSum += challeng.mean * w;
+				challWeight += w;
+			}
+		}
+	});
+	const traceDiff = challWeight > 0 ? challSum / challWeight : null;
+	if (rmpDiff !== null && traceDiff !== null) return (rmpDiff + traceDiff) / 2;
+	return rmpDiff ?? traceDiff ?? null;
+};
+
 function Compare() {
 	const [searchParams, setSearchParams] = useSearchParams();
 	const { user, loading: authLoading } = useAuth();
@@ -240,7 +259,7 @@ function Compare() {
 		return () => {
 			cancelled = true;
 		};
-	}, [leftSlug]);
+	}, [leftSlug, user]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -268,7 +287,7 @@ function Compare() {
 		return () => {
 			cancelled = true;
 		};
-	}, [rightSlug]);
+	}, [rightSlug, user]);
 
 	const updateSlugs = (updates: { a?: string; b?: string }) => {
 		const next = new URLSearchParams(searchParams);
@@ -486,11 +505,11 @@ function Compare() {
 		},
 		{
 			label: 'Difficulty',
-			left: formatMetric(leftProfile?.difficulty),
-			right: formatMetric(rightProfile?.difficulty),
-			leftClass: getDifficultyClass(leftProfile?.difficulty),
-			rightClass: getDifficultyClass(rightProfile?.difficulty),
-			winner: pickWinner(leftProfile?.difficulty, rightProfile?.difficulty, 'lower'),
+			left: formatMetric(getBlendedDifficulty(leftProfile)),
+			right: formatMetric(getBlendedDifficulty(rightProfile)),
+			leftClass: getDifficultyClass(getBlendedDifficulty(leftProfile)),
+			rightClass: getDifficultyClass(getBlendedDifficulty(rightProfile)),
+			winner: pickWinner(getBlendedDifficulty(leftProfile), getBlendedDifficulty(rightProfile), 'lower'),
 			weight: 1.5,
 		},
 		{

@@ -132,10 +132,12 @@ export async function fetchProfessorFull(slug: string): Promise<ProfessorFull | 
 }
 
 export async function fetchProfessorData(slug: string): Promise<ProfessorProfile | null> {
-  if (_profCache.has(slug)) return _profCache.get(slug)!;
+  const token = localStorage.getItem('auth_token');
+  const key = `${slug}:${token ?? 'u'}`;
+  if (_profCache.has(key)) return _profCache.get(key)!;
   try {
     const data = await get<ProfessorProfile>(`/api/professors/${encodeURIComponent(slug)}`);
-    _profCache.set(slug, data);
+    _profCache.set(key, data);
     return data;
   } catch {
     return null;

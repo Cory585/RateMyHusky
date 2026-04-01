@@ -607,12 +607,53 @@ const Professor = () => {
       avgRating = traceRating;
     }
 
+    // TRACE difficulty from "challenging" question (course-filtered)
+    let traceChallengSum = 0, traceChallengWeight = 0;
+    filteredTraceCourses.forEach(c => {
+      const challeng = c.scores.find(s => s.question.toLowerCase().includes('challeng'));
+      if (challeng) {
+        const w = challeng.totalResponses ?? challeng.completed ?? 0;
+        if (w > 0) {
+          traceChallengSum += challeng.mean * w;
+          traceChallengWeight += w;
+        }
+      }
+    });
+    const traceDifficulty = traceChallengWeight > 0 ? traceChallengSum / traceChallengWeight : null;
+
+    // TRACE hours per week (course-filtered)
+    let traceHoursSum = 0, traceHoursWeight = 0;
+    filteredTraceCourses.forEach(c => {
+      const hours = c.scores.find(s => s.question.toLowerCase().includes('hours per week'));
+      if (hours) {
+        const w = hours.totalResponses ?? hours.completed ?? 0;
+        if (w > 0) {
+          traceHoursSum += hours.mean * w;
+          traceHoursWeight += w;
+        }
+      }
+    });
+    const filteredHoursPerWeek = traceHoursWeight > 0 ? traceHoursSum / traceHoursWeight : null;
+
+    const rmpDifficulty = filteredRmpReviews.length > 0
+      ? filteredRmpReviews.reduce((acc, r) => acc + r.difficulty, 0) / filteredRmpReviews.length
+      : null;
+
+    const blendedDifficulty = (rmpDifficulty !== null && traceDifficulty !== null)
+      ? (rmpDifficulty + traceDifficulty) / 2
+      : rmpDifficulty ?? traceDifficulty ?? 0;
+
     if (allSelected) {
+      // For allSelected, use profile.difficulty (full precomputed RMP avg) blended with TRACE challenging
+      const allRmpDiff = profile.difficulty;
+      const allBlended = (allRmpDiff !== null && traceDifficulty !== null)
+        ? (allRmpDiff + traceDifficulty) / 2
+        : allRmpDiff ?? traceDifficulty ?? 0;
       return {
         avgRating: profile.avgRating,
         rmpRating: profile.rmpRating,
         traceRating: profile.traceRating,
-        difficulty: profile.difficulty ?? 0,
+        difficulty: allBlended,
         totalRatings: profile.totalRatings,
         wouldTakeAgainPct: profile.wouldTakeAgainPct,
         hoursPerWeek: profile.hoursPerWeek,
@@ -623,12 +664,10 @@ const Professor = () => {
       avgRating,
       rmpRating,
       traceRating,
-      difficulty: filteredRmpReviews.length > 0
-        ? filteredRmpReviews.reduce((acc, r) => acc + r.difficulty, 0) / filteredRmpReviews.length
-        : 0,
+      difficulty: blendedDifficulty,
       totalRatings: filteredRmpReviews.length + traceWeight,
       wouldTakeAgainPct: profile.wouldTakeAgainPct,
-      hoursPerWeek: profile.hoursPerWeek,
+      hoursPerWeek: filteredHoursPerWeek,
     };
   }, [profile, filteredRmpReviews, filteredTraceCourses, allCourseCodes, selectedCourses]);
 
