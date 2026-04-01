@@ -1146,3 +1146,40 @@
     align-items: center;
   }
 }
+/* ── Course filter tip ── */
+.prof-course-tip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: color-mix(in srgb, var(--accent, #6c8ebf) 10%, var(--bg-secondary, #1e1e2e));
+  border: 1px solid color-mix(in srgb, var(--accent, #6c8ebf) 30%, transparent);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 0.83rem;
+  color: var(--text-secondary, #a0a0b0);
+}
+
+.prof-course-tip-text strong {
+  color: var(--text-primary, #e0e0f0);
+  font-weight: 600;
+}
+
+.prof-course-tip-close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary, #a0a0b0);
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.prof-course-tip-close:hover {
+  color: var(--text-primary, #e0e0f0);
+  background: color-mix(in srgb, var(--accent, #6c8ebf) 15%, transparent);
+}

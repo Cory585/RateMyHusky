@@ -237,6 +237,7 @@ const Professor = () => {
   const MAX_VISIBLE_TERMS = 3;
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [deptAvg, setDeptAvg] = useState<TraceDeptAvgItem[]>([]);
+  const [showCourseTip, setShowCourseTip] = useState(true);
 
   /* ── review pill ── */
   const updateReviewPill = useCallback(() => {
@@ -1298,6 +1299,20 @@ const Professor = () => {
           </section>
         );
       })()}
+
+      {showCourseTip && (
+        <div className="prof-course-tip">
+          <span className="prof-course-tip-text">
+            <strong>Tip:</strong> Clear all courses and click on a specific course to filter reviews by that course.
+          </span>
+          <button className="prof-course-tip-close" onClick={() => setShowCourseTip(false)} aria-label="Dismiss tip">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       <section className="prof-section prof-reviews-section" ref={reviewsRef}>
         <div className="prof-reviews-header">
