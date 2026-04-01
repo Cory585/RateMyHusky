@@ -50,7 +50,7 @@ const Course = () => {
 		return () => {
 			cancelled = true;
 		};
-	}, [code]);
+	}, [code, user]);
 
 	useEffect(() => {
 		const handler = () => setShowBackToTop(window.scrollY > 300);
@@ -82,7 +82,7 @@ const Course = () => {
 		const getInstructorsWithinYears = (yearsBack: number) => {
 			const cutoffYear = currentYear - yearsBack;
 			return course.instructors.filter(inst => {
-				const yearMatch = inst.latestTermTitle.match(/\b(20\d{2})\b/);
+				const yearMatch = (inst.latestTermTitle || '').match(/\b(20\d{2})\b/);
 				return yearMatch && parseInt(yearMatch[1]) >= cutoffYear;
 			});
 		};
@@ -96,9 +96,16 @@ const Course = () => {
 			result = getInstructorsWithinYears(yearsBack);
 		}
 
+		// If no recency data available, fall back to all instructors sorted by rating
+		if (!result.length) {
+			return [...course.instructors]
+				.sort((a, b) => (b.avgRating ?? -1) - (a.avgRating ?? -1))
+				.slice(0, 10);
+		}
+
 		const sorted = result.sort((a, b) => {
-			const aTermSort = termSortKey(a.latestTermTitle);
-			const bTermSort = termSortKey(b.latestTermTitle);
+			const aTermSort = termSortKey(a.latestTermTitle || '');
+			const bTermSort = termSortKey(b.latestTermTitle || '');
 			if (bTermSort !== aTermSort) return bTermSort - aTermSort;
 			return (b.avgRating ?? -1) - (a.avgRating ?? -1);
 		});
@@ -168,6 +175,7 @@ const Course = () => {
 					<RatingStatCard avgRating={summary.avgRating} />
 					<DifficultyStatCard value={avgDifficulty} />
 					<StatCard label="Avg Hrs / Week" value={avgHoursPerWeek != null ? `${avgHoursPerWeek.toFixed(1)}h` : '—'} />
+					<StatCard label="Instructors" value={course.instructors.length.toLocaleString()} />
 					<StatCard label="Avg Enrollment" value={summary.avgEnrollment != null ? summary.avgEnrollment.toLocaleString() : '—'} />
 					<StatCard label="Last Taught" value={summary.latestTermTitle || 'Unknown'} className="course-stat-last-taught" />
 				</section>
