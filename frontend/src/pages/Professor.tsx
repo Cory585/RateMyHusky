@@ -982,7 +982,7 @@ const Professor = () => {
         )}
       </section>
 
-      {radarData && !user && (
+      {!user && (profile?.traceCourses?.length ?? 0) > 0 && (
         <section className="prof-radar-section">
           <div className="prof-radar-header">
             <h2 className="prof-section-title">TRACE In-Depth Evaluation</h2>
