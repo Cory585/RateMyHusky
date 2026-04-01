@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { fetchProfessorData, fetchProfessorsCatalog, fetchSearchSuggestions } from '../api/api';
+import { useAuth } from '../context/AuthContext';
 import { termSortKey } from '../utils/termUtils';
 import type { CatalogProfessor, ProfessorProfile, ProfessorSuggestion } from '../api/api';
 import StarRating from '../components/StarRating';
@@ -101,6 +102,7 @@ const getRecentTraceSnapshot = (profile: ProfessorProfile | null): TraceSnapshot
 
 function Compare() {
 	const [searchParams, setSearchParams] = useSearchParams();
+	const { user, loading: authLoading } = useAuth();
 
 	const [catalog, setCatalog] = useState<CatalogProfessor[]>([]);
 	const [, setCatalogLoading] = useState(true);
@@ -119,6 +121,8 @@ function Compare() {
 	const rightWrapperRef = useRef<HTMLDivElement>(null);
 	const leftDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const rightDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const leftFetchGenRef = useRef(0);
+	const rightFetchGenRef = useRef(0);
 
 	const [leftProfile, setLeftProfile] = useState<ProfessorProfile | null>(null);
 	const [rightProfile, setRightProfile] = useState<ProfessorProfile | null>(null);
@@ -335,9 +339,12 @@ function Compare() {
 			return;
 		}
 
+		leftFetchGenRef.current += 1;
+		const gen = leftFetchGenRef.current;
 		leftDebounceRef.current = setTimeout(async () => {
 			try {
 				const results = await fetchSearchSuggestions(trimmedQuery, 'Professor');
+				if (gen !== leftFetchGenRef.current) return;
 				const professorResults = results
 					.filter((result): result is ProfessorSuggestion => result.type === 'professor')
 					.filter((result) => getSuggestionSlug(result) !== rightSlug)
@@ -347,6 +354,7 @@ function Compare() {
 				setShowLeftSuggestions(professorResults.length > 0);
 				setLeftActiveIndex(-1);
 			} catch {
+				if (gen !== leftFetchGenRef.current) return;
 				setLeftSuggestions([]);
 				setShowLeftSuggestions(false);
 			}
@@ -368,9 +376,12 @@ function Compare() {
 			return;
 		}
 
+		rightFetchGenRef.current += 1;
+		const gen = rightFetchGenRef.current;
 		rightDebounceRef.current = setTimeout(async () => {
 			try {
 				const results = await fetchSearchSuggestions(trimmedQuery, 'Professor');
+				if (gen !== rightFetchGenRef.current) return;
 				const professorResults = results
 					.filter((result): result is ProfessorSuggestion => result.type === 'professor')
 					.filter((result) => getSuggestionSlug(result) !== leftSlug)
@@ -380,6 +391,7 @@ function Compare() {
 				setShowRightSuggestions(professorResults.length > 0);
 				setRightActiveIndex(-1);
 			} catch {
+				if (gen !== rightFetchGenRef.current) return;
 				setRightSuggestions([]);
 				setShowRightSuggestions(false);
 			}
@@ -463,9 +475,9 @@ function Compare() {
 		},
 		{
 			label: 'Total Reviews',
-			left: leftProfile?.totalRatings?.toLocaleString() ?? leftCatalogProfessor?.totalReviews?.toLocaleString() ?? 'N/A',
-			right: rightProfile?.totalRatings?.toLocaleString() ?? rightCatalogProfessor?.totalReviews?.toLocaleString() ?? 'N/A',
-			winner: pickWinner(leftProfile?.totalRatings ?? leftCatalogProfessor?.totalReviews, rightProfile?.totalRatings ?? rightCatalogProfessor?.totalReviews, 'higher', 0),
+			left: leftProfile?.totalComments?.toLocaleString() ?? leftCatalogProfessor?.totalComments?.toLocaleString() ?? 'N/A',
+			right: rightProfile?.totalComments?.toLocaleString() ?? rightCatalogProfessor?.totalComments?.toLocaleString() ?? 'N/A',
+			winner: pickWinner(leftProfile?.totalComments ?? leftCatalogProfessor?.totalComments, rightProfile?.totalComments ?? rightCatalogProfessor?.totalComments, 'higher', 0),
 			weight: 0.5,
 		},
 		{
@@ -485,14 +497,14 @@ function Compare() {
 			label: 'Recent TRACE Snapshot',
 			left: leftSnapshot
 				? `${leftSnapshot.score.toFixed(2)} (${leftSnapshot.term})`
-				: leftProfile
-					? 'No TRACE overall score'
-					: 'N/A',
+				: user
+					? 'N/A'
+					: 'Sign in to view',
 			right: rightSnapshot
 				? `${rightSnapshot.score.toFixed(2)} (${rightSnapshot.term})`
-				: rightProfile
-					? 'No TRACE overall score'
-					: 'N/A',
+				: user
+					? 'N/A'
+					: 'Sign in to view',
 			footnoteLeft: leftSnapshot?.course,
 			footnoteRight: rightSnapshot?.course,
 			winner: pickWinner(leftSnapshot?.score, rightSnapshot?.score),
@@ -757,23 +769,38 @@ function Compare() {
 					{compareRows.map((row) => {
 						const showLeft = Boolean(leftSlug) && !leftLoading;
 						const showRight = Boolean(rightSlug) && !rightLoading;
+						const renderValue = (value: string, showValue: boolean) => {
+							if (!authLoading && showValue && row.label === 'Recent TRACE Snapshot' && value === 'Sign in to view') {
+								return (
+									<span className="compare-lock-prompt">
+										<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="compare-lock-icon">
+											<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+											<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+										</svg>
+										<span>Sign in to view</span>
+									</span>
+								);
+							}
+
+							return <span>{showValue ? value : '—'}</span>;
+						};
 						return (
 							<div className="compare-row" role="row" key={row.label}>
 								<div
-									className={`compare-cell compare-cell-left ${showLeft ? (row.leftClass ?? '') : ''} ${showLeft && row.winner === 'left' ? 'compare-cell-winner' : ''}`}
+									className={`compare-cell compare-cell-left ${showLeft ? (row.leftClass ?? '') : ''} ${bothSelected && showLeft && row.winner === 'left' ? 'compare-cell-winner' : ''}`}
 									role="cell"
 								>
-									<span>{showLeft ? row.left : '—'}</span>
+									{renderValue(row.left, showLeft)}
 									{showLeft && row.footnoteLeft && <small>{row.footnoteLeft}</small>}
 								</div>
 								<div className="compare-cell compare-cell-label" role="columnheader">
 									{row.label}
 								</div>
 								<div
-									className={`compare-cell compare-cell-right ${showRight ? (row.rightClass ?? '') : ''} ${showRight && row.winner === 'right' ? 'compare-cell-winner' : ''}`}
+									className={`compare-cell compare-cell-right ${showRight ? (row.rightClass ?? '') : ''} ${bothSelected && showRight && row.winner === 'right' ? 'compare-cell-winner' : ''}`}
 									role="cell"
 								>
-									<span>{showRight ? row.right : '—'}</span>
+									{renderValue(row.right, showRight)}
 									{showRight && row.footnoteRight && <small>{row.footnoteRight}</small>}
 								</div>
 							</div>

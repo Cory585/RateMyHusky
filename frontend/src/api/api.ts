@@ -12,14 +12,12 @@ export interface Professor {
   rmpRating: number | null;
   traceRating: number | null;
   avgRating: number;
-  rmpReviews: number;
-  traceReviews: number;
-  totalReviews: number;
   totalComments?: number;
-  url: string;
 }
 
-export interface RandomProfessor extends Professor {
+export interface RandomProfessor {
+  name: string;
+  dept: string;
   college: string;
 }
 
@@ -27,9 +25,6 @@ export interface RandomProfessor extends Professor {
 export interface TraceCourseScore {
   question: string;
   mean: number;
-  median: number;
-  stdDev: number;
-  enrollment: number;
   completed: number;
   totalResponses?: number;
   count1?: number;
@@ -46,8 +41,6 @@ export interface TraceCourse {
   termTitle: string;
   departmentName: string;
   displayName: string;
-  section: string;
-  enrollment: number;
   scores: TraceCourseScore[];
 }
 
@@ -57,10 +50,10 @@ export interface ProfessorProfile {
   rmpRating: number | null;
   traceRating: number | null;
   avgRating: number;
-  numRatings: number;
   wouldTakeAgainPct: number | null;
   difficulty: number | null;
   totalRatings: number;
+  totalComments: number;
   professorUrl: string | null;
   traceCourses: TraceCourse[];
   imageUrl: string | null;
@@ -73,9 +66,6 @@ export interface ProfessorReviews {
 }
 
 export interface ProfessorReview {
-  professorName: string;
-  department: string;
-  overallRating: number;
   course: string;
   quality: number;
   difficulty: number;
@@ -228,12 +218,6 @@ export interface CatalogCourse {
   name: string;
   department: string;
   avgRating: number | null;
-  totalSections: number;
-  totalInstructors: number;
-  totalEnrollment: number;
-  totalResponses: number;
-  latestTermTitle: string;
-  latestTermId: number;
 }
 
 export interface CourseCatalogResponse {
@@ -251,9 +235,7 @@ export interface CourseSummary {
   totalSections: number;
   totalInstructors: number;
   totalEnrollment: number;
-  totalResponses: number;
   latestTermTitle: string;
-  latestTermId: number;
 }
 
 export interface CourseInstructorBreakdown {
@@ -264,32 +246,22 @@ export interface CourseInstructorBreakdown {
   wouldTakeAgainPct: number | null;
   totalReviews: number;
   totalComments: number;
-  sections: number;
-  totalEnrollment: number;
-  totalResponses: number;
   avgRating: number | null;
   courseAvgDifficulty: number | null;
   courseAvgHoursPerWeek: number | null;
 }
 
 export interface CourseSection {
-  courseId: number;
-  instructorId: number;
   termId: number;
   termTitle: string;
-  section: string;
   instructor: string;
-  enrollment: number;
   overallRating: number | null;
   rmpRating: number | null;
-  totalResponses: number;
-  completed: number;
 }
 
 export interface CourseQuestionScore {
   question: string;
   avgRating: number | null;
-  totalResponses: number;
 }
 
 export interface CourseDetail {
@@ -370,10 +342,12 @@ export async function submitFeedback(payload: {
 }
 
 export async function fetchCourseData(code: string): Promise<CourseDetail | null> {
-  if (_courseCache.has(code)) return _courseCache.get(code)!;
+  const token = localStorage.getItem('auth_token');
+  const key = `${code}:${token ?? 'u'}`;
+  if (_courseCache.has(key)) return _courseCache.get(key)!;
   try {
     const data = await get<CourseDetail>(`/api/courses/${encodeURIComponent(code)}`);
-    _courseCache.set(code, data);
+    _courseCache.set(key, data);
     return data;
   } catch {
     return null;

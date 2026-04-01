@@ -9,6 +9,8 @@ import { getInitials, stripPrefix } from '../utils/nameUtils';
 import { termSortKey } from '../utils/termUtils';
 import SectionHistoryChart from '../components/SectionHistoryChart';
 import Breadcrumbs from '../components/Breadcrumbs';
+import { useAuth } from '../context/AuthContext';
+import SignInModal from '../components/SignInModal';
 import './Course.css';
 
 const INITIAL_INSTRUCTORS_VISIBLE = 5;
@@ -16,11 +18,13 @@ const INSTRUCTORS_VISIBLE_STEP = 5;
 
 const Course = () => {
 	const { code = '' } = useParams<{ code: string }>();
+	const { user } = useAuth();
 	const [course, setCourse] = useState<CourseDetail | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [notFound, setNotFound] = useState(false);
 	const [visibleInstructorCount, setVisibleInstructorCount] = useState(INITIAL_INSTRUCTORS_VISIBLE);
 	const [showBackToTop, setShowBackToTop] = useState(false);
+	const [showSignIn, setShowSignIn] = useState(false);
 	const tableWrapRef = useRef<HTMLDivElement>(null);
 	const [tableAtStart, setTableAtStart] = useState(true);
 	const [tableAtEnd, setTableAtEnd] = useState(false);
@@ -127,7 +131,11 @@ const Course = () => {
 	const avgHoursPerWeek = useMemo(() => {
 		if (!course) return null;
 		const q = course.questionScores.find(s => s.question.toLowerCase().includes('hours per week'));
-		return q?.avgRating ?? null;
+		if (q?.avgRating != null) return q.avgRating;
+		// Fallback: average instructor-level courseAvgHoursPerWeek
+		const valid = course.instructors.filter(i => i.courseAvgHoursPerWeek != null);
+		if (!valid.length) return null;
+		return valid.reduce((sum, i) => sum + i.courseAvgHoursPerWeek!, 0) / valid.length;
 	}, [course]);
 
 	if (loading) {
@@ -169,10 +177,10 @@ const Course = () => {
 				<section className="course-stats-grid">
 					<RatingStatCard avgRating={summary.avgRating} />
 					<DifficultyStatCard value={avgDifficulty} />
-					<StatCard label="Avg Hrs / Week" value={avgHoursPerWeek != null ? `${avgHoursPerWeek.toFixed(1)}h` : 'N/A'} />
+					<StatCard label="Avg Hrs / Week" value={avgHoursPerWeek != null ? `${avgHoursPerWeek.toFixed(1)}h` : '—'} />
 					<StatCard label="Instructors" value={summary.totalInstructors.toLocaleString()} />
-					<StatCard label="Avg Enrollment" value={summary.totalSections > 0 ? Math.round(summary.totalEnrollment / summary.totalSections).toLocaleString() : 'N/A'} />
-					<StatCard label="Last Taught" value={summary.latestTermTitle || 'Unknown'} />
+					<StatCard label="Avg Enrollment" value={summary.totalSections > 0 ? Math.round(summary.totalEnrollment / summary.totalSections).toLocaleString() : '—'} />
+					<StatCard label="Last Taught" value={summary.latestTermTitle || 'Unknown'} className="course-stat-last-taught" />
 				</section>
 
 				{recentInstructors.length > 0 && (
@@ -215,7 +223,7 @@ const Course = () => {
 														<StarRating rating={prof.avgRating} size="sm" />
 													</>
 												) : (
-													<span className="course-top-prof-avg">N/A</span>
+													<span className="course-top-prof-avg">—</span>
 												)}
 											</div>
 											<h3 className="course-top-prof-name">
@@ -249,9 +257,9 @@ const Course = () => {
 							{visibleInstructors.map((row) => (
 								<div key={row.name} className="instructor-row">
 									<span>{row.name}</span>
-									<span>{row.avgRating != null ? row.avgRating.toFixed(2) : 'N/A'}</span>
-									<span>{row.courseAvgDifficulty != null ? row.courseAvgDifficulty.toFixed(2) : 'N/A'}</span>
-									<span>{row.courseAvgHoursPerWeek != null ? `${row.courseAvgHoursPerWeek.toFixed(1)}h` : 'N/A'}</span>
+											<span>{row.avgRating != null ? row.avgRating.toFixed(2) : '—'}</span>
+											<span>{row.courseAvgDifficulty != null ? row.courseAvgDifficulty.toFixed(2) : '—'}</span>
+											<span>{row.courseAvgHoursPerWeek != null ? `${row.courseAvgHoursPerWeek.toFixed(1)}h` : '—'}</span>
 								</div>
 							))}
 						</div>
@@ -282,10 +290,22 @@ const Course = () => {
 					<div className="course-panel-header">
 						<h2>Rating History</h2>
 					</div>
-					<SectionHistoryChart sections={course.sections} />
+					{!user ? (
+						<div className="course-rating-history-paywall">
+							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="paywall-lock-icon">
+								<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+								<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+							</svg>
+							<p>Sign in with your <strong>husky.neu.edu</strong> account to view historical rating trends.</p>
+							<button className="paywall-signin-btn" onClick={() => setShowSignIn(true)}>Sign In</button>
+						</div>
+					) : (
+						<SectionHistoryChart sections={course.sections} />
+					)}
 				</section>
 
 			</div>
+			<SignInModal open={showSignIn} onClose={() => setShowSignIn(false)} />
 			<button
 			className={`back-to-top ${showBackToTop ? 'visible' : ''}`}
 			onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
@@ -304,13 +324,13 @@ function RatingStatCard({ avgRating }: { avgRating: number | null }) {
 	return (
 		<article className="course-stat-card">
 			<strong className="course-stat-value">{avgRating != null ? avgRating.toFixed(2) : '—'}</strong>
+			<StarRating rating={avgRating ?? 0} size="lg" />
 			<span className="course-stat-label" style={{ display: 'block', textAlign: 'center', position: 'relative' }}>
 				Overall Rating
 				{avgRating != null && (
 					<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', marginLeft: '4px', opacity: 0.6 }}><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
 				)}
 			</span>
-			<StarRating rating={avgRating ?? 0} size="lg" />
 			{avgRating != null && (
 				<div className="course-stat-breakdown">
 					<span>TRACE: {avgRating.toFixed(2)}</span>
@@ -320,9 +340,9 @@ function RatingStatCard({ avgRating }: { avgRating: number | null }) {
 	);
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatCard({ label, value, className }: { label: string; value: string; className?: string }) {
 	return (
-		<article className="course-stat-card">
+		<article className={`course-stat-card${className ? ` ${className}` : ''}`}>
 			<strong className="course-stat-value">{value}</strong>
 			<span className="course-stat-label">{label}</span>
 		</article>
@@ -340,10 +360,10 @@ function DifficultyStatCard({ value }: { value: number | null }) {
 	return (
 		<article className="course-stat-card">
 			<strong className="course-stat-value">{value != null ? value.toFixed(2) : '—'}</strong>
-			<span className="course-stat-label">Avg Difficulty</span>
 			<div className="course-difficulty-bar">
 				<div className="course-difficulty-fill" style={{ width: `${((value ?? 0) / 5) * 100}%`, background: color }} />
 			</div>
+			<span className="course-stat-label">Avg Difficulty</span>
 		</article>
 	);
 }

@@ -64,13 +64,20 @@ const FeedbackTab = () => {
   };
 
   const getPlaceholder = () => {
-    if (feedbackType === 'missing') {
-      return "What data is missing? Please include the professor name and any relevant links.";
+    switch (feedbackType) {
+      case 'bug':
+        return "Describe the bug. What happened, and what did you expect to happen?";
+      case 'feature':
+        return "What feature would you like to see? Describe what it would do and why it would be useful.";
+      case 'missing':
+        return "What data is missing? Please include the professor name and any relevant links.";
+      case 'incorrectdata':
+        return "What data is incorrect? Please include the professor name and what the correct information should be.";
+      case 'general':
+        return "Share your thoughts, suggestions, or anything else on your mind.";
+      default:
+        return "Describe your feedback here.";
     }
-    if (feedbackType === 'wrongname') {
-      return "What's the correct name? Please provide links to their RMP pages so we can fix it.";
-    }
-    return "Say more about bugs, suggestions, etc.";
   };
 
   return (

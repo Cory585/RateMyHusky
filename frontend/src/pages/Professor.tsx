@@ -11,7 +11,7 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer, Legend, Tooltip as RechartsTooltip,
 } from 'recharts';
-import { fetchProfessorFull, fetchProfessorReviews, fetchTraceDeptAvg } from '../api/api';
+import { fetchProfessorFull, fetchTraceDeptAvg } from '../api/api';
 import type { ProfessorProfile, ProfessorReview, TraceComment, TraceDeptAvgItem } from '../api/api';
 import { termSortKey } from '../utils/termUtils';
 import { useAuth } from '../context/AuthContext';
@@ -306,25 +306,26 @@ const Professor = () => {
     return () => { cancelled = true; };
   }, [slug]);
 
-  /* ── re-fetch reviews on auth change to pick up comment text ── */
+  /* ── re-fetch profile + reviews on auth change ── */
   const isInitialMount = useRef(true);
   useEffect(() => {
     if (isInitialMount.current) { isInitialMount.current = false; return; }
     if (!slug) return;
     let cancelled = false;
-    async function loadReviews() {
+    async function loadOnAuthChange() {
       setReviewsLoading(true);
       try {
-        const data = await fetchProfessorReviews(slug!);
+        const data = await fetchProfessorFull(slug!);
         if (cancelled) return;
         if (data) {
+          setProfile(data);
           setReviews(data.reviews || []);
           setTraceComments(data.traceComments || []);
         }
-      } catch { /* reviews are non-critical */ }
+      } catch { /* non-critical */ }
       finally { if (!cancelled) setReviewsLoading(false); }
     }
-    loadReviews();
+    loadOnAuthChange();
     return () => { cancelled = true; };
   }, [slug, user]);
 
@@ -464,18 +465,16 @@ const Professor = () => {
     return null;
   }, [filteredTraceCourses, profile]);
 
-  // Fetch department averages whenever the most-recent-term context changes
+  // Fetch department averages whenever the most-recent-term context changes (auth-gated)
   useEffect(() => {
-    if (!mostRecentTermData?.deptName || !mostRecentTermData.termId) {
-      console.log('[radar] skipping fetch — deptName:', mostRecentTermData?.deptName, 'termId:', mostRecentTermData?.termId);
+    if (!user || !mostRecentTermData?.deptName || !mostRecentTermData.termId) {
       setDeptAvg([]);
       return;
     }
-    console.log('[radar] fetching dept avg:', mostRecentTermData.deptName, mostRecentTermData.termId);
     fetchTraceDeptAvg(mostRecentTermData.deptName, mostRecentTermData.termId)
-      .then(data => { console.log('[radar] deptAvg result:', data); setDeptAvg(data); })
+      .then(data => { setDeptAvg(data); })
       .catch(() => setDeptAvg([]));
-  }, [mostRecentTermData?.deptName, mostRecentTermData?.termId]);
+  }, [user, mostRecentTermData?.deptName, mostRecentTermData?.termId]);
 
   const RADAR_METRICS = useMemo(() => [
     {
@@ -541,8 +540,6 @@ const Professor = () => {
     const profScores = mostRecentTermData.scores;
     // For newer terms (901+) dept_mean is stored per score row; for older terms use fetched deptAvg
     const useDeptMeanFromScores = deptAvg.length === 0 && profScores.some(s => s.deptMean != null);
-    console.log('[radar] useDeptMeanFromScores:', useDeptMeanFromScores);
-    console.log('[radar] all score deptMeans:', profScores.map(s => ({ q: s.question, deptMean: s.deptMean })));
     const deptScores = useDeptMeanFromScores
       ? profScores.map(s => ({ question: s.question, mean: s.deptMean! }))
       : deptAvg.map(d => ({ question: d.question, mean: d.avgMean }));
@@ -562,6 +559,18 @@ const Professor = () => {
     const hasData = points.some(p => !p.profMissing);
     return hasData ? points : null;
   }, [mostRecentTermData, deptAvg, RADAR_METRICS, getMetricValue]);
+
+  const radarDomainMin = useMemo(() => {
+    if (!radarData) return 4;
+    const allVals = radarData.flatMap(p => [
+      p.profMissing ? null : p.professor,
+      p.deptMissing ? null : p.department,
+    ]).filter((v): v is number => v !== null && v > 0);
+    const min = allVals.length > 0 ? Math.min(...allVals) : 4;
+    if (min < 3) return 2;
+    if (min < 4) return 3;
+    return 4;
+  }, [radarData]);
 
   const stats = useMemo(() => {
     if (!profile) return null;
@@ -893,7 +902,7 @@ const Professor = () => {
           )}
         </div>
         <div className="prof-stat-card">
-          <span className="prof-stat-value"><AnimatedNumber value={stats.difficulty} /></span>
+          <span className="prof-stat-value">{stats.difficulty > 0 ? <AnimatedNumber value={stats.difficulty} /> : '—'}</span>
           <span className="prof-stat-label">Difficulty</span>
           <div className="prof-difficulty-bar">
             <div className="prof-difficulty-fill" style={{ 
@@ -911,7 +920,7 @@ const Professor = () => {
           </div>
         </div>
         <div className="prof-stat-card">
-          <span className="prof-stat-value green">
+          <span className={`prof-stat-value ${stats.wouldTakeAgainPct !== null ? 'green' : ''}`}>
             {stats.wouldTakeAgainPct !== null ? <AnimatedNumber value={stats.wouldTakeAgainPct} decimals={0} suffix="%" /> : '—'}
           </span>
           <span className="prof-stat-label">Would Take Again</span>
@@ -975,7 +984,23 @@ const Professor = () => {
         )}
       </section>
 
-      {radarData && (
+      {!user && (profile?.traceCourses?.length ?? 0) > 0 && (
+        <section className="prof-radar-section">
+          <div className="prof-radar-header">
+            <h2 className="prof-section-title">TRACE In-Depth Evaluation</h2>
+          </div>
+          <div className="prof-trace-paywall">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="paywall-lock-icon">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            <p>Sign in with your <strong>husky.neu.edu</strong> account to view the full radar breakdown.</p>
+            <button className="paywall-signin-btn" onClick={() => { sessionStorage.setItem('prof_review_tab', 'trace'); setShowSignIn(true); }}>Sign In</button>
+          </div>
+        </section>
+      )}
+
+      {radarData && user && (
         <section className="prof-radar-section">
           <div className="prof-radar-header">
             <h2 className="prof-section-title">TRACE In-Depth Evaluation</h2>
@@ -999,8 +1024,9 @@ const Professor = () => {
                     const { x, y, cy, payload, textAnchor } = props;
                     const point = radarData?.find(p => p.metric === payload.value);
                     const rating = point && !point.profMissing ? point.professor.toFixed(2) : null;
-                    // Shift the whole label up when it's above center so the rating line doesn't overlap the chart
-                    const adjustedY = rating && y < cy ? y - 10 : y;
+                    // Shift the whole label up when it's above center; extra offset for the topmost label
+                    const isTop = y < cy;
+                    const adjustedY = rating && isTop ? y - (payload.value === 'Teaching' ? 22 : 10) : y;
                     return (
                       <text x={x} y={adjustedY} textAnchor={textAnchor} fill="var(--radar-label, #555)" fontFamily="Nunito, sans-serif">
                         <tspan x={x} fontSize={12} fontWeight={600}>{payload.value}</tspan>
@@ -1012,10 +1038,16 @@ const Professor = () => {
                   }}
                 />
                 <PolarRadiusAxis
-                  domain={[0, 5]}
-                  tick={false}
+                  domain={[radarDomainMin, 5]}
+                  tick={(props: any) => {
+                    const { x, y, payload } = props;
+                    return (
+                      <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={600} fontFamily="Nunito, sans-serif" fill="#444" stroke="#fff" strokeWidth={2} paintOrder="stroke">{payload.value}</text>
+                    );
+                  }}
                   axisLine={false}
-                  tickCount={6}
+                  ticks={radarDomainMin === 2 ? [2, 3, 4, 5] : radarDomainMin === 3 ? [3, 4, 5] : [4, 5]}
+                  angle={90}
                 />
                 <RechartsTooltip
                   contentStyle={{

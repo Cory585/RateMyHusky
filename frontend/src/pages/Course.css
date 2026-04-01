@@ -74,7 +74,7 @@
 	z-index: 2;
 }
 
-@media (min-width: 1280px) {
+@media (min-width: 768px) {
 	.course-stats-grid { grid-template-columns: repeat(6, 1fr); }
 }
 
@@ -157,11 +157,19 @@
 	letter-spacing: 0.7px;
 	color: #aaa;
 	text-align: center;
-	margin-top: 2px;
+	margin-top: auto;
+}
+
+.course-stat-last-taught .course-stat-value {
+	white-space: normal;
+	overflow-wrap: break-word;
+	text-align: center;
+	font-size: clamp(0.9rem, 2.5vw, 1.8rem);
 }
 
 .course-difficulty-bar {
 	width: 100%;
+	align-self: stretch;
 	height: 8px;
 	background: #eee;
 	border-radius: 3px;
@@ -375,12 +383,23 @@
 
 .instructor-header-row,
 .instructor-row {
-	display: grid;
-	grid-template-columns: 2fr 1fr 1fr 1fr;
-	column-gap: 8px;
+	display: flex;
 	align-items: center;
+	gap: 24px;
 	padding: 0 8px;
 	border-bottom: 1px solid #efefef;
+}
+
+.instructor-header-row span,
+.instructor-row span {
+	flex: 1;
+	text-align: left;
+	min-width: 0;
+}
+
+.instructor-header-row span:first-child,
+.instructor-row span:first-child {
+	flex: 2;
 }
 
 .instructor-header-row {
@@ -401,11 +420,6 @@
 
 .instructor-row:last-child {
 	border-bottom: none;
-}
-
-.instructor-header-row span,
-.instructor-row span {
-	text-align: left;
 }
 
 .course-expand-controls {
@@ -585,9 +599,9 @@
 		font-size: 1rem;
 	}
 
-	/* Stats: 2 compact columns */
+	/* Stats: 3 columns on small screens */
 	.course-stats-grid {
-		grid-template-columns: repeat(2, 1fr);
+		grid-template-columns: repeat(3, 1fr);
 		gap: 10px;
 	}
 
@@ -807,4 +821,74 @@
 	.course-top-prof-grid {
 		grid-template-columns: 1fr;
 	}
+}
+
+/* ── Rating History Paywall ── */
+.course-rating-history-paywall {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	text-align: center;
+	padding: 48px 24px;
+	background: #fff;
+	border-radius: 16px;
+	border: 1.5px dashed #e0e0e0;
+	margin-top: 8px;
+}
+
+.course-rating-history-paywall .paywall-lock-icon {
+	width: 40px;
+	height: 40px;
+	color: #d6394c;
+	margin-bottom: 16px;
+}
+
+.course-rating-history-paywall h3 {
+	font-size: 1.1rem;
+	font-weight: 800;
+	color: #1a1a1a;
+	margin-bottom: 8px;
+}
+
+.course-rating-history-paywall p {
+	font-size: 0.88rem;
+	color: #888;
+	line-height: 1.5;
+	max-width: 340px;
+	margin-bottom: 20px;
+}
+
+.course-rating-history-paywall p strong {
+	color: #d6394c;
+	font-weight: 800;
+}
+
+.course-rating-history-paywall .paywall-signin-btn {
+	background: #d6394c;
+	color: #fff;
+	border: none;
+	padding: 11px 32px;
+	border-radius: 12px;
+	font-size: 0.9rem;
+	font-weight: 700;
+	cursor: pointer;
+	transition: background 0.15s, transform 0.15s;
+}
+
+.course-rating-history-paywall .paywall-signin-btn:hover {
+	background: #b82e3f;
+	transform: scale(1.03);
+}
+
+.dark .course-rating-history-paywall {
+	background: #1e1e1e;
+	border-color: #333;
+}
+
+.dark .course-rating-history-paywall h3 {
+	color: #e0e0e0;
+}
+
+.dark .course-rating-history-paywall p {
+	color: #777;
 }

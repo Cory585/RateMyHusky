@@ -472,11 +472,7 @@ def goat_professors():
             "rmpRating": round(row["rmp_rating"], 2) if row["rmp_rating"] else None,
             "traceRating": round(row["trace_rating"], 2) if row["trace_rating"] else None,
             "avgRating": round(row["avg_rating"], 2) if row["avg_rating"] else None,
-            "rmpReviews": row["num_ratings"],
-            "traceReviews": row["trace_reviews"],
-            "totalReviews": row["total_reviews"],
             "totalComments": comment_counts.get(row["name_key"], 0),
-            "url": row["professor_url"] or "",
         })
     cache_set(cache_key, result)
     return jsonify(result)
@@ -499,13 +495,6 @@ def random_professor():
     return jsonify({
         "name": row["name"],
         "dept": row["department"],
-        "rmpRating": round(row["rmp_rating"], 2) if row["rmp_rating"] else None,
-        "traceRating": round(row["trace_rating"], 2) if row["trace_rating"] else None,
-        "avgRating": round(row["avg_rating"], 2) if row["avg_rating"] else None,
-        "rmpReviews": row["num_ratings"],
-        "traceReviews": row["trace_reviews"],
-        "totalReviews": row["total_reviews"],
-        "url": row["professor_url"] or "",
         "college": row["college"],
     })
 
@@ -581,11 +570,21 @@ def search():
 # ──────────────────────────────────────────────
 @app.route("/api/professors/<slug>")
 def professor_profile(slug):
-    cache_key = f"prof:{slug}"
+    is_authed = False
+    token = _get_auth_token()
+    if token:
+        try:
+            pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            is_authed = True
+        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+            pass
+
+    cache_key = f"prof:{slug}:{'a' if is_authed else 'u'}"
     cached = cache_get(cache_key)
     if cached:
         resp = jsonify(cached)
-        resp.headers["Cache-Control"] = "public, max-age=3600"
+        resp.headers["Cache-Control"] = "private, max-age=3600" if is_authed else "public, max-age=3600"
+        resp.headers["Vary"] = "Authorization"
         return resp
 
     # Look up professor from catalog
@@ -607,7 +606,6 @@ def professor_profile(slug):
         "rmpRating": round(prof["rmp_rating"], 2) if prof["rmp_rating"] else None,
         "traceRating": round(prof["trace_rating"], 2) if prof["trace_rating"] else None,
         "avgRating": round(prof["avg_rating"], 2) if prof["avg_rating"] else 0.0,
-        "numRatings": prof["num_ratings"],
         "wouldTakeAgainPct": round(prof["would_take_again_pct"], 1) if prof["would_take_again_pct"] else None,
         "difficulty": round(prof["difficulty"], 2) if prof["difficulty"] else None,
         "totalRatings": prof["total_reviews"],
@@ -616,79 +614,92 @@ def professor_profile(slug):
         "hoursPerWeek": round(prof["avg_hours"], 1) if prof["avg_hours"] else None,
     }
 
-    # ── TRACE courses + scores (batched into 2 queries instead of N+1) ──
-    trace_course_rows = query("""
-        SELECT course_id, term_id, term_title, department_name, display_name,
-               section, enrollment, instructor_id
-        FROM trace_courses WHERE name_key = %s
-        ORDER BY term_id DESC
-    """, (name_key,))
-
-    # Batch-fetch all scores for this professor's courses in one query
-    scores_by_key = {}
-    if trace_course_rows:
-        keys = tuple((int(c["course_id"]), int(c["instructor_id"]), int(c["term_id"] or 0)) for c in trace_course_rows)
-
-        all_scores = query(
-            "SELECT course_id, instructor_id, term_id, question, mean, median, std_dev, "
-            "enrollment, completed, count_1, count_2, count_3, count_4, count_5, dept_mean "
-            "FROM trace_scores WHERE (course_id, instructor_id, term_id) IN %s",
-            (keys,)
-        )
-        for s in all_scores:
-            k = (int(s["course_id"]), int(s["instructor_id"]), int(s["term_id"] or 0))
-            scores_by_key.setdefault(k, []).append(s)
-
+    # ── TRACE courses + scores ──
+    # Authenticated: full data with scores. Unauthenticated: names/terms only, no scores.
     trace_course_list = []
-    for c in trace_course_rows:
-        cid = int(c["course_id"])
-        iid = int(c["instructor_id"])
-        tid = int(c["term_id"]) if c["term_id"] else 0
+    if is_authed:
+        trace_course_rows = query("""
+            SELECT course_id, term_id, term_title, department_name, display_name,
+                   section, enrollment, instructor_id
+            FROM trace_courses WHERE name_key = %s
+            ORDER BY term_id DESC
+        """, (name_key,))
 
-        scores_list = []
-        for s in scores_by_key.get((cid, iid, tid), []):
-            c1 = int(s["count_1"] or 0)
-            c2 = int(s["count_2"] or 0)
-            c3 = int(s["count_3"] or 0)
-            c4 = int(s["count_4"] or 0)
-            c5 = int(s["count_5"] or 0)
-            total_resp = c1 + c2 + c3 + c4 + c5
-            if total_resp > 0:
-                computed_mean = (1*c1 + 2*c2 + 3*c3 + 4*c4 + 5*c5) / total_resp
-            else:
-                computed_mean = float(s["mean"]) if s["mean"] else 0
-            scores_list.append({
-                "question": str(s["question"] or ""),
-                "mean": round(computed_mean, 2),
-                "median": round(float(s["median"]), 2) if s["median"] else 0,
-                "stdDev": round(float(s["std_dev"]), 2) if s["std_dev"] else 0,
-                "enrollment": int(s["enrollment"] or 0),
-                "completed": int(s["completed"] or 0),
-                "totalResponses": total_resp,
-                "count1": c1,
-                "count2": c2,
-                "count3": c3,
-                "count4": c4,
-                "count5": c5,
-                "deptMean": round(float(s["dept_mean"]), 2) if s["dept_mean"] else None,
+        scores_by_key = {}
+        if trace_course_rows:
+            keys = tuple((int(c["course_id"]), int(c["instructor_id"]), int(c["term_id"] or 0)) for c in trace_course_rows)
+
+            all_scores = query(
+                "SELECT course_id, instructor_id, term_id, question, mean, median, std_dev, "
+                "enrollment, completed, count_1, count_2, count_3, count_4, count_5, dept_mean "
+                "FROM trace_scores WHERE (course_id, instructor_id, term_id) IN %s",
+                (keys,)
+            )
+            for s in all_scores:
+                k = (int(s["course_id"]), int(s["instructor_id"]), int(s["term_id"] or 0))
+                scores_by_key.setdefault(k, []).append(s)
+
+        for c in trace_course_rows:
+            cid = int(c["course_id"])
+            iid = int(c["instructor_id"])
+            tid = int(c["term_id"]) if c["term_id"] else 0
+
+            scores_list = []
+            for s in scores_by_key.get((cid, iid, tid), []):
+                c1 = int(s["count_1"] or 0)
+                c2 = int(s["count_2"] or 0)
+                c3 = int(s["count_3"] or 0)
+                c4 = int(s["count_4"] or 0)
+                c5 = int(s["count_5"] or 0)
+                total_resp = c1 + c2 + c3 + c4 + c5
+                if total_resp > 0:
+                    computed_mean = (1*c1 + 2*c2 + 3*c3 + 4*c4 + 5*c5) / total_resp
+                else:
+                    computed_mean = float(s["mean"]) if s["mean"] else 0
+                scores_list.append({
+                    "question": str(s["question"] or ""),
+                    "mean": round(computed_mean, 2),
+                    "completed": int(s["completed"] or 0),
+                    "totalResponses": total_resp,
+                    "count1": c1,
+                    "count2": c2,
+                    "count3": c3,
+                    "count4": c4,
+                    "count5": c5,
+                    "deptMean": round(float(s["dept_mean"]), 2) if s["dept_mean"] else None,
+                })
+
+            trace_course_list.append({
+                "courseId": cid,
+                "termId": tid,
+                "termTitle": str(c["term_title"] or ""),
+                "departmentName": str(c["department_name"] or ""),
+                "displayName": str(c["display_name"] or ""),
+                "scores": scores_list,
             })
 
-        trace_course_list.append({
-            "courseId": cid,
-            "termId": tid,
-            "termTitle": str(c["term_title"] or ""),
-            "departmentName": str(c["department_name"] or ""),
-            "displayName": str(c["display_name"] or ""),
-            "section": str(c["section"] or ""),
-            "enrollment": int(c["enrollment"] or 0),
-            "scores": scores_list,
-        })
+    else:
+        trace_course_rows = query("""
+            SELECT course_id, term_id, term_title, department_name, display_name
+            FROM trace_courses WHERE name_key = %s
+            ORDER BY term_id DESC
+        """, (name_key,))
+        for c in trace_course_rows:
+            trace_course_list.append({
+                "courseId": int(c["course_id"]),
+                "termId": int(c["term_id"]) if c["term_id"] else 0,
+                "termTitle": str(c["term_title"] or ""),
+                "departmentName": str(c["department_name"] or ""),
+                "displayName": str(c["display_name"] or ""),
+                "scores": [],
+            })
 
     profile["traceCourses"] = trace_course_list
 
     cache_set(cache_key, profile)
     resp = jsonify(profile)
-    resp.headers["Cache-Control"] = "public, max-age=3600"
+    resp.headers["Cache-Control"] = "private, max-age=3600" if is_authed else "public, max-age=3600"
+    resp.headers["Vary"] = "Authorization"
     return resp
 
 
@@ -722,8 +733,7 @@ def professor_reviews(slug):
 
     # ── RMP reviews ──
     review_rows = query("""
-        SELECT professor_name, department, overall_rating, course,
-               quality, difficulty, date, tags, attendance, grade,
+        SELECT course, quality, difficulty, date, tags, attendance, grade,
                textbook, online_class, comment
         FROM rmp_reviews WHERE name_key = %s
     """, (name_key,))
@@ -731,9 +741,6 @@ def professor_reviews(slug):
     reviews = []
     for r in review_rows:
         reviews.append({
-            "professorName": str(r["professor_name"] or ""),
-            "department": str(r["department"] or ""),
-            "overallRating": float(r["overall_rating"]) if r["overall_rating"] else 0,
             "course": str(r["course"] or ""),
             "quality": int(r["quality"]) if r["quality"] else 0,
             "difficulty": int(r["difficulty"]) if r["difficulty"] else 0,
@@ -1137,12 +1144,6 @@ def courses_catalog():
                 "name": r["name"],
                 "department": r["department"],
                 "avgRating": avg,
-                "totalSections": 0,
-                "totalInstructors": 0,
-                "totalEnrollment": 0,
-                "totalResponses": 0,
-                "latestTermTitle": "",
-                "latestTermId": 0,
             })
 
         # Sort by rating if requested
@@ -1210,12 +1211,6 @@ def courses_catalog():
                 "name": r["name"],
                 "department": r["department"],
                 "avgRating": rating_map.get(r["code"]),
-                "totalSections": 0,
-                "totalInstructors": 0,
-                "totalEnrollment": 0,
-                "totalResponses": 0,
-                "latestTermTitle": "",
-                "latestTermId": 0,
             })
 
     result = {
@@ -1234,7 +1229,16 @@ def course_profile(code):
     if not code_norm:
         return jsonify({"error": "Course not found"}), 404
 
-    cache_key = f"course:{code_norm}"
+    is_authed = False
+    token = _get_auth_token()
+    if token:
+        try:
+            pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            is_authed = True
+        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+            pass
+
+    cache_key = f"course:{code_norm}:{'a' if is_authed else 'u'}"
     cached = cache_get(cache_key)
     if cached:
         resp = jsonify(cached)
@@ -1334,9 +1338,7 @@ def course_profile(code):
         "totalSections": len(sections),
         "totalInstructors": len(instructor_ids),
         "totalEnrollment": total_enrollment,
-        "totalResponses": total_responses,
         "latestTermTitle": latest_term_title,
-        "latestTermId": latest_term_id,
     }
 
     # Build instructor aggregates
@@ -1422,14 +1424,14 @@ def course_profile(code):
             "wouldTakeAgainPct": meta_wta,
             "totalReviews": meta_reviews or 0,
             "totalComments": meta_comments,
-            "sections": data["sections"],
-            "totalEnrollment": data["enrollment"],
-            "totalResponses": resp,
+            "_sections": data["sections"],
             "avgRating": round(data["weighted"] / resp, 2) if resp > 0 else None,
             "courseAvgDifficulty": course_diff,
             "courseAvgHoursPerWeek": round(data["hours_weighted"] / hours_resp, 2) if hours_resp > 0 else None,
         })
-    instructor_rows.sort(key=lambda r: (r["avgRating"] is None, -(r["avgRating"] or 0), -r["sections"]))
+    instructor_rows.sort(key=lambda r: (r["avgRating"] is None, -(r["avgRating"] or 0), -r["_sections"]))
+    for row in instructor_rows:
+        del row["_sections"]
 
     # Build section rows
     section_rows = []
@@ -1445,17 +1447,11 @@ def course_profile(code):
         prof = prof_map.get(normalize_name(name))
         rmp_rating = round(prof["rmp_rating"], 2) if prof and prof.get("rmp_rating") else None
         section_rows.append({
-            "courseId": _safe_int(s["course_id"]),
-            "instructorId": _safe_int(s["instructor_id"]),
             "termId": _safe_int(s["term_id"]),
             "termTitle": s["term_title"] or "",
-            "section": s["section"] or "",
             "instructor": name,
-            "enrollment": _safe_int(s["enrollment"]),
-            "overallRating": overall_mean,
-            "rmpRating": rmp_rating,
-            "totalResponses": _safe_int(sc["total_responses"]) if sc else 0,
-            "completed": _safe_int(sc["completed"]) if sc else 0,
+            "overallRating": overall_mean if is_authed else None,
+            "rmpRating": rmp_rating if is_authed else None,
         })
 
     # Get question-level scores
@@ -1474,15 +1470,17 @@ def course_profile(code):
         question_rows.append({
             "question": qs["question"],
             "avgRating": round(_safe_float(qs["weighted_sum"]) / resp, 2) if resp > 0 else None,
-            "totalResponses": resp,
+            "_totalResponses": resp,
         })
-    question_rows.sort(key=lambda r: (-r["totalResponses"], r["question"].lower()))
+    question_rows.sort(key=lambda r: (-r["_totalResponses"], r["question"].lower()))
+    for row in question_rows:
+        del row["_totalResponses"]
 
     result = {
         "summary": summary,
         "instructors": instructor_rows,
         "sections": section_rows,
-        "questionScores": question_rows,
+        "questionScores": question_rows if is_authed else [],
     }
     cache_set(cache_key, result)
     resp = jsonify(result)
