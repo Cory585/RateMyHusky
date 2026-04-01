@@ -1313,7 +1313,7 @@ const Professor = () => {
             <div className="prof-course-tip-body">
               <div className="prof-course-tip-label">Tip</div>
               <p className="prof-course-tip-text">
-                Want to see ratings and reviews for a specific course? Click <strong>Clear All</strong> above to deselect everything, then click on the course you're interested in. The ratings and reviews will update to show only feedback from students who took that course with this professor.
+                To filter reviews by course, click <strong>Clear All</strong> in the Courses Taught section, then select the course you want to see reviews for.
               </p>
             </div>
             <button className="prof-course-tip-close" onClick={() => setShowCourseTip(false)} aria-label="Dismiss tip">
