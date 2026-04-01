@@ -168,7 +168,12 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	text-align: center;
-	font-size: clamp(1rem, 2.3vw, 2.3rem);
+	font-size: clamp(1.6rem, 2.5vw, 2.3rem);
+}
+
+.course-stat-card.course-stat-last-taught {
+	padding-left: 10px;
+	padding-right: 10px;
 }
 
 .course-difficulty-bar {
@@ -617,6 +622,16 @@
 	.course-stat-value {
 		font-size: 1.5rem;
 		white-space: normal;
+	}
+
+	.course-stat-last-taught .course-stat-value {
+		font-size: 1.5rem;
+		white-space: nowrap;
+	}
+
+	.course-stat-card.course-stat-last-taught {
+		padding-left: 8px;
+		padding-right: 8px;
 	}
 
 	/* Top prof cards: 2 columns on small screens */

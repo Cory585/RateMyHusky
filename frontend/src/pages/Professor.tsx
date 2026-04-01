@@ -607,7 +607,7 @@ const Professor = () => {
       avgRating = traceRating;
     }
 
-    // TRACE difficulty from "challenging" question (course-filtered)
+    // TRACE difficulty from "challenging" question — only available when signed in (scores present)
     let traceChallengSum = 0, traceChallengWeight = 0;
     filteredTraceCourses.forEach(c => {
       const challeng = c.scores.find(s => s.question.toLowerCase().includes('challeng'));
@@ -619,9 +619,9 @@ const Professor = () => {
         }
       }
     });
-    const traceDifficulty = traceChallengWeight > 0 ? traceChallengSum / traceChallengWeight : null;
+    const traceChallengDiff = traceChallengWeight > 0 ? traceChallengSum / traceChallengWeight : null;
 
-    // TRACE hours per week (course-filtered)
+    // TRACE hours per week (course-filtered, signed-in only)
     let traceHoursSum = 0, traceHoursWeight = 0;
     filteredTraceCourses.forEach(c => {
       const hours = c.scores.find(s => s.question.toLowerCase().includes('hours per week'));
@@ -635,36 +635,32 @@ const Professor = () => {
     });
     const filteredHoursPerWeek = traceHoursWeight > 0 ? traceHoursSum / traceHoursWeight : null;
 
-    const rmpDifficulty = filteredRmpReviews.length > 0
-      ? filteredRmpReviews.reduce((acc, r) => acc + r.difficulty, 0) / filteredRmpReviews.length
-      : null;
-
-    const blendedDifficulty = (rmpDifficulty !== null && traceDifficulty !== null)
-      ? (rmpDifficulty + traceDifficulty) / 2
-      : rmpDifficulty ?? traceDifficulty ?? 0;
-
     if (allSelected) {
-      // For allSelected, use profile.difficulty (full precomputed RMP avg) blended with TRACE challenging
-      const allRmpDiff = profile.difficulty;
-      const allBlended = (allRmpDiff !== null && traceDifficulty !== null)
-        ? (allRmpDiff + traceDifficulty) / 2
-        : allRmpDiff ?? traceDifficulty ?? 0;
+      // profile.difficulty is already the blended value from the backend
       return {
         avgRating: profile.avgRating,
         rmpRating: profile.rmpRating,
         traceRating: profile.traceRating,
-        difficulty: allBlended,
+        difficulty: profile.difficulty ?? 0,
         totalRatings: profile.totalRatings,
         wouldTakeAgainPct: profile.wouldTakeAgainPct,
         hoursPerWeek: profile.hoursPerWeek,
       };
     }
 
+    // Course-filtered: blend from filtered data; fall back to profile.difficulty if no data
+    const rmpDifficulty = filteredRmpReviews.length > 0
+      ? filteredRmpReviews.reduce((acc, r) => acc + r.difficulty, 0) / filteredRmpReviews.length
+      : null;
+    const filteredDifficulty = (rmpDifficulty !== null && traceChallengDiff !== null)
+      ? (rmpDifficulty + traceChallengDiff) / 2
+      : rmpDifficulty ?? traceChallengDiff ?? profile.difficulty ?? 0;
+
     return {
       avgRating,
       rmpRating,
       traceRating,
-      difficulty: blendedDifficulty,
+      difficulty: filteredDifficulty,
       totalRatings: filteredRmpReviews.length + traceWeight,
       wouldTakeAgainPct: profile.wouldTakeAgainPct,
       hoursPerWeek: filteredHoursPerWeek,
@@ -682,26 +678,20 @@ const Professor = () => {
       }
     });
 
-    // TRACE
-    filteredTraceCourses.forEach(c => {
-      const overall = c.scores.find(s => {
-        const q = s.question.toLowerCase().replace(/\s+/g, ' ');
-        return q === 'overall rating of teaching' || q.includes('overall rating') || q.includes('overall');
-      });
-      if (overall) {
-        counts[1] += overall.count1 ?? 0;
-        counts[2] += overall.count2 ?? 0;
-        counts[3] += overall.count3 ?? 0;
-        counts[4] += overall.count4 ?? 0;
-        counts[5] += overall.count5 ?? 0;
-      }
-    });
+    // TRACE — use precomputed totals from backend
+    if (profile?.traceRatingCounts) {
+      counts[1] += profile.traceRatingCounts.count1;
+      counts[2] += profile.traceRatingCounts.count2;
+      counts[3] += profile.traceRatingCounts.count3;
+      counts[4] += profile.traceRatingCounts.count4;
+      counts[5] += profile.traceRatingCounts.count5;
+    }
 
     return [5, 4, 3, 2, 1].map(star => ({
       star,
       count: counts[star as 1 | 2 | 3 | 4 | 5],
     }));
-  }, [filteredRmpReviews, filteredTraceCourses]);
+  }, [filteredRmpReviews, profile?.traceRatingCounts]);
 
   const maxCount = useMemo(() => Math.max(...ratingDistribution.map(d => d.count), 1), [ratingDistribution]);
 

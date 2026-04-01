@@ -44,6 +44,14 @@ export interface TraceCourse {
   scores: TraceCourseScore[];
 }
 
+export interface TraceRatingCounts {
+  count1: number;
+  count2: number;
+  count3: number;
+  count4: number;
+  count5: number;
+}
+
 export interface ProfessorProfile {
   name: string;
   department: string;
@@ -58,6 +66,7 @@ export interface ProfessorProfile {
   traceCourses: TraceCourse[];
   imageUrl: string | null;
   hoursPerWeek: number | null;
+  traceRatingCounts?: TraceRatingCounts;
 }
 
 export interface ProfessorReviews {
@@ -117,14 +126,13 @@ export const fetchRandomProfessor = () => get<RandomProfessor>("/api/random-prof
 /* ---- Professor page fetchers ---- */
 export async function fetchProfessorFull(slug: string): Promise<ProfessorFull | null> {
   const token = localStorage.getItem('auth_token');
-  const key = `${slug}:${token ?? 'u'}`;
-  if (_profFullCache.has(key)) return _profFullCache.get(key)!;
+  const reviewsKey = `${slug}:${token ?? 'u'}`;
+  if (_profFullCache.has(reviewsKey)) return _profFullCache.get(reviewsKey)!;
   try {
     const data = await get<ProfessorFull>(`/api/professors/${encodeURIComponent(slug)}/full`);
-    _profFullCache.set(key, data);
-    // Also populate individual caches so Compare page hits don't re-fetch
-    _profCache.set(slug, data);
-    _profReviewsCache.set(key, data);
+    _profFullCache.set(reviewsKey, data);
+    _profCache.set(reviewsKey, data);
+    _profReviewsCache.set(reviewsKey, data);
     return data;
   } catch {
     return null;

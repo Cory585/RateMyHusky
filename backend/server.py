@@ -615,22 +615,21 @@ def professor_profile(slug):
     }
 
     # ── TRACE courses + scores ──
-    # Authenticated: full data with scores. Unauthenticated: names/terms only, no scores.
+    # Authenticated: full scores. Unauthenticated: metadata + precomputed traceAvgDifficulty only.
     trace_course_list = []
-    if is_authed:
-        trace_course_rows = query("""
-            SELECT course_id, term_id, term_title, department_name, display_name,
-                   section, enrollment, instructor_id
-            FROM trace_courses WHERE name_key = %s
-            ORDER BY term_id DESC
-        """, (name_key,))
+    trace_course_rows = query("""
+        SELECT course_id, term_id, term_title, department_name, display_name,
+               section, enrollment, instructor_id
+        FROM trace_courses WHERE name_key = %s
+        ORDER BY term_id DESC
+    """, (name_key,))
 
+    if is_authed:
         scores_by_key = {}
         if trace_course_rows:
             keys = tuple((int(c["course_id"]), int(c["instructor_id"]), int(c["term_id"] or 0)) for c in trace_course_rows)
-
             all_scores = query(
-                "SELECT course_id, instructor_id, term_id, question, mean, median, std_dev, "
+                "SELECT course_id, instructor_id, term_id, question, mean, "
                 "enrollment, completed, count_1, count_2, count_3, count_4, count_5, dept_mean "
                 "FROM trace_scores WHERE (course_id, instructor_id, term_id) IN %s",
                 (keys,)
@@ -639,11 +638,12 @@ def professor_profile(slug):
                 k = (int(s["course_id"]), int(s["instructor_id"]), int(s["term_id"] or 0))
                 scores_by_key.setdefault(k, []).append(s)
 
+        challeng_sum, challeng_weight = 0.0, 0
+        rating_dist = {"count1": 0, "count2": 0, "count3": 0, "count4": 0, "count5": 0}
         for c in trace_course_rows:
             cid = int(c["course_id"])
             iid = int(c["instructor_id"])
             tid = int(c["term_id"]) if c["term_id"] else 0
-
             scores_list = []
             for s in scores_by_key.get((cid, iid, tid), []):
                 c1 = int(s["count_1"] or 0)
@@ -656,6 +656,16 @@ def professor_profile(slug):
                     computed_mean = (1*c1 + 2*c2 + 3*c3 + 4*c4 + 5*c5) / total_resp
                 else:
                     computed_mean = float(s["mean"]) if s["mean"] else 0
+                q_lower = str(s["question"] or "").lower()
+                if "challeng" in q_lower:
+                    challeng_sum += computed_mean * (total_resp if total_resp > 0 else 1)
+                    challeng_weight += total_resp if total_resp > 0 else 1
+                if "overall" in q_lower:
+                    rating_dist["count1"] += c1
+                    rating_dist["count2"] += c2
+                    rating_dist["count3"] += c3
+                    rating_dist["count4"] += c4
+                    rating_dist["count5"] += c5
                 scores_list.append({
                     "question": str(s["question"] or ""),
                     "mean": round(computed_mean, 2),
@@ -668,7 +678,6 @@ def professor_profile(slug):
                     "count5": c5,
                     "deptMean": round(float(s["dept_mean"]), 2) if s["dept_mean"] else None,
                 })
-
             trace_course_list.append({
                 "courseId": cid,
                 "termId": tid,
@@ -678,12 +687,58 @@ def professor_profile(slug):
                 "scores": scores_list,
             })
 
+        trace_avg_difficulty = round(challeng_sum / challeng_weight, 2) if challeng_weight > 0 else None
+        profile["traceRatingCounts"] = rating_dist
+
     else:
-        trace_course_rows = query("""
-            SELECT course_id, term_id, term_title, department_name, display_name
-            FROM trace_courses WHERE name_key = %s
-            ORDER BY term_id DESC
+        # Lightweight query: only challenging scores to compute the professor-wide avg
+        challeng_rows = query("""
+            SELECT ts.mean, ts.count_1, ts.count_2, ts.count_3, ts.count_4, ts.count_5
+            FROM trace_scores ts
+            JOIN trace_courses tc
+              ON ts.course_id = tc.course_id
+             AND ts.instructor_id = tc.instructor_id
+             AND ts.term_id = tc.term_id
+            WHERE tc.name_key = %s AND lower(ts.question) LIKE '%%challeng%%'
         """, (name_key,))
+
+        challeng_sum, challeng_weight = 0.0, 0
+        for s in challeng_rows:
+            c1 = int(s["count_1"] or 0)
+            c2 = int(s["count_2"] or 0)
+            c3 = int(s["count_3"] or 0)
+            c4 = int(s["count_4"] or 0)
+            c5 = int(s["count_5"] or 0)
+            total_resp = c1 + c2 + c3 + c4 + c5
+            if total_resp > 0:
+                computed_mean = (1*c1 + 2*c2 + 3*c3 + 4*c4 + 5*c5) / total_resp
+                challeng_sum += computed_mean * total_resp
+                challeng_weight += total_resp
+            elif s["mean"]:
+                challeng_sum += float(s["mean"])
+                challeng_weight += 1
+
+        trace_avg_difficulty = round(challeng_sum / challeng_weight, 2) if challeng_weight > 0 else None
+
+        # Compute rating distribution from overall rating question for unauthenticated users
+        overall_rows = query("""
+            SELECT ts.count_1, ts.count_2, ts.count_3, ts.count_4, ts.count_5
+            FROM trace_scores ts
+            JOIN trace_courses tc
+              ON ts.course_id = tc.course_id
+             AND ts.instructor_id = tc.instructor_id
+             AND ts.term_id = tc.term_id
+            WHERE tc.name_key = %s AND lower(ts.question) LIKE '%%overall%%'
+        """, (name_key,))
+        rating_dist = {"count1": 0, "count2": 0, "count3": 0, "count4": 0, "count5": 0}
+        for s in overall_rows:
+            rating_dist["count1"] += int(s["count_1"] or 0)
+            rating_dist["count2"] += int(s["count_2"] or 0)
+            rating_dist["count3"] += int(s["count_3"] or 0)
+            rating_dist["count4"] += int(s["count_4"] or 0)
+            rating_dist["count5"] += int(s["count_5"] or 0)
+        profile["traceRatingCounts"] = rating_dist
+
         for c in trace_course_rows:
             trace_course_list.append({
                 "courseId": int(c["course_id"]),
@@ -693,6 +748,14 @@ def professor_profile(slug):
                 "displayName": str(c["display_name"] or ""),
                 "scores": [],
             })
+
+    # Blend RMP difficulty with TRACE challenging avg into a single difficulty value
+    rmp_diff = round(prof["difficulty"], 2) if prof["difficulty"] else None
+    if rmp_diff is not None and trace_avg_difficulty is not None:
+        profile["difficulty"] = round((rmp_diff + trace_avg_difficulty) / 2, 2)
+    elif trace_avg_difficulty is not None:
+        profile["difficulty"] = trace_avg_difficulty
+    # else: profile["difficulty"] already set to rmp_diff (or None) above
 
     profile["traceCourses"] = trace_course_list
 
@@ -771,16 +834,49 @@ def professor_reviews(slug):
                 "WHERE (tc_course_id, tc_instructor_id, tc_term_id) IN %s",
                 (tuple(keys),)
             )
+            # Group by question so we can deduplicate near-identical comments per group
+            by_question: dict = {}
             for c in comment_rows:
                 comment_text = sanitize(c["comment"]) if c["comment"] else ""
                 if not comment_text.strip():
                     continue
-                comments.append({
-                    "question": str(c["question"] or ""),
-                    "comment": comment_text if is_authed else "",
+                q = str(c["question"] or "")
+                by_question.setdefault(q, []).append({
+                    "question": q,
+                    "comment": comment_text,
                     "termId": int(c["tc_term_id"]) if c["tc_term_id"] else 0,
                     "courseId": int(c["tc_course_id"]) if c["tc_course_id"] else 0,
                 })
+
+            def _normalize(s: str) -> str:
+                return re.sub(r'\s+', ' ', s.lower()).strip()
+
+            def _dedup_group(items: list) -> list:
+                seen: list[str] = []
+                result = []
+                for item in items:
+                    norm = _normalize(item["comment"])
+                    is_dupe = False
+                    for s in seen:
+                        prefix = s[:max(1, int(len(s) * 0.9))]
+                        if s == norm or norm.startswith(prefix) or s.startswith(norm[:max(1, int(len(norm) * 0.9))]):
+                            ratio = min(len(s), len(norm)) / max(len(s), len(norm)) if max(len(s), len(norm)) > 0 else 1.0
+                            if ratio >= 0.9:
+                                is_dupe = True
+                                break
+                    if not is_dupe:
+                        seen.append(norm)
+                        result.append(item)
+                return result
+
+            for q, items in by_question.items():
+                for item in _dedup_group(items):
+                    comments.append({
+                        "question": item["question"],
+                        "comment": item["comment"] if is_authed else "",
+                        "termId": item["termId"],
+                        "courseId": item["courseId"],
+                    })
 
     result = {"reviews": reviews, "traceComments": comments}
     cache_set(cache_key, result)
