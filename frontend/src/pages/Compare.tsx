@@ -193,18 +193,26 @@ function Compare() {
 	}, [rightSlug, rightCatalogProfessor]);
 
 	useEffect(() => {
-		setLeftQuery(leftCatalogProfessor?.name ?? '');
+		if (!leftSlug) {
+			setLeftQuery('');
+		} else if (leftCatalogProfessor?.name) {
+			setLeftQuery(leftCatalogProfessor.name);
+		}
 		setLeftSuggestions([]);
 		setShowLeftSuggestions(false);
 		setLeftActiveIndex(-1);
-	}, [leftCatalogProfessor?.name]);
+	}, [leftSlug, leftCatalogProfessor?.name]);
 
 	useEffect(() => {
-		setRightQuery(rightCatalogProfessor?.name ?? '');
+		if (!rightSlug) {
+			setRightQuery('');
+		} else if (rightCatalogProfessor?.name) {
+			setRightQuery(rightCatalogProfessor.name);
+		}
 		setRightSuggestions([]);
 		setShowRightSuggestions(false);
 		setRightActiveIndex(-1);
-	}, [rightCatalogProfessor?.name]);
+	}, [rightSlug, rightCatalogProfessor?.name]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -292,8 +300,20 @@ function Compare() {
 	};
 
 	const handleClear = (side: Side) => {
-		if (side === 'a') updateSlugs({ a: '' });
-		else updateSlugs({ b: '' });
+		if (side === 'a') {
+			setLeftQuery('');
+			setLeftSuggestions([]);
+			setShowLeftSuggestions(false);
+			setLeftActiveIndex(-1);
+			updateSlugs({ a: '' });
+			return;
+		}
+
+		setRightQuery('');
+		setRightSuggestions([]);
+		setShowRightSuggestions(false);
+		setRightActiveIndex(-1);
+		updateSlugs({ b: '' });
 	};
 
 	const getSlugForSuggestion = (name: string) => {
