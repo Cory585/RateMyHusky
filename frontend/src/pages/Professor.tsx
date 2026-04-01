@@ -237,7 +237,7 @@ const Professor = () => {
   const MAX_VISIBLE_TERMS = 3;
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [deptAvg, setDeptAvg] = useState<TraceDeptAvgItem[]>([]);
-  const [showCourseTip, setShowCourseTip] = useState(true);
+  const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('prof_course_tip_dismissed') !== '1');
 
   /* ── review pill ── */
   const updateReviewPill = useCallback(() => {
@@ -1316,7 +1316,7 @@ const Professor = () => {
                 To filter reviews by course, click <strong>Clear All</strong> in the Courses Taught section, then select the course you want to see reviews for.
               </p>
             </div>
-            <button className="prof-course-tip-close" onClick={() => setShowCourseTip(false)} aria-label="Dismiss tip">
+            <button className="prof-course-tip-close" onClick={() => { localStorage.setItem('prof_course_tip_dismissed', '1'); setShowCourseTip(false); }} aria-label="Dismiss tip">
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" />
                 <line x1="6" y1="6" x2="18" y2="18" />
