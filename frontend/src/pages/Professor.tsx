@@ -1301,16 +1301,28 @@ const Professor = () => {
       })()}
 
       {showCourseTip && (
-        <div className="prof-course-tip">
-          <span className="prof-course-tip-text">
-            <strong>Tip:</strong> Clear all courses and click on a specific course to filter reviews by that course.
-          </span>
-          <button className="prof-course-tip-close" onClick={() => setShowCourseTip(false)} aria-label="Dismiss tip">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
+        <div className="prof-course-tip-wrapper">
+          <div className="prof-course-tip">
+            <div className="prof-course-tip-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+            </div>
+            <div className="prof-course-tip-body">
+              <div className="prof-course-tip-label">Tip</div>
+              <p className="prof-course-tip-text">
+                Want to see ratings and reviews for a specific course? Click <strong>Clear All</strong> above to deselect everything, then click on the course you're interested in. The ratings and reviews will update to show only feedback from students who took that course with this professor.
+              </p>
+            </div>
+            <button className="prof-course-tip-close" onClick={() => setShowCourseTip(false)} aria-label="Dismiss tip">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
         </div>
       )}
 
