@@ -36,6 +36,9 @@ export interface TraceCourse {
   termTitle: string;
   departmentName: string;
   displayName: string;
+  hoursPerWeek?: number | null;
+  challengeWeightedSum?: number | null;
+  challengeResponses?: number | null;
 }
 
 export interface TraceRatingCounts {
@@ -44,6 +47,7 @@ export interface TraceRatingCounts {
   count3: number;
   count4: number;
   count5: number;
+  completed: number;
 }
 
 export interface ProfessorProfile {
@@ -60,7 +64,7 @@ export interface ProfessorProfile {
   traceCourses: TraceCourse[];
   imageUrl: string | null;
   hoursPerWeek: number | null;
-  traceRatingCounts?: TraceRatingCounts;
+  traceRatingCounts?: Record<string, TraceRatingCounts>;
   radarData?: RadarDataPoint[] | null;
   radarTermTitle?: string | null;
 }
@@ -105,7 +109,7 @@ async function get<T>(path: string): Promise<T> {
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  const res = await fetch(`${API_BASE}${path}`, { headers });
+  const res = await fetch(`${API_BASE}${path}`, { headers, cache: token ? 'no-cache' : 'default' });
   if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
   return res.json();
 }

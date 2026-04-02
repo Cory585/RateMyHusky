@@ -446,15 +446,31 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
   const stats = useMemo(() => {
     if (!profile) return null;
 
+    const noneSelected = selectedCourses.size === 0;
     const allSelected = allCourseCodes.length > 0 && selectedCourses.size === allCourseCodes.length;
 
+    if (noneSelected) {
+      return {
+        avgRating: 0,
+        rmpRating: null,
+        traceRating: null,
+        difficulty: 0,
+        totalRatings: 0,
+        wouldTakeAgainPct: profile.wouldTakeAgainPct,
+        hoursPerWeek: null,
+      };
+    }
+
     if (allSelected) {
+      const traceCompleted = profile.traceRatingCounts
+        ? Object.values(profile.traceRatingCounts).reduce((sum, rc) => sum + (rc.completed || 0), 0)
+        : 0;
       return {
         avgRating: profile.avgRating,
         rmpRating: profile.rmpRating,
         traceRating: profile.traceRating,
         difficulty: profile.difficulty ?? 0,
-        totalRatings: profile.totalRatings,
+        totalRatings: profile.totalRatings + traceCompleted,
         wouldTakeAgainPct: profile.wouldTakeAgainPct,
         hoursPerWeek: profile.hoursPerWeek,
       };
@@ -478,19 +494,50 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
       avgRating = traceRating;
     }
 
+    const coursesWithHours = filteredTraceCourses.filter(c => c.hoursPerWeek != null);
+    const filteredHoursPerWeek = coursesWithHours.length > 0
+      ? Math.round(coursesWithHours.reduce((acc, c) => acc + c.hoursPerWeek!, 0) / coursesWithHours.length * 10) / 10
+      : null;
+
+    let traceWeightedSum = 0, traceResponses = 0;
+    for (const c of filteredTraceCourses) {
+      if (c.challengeWeightedSum != null && c.challengeResponses != null) {
+        traceWeightedSum += c.challengeWeightedSum;
+        traceResponses += c.challengeResponses;
+      }
+    }
+    const traceDifficulty = traceResponses > 0 ? traceWeightedSum / traceResponses : null;
+
+    let difficulty: number;
+    if (rmpDifficulty !== null && traceDifficulty !== null) {
+      difficulty = (rmpDifficulty + traceDifficulty) / 2;
+    } else if (rmpDifficulty !== null) {
+      difficulty = rmpDifficulty;
+    } else if (traceDifficulty !== null) {
+      difficulty = traceDifficulty;
+    } else {
+      difficulty = profile.difficulty ?? 0;
+    }
+
     return {
       avgRating,
       rmpRating,
       traceRating,
-      difficulty: rmpDifficulty ?? profile.difficulty ?? 0,
-      totalRatings: filteredRmpReviews.length,
+      difficulty,
+      totalRatings: filteredRmpReviews.length + (profile.traceRatingCounts
+        ? Array.from(selectedCourses).reduce((sum, code) => sum + (profile.traceRatingCounts![code]?.completed || 0), 0)
+        : 0),
       wouldTakeAgainPct: profile.wouldTakeAgainPct,
-      hoursPerWeek: profile.hoursPerWeek,
+      hoursPerWeek: filteredHoursPerWeek ?? profile.hoursPerWeek,
     };
-  }, [profile, filteredRmpReviews, allCourseCodes, selectedCourses]);
+  }, [profile, filteredRmpReviews, filteredTraceCourses, allCourseCodes, selectedCourses]);
 
   const ratingDistribution = useMemo(() => {
     const counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+
+    if (selectedCourses.size === 0) {
+      return [5, 4, 3, 2, 1].map(star => ({ star, count: 0 }));
+    }
 
     // RMP
     filteredRmpReviews.forEach(r => {
@@ -500,20 +547,25 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
       }
     });
 
-    // TRACE — use precomputed totals from backend
+    // TRACE — use course-keyed rating counts, filtered by selected courses
     if (profile?.traceRatingCounts) {
-      counts[1] += profile.traceRatingCounts.count1;
-      counts[2] += profile.traceRatingCounts.count2;
-      counts[3] += profile.traceRatingCounts.count3;
-      counts[4] += profile.traceRatingCounts.count4;
-      counts[5] += profile.traceRatingCounts.count5;
+      for (const code of selectedCourses) {
+        const rc = profile.traceRatingCounts[code];
+        if (rc) {
+          counts[1] += rc.count1;
+          counts[2] += rc.count2;
+          counts[3] += rc.count3;
+          counts[4] += rc.count4;
+          counts[5] += rc.count5;
+        }
+      }
     }
 
     return [5, 4, 3, 2, 1].map(star => ({
       star,
       count: counts[star as 1 | 2 | 3 | 4 | 5],
     }));
-  }, [filteredRmpReviews, profile?.traceRatingCounts]);
+  }, [filteredRmpReviews, selectedCourses, profile?.traceRatingCounts]);
 
   const maxCount = useMemo(() => Math.max(...ratingDistribution.map(d => d.count), 1), [ratingDistribution]);
 

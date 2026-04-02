@@ -676,7 +676,7 @@ def professor_profile(slug):
                 scores_by_key.setdefault(k, []).append(s)
 
         challeng_sum, challeng_weight = 0.0, 0
-        rating_dist = {"count1": 0, "count2": 0, "count3": 0, "count4": 0, "count5": 0}
+        rating_dist_by_course = {}
         for c in trace_course_rows:
             cid = int(c["course_id"])
             iid = int(c["instructor_id"])
@@ -697,21 +697,53 @@ def professor_profile(slug):
                     challeng_sum += computed_mean * (total_resp if total_resp > 0 else 1)
                     challeng_weight += total_resp if total_resp > 0 else 1
                 if "overall" in q_lower:
-                    rating_dist["count1"] += c1
-                    rating_dist["count2"] += c2
-                    rating_dist["count3"] += c3
-                    rating_dist["count4"] += c4
-                    rating_dist["count5"] += c5
+                    dn = str(c["display_name"] or "")
+                    m = re.match(r"^([A-Z]+\d+)", dn)
+                    course_code = (m.group(1) if m else dn.split(":")[0].split(" ")[0]).upper()
+                    if course_code not in rating_dist_by_course:
+                        rating_dist_by_course[course_code] = {"count1": 0, "count2": 0, "count3": 0, "count4": 0, "count5": 0, "completed": 0}
+                    rating_dist_by_course[course_code]["count1"] += c1
+                    rating_dist_by_course[course_code]["count2"] += c2
+                    rating_dist_by_course[course_code]["count3"] += c3
+                    rating_dist_by_course[course_code]["count4"] += c4
+                    rating_dist_by_course[course_code]["count5"] += c5
+                    rating_dist_by_course[course_code]["completed"] += int(s["completed"] or 0)
+            hours_sum, hours_weight = 0.0, 0
+            challeng_c_sum, challeng_c_weight = 0.0, 0
+            for s in scores_by_key.get((cid, iid, tid), []):
+                q_lower = str(s["question"] or "").lower()
+                c1 = int(s["count_1"] or 0); c2 = int(s["count_2"] or 0)
+                c3 = int(s["count_3"] or 0); c4 = int(s["count_4"] or 0)
+                c5 = int(s["count_5"] or 0)
+                total_resp = c1 + c2 + c3 + c4 + c5
+                if "hours" in q_lower:
+                    if total_resp > 0:
+                        hours_sum += (1*c1 + 3.5*c2 + 6*c3 + 9*c4 + 12*c5)
+                        hours_weight += total_resp
+                    elif s["mean"]:
+                        hours_sum += float(s["mean"])
+                        hours_weight += 1
+                if "challeng" in q_lower:
+                    if total_resp > 0:
+                        challeng_c_sum += (1*c1 + 2*c2 + 3*c3 + 4*c4 + 5*c5)
+                        challeng_c_weight += total_resp
+                    elif s["mean"]:
+                        challeng_c_sum += float(s["mean"])
+                        challeng_c_weight += 1
+            course_hours = round(hours_sum / hours_weight, 1) if hours_weight > 0 else None
             trace_course_list.append({
                 "courseId": cid,
                 "termId": tid,
                 "termTitle": str(c["term_title"] or ""),
                 "departmentName": str(c["department_name"] or ""),
                 "displayName": str(c["display_name"] or ""),
+                "hoursPerWeek": course_hours,
+                "challengeWeightedSum": challeng_c_sum if challeng_c_weight > 0 else None,
+                "challengeResponses": challeng_c_weight if challeng_c_weight > 0 else None,
             })
 
         trace_avg_difficulty = round(challeng_sum / challeng_weight, 2) if challeng_weight > 0 else None
-        profile["traceRatingCounts"] = rating_dist
+        profile["traceRatingCounts"] = rating_dist_by_course
 
         # ── Precompute radar data for the most recent term with scores ──
         radar_data = None
@@ -822,9 +854,9 @@ def professor_profile(slug):
         profile["radarTermTitle"] = radar_term_title if radar_data else None
 
     else:
-        # Lightweight query: only challenging scores to compute the professor-wide avg
+        # Lightweight query: only challenging scores to compute the professor-wide avg and per-course avg
         challeng_rows = query("""
-            SELECT ts.mean, ts.count_1, ts.count_2, ts.count_3, ts.count_4, ts.count_5
+            SELECT ts.course_id, ts.term_id, ts.mean, ts.count_1, ts.count_2, ts.count_3, ts.count_4, ts.count_5
             FROM trace_scores ts
             JOIN trace_courses tc
               ON ts.course_id = tc.course_id
@@ -834,6 +866,7 @@ def professor_profile(slug):
         """, (name_key,))
 
         challeng_sum, challeng_weight = 0.0, 0
+        challeng_by_ct = {}
         for s in challeng_rows:
             c1 = int(s["count_1"] or 0)
             c2 = int(s["count_2"] or 0)
@@ -841,19 +874,26 @@ def professor_profile(slug):
             c4 = int(s["count_4"] or 0)
             c5 = int(s["count_5"] or 0)
             total_resp = c1 + c2 + c3 + c4 + c5
+            key = (int(s["course_id"]), int(s["term_id"] or 0))
+            if key not in challeng_by_ct:
+                challeng_by_ct[key] = {"sum": 0.0, "weight": 0}
             if total_resp > 0:
                 computed_mean = (1*c1 + 2*c2 + 3*c3 + 4*c4 + 5*c5) / total_resp
                 challeng_sum += computed_mean * total_resp
                 challeng_weight += total_resp
+                challeng_by_ct[key]["sum"] += computed_mean * total_resp
+                challeng_by_ct[key]["weight"] += total_resp
             elif s["mean"]:
                 challeng_sum += float(s["mean"])
                 challeng_weight += 1
+                challeng_by_ct[key]["sum"] += float(s["mean"])
+                challeng_by_ct[key]["weight"] += 1
 
         trace_avg_difficulty = round(challeng_sum / challeng_weight, 2) if challeng_weight > 0 else None
 
         # Compute rating distribution from overall rating question for unauthenticated users
         overall_rows = query("""
-            SELECT ts.count_1, ts.count_2, ts.count_3, ts.count_4, ts.count_5
+            SELECT tc.display_name, ts.completed, ts.count_1, ts.count_2, ts.count_3, ts.count_4, ts.count_5
             FROM trace_scores ts
             JOIN trace_courses tc
               ON ts.course_id = tc.course_id
@@ -861,23 +901,62 @@ def professor_profile(slug):
              AND ts.term_id = tc.term_id
             WHERE tc.name_key = %s AND lower(ts.question) LIKE '%%overall%%'
         """, (name_key,))
-        rating_dist = {"count1": 0, "count2": 0, "count3": 0, "count4": 0, "count5": 0}
+        rating_dist_by_course = {}
         for s in overall_rows:
-            rating_dist["count1"] += int(s["count_1"] or 0)
-            rating_dist["count2"] += int(s["count_2"] or 0)
-            rating_dist["count3"] += int(s["count_3"] or 0)
-            rating_dist["count4"] += int(s["count_4"] or 0)
-            rating_dist["count5"] += int(s["count_5"] or 0)
-        profile["traceRatingCounts"] = rating_dist
+            dn = str(s["display_name"] or "")
+            m = re.match(r"^([A-Z]+\d+)", dn)
+            course_code = (m.group(1) if m else dn.split(":")[0].split(" ")[0]).upper()
+            if course_code not in rating_dist_by_course:
+                rating_dist_by_course[course_code] = {"count1": 0, "count2": 0, "count3": 0, "count4": 0, "count5": 0, "completed": 0}
+            rating_dist_by_course[course_code]["count1"] += int(s["count_1"] or 0)
+            rating_dist_by_course[course_code]["count2"] += int(s["count_2"] or 0)
+            rating_dist_by_course[course_code]["count3"] += int(s["count_3"] or 0)
+            rating_dist_by_course[course_code]["count4"] += int(s["count_4"] or 0)
+            rating_dist_by_course[course_code]["count5"] += int(s["count_5"] or 0)
+            rating_dist_by_course[course_code]["completed"] += int(s["completed"] or 0)
+        profile["traceRatingCounts"] = rating_dist_by_course
         profile["radarData"] = None
 
+        hours_rows = query("""
+            SELECT ts.course_id, ts.term_id, ts.mean,
+                   ts.count_1, ts.count_2, ts.count_3, ts.count_4, ts.count_5
+            FROM trace_scores ts
+            JOIN trace_courses tc
+              ON ts.course_id = tc.course_id
+             AND ts.instructor_id = tc.instructor_id
+             AND ts.term_id = tc.term_id
+            WHERE tc.name_key = %s AND lower(ts.question) LIKE '%%hours%%'
+        """, (name_key,))
+        hours_by_ct = {}
+        for s in hours_rows:
+            key = (int(s["course_id"]), int(s["term_id"] or 0))
+            c1 = int(s["count_1"] or 0); c2 = int(s["count_2"] or 0)
+            c3 = int(s["count_3"] or 0); c4 = int(s["count_4"] or 0)
+            c5 = int(s["count_5"] or 0)
+            total_resp = c1 + c2 + c3 + c4 + c5
+            if key not in hours_by_ct:
+                hours_by_ct[key] = {"sum": 0.0, "weight": 0}
+            if total_resp > 0:
+                hours_by_ct[key]["sum"] += (1*c1 + 3.5*c2 + 6*c3 + 9*c4 + 12*c5)
+                hours_by_ct[key]["weight"] += total_resp
+            elif s["mean"]:
+                hours_by_ct[key]["sum"] += float(s["mean"])
+                hours_by_ct[key]["weight"] += 1
+
         for c in trace_course_rows:
+            cid = int(c["course_id"]); tid = int(c["term_id"]) if c["term_id"] else 0
+            h = hours_by_ct.get((cid, tid))
+            course_hours = round(h["sum"] / h["weight"], 1) if h and h["weight"] > 0 else None
+            ch = challeng_by_ct.get((cid, tid))
             trace_course_list.append({
-                "courseId": int(c["course_id"]),
-                "termId": int(c["term_id"]) if c["term_id"] else 0,
+                "courseId": cid,
+                "termId": tid,
                 "termTitle": str(c["term_title"] or ""),
                 "departmentName": str(c["department_name"] or ""),
                 "displayName": str(c["display_name"] or ""),
+                "hoursPerWeek": course_hours,
+                "challengeWeightedSum": ch["sum"] if ch and ch["weight"] > 0 else None,
+                "challengeResponses": ch["weight"] if ch and ch["weight"] > 0 else None,
             })
 
     # Blend RMP difficulty with TRACE challenging avg into a single difficulty value
@@ -1469,7 +1548,8 @@ def course_profile(code):
     cached = cache_get(cache_key)
     if cached:
         resp = jsonify(cached)
-        resp.headers["Cache-Control"] = "public, max-age=3600"
+        resp.headers["Cache-Control"] = "private, max-age=3600" if is_authed else "public, max-age=3600"
+        resp.headers["Vary"] = "Authorization"
         return resp
 
     # Look up course in catalog
@@ -1606,6 +1686,7 @@ def course_profile(code):
     name_keys = list(name_key_map.keys())
     prof_map = {}
     comment_counts = {}
+    rmp_course_diff_map = {}
     if name_keys:
         placeholders = ",".join(["%s"] * len(name_keys))
         prof_rows = query(
@@ -1613,6 +1694,18 @@ def course_profile(code):
             f"FROM professors_catalog WHERE name_key IN ({placeholders})", name_keys
         )
         prof_map = {r["name_key"]: r for r in prof_rows}
+        # Fuzzy match RMP course: exact normalized match, or match on numeric portion
+        # (RMP course names are often misspelled, e.g. "C1100" instead of "CS1100")
+        code_num = re.sub(r"[^0-9]", "", code_norm)
+        rmp_course_diff_rows = query(
+            f"SELECT name_key, AVG(CAST(difficulty AS FLOAT)) as avg_diff "
+            f"FROM rmp_reviews "
+            f"WHERE name_key IN ({placeholders}) AND difficulty IS NOT NULL "
+            f"AND (UPPER(REPLACE(course, ' ', '')) = %s OR REGEXP_REPLACE(course, '[^0-9]', '', 'g') = %s) "
+            f"GROUP BY name_key",
+            name_keys + [code_norm, code_num]
+        )
+        rmp_course_diff_map = {r["name_key"]: round(float(r["avg_diff"]), 2) for r in rmp_course_diff_rows if r["avg_diff"] is not None}
         combined_counts = query(
             f"SELECT name_key, SUM(cnt) as cnt FROM ("
             f"  SELECT name_key, COUNT(*) as cnt FROM rmp_reviews "
@@ -1648,12 +1741,13 @@ def course_profile(code):
         challeng_resp = data["challeng_responses"]
         hours_resp = data["hours_responses"]
         trace_diff = round(data["challeng_weighted"] / challeng_resp, 2) if challeng_resp > 0 else None
-        if trace_diff is not None and meta_diff is not None:
-            course_diff = round((trace_diff + meta_diff) / 2, 2)
+        rmp_course_diff = rmp_course_diff_map.get(nk)
+        if trace_diff is not None and rmp_course_diff is not None:
+            course_diff = round((trace_diff + rmp_course_diff) / 2, 2)
         elif trace_diff is not None:
             course_diff = trace_diff
         else:
-            course_diff = meta_diff
+            course_diff = rmp_course_diff
         instructor_rows.append({
             "name": name,
             "slug": meta_slug,
@@ -1723,7 +1817,8 @@ def course_profile(code):
     }
     cache_set(cache_key, result)
     resp = jsonify(result)
-    resp.headers["Cache-Control"] = "public, max-age=3600"
+    resp.headers["Cache-Control"] = "private, max-age=3600" if is_authed else "public, max-age=3600"
+    resp.headers["Vary"] = "Authorization"
     return resp
 
 
