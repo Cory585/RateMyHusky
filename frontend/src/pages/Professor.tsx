@@ -528,7 +528,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
         ? Array.from(selectedCourses).reduce((sum, code) => sum + (profile.traceRatingCounts![code]?.completed || 0), 0)
         : 0),
       wouldTakeAgainPct: profile.wouldTakeAgainPct,
-      hoursPerWeek: filteredHoursPerWeek ?? profile.hoursPerWeek,
+      hoursPerWeek: filteredHoursPerWeek,
     };
   }, [profile, filteredRmpReviews, filteredTraceCourses, allCourseCodes, selectedCourses]);
 
@@ -637,9 +637,9 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
 
   const groupedTrace = useMemo(() => {
     const groups: Record<string, TraceComment[]> = {};
-    const ids = new Set(filteredTraceCourses.map(c => c.termId));
+    const ids = new Set(filteredTraceCourses.map(c => c.courseId));
     traceComments.forEach(c => {
-      if (ids.has(c.termId)) {
+      if (ids.has(c.courseId)) {
         if (!groups[c.question]) groups[c.question] = [];
         groups[c.question].push(c);
       }

@@ -244,10 +244,15 @@ def main():
     ts["_weighted_sum"] = 1*ts["count_1"] + 2*ts["count_2"] + 3*ts["count_3"] + 4*ts["count_4"] + 5*ts["count_5"]
     # Preserve the original CSV mean when individual counts are all zeros (newer data may only have mean/median)
     ts["_csv_mean"] = pd.to_numeric(ts["mean"], errors="coerce")
+    is_hours = ts["question"].str.lower().str.contains("hours", na=False)
     ts["mean"] = np.where(
-        ts["total_responses"] > 0,
-        ts["_weighted_sum"] / ts["total_responses"],
-        ts["_csv_mean"]
+        is_hours,
+        ts["_csv_mean"],  # always preserve scraper-computed mean for hours (uses real hour midpoints)
+        np.where(
+            ts["total_responses"] > 0,
+            ts["_weighted_sum"] / ts["total_responses"],
+            ts["_csv_mean"]
+        )
     )
     # Use completed count as total_responses when individual counts are missing but mean exists
     ts["total_responses"] = np.where(
