@@ -9,7 +9,7 @@ const Privacy = () => {
           <header className="terms-header">
             <span className="terms-kicker">Legal</span>
             <h1>Privacy Policy</h1>
-            <p className="terms-meta">Effective March 31, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective April 9, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -46,9 +46,9 @@ const Privacy = () => {
                 </li>
                 <li>
                   <strong>Feedback form:</strong> the feedback form collects a message type,
-                  description, and an optional email address. At this time, submissions are
-                  not stored server-side. If this changes, this Policy will be updated before
-                  any such storage begins.
+                  description, and an optional email address. Submissions are transmitted to
+                  the RateMyHusky team via email and are not stored in a database. Submitted
+                  information is used solely to improve the service.
                 </li>
               </ul>
               <p>
@@ -117,6 +117,20 @@ const Privacy = () => {
                   </a>.
                 </li>
                 <li>
+                  <strong>Google Analytics</strong>: collects anonymous usage data such as page
+                  views, engagement, and general geographic region to help us understand
+                  how the service is used and improve it. Google Analytics may use cookies to
+                  distinguish unique users. No personally identifiable information is shared
+                  with Google Analytics. Subject to{' '}
+                  <a
+                    href="https://policies.google.com/privacy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Google's Privacy Policy
+                  </a>.
+                </li>
+                <li>
                   <strong>RateMyProfessors &amp; Northeastern TRACE</strong>: these are data
                   sources only. We do not send any user data to these services.
                 </li>
@@ -138,10 +152,19 @@ const Privacy = () => {
             <section className="terms-section">
               <h2>6. Cookies &amp; Local Storage</h2>
               <p>
-                RateMyHusky does not use tracking cookies. During the Google OAuth sign-in
-                flow, a short-lived <code>httpOnly</code> cookie is set to facilitate the
-                authentication handshake; it is not used for tracking and is cleared after
-                sign-in completes.
+                During the Google OAuth sign-in flow, a short-lived <code>httpOnly</code> cookie
+                is set to facilitate the authentication handshake; it is not used for tracking
+                and is cleared after sign-in completes. Google Analytics may set cookies (e.g.,{' '}
+                <code>_ga</code>, <code>_gid</code>) to distinguish unique users and track
+                anonymous session data. You can opt out of Google Analytics tracking by
+                installing the{' '}
+                <a
+                  href="https://tools.google.com/dlpage/gaoptout"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Google Analytics Opt-out Browser Add-on
+                </a>.
               </p>
               <p>
                 <code>localStorage</code> is used to store your JWT session token and browser

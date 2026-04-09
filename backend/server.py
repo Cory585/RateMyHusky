@@ -22,7 +22,7 @@ import jwt as pyjwt
 import requests as http_requests
 from urllib.parse import urlencode
 from datetime import datetime, timedelta, timezone
-from threading import Lock
+from threading import Lock, Thread, Event
 import time
 
 load_dotenv()
@@ -184,7 +184,7 @@ _pool = None
 def _get_pool():
     global _pool
     if _pool is None:
-        _pool = ThreadedConnectionPool(5, 20, CRDB_DATABASE_URL, sslmode="require",
+        _pool = ThreadedConnectionPool(2, 10, CRDB_DATABASE_URL, sslmode="require",
                                        connect_timeout=5,
                                        keepalives=1, keepalives_idle=30,
                                        keepalives_interval=10, keepalives_count=3)
@@ -223,6 +223,41 @@ def cache_set(key, data):
                 del _cache[k]
 
 
+# ──────────────────────────────────────────────
+#  Daily memory reset at 09:00 UTC
+# ──────────────────────────────────────────────
+_shutdown_event = Event()
+_reset_thread_started = False
+
+def _seconds_until_next_9utc():
+    now = datetime.now(timezone.utc)
+    target = now.replace(hour=9, minute=0, second=0, microsecond=0)
+    if now >= target:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+def _daily_cache_reset():
+    while not _shutdown_event.is_set():
+        wait = _seconds_until_next_9utc()
+        if _shutdown_event.wait(timeout=wait):
+            break
+        try:
+            with _cache_lock:
+                _cache.clear()
+            print(f"[{datetime.now(timezone.utc).isoformat()}] Daily cache reset complete",
+                  flush=True)
+        except Exception as e:
+            print(f"[{datetime.now(timezone.utc).isoformat()}] Cache reset error: {e}",
+                  flush=True)
+
+def _start_reset_thread():
+    global _reset_thread_started
+    if not _reset_thread_started:
+        _reset_thread_started = True
+        t = Thread(target=_daily_cache_reset, daemon=True)
+        t.start()
+
+
 def _acquire_fresh_conn():
     key = id(g._get_current_object() if hasattr(g, '_get_current_object') else g)
     g.db_key = key
@@ -252,6 +287,11 @@ def get_db():
         _discard_db_conn()
         return _acquire_fresh_conn()
     return conn
+
+
+@app.before_request
+def _ensure_reset_thread():
+    _start_reset_thread()
 
 
 @app.teardown_appcontext
@@ -662,75 +702,88 @@ def professor_profile(slug):
     """, (name_key,))
 
     if is_authed:
-        scores_by_key = {}
         if trace_course_rows:
             keys = tuple((int(c["course_id"]), int(c["instructor_id"]), int(c["term_id"] or 0)) for c in trace_course_rows)
-            all_scores = query(
-                "SELECT course_id, instructor_id, term_id, question, mean, "
-                "completed, count_1, count_2, count_3, count_4, count_5, dept_mean "
-                "FROM trace_scores WHERE (course_id, instructor_id, term_id) IN %s",
-                (keys,)
-            )
-            for s in all_scores:
-                k = (int(s["course_id"]), int(s["instructor_id"]), int(s["term_id"] or 0))
-                scores_by_key.setdefault(k, []).append(s)
 
+            # ── SQL-aggregated per-course hours & challenge (replaces scores_by_key iteration) ──
+            # Note: CockroachDB requires explicit float casts for mixed-type arithmetic
+            per_course_agg = query("""
+                SELECT course_id, instructor_id, term_id,
+                       SUM(CASE WHEN LOWER(question) LIKE '%%hours%%' THEN
+                           CASE WHEN COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0) > 0
+                                THEN (1.0*COALESCE(count_1,0)::float+3.5*COALESCE(count_2,0)::float+6.0*COALESCE(count_3,0)::float+9.0*COALESCE(count_4,0)::float+12.0*COALESCE(count_5,0)::float)
+                                ELSE COALESCE(mean::float, 0) END
+                           ELSE 0 END)::float AS hours_sum,
+                       SUM(CASE WHEN LOWER(question) LIKE '%%hours%%' THEN
+                           CASE WHEN COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0) > 0
+                                THEN (COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0))::float
+                                ELSE CASE WHEN mean IS NOT NULL THEN 1.0 ELSE 0 END END
+                           ELSE 0 END)::float AS hours_weight,
+                       SUM(CASE WHEN LOWER(question) LIKE '%%challeng%%' THEN
+                           CASE WHEN COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0) > 0
+                                THEN (1.0*COALESCE(count_1,0)::float+2.0*COALESCE(count_2,0)::float+3.0*COALESCE(count_3,0)::float+4.0*COALESCE(count_4,0)::float+5.0*COALESCE(count_5,0)::float)
+                                ELSE COALESCE(mean::float, 0) END
+                           ELSE 0 END)::float AS challeng_sum,
+                       SUM(CASE WHEN LOWER(question) LIKE '%%challeng%%' THEN
+                           CASE WHEN COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0) > 0
+                                THEN (COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0))::float
+                                ELSE CASE WHEN mean IS NOT NULL THEN 1.0 ELSE 0 END END
+                           ELSE 0 END)::float AS challeng_weight
+                FROM trace_scores
+                WHERE (course_id, instructor_id, term_id) IN %s
+                GROUP BY course_id, instructor_id, term_id
+            """, (keys,))
+            pca_lookup = {(int(r["course_id"]), int(r["instructor_id"]), int(r["term_id"] or 0)): r for r in per_course_agg}
+
+            # ── SQL-aggregated rating distribution by course code (overall questions only) ──
+            rating_dist_rows = query("""
+                SELECT tc.display_name,
+                       SUM(COALESCE(ts.count_1,0)) AS c1,
+                       SUM(COALESCE(ts.count_2,0)) AS c2,
+                       SUM(COALESCE(ts.count_3,0)) AS c3,
+                       SUM(COALESCE(ts.count_4,0)) AS c4,
+                       SUM(COALESCE(ts.count_5,0)) AS c5,
+                       SUM(COALESCE(ts.completed,0)) AS completed
+                FROM trace_scores ts
+                JOIN trace_courses tc
+                  ON ts.course_id=tc.course_id AND ts.instructor_id=tc.instructor_id AND ts.term_id=tc.term_id
+                WHERE tc.name_key = %s AND LOWER(ts.question) LIKE '%%overall%%'
+                GROUP BY tc.display_name
+            """, (name_key,))
+            rating_dist_by_course = {}
+            for r in rating_dist_rows:
+                dn = str(r["display_name"] or "")
+                m = re.match(r"^([A-Z]+\d+)", dn)
+                course_code = (m.group(1) if m else dn.split(":")[0].split(" ")[0]).upper()
+                if course_code not in rating_dist_by_course:
+                    rating_dist_by_course[course_code] = {"count1": 0, "count2": 0, "count3": 0, "count4": 0, "count5": 0, "completed": 0}
+                rating_dist_by_course[course_code]["count1"] += int(r["c1"] or 0)
+                rating_dist_by_course[course_code]["count2"] += int(r["c2"] or 0)
+                rating_dist_by_course[course_code]["count3"] += int(r["c3"] or 0)
+                rating_dist_by_course[course_code]["count4"] += int(r["c4"] or 0)
+                rating_dist_by_course[course_code]["count5"] += int(r["c5"] or 0)
+                rating_dist_by_course[course_code]["completed"] += int(r["completed"] or 0)
+        else:
+            pca_lookup = {}
+            rating_dist_by_course = {}
+
+        # ── Build trace_course_list from SQL-aggregated data ──
         challeng_sum, challeng_weight = 0.0, 0
-        rating_dist_by_course = {}
         for c in trace_course_rows:
             cid = int(c["course_id"])
             iid = int(c["instructor_id"])
             tid = int(c["term_id"]) if c["term_id"] else 0
-            for s in scores_by_key.get((cid, iid, tid), []):
-                c1 = int(s["count_1"] or 0)
-                c2 = int(s["count_2"] or 0)
-                c3 = int(s["count_3"] or 0)
-                c4 = int(s["count_4"] or 0)
-                c5 = int(s["count_5"] or 0)
-                total_resp = c1 + c2 + c3 + c4 + c5
-                if total_resp > 0:
-                    computed_mean = (1*c1 + 2*c2 + 3*c3 + 4*c4 + 5*c5) / total_resp
-                else:
-                    computed_mean = float(s["mean"]) if s["mean"] else 0
-                q_lower = str(s["question"] or "").lower()
-                if "challeng" in q_lower:
-                    challeng_sum += computed_mean * (total_resp if total_resp > 0 else 1)
-                    challeng_weight += total_resp if total_resp > 0 else 1
-                if "overall" in q_lower:
-                    dn = str(c["display_name"] or "")
-                    m = re.match(r"^([A-Z]+\d+)", dn)
-                    course_code = (m.group(1) if m else dn.split(":")[0].split(" ")[0]).upper()
-                    if course_code not in rating_dist_by_course:
-                        rating_dist_by_course[course_code] = {"count1": 0, "count2": 0, "count3": 0, "count4": 0, "count5": 0, "completed": 0}
-                    rating_dist_by_course[course_code]["count1"] += c1
-                    rating_dist_by_course[course_code]["count2"] += c2
-                    rating_dist_by_course[course_code]["count3"] += c3
-                    rating_dist_by_course[course_code]["count4"] += c4
-                    rating_dist_by_course[course_code]["count5"] += c5
-                    rating_dist_by_course[course_code]["completed"] += int(s["completed"] or 0)
-            hours_sum, hours_weight = 0.0, 0
-            challeng_c_sum, challeng_c_weight = 0.0, 0
-            for s in scores_by_key.get((cid, iid, tid), []):
-                q_lower = str(s["question"] or "").lower()
-                c1 = int(s["count_1"] or 0); c2 = int(s["count_2"] or 0)
-                c3 = int(s["count_3"] or 0); c4 = int(s["count_4"] or 0)
-                c5 = int(s["count_5"] or 0)
-                total_resp = c1 + c2 + c3 + c4 + c5
-                if "hours" in q_lower:
-                    if total_resp > 0:
-                        hours_sum += (1*c1 + 3.5*c2 + 6*c3 + 9*c4 + 12*c5)
-                        hours_weight += total_resp
-                    elif s["mean"]:
-                        hours_sum += float(s["mean"])
-                        hours_weight += 1
-                if "challeng" in q_lower:
-                    if total_resp > 0:
-                        challeng_c_sum += (1*c1 + 2*c2 + 3*c3 + 4*c4 + 5*c5)
-                        challeng_c_weight += total_resp
-                    elif s["mean"]:
-                        challeng_c_sum += float(s["mean"])
-                        challeng_c_weight += 1
-            course_hours = round(hours_sum / hours_weight, 1) if hours_weight > 0 else None
+            agg = pca_lookup.get((cid, iid, tid))
+            if agg:
+                hw = float(agg["hours_weight"] or 0)
+                hs = float(agg["hours_sum"] or 0)
+                cw = float(agg["challeng_weight"] or 0)
+                cs = float(agg["challeng_sum"] or 0)
+                challeng_sum += cs
+                challeng_weight += cw
+            else:
+                hw, hs, cw, cs = 0, 0, 0, 0
+            course_hours = round(hs / hw, 1) if hw > 0 else None
             trace_course_list.append({
                 "courseId": cid,
                 "termId": tid,
@@ -738,8 +791,8 @@ def professor_profile(slug):
                 "departmentName": str(c["department_name"] or ""),
                 "displayName": str(c["display_name"] or ""),
                 "hoursPerWeek": course_hours,
-                "challengeWeightedSum": challeng_c_sum if challeng_c_weight > 0 else None,
-                "challengeResponses": challeng_c_weight if challeng_c_weight > 0 else None,
+                "challengeWeightedSum": cs if cw > 0 else None,
+                "challengeResponses": cw if cw > 0 else None,
             })
 
         trace_avg_difficulty = round(challeng_sum / challeng_weight, 2) if challeng_weight > 0 else None
@@ -757,43 +810,48 @@ def professor_profile(slug):
                 seen_tid_set.add(tid)
 
         for tid in seen_tids:
-            term_courses = [
+            term_keys = tuple(
                 (int(tc["course_id"]), int(tc["instructor_id"]), tid)
                 for tc in trace_course_rows
                 if (int(tc["term_id"]) if tc["term_id"] else 0) == tid
-            ]
-            q_agg: dict = {}
-            for key in term_courses:
-                for s in scores_by_key.get(key, []):
-                    q = str(s["question"] or "").strip()
-                    c1 = int(s["count_1"] or 0); c2 = int(s["count_2"] or 0)
-                    c3 = int(s["count_3"] or 0); c4 = int(s["count_4"] or 0)
-                    c5 = int(s["count_5"] or 0)
-                    total_resp = c1 + c2 + c3 + c4 + c5
-                    if total_resp > 0:
-                        mean = (1*c1 + 2*c2 + 3*c3 + 4*c4 + 5*c5) / total_resp
-                    else:
-                        mean = float(s["mean"]) if s["mean"] else 0
-                    w = total_resp if total_resp > 0 else 1
-                    if q not in q_agg:
-                        q_agg[q] = {"prof_sum": 0.0, "prof_w": 0, "dept_sum": 0.0, "dept_w": 0}
-                    q_agg[q]["prof_sum"] += mean * w
-                    q_agg[q]["prof_w"] += w
-                    dm = float(s["dept_mean"]) if s["dept_mean"] else None
-                    if dm is not None:
-                        q_agg[q]["dept_sum"] += dm * w
-                        q_agg[q]["dept_w"] += w
+            )
+            if not term_keys:
+                continue
+            # SQL-aggregated radar data per question for this term
+            # Note: mean*w/w*w simplifies to weighted_sum; CockroachDB needs explicit float casts
+            radar_rows = query("""
+                SELECT question,
+                       SUM(CASE WHEN COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0) > 0
+                            THEN (1.0*COALESCE(count_1,0)::float+2.0*COALESCE(count_2,0)::float+3.0*COALESCE(count_3,0)::float+4.0*COALESCE(count_4,0)::float+5.0*COALESCE(count_5,0)::float)
+                            ELSE COALESCE(mean::float, 0) END)::float AS prof_sum,
+                       SUM(CASE WHEN COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0) > 0
+                            THEN (COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0))::float
+                            ELSE 1.0 END)::float AS prof_w,
+                       SUM(CASE WHEN dept_mean IS NOT NULL THEN
+                            dept_mean::float * CASE WHEN COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0) > 0
+                                             THEN (COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0))::float
+                                             ELSE 1.0 END
+                            ELSE 0 END)::float AS dept_sum,
+                       SUM(CASE WHEN dept_mean IS NOT NULL THEN
+                            CASE WHEN COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0) > 0
+                                 THEN (COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0))::float
+                                 ELSE 1.0 END
+                            ELSE 0 END)::float AS dept_w
+                FROM trace_scores
+                WHERE (course_id, instructor_id, term_id) IN %s
+                GROUP BY question
+            """, (term_keys,))
 
-            if not q_agg:
+            if not radar_rows:
                 continue
 
             agg_scores = [
-                {"question": q, "mean": v["prof_sum"] / v["prof_w"]}
-                for q, v in q_agg.items() if v["prof_w"] > 0
+                {"question": str(r["question"] or "").strip(), "mean": float(r["prof_sum"]) / float(r["prof_w"])}
+                for r in radar_rows if float(r["prof_w"] or 0) > 0
             ]
             dept_scores = [
-                {"question": q, "mean": v["dept_sum"] / v["dept_w"]}
-                for q, v in q_agg.items() if v["dept_w"] > 0
+                {"question": str(r["question"] or "").strip(), "mean": float(r["dept_sum"]) / float(r["dept_w"])}
+                for r in radar_rows if float(r["dept_w"] or 0) > 0
             ]
 
             # Older terms may not have dept_mean in scores rows — fall back to dept avg query
@@ -1062,21 +1120,16 @@ def professor_reviews(slug):
                 return re.sub(r'\s+', ' ', s.lower()).strip()
 
             def _dedup_group(items: list) -> list:
-                seen: list[str] = []
+                seen: set[str] = set()
                 result = []
                 for item in items:
                     norm = _normalize(item["comment"])
-                    is_dupe = False
-                    for s in seen:
-                        prefix = s[:max(1, int(len(s) * 0.9))]
-                        if s == norm or norm.startswith(prefix) or s.startswith(norm[:max(1, int(len(norm) * 0.9))]):
-                            ratio = min(len(s), len(norm)) / max(len(s), len(norm)) if max(len(s), len(norm)) > 0 else 1.0
-                            if ratio >= 0.9:
-                                is_dupe = True
-                                break
-                    if not is_dupe:
-                        seen.append(norm)
-                        result.append(item)
+                    # Use truncated prefix as hash key for O(1) lookup instead of O(n) scan
+                    prefix_key = norm[:80]
+                    if prefix_key in seen:
+                        continue
+                    seen.add(prefix_key)
+                    result.append(item)
                 return result
 
             for q, items in by_question.items():

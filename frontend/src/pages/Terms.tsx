@@ -9,7 +9,7 @@ const Terms = () => {
           <header className="terms-header">
             <span className="terms-kicker">Legal</span>
             <h1>Terms &amp; Conditions</h1>
-            <p className="terms-meta">Effective March 31, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective April 9, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -79,9 +79,9 @@ const Terms = () => {
                   are never synced to our servers.
                 </li>
                 <li>
-                  <strong>Anonymous usage data:</strong> Vercel Analytics and Vercel Speed
-                  Insights collect anonymous page view and performance metrics. No personally
-                  identifiable information is included.
+                  <strong>Anonymous usage data:</strong> Vercel Analytics, Vercel Speed
+                  Insights, and Google Analytics collect anonymous page view and performance
+                  metrics. No personally identifiable information is included.
                 </li>
               </ul>
               <p>
@@ -112,6 +112,19 @@ const Terms = () => {
                 <li>
                   <strong>Vercel Analytics &amp; Speed Insights</strong>: collects anonymous
                   performance and usage data to help improve the service.
+                </li>
+                <li>
+                  <strong>Google Analytics</strong>: collects anonymous usage data such as page
+                  views and engagement to help us understand how the service is used.
+                  Google Analytics may use cookies; no personally identifiable information is
+                  shared. Subject to{' '}
+                  <a
+                    href="https://policies.google.com/privacy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Google's Privacy Policy
+                  </a>.
                 </li>
                 <li>
                   <strong>RateMyProfessors</strong>: professor ratings and review data are
