@@ -5,13 +5,25 @@ import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import SearchBar from '../components/SearchBar';
 import Footer from '../components/Footer';
-import { fetchStats, fetchColleges, fetchGoatProfessors, fetchRandomProfessor, fetchProfessorsCatalog } from '../api/api';
-import type { Stat, Professor } from '../api/api';
+import { fetchGoatProfessors, fetchRandomProfessor, fetchProfessorsCatalog } from '../api/api';
+import type { Professor } from '../api/api';
 import neuIcon from '../assets/neu-circle-icon.png';
 import './Homepage.css';
 
+const STATS = [
+  { label: 'Professors', value: '9,300+' },
+  { label: 'Courses', value: '7,900+' },
+  { label: 'Comments', value: '1,767,900+' },
+  { label: 'Departments', value: '80' },
+];
+
+const COLLEGES = [
+  'Business', 'CAMD', 'CSSH', 'Engineering',
+  'Health Sciences', 'Khoury', 'Law', 'Professional Studies', 'Science',
+];
+
 /* ---- animated stat counter ---- */
-const AnimatedStat = ({ value, label }: Stat) => {
+const AnimatedStat = ({ value, label }: { value: string; label: string }) => {
   const ref = useRef<HTMLDivElement>(null);
   const [display, setDisplay] = useState('0');
   const [hasAnimated, setHasAnimated] = useState(false);
@@ -155,12 +167,17 @@ const Homepage = () => {
       }
     }
   }, [location.hash]);
-  const [stats, setStats] = useState<Stat[]>([]);
-  const [colleges, setColleges] = useState<string[]>([]);
-  const [selectedCollege, setSelectedCollege] = useState<string>('');
+  const [selectedCollege, setSelectedCollege] = useState<string>(() => {
+    const state = location.state as { goatedCollege?: string } | null;
+    const restored = state?.goatedCollege;
+    return restored && COLLEGES.includes(restored) ? restored : COLLEGES[0];
+  });
   const [profs, setProfs] = useState<Professor[]>([]);
-  const [loading, setLoading] = useState(true);
   const [profsLoading, setProfsLoading] = useState(false);
+  const [goatVisible, setGoatVisible] = useState(false);
+  const goatSectionRef = useRef<HTMLElement>(null);
+  const [shuffleVisible, setShuffleVisible] = useState(false);
+  const shuffleSectionRef = useRef<HTMLElement>(null);
   const [shuffling, setShuffling] = useState(false);
   const [openTooltip, setOpenTooltip] = useState<number | null>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -234,7 +251,7 @@ const Homepage = () => {
       clearTimeout(readyTimer);
       observer.disconnect();
     };
-  }, [updatePill, colleges]);
+  }, [updatePill]);
 
   // Detect scroll position on college tabs
   useEffect(() => {
@@ -253,37 +270,28 @@ const Homepage = () => {
       el.removeEventListener('scroll', checkScroll);
       window.removeEventListener('resize', checkScroll);
     };
-  }, [colleges]);
-
-  // Initial data load
-  useEffect(() => {
-    async function init() {
-      try {
-        const [statsData, collegeData] = await Promise.all([
-          fetchStats(),
-          fetchColleges(),
-        ]);
-        setStats(statsData);
-        setColleges(collegeData);
-        const state = location.state as { goatedCollege?: string } | null;
-        const restored = state?.goatedCollege;
-        if (restored && collegeData.includes(restored)) {
-          setSelectedCollege(restored);
-        } else if (collegeData.length > 0) {
-          setSelectedCollege(collegeData[0]);
-        }
-      } catch (err) {
-        console.error('Failed to load homepage data:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    init();
   }, []);
 
-  // Load GOAT professors when selected college changes
+  // Trigger fetch when goat section scrolls into view
   useEffect(() => {
-    if (!selectedCollege) return;
+    const el = goatSectionRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setGoatVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '200px' }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // Load GOAT professors when section is visible and selected college changes
+  useEffect(() => {
+    if (!goatVisible || !selectedCollege) return;
     let cancelled = false;
 
     async function loadProfs() {
@@ -301,7 +309,7 @@ const Homepage = () => {
     loadProfs();
 
     return () => { cancelled = true; };
-  }, [selectedCollege]);
+  }, [goatVisible, selectedCollege]);
 
 
   const [slotResult, setSlotResult] = useState<{ name: string; dept: string; college: string; slug: string } | null>(null);
@@ -356,7 +364,24 @@ const Homepage = () => {
     }
   }, [realWheelNames, selectedCollege]);
 
-  useEffect(() => { prefetchNext(); }, [prefetchNext]);
+  // Trigger prefetch when shuffle section scrolls into view
+  useEffect(() => {
+    const el = shuffleSectionRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setShuffleVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '200px' }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => { if (shuffleVisible) prefetchNext(); }, [shuffleVisible, prefetchNext]);
 
   const handleShuffle = async () => {
     if (shuffling) return;
@@ -458,20 +483,13 @@ const Homepage = () => {
 
       {/* ======== Stats Banner ======== */}
       <section className="stats-banner">
-        {loading
-          ? Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="stat-item">
-                <span className="stat-value">—</span>
-                <span className="stat-label">Loading…</span>
-              </div>
-            ))
-          : stats.map((s) => (
-              <AnimatedStat key={s.label} value={s.value} label={s.label} />
-            ))}
+        {STATS.map((s) => (
+          <AnimatedStat key={s.label} value={s.value} label={s.label} />
+        ))}
       </section>
 
       {/* ======== GOAT Professors Leaderboard ======== */}
-      <section id="goated" className="section goat-section">
+      <section id="goated" className="section goat-section" ref={goatSectionRef}>
         <div className="section-header">
           <h2 className="section-title">GOATED Professors</h2>
         </div>
@@ -489,7 +507,7 @@ const Homepage = () => {
               visibility: pillStyle.opacity === 0 ? 'hidden' : 'visible'
             }}
           />
-          {colleges.map((c) => (
+          {COLLEGES.map((c) => (
             <button
               key={c}
               className={`goat-tab ${c === selectedCollege ? 'active' : ''}`}
@@ -566,7 +584,7 @@ const Homepage = () => {
       </section>
 
       {/* ======== Professor Randomizer ======== */}
-      <section id="shuffle" className="section randomizer-section">
+      <section id="shuffle" className="section randomizer-section" ref={shuffleSectionRef}>
         <div className="randomizer-content">
           <div className="randomizer-text">
             <h2 className="section-title">🎲 Feeling Lucky?</h2>

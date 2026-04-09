@@ -221,7 +221,7 @@ const Terms = () => {
                 RateMyHusky aggregates publicly available data from third-party sources. If you
                 believe content displayed on this platform infringes your copyright or should be
                 removed for another legal reason, please contact us at{' '}
-                <a href="mailto:support@ratemyhusky.com">support@ratemyhusky.com</a> with a
+                <a href="mailto:legal@ratemyhusky.com">legal@ratemyhusky.com</a> with a
                 description of the content and the basis for your removal request. We will
                 review and respond in good faith.
               </p>
