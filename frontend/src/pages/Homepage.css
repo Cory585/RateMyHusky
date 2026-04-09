@@ -279,29 +279,36 @@
   min-height: 608px; /* header (48px) + 10 rows (56px each) */
 }
 
-.goat-leaderboard.goat-loading .goat-row {
-  opacity: 0.35;
+
+/* ---- skeleton loading rows ---- */
+.goat-skeleton-row {
   pointer-events: none;
-  transition: opacity 0.15s;
 }
 
-.goat-leaderboard.goat-loading::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 28px;
-  height: 28px;
-  border: 3px solid rgba(214, 57, 76, 0.2);
-  border-top-color: #d6394c;
-  border-radius: 50%;
-  animation: goatSpin 0.6s linear infinite;
-  z-index: 10;
+.skeleton-bone {
+  display: inline-block;
+  height: 14px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #e8e8e8 25%, #f5f5f5 50%, #e8e8e8 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.4s ease-in-out infinite;
 }
 
-@keyframes goatSpin {
-  to { transform: translate(-50%, -50%) rotate(360deg); }
+.skeleton-rank { width: 20px; }
+.skeleton-name { width: 70%; }
+.skeleton-dept { width: 60%; }
+.skeleton-rating { width: 50px; }
+.skeleton-reviews { width: 36px; }
+
+@keyframes skeletonShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.dark .skeleton-bone {
+  background: linear-gradient(90deg, #2a2a2a 25%, #333 50%, #2a2a2a 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.4s ease-in-out infinite;
 }
 
 .goat-view-all {
@@ -848,11 +855,6 @@
 
 .dark .goat-scroll-wrap::after {
   background: linear-gradient(to left, rgba(36,36,36,0.97) 20%, transparent);
-}
-
-.dark .goat-leaderboard.goat-loading::after {
-  border-color: rgba(214, 57, 76, 0.15);
-  border-top-color: #d6394c;
 }
 
 .dark .goat-header-row {

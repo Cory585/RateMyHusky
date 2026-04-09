@@ -158,8 +158,11 @@ const Homepage = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Scroll to hash anchor only when navigating via breadcrumb (has state), not on refresh
+  // Disable browser scroll restoration, scroll to top on refresh
   useEffect(() => {
+    if ('scrollRestoration' in history) {
+      history.scrollRestoration = 'manual';
+    }
     if (location.hash && location.state) {
       const el = document.getElementById(location.hash.slice(1));
       if (el) {
@@ -468,7 +471,7 @@ const Homepage = () => {
         </div>
 
         <div className={`goat-scroll-wrap${leaderFade.left ? ' fade-left' : ''}${leaderFade.right ? ' fade-right' : ''}`}>
-        <div ref={leaderboardRef} className={`goat-leaderboard ${profsLoading ? 'goat-loading' : ''}`}>
+        <div ref={leaderboardRef} className="goat-leaderboard">
           <div className="goat-header-row">
             <span className="goat-col-rank">#</span>
             <span className="goat-col-name">Professor</span>
@@ -477,7 +480,17 @@ const Homepage = () => {
             <span className="goat-col-reviews">Reviews</span>
           </div>
 
-          {profs.length === 0 && !profsLoading ? (
+          {profsLoading ? (
+            Array.from({ length: 10 }).map((_, i) => (
+              <div key={i} className="goat-row goat-skeleton-row">
+                <span className="goat-col-rank"><span className="skeleton-bone skeleton-rank" /></span>
+                <div className="goat-col-name"><span className="skeleton-bone skeleton-name" /></div>
+                <span className="goat-col-dept"><span className="skeleton-bone skeleton-dept" /></span>
+                <span className="goat-col-rating"><span className="skeleton-bone skeleton-rating" /></span>
+                <span className="goat-col-reviews"><span className="skeleton-bone skeleton-reviews" /></span>
+              </div>
+            ))
+          ) : profs.length === 0 ? (
             <div className="goat-row" style={{ justifyContent: 'center', opacity: 0.6 }}>
               No professors found for this college.
             </div>
