@@ -53,7 +53,7 @@ const FeedbackTab = () => {
       callback: (token: string) => setTurnstileToken(token),
       'expired-callback': () => setTurnstileToken(''),
       theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
-      size: 'compact',
+      size: 'normal',
     });
   }, []);
 
