@@ -39,6 +39,7 @@ export interface TraceCourse {
   hoursPerWeek?: number | null;
   challengeWeightedSum?: number | null;
   challengeResponses?: number | null;
+  overallRating?: number | null;
 }
 
 export interface TraceRatingCounts {

@@ -745,7 +745,17 @@ def professor_profile(slug):
                            CASE WHEN COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0) > 0
                                 THEN (COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0))::float
                                 ELSE CASE WHEN mean IS NOT NULL THEN 1.0 ELSE 0 END END
-                           ELSE 0 END)::float AS challeng_weight
+                           ELSE 0 END)::float AS challeng_weight,
+                       SUM(CASE WHEN LOWER(question) LIKE '%%overall%%' THEN
+                           CASE WHEN COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0) > 0
+                                THEN (1.0*COALESCE(count_1,0)::float+2.0*COALESCE(count_2,0)::float+3.0*COALESCE(count_3,0)::float+4.0*COALESCE(count_4,0)::float+5.0*COALESCE(count_5,0)::float)
+                                ELSE COALESCE(mean::float, 0) END
+                           ELSE 0 END)::float AS overall_sum,
+                       SUM(CASE WHEN LOWER(question) LIKE '%%overall%%' THEN
+                           CASE WHEN COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0) > 0
+                                THEN (COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0))::float
+                                ELSE CASE WHEN mean IS NOT NULL THEN 1.0 ELSE 0 END END
+                           ELSE 0 END)::float AS overall_weight
                 FROM trace_scores
                 WHERE (course_id, instructor_id, term_id) IN %s
                 GROUP BY course_id, instructor_id, term_id
@@ -796,11 +806,14 @@ def professor_profile(slug):
                 hs = float(agg["hours_sum"] or 0)
                 cw = float(agg["challeng_weight"] or 0)
                 cs = float(agg["challeng_sum"] or 0)
+                ow = float(agg["overall_weight"] or 0)
+                os_ = float(agg["overall_sum"] or 0)
                 challeng_sum += cs
                 challeng_weight += cw
             else:
-                hw, hs, cw, cs = 0, 0, 0, 0
+                hw, hs, cw, cs, ow, os_ = 0, 0, 0, 0, 0, 0
             course_hours = round(hs / hw, 1) if hw > 0 else None
+            course_overall = round(os_ / ow, 2) if ow > 0 else None
             trace_course_list.append({
                 "courseId": cid,
                 "termId": tid,
@@ -810,6 +823,7 @@ def professor_profile(slug):
                 "hoursPerWeek": course_hours,
                 "challengeWeightedSum": cs if cw > 0 else None,
                 "challengeResponses": cw if cw > 0 else None,
+                "overallRating": course_overall,
             })
 
         trace_avg_difficulty = round(challeng_sum / challeng_weight, 2) if challeng_weight > 0 else None
