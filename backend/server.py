@@ -164,6 +164,23 @@ CORS(app, supports_credentials=True, origins=[FRONTEND_URL])
 limiter = Limiter(get_remote_address, app=app, default_limits=["120 per minute"])
 
 
+BLOCKED_USER_AGENTS = [
+    "python-requests", "python-httpx", "python-urllib", "aiohttp",
+    "scrapy", "curl", "wget", "go-http-client", "java/", "okhttp",
+    "httpie", "postmanruntime", "node-fetch", "undici",
+    "gptbot", "ccbot", "claudebot", "bytespider", "google-extended",
+    "ahrefsbot", "semrushbot", "dotbot", "mj12bot", "petalbot",
+    "barkrowler", "dataforseobot",
+]
+
+
+@app.before_request
+def block_bots():
+    ua = (request.headers.get("User-Agent") or "").lower()
+    if not ua or any(bot in ua for bot in BLOCKED_USER_AGENTS):
+        return jsonify({"error": "Forbidden"}), 403
+
+
 @app.after_request
 def set_security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
