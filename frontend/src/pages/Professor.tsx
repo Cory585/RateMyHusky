@@ -462,12 +462,15 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
     }
 
     if (allSelected) {
+      const traceCompleted = profile.traceRatingCounts
+        ? Object.values(profile.traceRatingCounts).reduce((sum, rc) => sum + (rc.completed || 0), 0)
+        : 0;
       return {
         avgRating: profile.avgRating,
         rmpRating: profile.rmpRating,
         traceRating: profile.traceRating,
         difficulty: profile.difficulty ?? 0,
-        totalRatings: profile.totalRatings,
+        totalRatings: filteredRmpReviews.length + traceCompleted,
         wouldTakeAgainPct: profile.wouldTakeAgainPct,
         hoursPerWeek: profile.hoursPerWeek,
       };

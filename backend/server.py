@@ -177,7 +177,7 @@ BLOCKED_USER_AGENTS = [
 @app.before_request
 def block_bots():
     ua = (request.headers.get("User-Agent") or "").lower()
-    if not ua or any(bot in ua for bot in BLOCKED_USER_AGENTS):
+    if ua and any(bot in ua for bot in BLOCKED_USER_AGENTS):
         return jsonify({"error": "Forbidden"}), 403
 
 
