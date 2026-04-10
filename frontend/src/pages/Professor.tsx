@@ -897,7 +897,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
               <path d="M7 11V7a5 5 0 0 1 10 0v4" />
             </svg>
-            <p>Sign in with your <strong>husky.neu.edu</strong> account to view the full radar breakdown.</p>
+            <p>Sign in with your <span className="husky-email">husky.neu.edu</span> account to view the full radar breakdown.</p>
             <button className="paywall-signin-btn" onClick={() => { sessionStorage.setItem('prof_review_tab', 'trace'); setShowSignIn(true); }}>Sign In</button>
           </div>
         </section>
@@ -1381,7 +1381,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
                           <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                           <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                         </svg>
-                        <p>Sign in with your <strong>husky.neu.edu</strong> account to read these comments.</p>
+                        <p>Sign in with your <span className="husky-email">husky.neu.edu</span> account to read these comments.</p>
                         <button className="paywall-signin-btn small" onClick={(e) => { e.stopPropagation(); sessionStorage.setItem('prof_review_tab', 'trace'); setShowSignIn(true); }}>Sign In</button>
                       </div>
                     )}
