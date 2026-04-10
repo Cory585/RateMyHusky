@@ -22,6 +22,11 @@ const COLLEGES = [
   'Health Sciences', 'Khoury', 'Law', 'Professional Studies', 'Science',
 ];
 
+// Module-level caches so data survives component unmounts
+const goatCache = new Map<string, Professor[]>();
+let wheelPool: CatalogProfessor[] = [];
+let wheelPoolLoaded = false;
+
 /* ---- animated stat counter ---- */
 const AnimatedStat = ({ value, label }: { value: string; label: string }) => {
   const ref = useRef<HTMLDivElement>(null);
@@ -294,15 +299,15 @@ const Homepage = () => {
     return () => observer.disconnect();
   }, []);
 
-  // Cache fetched goat professors per college to avoid re-fetching on tab switch
-  const goatCache = useRef<Record<string, Professor[]>>({});
+  // goatCache is defined at module level so it survives unmounts
 
   // Load GOAT professors when section is visible and selected college changes
   useEffect(() => {
     if (!goatVisible || !selectedCollege) return;
 
-    if (goatCache.current[selectedCollege]) {
-      setProfs(goatCache.current[selectedCollege]);
+    const cached = goatCache.get(selectedCollege);
+    if (cached) {
+      setProfs(cached);
       setOpenTooltip(null);
       return;
     }
@@ -315,7 +320,7 @@ const Homepage = () => {
       try {
         const data = await fetchGoatProfessors(selectedCollege);
         if (!cancelled) {
-          goatCache.current[selectedCollege] = data;
+          goatCache.set(selectedCollege, data);
           setProfs(data);
         }
       } catch (err) {
@@ -338,9 +343,7 @@ const Homepage = () => {
   const [wheelRotation, setWheelRotation] = useState(0);
   const [wheelDurationMs, setWheelDurationMs] = useState(0);
 
-  // Fetch wheel pool once per session when shuffle section becomes visible
-  const wheelPoolRef = useRef<CatalogProfessor[]>([]);
-  const wheelPoolLoadedRef = useRef(false);
+  // wheelPool is defined at module level so it survives unmounts
 
   useEffect(() => {
     const el = shuffleSectionRef.current;
@@ -359,16 +362,16 @@ const Homepage = () => {
   }, []);
 
   useEffect(() => {
-    if (!shuffleVisible || wheelPoolLoadedRef.current) return;
-    wheelPoolLoadedRef.current = true;
+    if (!shuffleVisible || wheelPoolLoaded) return;
+    wheelPoolLoaded = true;
     fetchProfessorsCatalog({ minRating: 3, limit: 100, sort: 'rating' })
-      .then((res) => { wheelPoolRef.current = res.professors; })
+      .then((res) => { wheelPool = res.professors; })
       .catch((err) => console.error('Failed to load wheel pool:', err));
   }, [shuffleVisible]);
 
   const handleShuffle = async () => {
     if (shuffling) return;
-    const pool = wheelPoolRef.current;
+    const pool = wheelPool;
     if (pool.length < WHEEL_SLICES) {
       console.error('Not enough professors in wheel pool');
       return;
