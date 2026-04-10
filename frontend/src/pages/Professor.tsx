@@ -451,11 +451,11 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
 
     if (noneSelected) {
       return {
-        avgRating: 0,
+        avgRating: null,
         rmpRating: null,
         traceRating: null,
-        difficulty: 0,
-        totalRatings: 0,
+        difficulty: null,
+        totalRatings: null,
         wouldTakeAgainPct: profile.wouldTakeAgainPct,
         hoursPerWeek: null,
       };
@@ -789,7 +789,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
 
       <section className="prof-stats">
         <div className="prof-stat-card prof-stat-clickable">
-          <span className="prof-stat-value"><AnimatedNumber value={stats.avgRating} /></span>
+          <span className="prof-stat-value">{stats.avgRating !== null ? <AnimatedNumber value={stats.avgRating} /> : '—'}</span>
           <span className="prof-stat-label" style={{ display: 'block', textAlign: 'center', position: 'relative' }}>
             Overall Rating
             {(stats.rmpRating !== null || stats.traceRating !== null) && (
@@ -835,7 +835,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
           <span className="prof-stat-label">Hrs / Week</span>
         </div>
         <div className="prof-stat-card prof-stat-clickable" onClick={() => chartsRef.current?.scrollIntoView({ behavior: 'smooth' })}>
-          <span className="prof-stat-value">{stats.totalRatings.toLocaleString()}</span>
+          <span className="prof-stat-value">{stats.totalRatings !== null ? stats.totalRatings.toLocaleString() : '—'}</span>
           <span className="prof-stat-label">Total Ratings</span>
           <span className="prof-stat-hint">View distribution ↓</span>
         </div>

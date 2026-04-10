@@ -43,7 +43,7 @@ const parseMaybeNumber = (value: number | null | undefined) => {
 
 const formatMetric = (value: number | null | undefined, digits = 2) => {
 	const parsed = parseMaybeNumber(value);
-	return parsed === null ? 'N/A' : parsed.toFixed(digits);
+	return parsed === null ? '—' : parsed.toFixed(digits);
 };
 
 const getDifficultyClass = (value: number | null | undefined) => {
@@ -454,12 +454,12 @@ function Compare() {
 		? `${leftCatalogProfessor.department} (${leftCatalogProfessor.college})`
 		: leftProfile?.department
 			? leftProfile.department
-			: 'N/A';
+			: '—';
 	const rightDept = rightCatalogProfessor
 		? `${rightCatalogProfessor.department} (${rightCatalogProfessor.college})`
 		: rightProfile?.department
 			? rightProfile.department
-			: 'N/A';
+			: '—';
 
 	const compareRows = [
 		{
@@ -501,8 +501,8 @@ function Compare() {
 		},
 		{
 			label: 'Total Reviews',
-			left: leftProfile?.totalComments?.toLocaleString() ?? leftCatalogProfessor?.totalComments?.toLocaleString() ?? 'N/A',
-			right: rightProfile?.totalComments?.toLocaleString() ?? rightCatalogProfessor?.totalComments?.toLocaleString() ?? 'N/A',
+			left: leftProfile?.totalComments?.toLocaleString() ?? leftCatalogProfessor?.totalComments?.toLocaleString() ?? '—',
+			right: rightProfile?.totalComments?.toLocaleString() ?? rightCatalogProfessor?.totalComments?.toLocaleString() ?? '—',
 			winner: pickWinner(leftProfile?.totalComments ?? leftCatalogProfessor?.totalComments, rightProfile?.totalComments ?? rightCatalogProfessor?.totalComments, 'higher', 0),
 			weight: 0.5,
 		},
@@ -510,11 +510,11 @@ function Compare() {
 			label: 'Would Take Again',
 			left:
 				leftProfile?.wouldTakeAgainPct === null || leftProfile?.wouldTakeAgainPct === undefined
-					? 'N/A'
+					? '—'
 					: `${leftProfile.wouldTakeAgainPct.toFixed(0)}%`,
 			right:
 				rightProfile?.wouldTakeAgainPct === null || rightProfile?.wouldTakeAgainPct === undefined
-					? 'N/A'
+					? '—'
 					: `${rightProfile.wouldTakeAgainPct.toFixed(0)}%`,
 			winner: pickWinner(leftProfile?.wouldTakeAgainPct, rightProfile?.wouldTakeAgainPct, 'higher', 0),
 			weight: 2,
@@ -524,12 +524,12 @@ function Compare() {
 			left: leftSnapshot
 				? `${leftSnapshot.score.toFixed(2)} (${leftSnapshot.term})`
 				: user
-					? 'N/A'
+					? '—'
 					: 'Sign in to view TRACE',
 			right: rightSnapshot
 				? `${rightSnapshot.score.toFixed(2)} (${rightSnapshot.term})`
 				: user
-					? 'N/A'
+					? '—'
 					: 'Sign in to view TRACE',
 			footnoteLeft: leftSnapshot?.course,
 			footnoteRight: rightSnapshot?.course,
@@ -700,7 +700,7 @@ function Compare() {
 									>
 										<span className="compare-suggestion-main">{prof.name}</span>
 										<span className="compare-suggestion-meta">
-											{prof.dept} • {prof.rating !== null ? prof.rating.toFixed(2) : 'N/A'}
+											{prof.dept} • {prof.rating !== null ? prof.rating.toFixed(2) : '—'}
 										</span>
 									</button>
 								);
@@ -763,7 +763,7 @@ function Compare() {
 									>
 										<span className="compare-suggestion-main">{prof.name}</span>
 										<span className="compare-suggestion-meta">
-											{prof.dept} • {prof.rating !== null ? prof.rating.toFixed(2) : 'N/A'}
+											{prof.dept} • {prof.rating !== null ? prof.rating.toFixed(2) : '—'}
 										</span>
 									</button>
 								);
