@@ -805,7 +805,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
           )}
         </div>
         <div className="prof-stat-card">
-          <span className="prof-stat-value">{stats.difficulty > 0 ? <AnimatedNumber value={stats.difficulty} /> : '—'}</span>
+          <span className="prof-stat-value">{stats.difficulty != null && stats.difficulty > 0 ? <AnimatedNumber value={stats.difficulty} /> : '—'}</span>
           <span className="prof-stat-label">Difficulty</span>
           <div className="prof-difficulty-bar">
             <div className="prof-difficulty-fill" style={{ 
@@ -835,7 +835,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
           <span className="prof-stat-label">Hrs / Week</span>
         </div>
         <div className="prof-stat-card prof-stat-clickable" onClick={() => chartsRef.current?.scrollIntoView({ behavior: 'smooth' })}>
-          <span className="prof-stat-value">{stats.totalRatings !== null ? stats.totalRatings.toLocaleString() : '—'}</span>
+          <span className="prof-stat-value">{stats.totalRatings ? stats.totalRatings.toLocaleString() : '—'}</span>
           <span className="prof-stat-label">Total Ratings</span>
           <span className="prof-stat-hint">View distribution ↓</span>
         </div>

@@ -1356,8 +1356,8 @@ def professors_catalog():
         # No search - use SQL sorting
         if sort == "rating":
             order = "avg_rating DESC NULLS LAST"
-        elif sort == "reviews":
-            order = "total_reviews DESC"
+        elif sort == "comments":
+            order = "total_comments DESC"
         else:
             order = "lower(name) ASC"
 
@@ -1373,32 +1373,6 @@ def professors_catalog():
             params + [limit, offset]
         )
 
-    # Batch-count RMP + TRACE comments for this page
-    comment_counts = {}
-    if page_rows:
-        name_keys = [row["name_key"] for row in page_rows]
-        placeholders = ",".join(["%s"] * len(name_keys))
-
-        combined_counts = query(
-            f"SELECT name_key, SUM(cnt) as cnt FROM ("
-            f"  SELECT name_key, COUNT(*) as cnt FROM rmp_reviews "
-            f"  WHERE name_key IN ({placeholders}) AND comment IS NOT NULL AND comment != '' "
-            f"  GROUP BY name_key"
-            f"  UNION ALL "
-            f"  SELECT tc2.name_key, COUNT(*) as cnt "
-            f"  FROM trace_comments tc "
-            f"  JOIN trace_courses tc2 ON tc.tc_course_id = tc2.course_id "
-            f"    AND tc.tc_instructor_id = tc2.instructor_id "
-            f"    AND tc.tc_term_id = tc2.term_id "
-            f"  WHERE tc2.name_key IN ({placeholders}) "
-            f"  AND tc.comment IS NOT NULL AND tc.comment != '' "
-            f"  GROUP BY tc2.name_key"
-            f") sub GROUP BY name_key",
-            name_keys + name_keys
-        )
-        for r in combined_counts:
-            comment_counts[r["name_key"]] = int(r["cnt"])
-
     professors = []
     for row in page_rows:
         professors.append({
@@ -1410,7 +1384,7 @@ def professors_catalog():
             "rmpRating": round(row["rmp_rating"], 2) if row["rmp_rating"] else None,
             "traceRating": round(row["trace_rating"], 2) if row["trace_rating"] else None,
             "totalReviews": row["total_reviews"],
-            "totalComments": comment_counts.get(row["name_key"], 0),
+            "totalComments": row.get("total_comments", 0) or 0,
             "wouldTakeAgainPct": round(row["would_take_again_pct"], 1) if row["would_take_again_pct"] else None,
             "imageUrl": row["image_url"],
         })

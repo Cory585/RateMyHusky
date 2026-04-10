@@ -274,7 +274,7 @@ export function fetchProfessorsCatalog(params: {
   maxRating?: number;
   minReviews?: number;
   maxReviews?: number;
-  sort?: 'alpha' | 'rating' | 'reviews';
+  sort?: 'alpha' | 'rating' | 'comments';
   page?: number;
   limit?: number;
 }): Promise<CatalogResponse> {
