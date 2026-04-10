@@ -294,9 +294,19 @@ const Homepage = () => {
     return () => observer.disconnect();
   }, []);
 
+  // Cache fetched goat professors per college to avoid re-fetching on tab switch
+  const goatCache = useRef<Record<string, Professor[]>>({});
+
   // Load GOAT professors when section is visible and selected college changes
   useEffect(() => {
     if (!goatVisible || !selectedCollege) return;
+
+    if (goatCache.current[selectedCollege]) {
+      setProfs(goatCache.current[selectedCollege]);
+      setOpenTooltip(null);
+      return;
+    }
+
     let cancelled = false;
 
     async function loadProfs() {
@@ -304,7 +314,10 @@ const Homepage = () => {
       setOpenTooltip(null);
       try {
         const data = await fetchGoatProfessors(selectedCollege);
-        if (!cancelled) setProfs(data);
+        if (!cancelled) {
+          goatCache.current[selectedCollege] = data;
+          setProfs(data);
+        }
       } catch (err) {
         console.error('Failed to load professors:', err);
       } finally {
