@@ -224,6 +224,7 @@ def cache_set(key, data):
 
 
 def _acquire_fresh_conn():
+    """Acquires a fresh database connection from the connection pool."""
     key = id(g._get_current_object() if hasattr(g, '_get_current_object') else g)
     g.db_key = key
     g.db = _get_pool().getconn(key=key)
