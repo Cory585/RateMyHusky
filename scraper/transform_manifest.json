@@ -1,0 +1,25 @@
+{
+  "processed_files": [
+    "Fall 2025.csv",
+    "Fall A 2025.csv",
+    "Summer 2 2025.csv",
+    "Summer 2025.csv"
+  ],
+  "source_tag": "scraper_v2",
+  "id_ranges": {
+    "courseId": "500001 - 504637",
+    "instructorId": "50001 - 52396",
+    "termId": "901 - 904",
+    "note": "All rows with IDs in these ranges came from scraper/transform_to_trace.py"
+  },
+  "id_maps": {
+    "terms": {
+      "901": "Fall 2025",
+      "902": "Fall A 2025",
+      "903": "Summer 2 2025",
+      "904": "Full Summer 2025"
+    },
+    "total_courses": 4637,
+    "total_instructors": 2396
+  }
+}

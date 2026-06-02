@@ -1,9 +1,3 @@
-/*
-  Footer component
-  - Displays branding, resources, affiliations, and legal links
-  - Responsive design for desktop and mobile
-*/
-
 import { Link } from 'react-router-dom';
 import logo from '../assets/logo.jpg';
 import './Footer.css';
@@ -11,48 +5,22 @@ import './Footer.css';
 const Footer = () => {
   return (
     <footer className="footer">
-      <div className="footer-top">
+      <div className="footer-inner">
         <div className="footer-brand">
           <img src={logo} alt="RateMyHusky" className="footer-brand-logo" />
-          <div className="footer-brand-name">
-            <span>Rate</span>MyHusky
-          </div>
+          <span className="footer-brand-name"><span>Rate</span>MyHusky</span>
         </div>
-
-        <div className="footer-columns">
-          <div className="footer-col">
-            <h4>Resources</h4>
-            <ul>
-              <li><Link to="/changelog">Changelog</Link></li>
-              <li><Link to="/faq">FAQs</Link></li>
-            </ul>
+        <div className="footer-meta">
+          <span className="footer-copy">
+            © {new Date().getFullYear()} RateMyHusky. Made by{' '}
+            <a href="https://oasisneu.com/" target="_blank" rel="noreferrer">Oasis</a>
+            {' '}in Boston, MA.
+          </span>
+          <div className="footer-links">
+            <Link to="/terms">Terms &amp; Conditions</Link>
+            <span className="footer-divider">·</span>
+            <Link to="/privacy">Privacy Policy</Link>
           </div>
-
-          <div className="footer-col">
-            <h4>Affiliations</h4>
-            <ul>
-              <li><a href="https://oasisneu.com" target="_blank" rel="noreferrer">Oasis</a></li>
-            </ul>
-          </div>
-        </div>
-      </div>
-
-      <div className="footer-bottom">
-        <span>
-          © {new Date().getFullYear()} RateMyHusky. Made by developers of{' '}
-          <a
-            href="https://oasisneu.com/"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Oasis
-          </a>{' '}
-          in Boston, MA.
-        </span>
-
-        <div className="footer-bottom-links">
-          <Link to="/terms">Terms &amp; Conditions</Link>
-          <Link to="/privacy">Privacy Policy</Link>
         </div>
       </div>
     </footer>

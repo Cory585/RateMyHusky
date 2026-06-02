@@ -1,25 +1,23 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   fetchProfessorsCatalog,
-  fetchColleges,
   fetchDepartments,
   fetchSearchSuggestions,
   type CatalogProfessor,
   type ProfessorSuggestion,
 } from '../api/api';
 import Footer from '../components/Footer';
-import StarRating from '../components/StarRating';
-import RatingBadge from '../components/RatingBadge';
 import Dropdown from '../components/Dropdown';
+import StarRating from '../components/StarRating';
+import { getInitials, splitProfName, stripPrefix } from '../utils/nameUtils';
 
 import './ProfessorCatalog.css';
 
 const SORT_OPTIONS = [
   { value: 'alpha',   label: 'A – Z' },
   { value: 'rating',  label: 'Highest Rating' },
-  { value: 'reviews', label: 'Most Reviews' },
+  { value: 'comments', label: 'Most Comments' },
 ];
 
 const REVIEW_SLIDER_MAX = 1000;
@@ -51,7 +49,7 @@ const DEFAULT_FILTERS: Filters = {
 
 function getFiltersFromSearchParams(sp: URLSearchParams): Filters {
   const sortValue = sp.get('sort');
-  const sort = sortValue === 'rating' || sortValue === 'reviews' || sortValue === 'alpha'
+  const sort = sortValue === 'rating' || sortValue === 'comments' || sortValue === 'alpha'
     ? sortValue
     : 'alpha';
 
@@ -89,26 +87,52 @@ function buildSearchParamsFromFilters(filters: Filters): URLSearchParams {
   return next;
 }
 
-function initials(name: string) {
-  return name
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map(n => n[0].toUpperCase())
-    .join('');
+function ratingColor(v: number | null): 'high' | 'mid' | 'low' | 'neutral' {
+  if (v === null) return 'neutral';
+  if (v >= 4) return 'high';
+  if (v >= 3) return 'mid';
+  return 'low';
 }
 
 export default function ProfessorCatalog() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [filters, setFilters]       = useState<Filters>(() => getFiltersFromSearchParams(searchParams));
-  const [colleges, setColleges]     = useState<string[]>([]);
+  const [colleges]     = useState<string[]>([
+    'Business', 'CAMD', 'CSSH', 'Engineering',
+    'Health Sciences', 'Khoury', 'Law', 'Professional Studies', 'Science',
+  ]);
   const [departments, setDepts]     = useState<string[]>([]);
   const [professors, setProfessors] = useState<CatalogProfessor[]>([]);
   const [total, setTotal]           = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading]       = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [deptOpen, setDeptOpen] = useState(false);
+  const [collegeOpen, setCollegeOpen] = useState(false);
+
+  useEffect(() => {
+    const close = () => setSidebarOpen(false);
+    window.addEventListener('close-filter-sidebar', close);
+    return () => window.removeEventListener('close-filter-sidebar', close);
+  }, []);
+
+  useEffect(() => {
+    document.body.style.overflow = sidebarOpen ? 'hidden' : '';
+    if (!sidebarOpen) return () => { document.body.style.overflow = ''; };
+    const handler = (e: TouchEvent) => {
+      if (sidebarRef.current && !sidebarRef.current.contains(e.target as Node)) {
+        setSidebarOpen(false);
+      }
+    };
+    document.addEventListener('touchmove', handler, { passive: true });
+    return () => {
+      document.body.style.overflow = '';
+      document.removeEventListener('touchmove', handler);
+    };
+  }, [sidebarOpen]);
+
+
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => (localStorage.getItem('catalog-view') as 'grid' | 'list') || 'grid');
   const [minRatingDraft, setMinRatingDraft] = useState(() => getFiltersFromSearchParams(searchParams).minRating);
   const [maxRatingDraft, setMaxRatingDraft] = useState(() => getFiltersFromSearchParams(searchParams).maxRating);
@@ -117,57 +141,42 @@ export default function ProfessorCatalog() {
   const [searchSuggestions, setSearchSuggestions] = useState<ProfessorSuggestion[]>([]);
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
   const [activeSearchIndex, setActiveSearchIndex] = useState(-1);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const [searchPlaceholder, setSearchPlaceholder] = useState('');
+
+  const professorExamples = useMemo(() => [
+    "Alan Mislove", "Ravi Sundaram", "Dan Felushko",
+    "Cristina Nita-Rotaru", "Stacy Marsella", "Kathleen Durant",
+    "Gene Cooperman", "Benjamin Yelle", "Peter Topalov"
+  ], []);
 
   const searchWrapperRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
 
-  const [searchFocused, setSearchFocused] = useState(false);
-  const [typingPlaceholder, setTypingPlaceholder] = useState('');
-  const profExamples = useMemo(() => [
-    'Alan Mislove', 'Ravi Sundaram', 'Cristina Nita-Rotaru',
-    'Stacy Marsella', 'Kathleen Durant', 'Gene Cooperman',
-    'Dan Felushko', 'Ousmane Hicham',
-  ], []);
-  useEffect(() => {
-    if (searchFocused || filters.q) {
-      setTypingPlaceholder('Search professor name…');
-      return;
+  const [numCols, setNumCols] = useState(4);
+  const [isMeasured, setIsMeasured] = useState(false);
+  const gridObserverRef = useRef<ResizeObserver | null>(null);
+  const gridRef = useCallback((node: HTMLDivElement | null) => {
+    if (gridObserverRef.current) {
+      gridObserverRef.current.disconnect();
+      gridObserverRef.current = null;
     }
-    let idx = Math.floor(Math.random() * profExamples.length);
-    let text = '';
-    let deleting = false;
-    let speed = 100;
-    const tick = () => {
-      const full = profExamples[idx];
-      if (deleting) { text = full.substring(0, text.length - 1); speed = 50; }
-      else          { text = full.substring(0, text.length + 1); speed = 100; }
-      setTypingPlaceholder(`Search for "${text}"`);
-      if (!deleting && text === full)        { deleting = true;  speed = 2000; }
-      else if (deleting && text === '')      { deleting = false; idx = (idx + 1) % profExamples.length; speed = 500; }
-      tid = setTimeout(tick, speed);
+    if (!node) return;
+    const update = () => {
+      const cols = window.getComputedStyle(node).gridTemplateColumns.split(' ').length;
+      setNumCols(cols);
+      setIsMeasured(true);
     };
-    let tid = setTimeout(tick, speed);
-    return () => clearTimeout(tid);
-  }, [searchFocused, filters.q, profExamples]);
-
-  // Responsive page size: fewer cards on smaller screens
-  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
-  useEffect(() => {
-    const onResize = () => setViewportWidth(window.innerWidth);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    gridObserverRef.current = new ResizeObserver(update);
+    gridObserverRef.current.observe(node);
+    update();
   }, []);
-  const pageSize = useMemo(() => {
-    if (viewportWidth <= 480) return 10;
-    if (viewportWidth <= 768) return 10;
-    return 20;
-  }, [viewportWidth]);
 
-  // Fetch colleges once
-  useEffect(() => {
-    fetchColleges().then(setColleges).catch(console.error);
-  }, []);
+  // pageSize = cols × 4 rows: always even, always fills the grid completely.
+  // List mode uses a fixed even count since it has no grid columns.
+  const pageSize = viewMode === 'list' ? 10 : numCols * 4;
 
   // Re-fetch departments when college changes
   useEffect(() => {
@@ -178,6 +187,7 @@ export default function ProfessorCatalog() {
 
   // Fetch professors when any filter changes
   useEffect(() => {
+    if (viewMode === 'grid' && !isMeasured) return;
     setLoading(true);
     fetchProfessorsCatalog({
       q:          filters.q          || undefined,
@@ -187,7 +197,7 @@ export default function ProfessorCatalog() {
       maxRating:  filters.maxRating  < 5 ? filters.maxRating  : undefined,
       minReviews: filters.minReviews > 0 ? filters.minReviews : undefined,
       maxReviews: filters.maxReviews ?? undefined,
-      sort:       filters.sort as 'alpha' | 'rating' | 'reviews',
+      sort:       filters.sort as 'alpha' | 'rating' | 'comments',
       page:       filters.page,
       limit:      pageSize,
     })
@@ -198,7 +208,7 @@ export default function ProfessorCatalog() {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [filters, pageSize]);
+  }, [filters, pageSize, isMeasured, viewMode]);
 
   // Keep filters in the URL so the catalog view is shareable/bookmarkable.
   useEffect(() => {
@@ -354,19 +364,92 @@ export default function ProfessorCatalog() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  useEffect(() => {
+    if (isSearchFocused || filters.q) {
+      setSearchPlaceholder('Search professor name…');
+      return;
+    }
+
+    let currentExampleIndex = Math.floor(Math.random() * professorExamples.length);
+    let currentText = '';
+    let isDeleting = false;
+    let typingSpeed = 100;
+
+    const type = () => {
+      const fullText = professorExamples[currentExampleIndex];
+      if (isDeleting) {
+        currentText = fullText.substring(0, currentText.length - 1);
+        typingSpeed = 50;
+      } else {
+        currentText = fullText.substring(0, currentText.length + 1);
+        typingSpeed = 100;
+      }
+      setSearchPlaceholder(`Search for "${currentText}"`);
+      if (!isDeleting && currentText === fullText) {
+        isDeleting = true;
+        typingSpeed = 2000;
+      } else if (isDeleting && currentText === '') {
+        isDeleting = false;
+        currentExampleIndex = (currentExampleIndex + 1) % professorExamples.length;
+        typingSpeed = 500;
+      }
+      timeoutId = setTimeout(type, typingSpeed);
+    };
+
+    let timeoutId = setTimeout(type, typingSpeed);
+    return () => clearTimeout(timeoutId);
+  }, [isSearchFocused, filters.q, professorExamples]);
+
   const hasActiveFilters =
-    !!filters.q || !!filters.college || !!filters.dept || filters.minRating > 0 || filters.maxRating < 5 || filters.minReviews > 0 || filters.maxReviews !== null;
+    !!filters.q || !!filters.college || !!filters.dept || filters.minRating > 0 || filters.maxRating < 5 || filters.minReviews > 1 || filters.maxReviews !== null;
+
+  const activeFilterCount =
+    (filters.q ? 1 : 0) +
+    (filters.college ? filters.college.split(',').filter(Boolean).length : 0) +
+    (filters.dept ? filters.dept.split(',').filter(Boolean).length : 0) +
+    (filters.minRating > 0 || filters.maxRating < 5 ? 1 : 0) +
+    (filters.minReviews > 1 || filters.maxReviews !== null ? 1 : 0);
 
   return (
     <div className="catalog-page">
+
       {sidebarOpen && (
         <div className="catalog-overlay" onClick={() => setSidebarOpen(false)} />
       )}
 
+      <div className="catalog-header">
+        <h1 className="catalog-title">Professors</h1>
+        <span className="catalog-count">
+          {loading ? '…' : `${total.toLocaleString()} result${total !== 1 ? 's' : ''}`}
+        </span>
+        <div className="catalog-view-toggle">
+          <button
+            className={`catalog-view-btn ${viewMode === 'grid' ? 'active' : ''}`}
+            onClick={() => { setViewMode('grid'); localStorage.setItem('catalog-view', 'grid'); }}
+            aria-label="Grid view"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
+            </svg>
+          </button>
+          <button
+            className={`catalog-view-btn ${viewMode === 'list' ? 'active' : ''}`}
+            onClick={() => { setViewMode('list'); localStorage.setItem('catalog-view', 'list'); }}
+            aria-label="List view"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" />
+              <line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
       <div className="catalog-layout">
         {/* ── Sidebar ── */}
-        <aside className={`catalog-sidebar ${sidebarOpen ? 'open' : ''}`}>
-          <div className="sidebar-inner">
+        <aside ref={sidebarRef} className={`catalog-sidebar ${sidebarOpen ? 'open' : ''}`}>
+          <div className={`sidebar-inner ${deptOpen || collegeOpen ? 'dept-open' : ''}`}>
             <div className="sidebar-header">
               <span className="sidebar-title">Filters</span>
               {hasActiveFilters && (
@@ -398,6 +481,7 @@ export default function ProfessorCatalog() {
                 colleges={colleges}
                 selected={filters.college}
                 onSelect={c => setCollege(c)}
+                onOpenChange={setCollegeOpen}
               />
             </div>
 
@@ -413,6 +497,7 @@ export default function ProfessorCatalog() {
                 departments={departments}
                 selected={filters.dept}
                 onSelect={d => updateFilter('dept', d)}
+                onOpenChange={setDeptOpen}
               />
             </div>
 
@@ -484,6 +569,7 @@ export default function ProfessorCatalog() {
                   min="0"
                   value={minReviewsDraft === 0 ? '' : minReviewsDraft}
                   placeholder="Min"
+                  onKeyDown={e => { if (['e', 'E', '+', '-', '.'].includes(e.key)) e.preventDefault(); }}
                   onChange={e => {
                     const v = parseInt(e.target.value, 10);
                     const clamped = isNaN(v) || v < 0 ? 0 : Math.min(v, REVIEW_INPUT_MAX);
@@ -497,9 +583,10 @@ export default function ProfessorCatalog() {
                 <input
                   type="number"
                   className="reviews-number-input"
-                  min="1"
+                  min="0"
                   value={maxReviewsDraft ?? ''}
                   placeholder="Max"
+                  onKeyDown={e => { if (['e', 'E', '+', '-', '.'].includes(e.key)) e.preventDefault(); }}
                   onChange={e => {
                     const v = parseInt(e.target.value, 10);
                     if (isNaN(v) || e.target.value === '') {
@@ -517,48 +604,20 @@ export default function ProfessorCatalog() {
 
         {/* ── Main ── */}
         <main className="catalog-main">
-          <div className="catalog-header">
-            <h1 className="catalog-title">Professors</h1>
-            <span className="catalog-count">
-              {loading ? '…' : `${total.toLocaleString()} result${total !== 1 ? 's' : ''}`}
-            </span>
-            <div className="catalog-view-toggle">
-              <button
-                className={`catalog-view-btn ${viewMode === 'grid' ? 'active' : ''}`}
-                onClick={() => { setViewMode('grid'); localStorage.setItem('catalog-view', 'grid'); }}
-                aria-label="Grid view"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
-                  <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
-                </svg>
-              </button>
-              <button
-                className={`catalog-view-btn ${viewMode === 'list' ? 'active' : ''}`}
-                onClick={() => { setViewMode('list'); localStorage.setItem('catalog-view', 'list'); }}
-                aria-label="List view"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" />
-                  <line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" />
-                </svg>
-              </button>
-            </div>
-          </div>
           <div className="catalog-search-row">
             <div className="catalog-search-wrap" ref={searchWrapperRef}>
               <input
                 ref={searchInputRef}
                 type="text"
                 className="catalog-search"
-                placeholder={typingPlaceholder}
+                placeholder={searchPlaceholder}
                 value={filters.q}
                 onChange={e => updateFilter('q', e.target.value)}
                 onFocus={() => {
-                  setSearchFocused(true);
+                  setIsSearchFocused(true);
                   if (searchSuggestions.length > 0) setShowSearchSuggestions(true);
                 }}
-                onBlur={() => setSearchFocused(false)}
+                onBlur={() => setIsSearchFocused(false)}
                 onKeyDown={(e) => {
                   if (!showSearchSuggestions || searchSuggestions.length === 0) return;
 
@@ -598,18 +657,21 @@ export default function ProfessorCatalog() {
                 </ul>
               )}
             </div>
-            <button
-              className="catalog-filter-toggle"
-              onClick={() => setSidebarOpen(o => !o)}
-              aria-label="Toggle filters"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="4" y1="6" x2="20" y2="6" />
-                <line x1="4" y1="12" x2="20" y2="12" />
-                <line x1="4" y1="18" x2="20" y2="18" />
-              </svg>
-              Filters
-            </button>
+          <button
+            className={`catalog-filter-toggle${sidebarOpen ? ' open' : ''}`}
+            onClick={() => setSidebarOpen(o => !o)}
+            aria-label="Toggle filters"
+          >
+            <span className="filter-toggle-icon">
+              <span className="filter-toggle-bar" />
+              <span className="filter-toggle-bar" />
+              <span className="filter-toggle-bar" />
+            </span>
+            Filters
+            {activeFilterCount > 0 && (
+              <span className="filter-active-badge">{activeFilterCount}</span>
+            )}
+          </button>
           </div>
           <p className="catalog-disclaimer">
             Professors without any rating data are not shown.{' '}
@@ -617,7 +679,7 @@ export default function ProfessorCatalog() {
           </p>
 
           {loading ? (
-            <div className={viewMode === 'list' ? 'catalog-list' : 'catalog-grid'}>
+            <div className={viewMode === 'list' ? 'catalog-list' : 'catalog-grid'} ref={viewMode === 'grid' ? gridRef : undefined}>
               {Array.from({ length: pageSize }).map((_, i) => (
                 <div key={i} className={viewMode === 'list' ? 'prof-list-item skeleton' : 'prof-card skeleton'} />
               ))}
@@ -660,21 +722,28 @@ export default function ProfessorCatalog() {
                       className="prof-avatar-initials"
                       style={prof.imageUrl ? { display: 'none' } : undefined}
                     >
-                      {initials(prof.name)}
+                      {getInitials(prof.name)}
                     </span>
                   </div>
                   <div className="prof-list-info">
                     <span className="prof-list-name">{prof.name}</span>
+                    <span className="prof-list-college">{prof.college}</span>
                     <span className="prof-list-dept">{prof.department}</span>
                   </div>
-                  <span className="prof-list-rating">
-                    {prof.avgRating != null ? prof.avgRating.toFixed(2) : 'N/A'}
-                  </span>
+                  <div className="prof-list-rating-center">
+                    <span className="prof-list-avg-num">{prof.avgRating != null ? prof.avgRating.toFixed(1) : 'N/A'}</span>
+                    <StarRating rating={prof.avgRating ?? 0} size="sm" />
+                  </div>
+                  <div className="prof-list-stats">
+                    <span className="prof-list-stat">{prof.totalReviews.toLocaleString()} ratings</span>
+                    <span className="prof-list-stat">{prof.totalComments.toLocaleString()} comments</span>
+                    <span className="prof-list-stat">{prof.wouldTakeAgainPct != null ? `${Math.round(prof.wouldTakeAgainPct)}% again` : '—'}</span>
+                  </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="catalog-grid">
+            <div className="catalog-grid" ref={gridRef}>
               {professors.map(prof => (
                 <div
                   key={prof.slug}
@@ -686,56 +755,58 @@ export default function ProfessorCatalog() {
                     e.key === 'Enter' && navigate(`/professors/${prof.slug}`, { state: { fromCatalog: `/professors?${searchParams.toString()}` } })
                   }
                 >
-                  <div className="prof-avatar">
-                    {prof.imageUrl ? (
-                      <img
-                        src={prof.imageUrl}
-                        alt=""
-                        className="prof-avatar-img"
-                        onError={(e) => {
-                          const target = e.currentTarget;
-                          target.style.display = 'none';
-                          const fallback = target.parentElement?.querySelector('.prof-avatar-initials') as HTMLElement;
-                          if (fallback) fallback.style.display = 'flex';
-                        }}
-                      />
-                    ) : null}
-                    <span
-                      className="prof-avatar-initials"
-                      style={prof.imageUrl ? { display: 'none' } : undefined}
-                    >
-                      {initials(prof.name)}
-                    </span>
+                  <div className="prof-card-photo">
+                    <div className="prof-avatar">
+                      {prof.imageUrl ? (
+                        <img
+                          src={prof.imageUrl}
+                          alt=""
+                          className="prof-avatar-img"
+                          onError={(e) => {
+                            const target = e.currentTarget;
+                            target.style.display = 'none';
+                            const fallback = target.parentElement?.querySelector('.prof-avatar-initials') as HTMLElement;
+                            if (fallback) fallback.style.display = 'flex';
+                          }}
+                        />
+                      ) : null}
+                      <span
+                        className="prof-avatar-initials"
+                        style={prof.imageUrl ? { display: 'none' } : undefined}
+                      >
+                        {getInitials(prof.name)}
+                      </span>
+                    </div>
                   </div>
-                  <div className="prof-body">
-                    <h3 className="prof-name">{prof.name}</h3>
-                    <p className="prof-dept">{prof.department}</p>
+                  <div className="prof-card-info">
+                    <div className="prof-card-info-top">
+                      <h3 className="prof-name">
+                        {(() => {
+                          const [first, rest] = splitProfName(stripPrefix(prof.name));
+                          return rest ? <>{first}<br />{rest}</> : first;
+                        })()}
+                      </h3>
+                      <div className="prof-card-rating-row">
+                        <span className="prof-avg-num">{prof.avgRating != null ? prof.avgRating.toFixed(1) : 'N/A'}</span>
+                        <StarRating rating={prof.avgRating ?? 0} size="sm" />
+                      </div>
+                    </div>
                     <span className="prof-college">{prof.college}</span>
-
-                    <div className="prof-rating-row">
-                      {prof.avgRating != null ? (
-                        <>
-                          <StarRating rating={prof.avgRating} size="sm" />
-                          <span className="prof-avg">{prof.avgRating.toFixed(2)}</span>
-                        </>
-                      ) : (
-                        <span className="prof-avg na">N/A</span>
-                      )}
+                    <span className="prof-dept-label">{prof.department}</span>
+                    <div className="prof-sub-ratings">
+                      <div className="sub-rating-item" data-color={ratingColor(prof.rmpRating)}>
+                        <span className="sub-rating-val">{prof.rmpRating != null ? prof.rmpRating.toFixed(1) : '—'}</span>
+                        <span className="sub-rating-lbl">RMP</span>
+                      </div>
+                      <div className="sub-rating-item" data-color={ratingColor(prof.traceRating)}>
+                        <span className="sub-rating-val">{prof.traceRating != null ? prof.traceRating.toFixed(1) : '—'}</span>
+                        <span className="sub-rating-lbl">TRACE</span>
+                      </div>
                     </div>
-
-                    <div className="prof-badges">
-                      <RatingBadge label="RMP"   value={prof.rmpRating}   size="sm" />
-                      <RatingBadge label="TRACE" value={prof.traceRating} size="sm" />
-                    </div>
-
-                    <div className="prof-meta">
-                      <span>{prof.totalReviews.toLocaleString()} review{prof.totalReviews !== 1 ? 's' : ''}</span>
-                      {prof.wouldTakeAgainPct != null && (
-                        <>
-                          <span className="meta-dot">·</span>
-                          <span>{prof.wouldTakeAgainPct}% Again</span>
-                        </>
-                      )}
+                    <div className="prof-card-footer">
+                      <span className="prof-rating-count">{prof.totalReviews.toLocaleString()} ratings</span>
+                      <span className="prof-rating-count prof-rating-count--center">{prof.totalComments.toLocaleString()} comments</span>
+                      <span className="prof-rating-count">{prof.wouldTakeAgainPct != null ? `${Math.round(prof.wouldTakeAgainPct)}% again` : '—'}</span>
                     </div>
                   </div>
                 </div>
@@ -827,35 +898,40 @@ function CollegeFilter({
   colleges,
   selected,
   onSelect,
+  onOpenChange,
 }: {
   colleges: string[];
   selected: string;
   onSelect: (college: string) => void;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const toggle = (o: boolean) => { setOpen(o); onOpenChange?.(o); };
+  const [search, setSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
   const selectedSet = useMemo(() => new Set(selected ? selected.split(',') : []), [selected]);
-
-  useLayoutEffect(() => {
-    if (open && triggerRef.current) {
-      const r = triggerRef.current.getBoundingClientRect();
-      setDropdownPos({ top: r.bottom + 4, left: r.left, width: r.width });
-    }
-  }, [open]);
+  const filtered = colleges.filter(c =>
+    c.toLowerCase().includes(search.toLowerCase())
+  );
 
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (
-        ref.current && !ref.current.contains(e.target as Node) &&
-        dropdownRef.current && !dropdownRef.current.contains(e.target as Node)
-      ) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) toggle(false);
     };
+    const scrollHandler = (e: Event) => {
+      if (ref.current && ref.current.contains(e.target as Node)) return;
+      toggle(false);
+    };
+    const closeHandler = () => toggle(false);
     document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener('scroll', scrollHandler, { capture: true, passive: true });
+    window.addEventListener('close-filter-sidebar', closeHandler);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('scroll', scrollHandler, { capture: true });
+      window.removeEventListener('close-filter-sidebar', closeHandler);
+    };
   }, [open]);
 
   const toggleCollege = (c: string) => {
@@ -873,51 +949,55 @@ function CollegeFilter({
 
   return (
     <div className="dept-filter" ref={ref}>
-      <div className="dept-filter-trigger">
-        <button
-          ref={triggerRef}
-          className={`dept-toggle ${open ? 'open' : ''}`}
-          onClick={() => setOpen(o => !o)}
-          aria-expanded={open}
-        >
-          <span className="dept-toggle-label">
-            {label}
-          </span>
-          <span className="dept-toggle-icon">
-            <span className="dept-bar" />
-            <span className="dept-bar" />
-            <span className="dept-bar" />
-          </span>
-        </button>
+      <button
+        className={`dept-toggle ${open ? 'open' : ''}`}
+        onClick={() => toggle(!open)}
+        aria-expanded={open}
+      >
+        <span className="dept-toggle-label">
+          {label}
+        </span>
+        <span className="dept-toggle-icon">
+          <span className="dept-bar" />
+          <span className="dept-bar" />
+          <span className="dept-bar" />
+        </span>
+      </button>
 
-        {open && createPortal(
-          <div
-            ref={dropdownRef}
-            className="dept-dropdown"
-            style={{ top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width }}
-          >
-            <div className="dept-list">
-              {colleges.map(c => (
-                <label key={c} className="dept-option">
-                  <input
-                    type="checkbox"
-                    checked={selectedSet.has(c)}
-                    onChange={() => toggleCollege(c)}
-                  />
-                  <span>{c}</span>
-                </label>
-              ))}
-            </div>
-          </div>,
-          document.body
-        )}
-      </div>
+      {open && (
+        <div className="dept-dropdown">
+          <input
+            className="dept-search"
+            type="text"
+            placeholder="Search colleges…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            autoFocus
+          />
+          <div className="dept-list">
+            {filtered.map(c => (
+              <label key={c} className="dept-option">
+                <input
+                  type="checkbox"
+                  checked={selectedSet.has(c)}
+                  onChange={() => toggleCollege(c)}
+                />
+                <span>{c}</span>
+              </label>
+            ))}
+            {filtered.length === 0 && (
+              <p className="dept-empty">No colleges found</p>
+            )}
+          </div>
+        </div>
+      )}
 
-      {selectedSet.size > 0 && (
+      {!open && selectedSet.size > 0 && (
         <div className="filter-tags">
           {[...selectedSet].map(c => (
             <button key={c} className="filter-tag" onClick={() => toggleCollege(c)}>
-              {c} <span className="filter-tag-x">×</span>
+              {c}
+              <span className="filter-tag-x">×</span>
             </button>
           ))}
         </div>
@@ -932,39 +1012,40 @@ function DepartmentFilter({
   departments,
   selected,
   onSelect,
+  onOpenChange,
 }: {
   departments: string[];
   selected: string;
   onSelect: (dept: string) => void;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const toggle = (o: boolean) => { setOpen(o); onOpenChange?.(o); };
   const [search, setSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
   const filtered = departments.filter(d =>
     d.toLowerCase().includes(search.toLowerCase())
   );
   const selectedSet = useMemo(() => new Set(selected ? selected.split(',') : []), [selected]);
 
-  useLayoutEffect(() => {
-    if (open && triggerRef.current) {
-      const r = triggerRef.current.getBoundingClientRect();
-      setDropdownPos({ top: r.bottom + 4, left: r.left, width: r.width });
-    }
-  }, [open]);
-
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (
-        ref.current && !ref.current.contains(e.target as Node) &&
-        dropdownRef.current && !dropdownRef.current.contains(e.target as Node)
-      ) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) toggle(false);
     };
+    const scrollHandler = (e: Event) => {
+      if (ref.current && ref.current.contains(e.target as Node)) return;
+      toggle(false);
+    };
+    const closeHandler = () => toggle(false);
     document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener('scroll', scrollHandler, { capture: true, passive: true });
+    window.addEventListener('close-filter-sidebar', closeHandler);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('scroll', scrollHandler, { capture: true });
+      window.removeEventListener('close-filter-sidebar', closeHandler);
+    };
   }, [open]);
 
   const toggleDept = (d: string) => {
@@ -982,62 +1063,55 @@ function DepartmentFilter({
 
   return (
     <div className="dept-filter" ref={ref}>
-      <div className="dept-filter-trigger">
-        <button
-          ref={triggerRef}
-          className={`dept-toggle ${open ? 'open' : ''}`}
-          onClick={() => setOpen(o => !o)}
-          aria-expanded={open}
-        >
-          <span className="dept-toggle-label">
-            {label}
-          </span>
-          <span className="dept-toggle-icon">
-            <span className="dept-bar" />
-            <span className="dept-bar" />
-            <span className="dept-bar" />
-          </span>
-        </button>
+      <button
+        className={`dept-toggle ${open ? 'open' : ''}`}
+        onClick={() => toggle(!open)}
+        aria-expanded={open}
+      >
+        <span className="dept-toggle-label">
+          {label}
+        </span>
+        <span className="dept-toggle-icon">
+          <span className="dept-bar" />
+          <span className="dept-bar" />
+          <span className="dept-bar" />
+        </span>
+      </button>
 
-        {open && createPortal(
-          <div
-            ref={dropdownRef}
-            className="dept-dropdown"
-            style={{ top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width }}
-          >
-            <input
-              className="dept-search"
-              type="text"
-              placeholder="Search departments…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              autoFocus
-            />
-            <div className="dept-list">
-              {filtered.map(d => (
-                <label key={d} className="dept-option">
-                  <input
-                    type="checkbox"
-                    checked={selectedSet.has(d)}
-                    onChange={() => toggleDept(d)}
-                  />
-                  <span>{d}</span>
-                </label>
-              ))}
-              {filtered.length === 0 && (
-                <p className="dept-empty">No departments found</p>
-              )}
-            </div>
-          </div>,
-          document.body
-        )}
-      </div>
+      {open && (
+        <div className="dept-dropdown">
+          <input
+            className="dept-search"
+            type="text"
+            placeholder="Search departments…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            autoFocus
+          />
+          <div className="dept-list">
+            {filtered.map(d => (
+              <label key={d} className="dept-option">
+                <input
+                  type="checkbox"
+                  checked={selectedSet.has(d)}
+                  onChange={() => toggleDept(d)}
+                />
+                <span>{d}</span>
+              </label>
+            ))}
+            {filtered.length === 0 && (
+              <p className="dept-empty">No departments found</p>
+            )}
+          </div>
+        </div>
+      )}
 
-      {selectedSet.size > 0 && (
+      {!open && selectedSet.size > 0 && (
         <div className="filter-tags">
           {[...selectedSet].map(d => (
             <button key={d} className="filter-tag" onClick={() => toggleDept(d)}>
-              {d} <span className="filter-tag-x">×</span>
+              {d}
+              <span className="filter-tag-x">×</span>
             </button>
           ))}
         </div>

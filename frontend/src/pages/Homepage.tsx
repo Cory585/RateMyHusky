@@ -2,19 +2,36 @@
 Primary Homepage Codespace
 */
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import SearchBar from '../components/SearchBar';
 import Footer from '../components/Footer';
-import { fetchStats, fetchColleges, fetchGoatProfessors, fetchRandomProfessor, fetchProfessorsCatalog } from '../api/api';
-import type { Stat, Professor } from '../api/api';
+import { fetchGoatProfessors, fetchProfessorsCatalog } from '../api/api';
+import type { CatalogProfessor, Professor } from '../api/api';
 import neuIcon from '../assets/neu-circle-icon.png';
 import './Homepage.css';
 
+const STATS = [
+  { label: 'Professors', value: '9,300+' },
+  { label: 'Courses', value: '7,900+' },
+  { label: 'Comments', value: '1,767,900+' },
+  { label: 'Departments', value: '80' },
+];
+
+const COLLEGES = [
+  'Business', 'CAMD', 'CSSH', 'Engineering',
+  'Health Sciences', 'Khoury', 'Law', 'Professional Studies', 'Science',
+];
+
+// Module-level caches so data survives component unmounts
+const goatCache = new Map<string, Professor[]>();
+let wheelPool: CatalogProfessor[] = [];
+let wheelPoolLoaded = false;
+
 /* ---- animated stat counter ---- */
-const AnimatedStat = ({ value, label }: Stat) => {
-  const ref = useRef<HTMLDivElement>(null);
-  const [display, setDisplay] = useState('0');
-  const [hasAnimated, setHasAnimated] = useState(false);
+const AnimatedStat = ({ value, label }: { value: string; label: string }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const valueRef = useRef<HTMLSpanElement>(null);
+  const hasAnimated = useRef(false);
 
   // Parse "7,600+" → { num: 7600, suffix: "+" }
   const parsed = useRef({ num: 0, suffix: '' });
@@ -26,50 +43,39 @@ const AnimatedStat = ({ value, label }: Stat) => {
     }
   }, [value]);
 
-  const animate = useCallback(() => {
-    if (hasAnimated) return;
-    setHasAnimated(true);
-
-    const { num, suffix } = parsed.current;
-    const duration = 2000;
-    const start = performance.now();
-
-    const step = (now: number) => {
-      const elapsed = now - start;
-      const progress = Math.min(elapsed / duration, 1);
-      // Ease out cubic
-      const eased = 1 - Math.pow(1 - progress, 3);
-      const current = Math.round(eased * num);
-      setDisplay(current.toLocaleString() + suffix);
-
-      if (progress < 1) {
-        requestAnimationFrame(step);
-      }
-    };
-
-    requestAnimationFrame(step);
-  }, [hasAnimated]);
-
   useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
+    const container = containerRef.current;
+    const el = valueRef.current;
+    if (!container || !el) return;
 
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting) {
-          animate();
+        if (entry.isIntersecting && !hasAnimated.current) {
+          hasAnimated.current = true;
           observer.disconnect();
+
+          const { num, suffix } = parsed.current;
+          const duration = 2000;
+          const start = performance.now();
+
+          const step = (now: number) => {
+            const progress = Math.min((now - start) / duration, 1);
+            const eased = 1 - Math.pow(1 - progress, 3);
+            el.textContent = Math.round(eased * num).toLocaleString() + suffix;
+            if (progress < 1) requestAnimationFrame(step);
+          };
+          requestAnimationFrame(step);
         }
       },
       { threshold: 0.5 }
     );
-    observer.observe(el);
+    observer.observe(container);
     return () => observer.disconnect();
-  }, [animate]);
+  }, [value]);
 
   return (
-    <div className="stat-item" ref={ref}>
-      <span className="stat-value">{display}</span>
+    <div className="stat-item" ref={containerRef}>
+      <span className="stat-value" ref={valueRef}>0</span>
       <span className="stat-label">{label}</span>
     </div>
   );
@@ -113,8 +119,8 @@ const RatingCell = ({ prof, isOpen, onToggle }: {
       className="goat-col-rating goat-rating-wrapper"
       onClick={(e) => { e.stopPropagation(); onToggle(); }}
     >
-      <Stars rating={prof.avgRating} />
-      <span className="goat-score">{prof.avgRating.toFixed(2)}</span>
+      <span className="goat-score">{prof.avgRating?.toFixed(2) ?? '—'}</span>
+      <Stars rating={prof.avgRating ?? 0} />
       <span className="goat-rating-hint">ⓘ</span>
 
       {isOpen && (
@@ -134,7 +140,7 @@ const RatingCell = ({ prof, isOpen, onToggle }: {
           <div className="tooltip-divider" />
           <div className="tooltip-row">
             <span className="tooltip-label">Avg Rating</span>
-            <span className="tooltip-value tooltip-blended">{prof.avgRating.toFixed(2)}</span>
+            <span className="tooltip-value tooltip-blended">{prof.avgRating?.toFixed(2) ?? '—'}</span>
           </div>
         </div>
       )}
@@ -144,17 +150,57 @@ const RatingCell = ({ prof, isOpen, onToggle }: {
 
 const Homepage = () => {
   const navigate = useNavigate();
-  const [stats, setStats] = useState<Stat[]>([]);
-  const [colleges, setColleges] = useState<string[]>([]);
-  const [selectedCollege, setSelectedCollege] = useState<string>('');
+  const location = useLocation();
+
+  // Disable browser scroll restoration, scroll to top on refresh
+  useEffect(() => {
+    if ('scrollRestoration' in history) {
+      history.scrollRestoration = 'manual';
+    }
+    if (location.hash && location.state) {
+      const el = document.getElementById(location.hash.slice(1));
+      if (el) {
+        setTimeout(() => el.scrollIntoView({ behavior: 'smooth' }), 100);
+      }
+    } else {
+      window.scrollTo(0, 0);
+    }
+  }, [location.hash, location.state]);
+  const [selectedCollege, setSelectedCollege] = useState<string>(() => {
+    const state = location.state as { goatedCollege?: string } | null;
+    const restored = state?.goatedCollege;
+    return restored && COLLEGES.includes(restored) ? restored : COLLEGES[0];
+  });
   const [profs, setProfs] = useState<Professor[]>([]);
-  const [loading, setLoading] = useState(true);
   const [profsLoading, setProfsLoading] = useState(false);
+  const [goatVisible, setGoatVisible] = useState(false);
+  const goatSectionRef = useRef<HTMLElement>(null);
+  const [shuffleVisible, setShuffleVisible] = useState(false);
+  const shuffleSectionRef = useRef<HTMLElement>(null);
   const [shuffling, setShuffling] = useState(false);
   const [openTooltip, setOpenTooltip] = useState<number | null>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
   const [tabsAtEnd, setTabsAtEnd] = useState(false);
   const [tabsAtStart, setTabsAtStart] = useState(true);
+  const leaderboardRef = useRef<HTMLDivElement>(null);
+  const [leaderFade, setLeaderFade] = useState({ left: false, right: false });
+
+  const updateLeaderFade = useCallback(() => {
+    const el = leaderboardRef.current;
+    if (!el) return;
+    setLeaderFade({
+      left: el.scrollLeft > 0,
+      right: el.scrollLeft + el.clientWidth < el.scrollWidth - 1,
+    });
+  }, []);
+
+  useEffect(() => {
+    const el = leaderboardRef.current;
+    if (!el) return;
+    updateLeaderFade();
+    el.addEventListener('scroll', updateLeaderFade, { passive: true });
+    return () => el.removeEventListener('scroll', updateLeaderFade);
+  }, [profs, updateLeaderFade]);
 
   // Pill animation state
   const [pillStyle, setPillStyle] = useState({ left: 0, width: 0, opacity: 0 });
@@ -163,7 +209,9 @@ const Homepage = () => {
   // Navigate to professor page
   const handleProfClick = (name: string) => {
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-    navigate(`/professors/${slug}`);
+    navigate(`/professors/${slug}`, {
+      state: { fromPage: { label: 'GOATED Professors', url: '/#goated' }, goatedCollege: selectedCollege },
+    });
   };
 
   const updatePill = useCallback(() => {
@@ -202,7 +250,7 @@ const Homepage = () => {
       clearTimeout(readyTimer);
       observer.disconnect();
     };
-  }, [updatePill, colleges]);
+  }, [updatePill]);
 
   // Detect scroll position on college tabs
   useEffect(() => {
@@ -221,33 +269,38 @@ const Homepage = () => {
       el.removeEventListener('scroll', checkScroll);
       window.removeEventListener('resize', checkScroll);
     };
-  }, [colleges]);
-
-  // Initial data load
-  useEffect(() => {
-    async function init() {
-      try {
-        const [statsData, collegeData] = await Promise.all([
-          fetchStats(),
-          fetchColleges(),
-        ]);
-        setStats(statsData);
-        setColleges(collegeData);
-        if (collegeData.length > 0) {
-          setSelectedCollege(collegeData[0]);
-        }
-      } catch (err) {
-        console.error('Failed to load homepage data:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    init();
   }, []);
 
-  // Load GOAT professors when selected college changes
+  // Trigger fetch when goat section scrolls into view
   useEffect(() => {
-    if (!selectedCollege) return;
+    const el = goatSectionRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setGoatVisible(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // goatCache is defined at module level so it survives unmounts
+
+  // Load GOAT professors when section is visible and selected college changes
+  useEffect(() => {
+    if (!goatVisible || !selectedCollege) return;
+
+    const cached = goatCache.get(selectedCollege);
+    if (cached) {
+      setProfs(cached);
+      setOpenTooltip(null);
+      return;
+    }
+
     let cancelled = false;
 
     async function loadProfs() {
@@ -255,7 +308,10 @@ const Homepage = () => {
       setOpenTooltip(null);
       try {
         const data = await fetchGoatProfessors(selectedCollege);
-        if (!cancelled) setProfs(data);
+        if (!cancelled) {
+          goatCache.set(selectedCollege, data);
+          setProfs(data);
+        }
       } catch (err) {
         console.error('Failed to load professors:', err);
       } finally {
@@ -265,7 +321,8 @@ const Homepage = () => {
     loadProfs();
 
     return () => { cancelled = true; };
-  }, [selectedCollege]);
+  }, [goatVisible, selectedCollege]);
+
 
   const [slotResult, setSlotResult] = useState<{ name: string; dept: string; college: string; slug: string } | null>(null);
   const [wheelState, setWheelState] = useState<'idle' | 'spinning' | 'result'>('idle');
@@ -275,63 +332,58 @@ const Homepage = () => {
   const [wheelRotation, setWheelRotation] = useState(0);
   const [wheelDurationMs, setWheelDurationMs] = useState(0);
 
-  const realWheelNames = Array.from(new Set(profs.map((p) => p.name).filter(Boolean)));
+  // wheelPool is defined at module level so it survives unmounts
+
+  useEffect(() => {
+    const el = shuffleSectionRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setShuffleVisible(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!shuffleVisible || wheelPoolLoaded) return;
+    wheelPoolLoaded = true;
+    fetchProfessorsCatalog({ minRating: 3, limit: 100, sort: 'rating' })
+      .then((res) => { wheelPool = res.professors; })
+      .catch((err) => console.error('Failed to load wheel pool:', err));
+  }, [shuffleVisible]);
 
   const handleShuffle = async () => {
     if (shuffling) return;
+    const pool = wheelPool;
+    if (pool.length < WHEEL_SLICES) {
+      console.error('Not enough professors in wheel pool');
+      return;
+    }
+
     setShuffling(true);
     setSlotResult(null);
     setWheelState('spinning');
 
     try {
-      const prof = await fetchRandomProfessor();
-      const slug = prof.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      // Pick a random winner from the pool
+      const shuffledPool = [...pool].sort(() => Math.random() - 0.5);
+      const winner = shuffledPool[0];
+      const sliceProfs = shuffledPool.slice(0, WHEEL_SLICES);
+      const names = sliceProfs.map((p) => p.name);
 
-      // Build a 16-slice wheel with unique real names only.
-      const uniqueNames: string[] = [];
-      const uniqueSet = new Set<string>();
+      const winnerIndex = 0; // winner is first after shuffle
+      setWheelNames(names);
 
-      const pushUnique = (name: string) => {
-        const trimmed = name.trim();
-        if (!trimmed || uniqueSet.has(trimmed)) return;
-        uniqueSet.add(trimmed);
-        uniqueNames.push(trimmed);
-      };
-
-      pushUnique(prof.name);
-      realWheelNames.forEach(pushUnique);
-
-      if (uniqueNames.length < WHEEL_SLICES) {
-        const collegeCatalog = await fetchProfessorsCatalog({
-          college: selectedCollege || undefined,
-          page: 1,
-          limit: 300,
-          sort: 'alpha',
-        });
-        collegeCatalog.professors.forEach((p) => pushUnique(p.name));
-      }
-
-      if (uniqueNames.length < WHEEL_SLICES) {
-        const globalCatalog = await fetchProfessorsCatalog({
-          page: 1,
-          limit: 500,
-          sort: 'alpha',
-        });
-        globalCatalog.professors.forEach((p) => pushUnique(p.name));
-      }
-
-      if (uniqueNames.length < WHEEL_SLICES) {
-        throw new Error('Not enough unique professor names to build a 16-slice wheel.');
-      }
-
-      const fixedPool = uniqueNames.slice(0, WHEEL_SLICES);
-      const shuffled = [...fixedPool].sort(() => Math.random() - 0.5);
-      const winnerIndex = Math.max(0, shuffled.indexOf(prof.name));
-      setWheelNames(shuffled);
+      const slug = winner.slug || winner.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
       const currentNormalized = ((wheelRotation % 360) + 360) % 360;
       const winnerCenterAngle = (winnerIndex + 0.5) * SLICE_DEG;
-      // In our wheel transform system, 0deg is the top marker position.
       const pointerAngle = 0;
       const targetNormalized = (pointerAngle - winnerCenterAngle + 360) % 360;
       const delta = (targetNormalized - currentNormalized + 360) % 360;
@@ -345,10 +397,10 @@ const Homepage = () => {
 
       await new Promise(r => setTimeout(r, 5000));
 
-      setSlotResult({ name: prof.name, dept: prof.dept ?? '', college: prof.college ?? '', slug });
+      setSlotResult({ name: winner.name, dept: winner.department ?? '', college: winner.college ?? '', slug });
       setWheelState('result');
     } catch (err) {
-      console.error('Failed to fetch random professor:', err);
+      console.error('Failed to spin wheel:', err);
       setWheelState('idle');
     } finally {
       setShuffling(false);
@@ -367,7 +419,7 @@ const Homepage = () => {
           Find the <span>right professor</span>, every semester
         </h1>
         <p className="hero-subtitle">
-          TRACE evaluations and RateMyProfessor ratings — all in one place.
+          TRACE evaluations and RateMyProfessor ratings, all in one place.
         </p>
 
         <SearchBar />
@@ -375,20 +427,13 @@ const Homepage = () => {
 
       {/* ======== Stats Banner ======== */}
       <section className="stats-banner">
-        {loading
-          ? Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="stat-item">
-                <span className="stat-value">—</span>
-                <span className="stat-label">Loading…</span>
-              </div>
-            ))
-          : stats.map((s) => (
-              <AnimatedStat key={s.label} value={s.value} label={s.label} />
-            ))}
+        {STATS.map((s) => (
+          <AnimatedStat key={s.label} value={s.value} label={s.label} />
+        ))}
       </section>
 
       {/* ======== GOAT Professors Leaderboard ======== */}
-      <section className="section goat-section">
+      <section id="goated" className="section goat-section" ref={goatSectionRef}>
         <div className="section-header">
           <h2 className="section-title">GOATED Professors</h2>
         </div>
@@ -406,7 +451,7 @@ const Homepage = () => {
               visibility: pillStyle.opacity === 0 ? 'hidden' : 'visible'
             }}
           />
-          {colleges.map((c) => (
+          {COLLEGES.map((c) => (
             <button
               key={c}
               className={`goat-tab ${c === selectedCollege ? 'active' : ''}`}
@@ -430,7 +475,8 @@ const Homepage = () => {
           ))}
         </div>
 
-        <div className={`goat-leaderboard ${profsLoading ? 'goat-loading' : ''}`}>
+        <div className={`goat-scroll-wrap${leaderFade.left ? ' fade-left' : ''}${leaderFade.right ? ' fade-right' : ''}`}>
+        <div ref={leaderboardRef} className="goat-leaderboard">
           <div className="goat-header-row">
             <span className="goat-col-rank">#</span>
             <span className="goat-col-name">Professor</span>
@@ -439,7 +485,17 @@ const Homepage = () => {
             <span className="goat-col-reviews">Reviews</span>
           </div>
 
-          {profs.length === 0 && !profsLoading ? (
+          {profsLoading ? (
+            Array.from({ length: 10 }).map((_, i) => (
+              <div key={i} className="goat-row goat-skeleton-row">
+                <span className="goat-col-rank"><span className="skeleton-bone skeleton-rank" /></span>
+                <div className="goat-col-name"><span className="skeleton-bone skeleton-name" /></div>
+                <span className="goat-col-dept"><span className="skeleton-bone skeleton-dept" /></span>
+                <span className="goat-col-rating"><span className="skeleton-bone skeleton-rating" /></span>
+                <span className="goat-col-reviews"><span className="skeleton-bone skeleton-reviews" /></span>
+              </div>
+            ))
+          ) : profs.length === 0 ? (
             <div className="goat-row" style={{ justifyContent: 'center', opacity: 0.6 }}>
               No professors found for this college.
             </div>
@@ -463,11 +519,12 @@ const Homepage = () => {
                   onToggle={() => setOpenTooltip(openTooltip === i ? null : i)}
                 />
                 <span className="goat-col-reviews">
-                  {p.totalReviews.toLocaleString()}
+                  {(p.totalComments ?? 0).toLocaleString()}
                 </span>
               </div>
             ))
           )}
+        </div>
         </div>
 
         {selectedCollege && (
@@ -481,7 +538,7 @@ const Homepage = () => {
       </section>
 
       {/* ======== Professor Randomizer ======== */}
-      <section className="section randomizer-section">
+      <section id="shuffle" className="section randomizer-section" ref={shuffleSectionRef}>
         <div className="randomizer-content">
           <div className="randomizer-text">
             <h2 className="section-title">🎲 Feeling Lucky?</h2>
@@ -531,7 +588,7 @@ const Homepage = () => {
             </div>
 
             {slotResult && (
-              <div className="wheel-result-card" onClick={() => navigate(`/professors/${slotResult.slug}`)}>
+              <div className="wheel-result-card" onClick={() => navigate(`/professors/${slotResult.slug}`, { state: { fromPage: { label: 'Shuffle Wheel', url: '/#shuffle' } } })}>
                 <span className="wheel-result-name">{slotResult.name}</span>
                 <span className="wheel-result-sub">{slotResult.dept}</span>
               </div>

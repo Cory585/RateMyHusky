@@ -1,5 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
 	fetchCourseDepartments,
@@ -11,14 +10,12 @@ import {
 import Dropdown from '../components/Dropdown';
 import Footer from '../components/Footer';
 import StarRating from '../components/StarRating';
-import ThemeToggle from '../components/ThemeToggle';
 import './ProfessorCatalog.css';
 import './Courses.css';
 
 const SORT_OPTIONS = [
-	{ value: 'alpha', label: 'Code A-Z' },
+	{ value: 'alpha', label: 'A - Z' },
 	{ value: 'rating', label: 'Highest Rating' },
-	{ value: 'sections', label: 'Most Sections' },
 	{ value: 'recent', label: 'Most Recent' },
 ];
 
@@ -27,7 +24,7 @@ interface Filters {
 	dept: string;
 	minRating: number;
 	maxRating: number;
-	sort: 'alpha' | 'rating' | 'sections' | 'recent';
+	sort: 'alpha' | 'rating' | 'recent';
 	page: number;
 }
 
@@ -43,7 +40,7 @@ const DEFAULT_FILTERS: Filters = {
 function getFiltersFromSearchParams(sp: URLSearchParams): Filters {
 	const sortValue = sp.get('sort');
 	const sort =
-		sortValue === 'rating' || sortValue === 'sections' || sortValue === 'recent' || sortValue === 'alpha'
+		sortValue === 'rating' || sortValue === 'recent' || sortValue === 'alpha'
 			? sortValue
 			: 'alpha';
 
@@ -83,6 +80,28 @@ export default function Courses() {
 	const [totalPages, setTotalPages] = useState(1);
 	const [loading, setLoading] = useState(true);
 	const [sidebarOpen, setSidebarOpen] = useState(false);
+	const [deptOpen, setDeptOpen] = useState(false);
+
+	useEffect(() => {
+		const close = () => setSidebarOpen(false);
+		window.addEventListener('close-filter-sidebar', close);
+		return () => window.removeEventListener('close-filter-sidebar', close);
+	}, []);
+
+	useEffect(() => {
+		document.body.style.overflow = sidebarOpen ? 'hidden' : '';
+		if (!sidebarOpen) return () => { document.body.style.overflow = ''; };
+		const handler = (e: TouchEvent) => {
+			if (sidebarRef.current && !sidebarRef.current.contains(e.target as Node)) {
+				setSidebarOpen(false);
+			}
+		};
+		document.addEventListener('touchmove', handler, { passive: true });
+		return () => {
+			document.body.style.overflow = '';
+			document.removeEventListener('touchmove', handler);
+		};
+	}, [sidebarOpen]);
 
 	const [minRatingDraft, setMinRatingDraft] = useState(() => getFiltersFromSearchParams(searchParams).minRating);
 	const [maxRatingDraft, setMaxRatingDraft] = useState(() => getFiltersFromSearchParams(searchParams).maxRating);
@@ -90,61 +109,52 @@ export default function Courses() {
 	const [searchSuggestions, setSearchSuggestions] = useState<CourseSuggestion[]>([]);
 	const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
 	const [activeSearchIndex, setActiveSearchIndex] = useState(-1);
+	const [isSearchFocused, setIsSearchFocused] = useState(false);
+	const [searchPlaceholder, setSearchPlaceholder] = useState('');
+
+	const courseExamples = useMemo(() => [
+		"CS 2500", "CS 3500", "CS 4500", "ECON 1115", "MATH 1341",
+		"CY 2550", "PHYS 1161", "ACCT 1201", "MKTG 2101", "BIOL 1111"
+	], []);
+
 	const searchWrapperRef = useRef<HTMLDivElement>(null);
 	const searchInputRef = useRef<HTMLInputElement>(null);
 	const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const sidebarRef = useRef<HTMLElement>(null);
 
-	const [searchFocused, setSearchFocused] = useState(false);
-	const [typingPlaceholder, setTypingPlaceholder] = useState('');
-	const courseExamples = useMemo(() => [
-		'CS 2500', 'CS 3500', 'ECON 1115', 'MATH 1341',
-		'CY 2550', 'PHYS 1161', 'ACCT 1201', 'BIOL 1111',
-	], []);
-	useEffect(() => {
-		if (searchFocused || filters.q) {
-			setTypingPlaceholder('Search course code or title...');
-			return;
+	const [numCols, setNumCols] = useState(4);
+	const [isMeasured, setIsMeasured] = useState(false);
+	const gridObserverRef = useRef<ResizeObserver | null>(null);
+	const gridRef = useCallback((node: HTMLDivElement | null) => {
+		if (gridObserverRef.current) {
+			gridObserverRef.current.disconnect();
+			gridObserverRef.current = null;
 		}
-		let idx = Math.floor(Math.random() * courseExamples.length);
-		let text = '';
-		let deleting = false;
-		let speed = 100;
-		const tick = () => {
-			const full = courseExamples[idx];
-			if (deleting) { text = full.substring(0, text.length - 1); speed = 50; }
-			else          { text = full.substring(0, text.length + 1); speed = 100; }
-			setTypingPlaceholder(`Search for "${text}"`);
-			if (!deleting && text === full)   { deleting = true;  speed = 2000; }
-			else if (deleting && text === '') { deleting = false; idx = (idx + 1) % courseExamples.length; speed = 500; }
-			tid = setTimeout(tick, speed);
+		if (!node) return;
+		const update = () => {
+			const cols = window.getComputedStyle(node).gridTemplateColumns.split(' ').length;
+			setNumCols(cols);
+			setIsMeasured(true);
 		};
-		let tid = setTimeout(tick, speed);
-		return () => clearTimeout(tid);
-	}, [searchFocused, filters.q, courseExamples]);
-
-	const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
-	useEffect(() => {
-		const onResize = () => setViewportWidth(window.innerWidth);
-		window.addEventListener('resize', onResize);
-		return () => window.removeEventListener('resize', onResize);
+		gridObserverRef.current = new ResizeObserver(update);
+		gridObserverRef.current.observe(node);
+		update();
 	}, []);
 
-	const pageSize = useMemo(() => {
-		if (viewportWidth <= 480) return 6;
-		if (viewportWidth <= 768) return 9;
-		return 20;
-	}, [viewportWidth]);
+	// pageSize = cols × 4 rows: always even, always fills the grid completely
+	const pageSize = numCols * 4;
 
 	useEffect(() => {
 		fetchCourseDepartments().then(setDepartments).catch(console.error);
 	}, []);
 
 	useEffect(() => {
+		if (!isMeasured) return;
 		setLoading(true);
 		fetchCoursesCatalog({
 			q: filters.q || undefined,
 			dept: filters.dept || undefined,
-			minRating: filters.minRating > 0 ? filters.minRating : undefined,
+			minRating: Math.max(filters.minRating, 0.01),
 			maxRating: filters.maxRating < 5 ? filters.maxRating : undefined,
 			sort: filters.sort,
 			page: filters.page,
@@ -157,7 +167,7 @@ export default function Courses() {
 			})
 			.catch(console.error)
 			.finally(() => setLoading(false));
-	}, [filters, pageSize]);
+	}, [filters, pageSize, isMeasured]);
 
 	useEffect(() => {
 		const next = buildSearchParamsFromFilters(filters);
@@ -261,17 +271,56 @@ export default function Courses() {
 		return () => document.removeEventListener('mousedown', handler);
 	}, []);
 
+	useEffect(() => {
+		if (isSearchFocused || filters.q) {
+			setSearchPlaceholder('Search course code or title...');
+			return;
+		}
+
+		let currentExampleIndex = Math.floor(Math.random() * courseExamples.length);
+		let currentText = '';
+		let isDeleting = false;
+		let typingSpeed = 100;
+
+		const type = () => {
+			const fullText = courseExamples[currentExampleIndex];
+			if (isDeleting) {
+				currentText = fullText.substring(0, currentText.length - 1);
+				typingSpeed = 50;
+			} else {
+				currentText = fullText.substring(0, currentText.length + 1);
+				typingSpeed = 100;
+			}
+			setSearchPlaceholder(`Search for "${currentText}"`);
+			if (!isDeleting && currentText === fullText) {
+				isDeleting = true;
+				typingSpeed = 2000;
+			} else if (isDeleting && currentText === '') {
+				isDeleting = false;
+				currentExampleIndex = (currentExampleIndex + 1) % courseExamples.length;
+				typingSpeed = 500;
+			}
+			timeoutId = setTimeout(type, typingSpeed);
+		};
+
+		let timeoutId = setTimeout(type, typingSpeed);
+		return () => clearTimeout(timeoutId);
+	}, [isSearchFocused, filters.q, courseExamples]);
+
 	const hasActiveFilters = !!filters.q || !!filters.dept || filters.minRating > 0 || filters.maxRating < 5;
 
 	return (
 		<div className="catalog-page">
-			<ThemeToggle />
-
 			{sidebarOpen && <div className="catalog-overlay" onClick={() => setSidebarOpen(false)} />}
 
+			<div className="catalog-header">
+				<h1 className="catalog-title">Courses</h1>
+				<span className="catalog-count">{loading ? '…' : `${total.toLocaleString()} result${total !== 1 ? 's' : ''}`}</span>
+			</div>
+
 			<div className="catalog-layout">
-				<aside className={`catalog-sidebar ${sidebarOpen ? 'open' : ''}`}>
-					<div className="sidebar-inner">
+				<aside ref={sidebarRef} className={`catalog-sidebar ${sidebarOpen ? 'open' : ''}`}>
+					<div className={`sidebar-inner ${deptOpen ? 'dept-open' : ''}`}>
 						<div className="sidebar-header">
 							<span className="sidebar-title">Filters</span>
 							{hasActiveFilters && (
@@ -287,8 +336,13 @@ export default function Courses() {
 						</div>
 
 						<div className="filter-section">
-							<p className="filter-label">Department</p>
-							<DepartmentFilter departments={departments} selected={filters.dept} onSelect={(d) => updateFilter('dept', d)} />
+							<p className="filter-label">
+								Department
+								{filters.dept && (
+									<button className="dept-clear-btn" onClick={() => updateFilter('dept', '')}>Clear all</button>
+								)}
+							</p>
+							<DepartmentFilter departments={departments} selected={filters.dept} onSelect={(d) => updateFilter('dept', d)} onOpenChange={setDeptOpen} />
 						</div>
 
 						<div className="filter-section">
@@ -313,30 +367,38 @@ export default function Courses() {
 								onChangeLow={(v) => setMinRatingDraft(v)}
 								onChangeHigh={(v) => setMaxRatingDraft(v)}
 							/>
+							<div className="slider-tick-marks">
+								{Array.from({ length: 11 }, (_, i) => {
+									const val = i * 0.5;
+									return (
+										<div key={val} className="tick-mark">
+											<div className="tick-line" />
+											<span className="tick-label">
+												{val === 0 ? '0' : Number.isInteger(val) ? String(val) : ''}
+											</span>
+										</div>
+									);
+								})}
+							</div>
 						</div>
 					</div>
 				</aside>
 
 				<main className="catalog-main">
-					<div className="catalog-header">
-						<h1 className="catalog-title">Courses</h1>
-						<span className="catalog-count">{loading ? '…' : `${total.toLocaleString()} result${total !== 1 ? 's' : ''}`}</span>
-					</div>
-
 					<div className="catalog-search-row">
 						<div className="catalog-search-wrap" ref={searchWrapperRef}>
 							<input
 								ref={searchInputRef}
 								type="text"
 								className="catalog-search"
-								placeholder={typingPlaceholder}
+								placeholder={searchPlaceholder}
 								value={filters.q}
 								onChange={(e) => updateFilter('q', e.target.value)}
 								onFocus={() => {
-									setSearchFocused(true);
+									setIsSearchFocused(true);
 									if (searchSuggestions.length > 0) setShowSearchSuggestions(true);
 								}}
-								onBlur={() => setSearchFocused(false)}
+								onBlur={() => setIsSearchFocused(false)}
 								onKeyDown={(e) => {
 									if (!showSearchSuggestions || searchSuggestions.length === 0) return;
 									if (e.key === 'ArrowDown') {
@@ -374,32 +436,29 @@ export default function Courses() {
 								</ul>
 							)}
 						</div>
-					<button
-						className="catalog-filter-toggle"
-						onClick={() => setSidebarOpen((o) => !o)}
-						aria-label="Toggle filters"
-					>
-						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-							<line x1="4" y1="6" x2="20" y2="6" />
-							<line x1="4" y1="12" x2="20" y2="12" />
-							<line x1="4" y1="18" x2="20" y2="18" />
-						</svg>
+					<button className={`catalog-filter-toggle${sidebarOpen ? ' open' : ''}`} onClick={() => setSidebarOpen((o) => !o)} aria-label="Toggle filters">
+						<span className="filter-toggle-icon">
+							<span className="filter-toggle-bar" />
+							<span className="filter-toggle-bar" />
+							<span className="filter-toggle-bar" />
+						</span>
 						Filters
 						{hasActiveFilters && <span className="filter-active-dot" />}
 					</button>
-				</div>
+					</div>
 
-				<p className="catalog-disclaimer">
-					Course cards currently use TRACE aggregate data only.
+					<p className="catalog-disclaimer">
+						Courses without any rating data are not shown.{' '}
+						<span>They may still have a page if found via search.</span>
 					</p>
 
 					{loading ? (
-						<div className="catalog-grid courses-grid">
+						<div className="catalog-grid" ref={gridRef}>
 							{Array.from({ length: pageSize }).map((_, i) => (
 								<div key={i} className="prof-card skeleton" />
 							))}
 						</div>
-					) : courses.length === 0 ? (
+					) : courses.filter((c) => c.avgRating != null).length === 0 ? (
 						<div className="catalog-empty">
 							<p>No courses match your filters.</p>
 							<button className="clear-btn prominent" onClick={clearFilters}>
@@ -407,8 +466,8 @@ export default function Courses() {
 							</button>
 						</div>
 					) : (
-						<div className="catalog-grid courses-grid">
-							{courses.map((course) => (
+						<div className="catalog-grid" ref={gridRef}>
+							{courses.filter((c) => c.avgRating != null).map((course) => (
 								<div
 									key={course.code}
 									className="prof-card course-card"
@@ -417,16 +476,18 @@ export default function Courses() {
 									onClick={() => navigate(`/courses/${course.code.toLowerCase()}`)}
 									onKeyDown={(e) => e.key === 'Enter' && navigate(`/courses/${course.code.toLowerCase()}`)}
 								>
+									<div className="course-card-header">
+										<span className="course-card-code">{course.code}</span>
+									</div>
 									<div className="prof-body">
-										<div className="course-code">{course.code}</div>
 										<h3 className="prof-name">{course.name}</h3>
 										<p className="prof-dept">{course.department}</p>
 
 										<div className="prof-rating-row">
 											{course.avgRating != null ? (
 												<>
+													<span className="prof-avg-num">{course.avgRating.toFixed(2)}</span>
 													<StarRating rating={course.avgRating} size="sm" />
-													<span className="prof-avg">{course.avgRating.toFixed(2)}</span>
 												</>
 											) : (
 												<span className="prof-avg na">N/A</span>
@@ -511,37 +572,38 @@ function DepartmentFilter({
 	departments,
 	selected,
 	onSelect,
+	onOpenChange,
 }: {
 	departments: string[];
 	selected: string;
 	onSelect: (dept: string) => void;
+	onOpenChange?: (open: boolean) => void;
 }) {
 	const [open, setOpen] = useState(false);
+	const toggle = (o: boolean) => { setOpen(o); onOpenChange?.(o); };
 	const [search, setSearch] = useState('');
 	const ref = useRef<HTMLDivElement>(null);
-	const triggerRef = useRef<HTMLButtonElement>(null);
-	const dropdownRef = useRef<HTMLDivElement>(null);
-	const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
-	const selectedSet = useMemo(() => new Set(selected ? selected.split(',') : []), [selected]);
 	const filtered = departments.filter((d) => d.toLowerCase().includes(search.toLowerCase()));
-
-	useLayoutEffect(() => {
-		if (open && triggerRef.current) {
-			const r = triggerRef.current.getBoundingClientRect();
-			setDropdownPos({ top: r.bottom + 4, left: r.left, width: r.width });
-		}
-	}, [open]);
+	const selectedSet = useMemo(() => new Set(selected ? selected.split(',') : []), [selected]);
 
 	useEffect(() => {
 		if (!open) return;
 		const handler = (e: MouseEvent) => {
-			if (
-				ref.current && !ref.current.contains(e.target as Node) &&
-				dropdownRef.current && !dropdownRef.current.contains(e.target as Node)
-			) setOpen(false);
+			if (ref.current && !ref.current.contains(e.target as Node)) toggle(false);
 		};
+		const scrollHandler = (e: Event) => {
+			if (ref.current && ref.current.contains(e.target as Node)) return;
+			toggle(false);
+		};
+		const closeHandler = () => toggle(false);
 		document.addEventListener('mousedown', handler);
-		return () => document.removeEventListener('mousedown', handler);
+		document.addEventListener('scroll', scrollHandler, { capture: true, passive: true });
+		window.addEventListener('close-filter-sidebar', closeHandler);
+		return () => {
+			document.removeEventListener('mousedown', handler);
+			document.removeEventListener('scroll', scrollHandler, { capture: true });
+			window.removeEventListener('close-filter-sidebar', closeHandler);
+		};
 	}, [open]);
 
 	const toggleDept = (d: string) => {
@@ -560,58 +622,51 @@ function DepartmentFilter({
 
 	return (
 		<div className="dept-filter" ref={ref}>
-			<div className="dept-filter-trigger">
-				<button
-					ref={triggerRef}
-					className={`dept-toggle ${open ? 'open' : ''}`}
-					onClick={() => setOpen((o) => !o)}
-					aria-expanded={open}
-				>
-					<span className="dept-toggle-label">{label}</span>
-					<span className="dept-toggle-icon">
-						<span className="dept-bar" />
-						<span className="dept-bar" />
-						<span className="dept-bar" />
-					</span>
-				</button>
+			<button
+				className={`dept-toggle ${open ? 'open' : ''}`}
+				onClick={() => toggle(!open)}
+				aria-expanded={open}
+			>
+				<span className="dept-toggle-label">{label}</span>
+				<span className="dept-toggle-icon">
+					<span className="dept-bar" />
+					<span className="dept-bar" />
+					<span className="dept-bar" />
+				</span>
+			</button>
 
-				{open && createPortal(
-					<div
-						ref={dropdownRef}
-						className="dept-dropdown"
-						style={{ top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width }}
-					>
-						<input
-							className="dept-search"
-							type="text"
-							placeholder="Search departments…"
-							value={search}
-							onChange={(e) => setSearch(e.target.value)}
-							autoFocus
-						/>
-						<div className="dept-list">
-							{filtered.map((d) => (
-								<label key={d} className="dept-option">
-									<input
-										type="checkbox"
-										checked={selectedSet.has(d)}
-										onChange={() => toggleDept(d)}
-									/>
-									<span>{d}</span>
-								</label>
-							))}
-							{filtered.length === 0 && <p className="dept-empty">No departments found</p>}
-						</div>
-					</div>,
-					document.body
-				)}
-			</div>
+			{open && (
+				<div className="dept-dropdown">
+					<input
+						className="dept-search"
+						type="text"
+						placeholder="Search departments…"
+						value={search}
+						onChange={(e) => setSearch(e.target.value)}
+						autoFocus
+					/>
+					<div className="dept-list">
+						{filtered.map((d) => (
+							<label key={d} className="dept-option">
+								<input
+									type="checkbox"
+									checked={selectedSet.has(d)}
+									onChange={() => toggleDept(d)}
+								/>
+								<span>{d}</span>
+							</label>
+						))}
+						{filtered.length === 0 && <p className="dept-empty">No departments found</p>}
+					</div>
+				</div>
+			)}
 
-			{selectedSet.size > 0 && (
+			{!open && selectedSet.size > 0 && (
 				<div className="filter-tags">
 					{[...selectedSet].map((d) => (
 						<button key={d} className="filter-tag" onClick={() => toggleDept(d)}>
-							{d} <span className="filter-tag-x">×</span>
+							{d}
+							<span className="filter-tag-x">×</span>
 						</button>
 					))}
 				</div>

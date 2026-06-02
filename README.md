@@ -1,5 +1,7 @@
 # RateMyHusky
 
+**https://ratemyhusky.com/**
+
 RateMyHusky is a full-stack web app for discovering, searching, and comparing Northeastern University professors.
 
 It combines:
@@ -10,12 +12,15 @@ It combines:
 ## Features
 
 - Professor catalog with filters for college, department, ratings, and review volume
-- Professor profile pages with RMP ratings, TRACE scores, comments, and related courses
+- Professor profile pages with RMP ratings, TRACE scores, rating history, comments, and related courses
+- Course catalog with filters and course detail pages showing sections, ratings, and linked professors
 - Side-by-side professor comparison view
+- GOATED professors leaderboard by college on the homepage
 - Search with autocomplete for professors and courses
-- Shuffle/random discovery experience
+- Shuffle wheel for random professor discovery
+- Breadcrumb navigation across pages
 - Google OAuth sign-in flow for gated functionality
-- Responsive UI with theme support
+- Dark mode toggle and responsive UI
 
 ## Tech Stack
 
@@ -26,6 +31,8 @@ It combines:
 | Auth | Google OAuth 2.0, JWT (PyJWT) |
 | Database | CockroachDB (via psycopg2) |
 | Data ingestion | CSV-based scraper outputs + migration scripts |
+| Frontend hosting | Vercel |
+| Backend hosting | Railway |
 
 ## Prerequisites
 
@@ -36,11 +43,12 @@ It combines:
 
 ## Quick Start
 
-1. Install backend dependencies.
-2. Configure backend environment variables.
-3. Start backend API server.
-4. Install frontend dependencies.
-5. Start frontend dev server.
+1. Unzip `trace_comments.zip` into `backend/Better_Scraper/output_data/`.
+2. Install backend dependencies.
+3. Configure backend environment variables.
+4. Start backend API server.
+5. Install frontend dependencies.
+6. Start frontend dev server.
 
 Detailed commands are below.
 
@@ -87,12 +95,18 @@ Frontend default: http://localhost:5173
 
 The frontend calls the backend API on port 5001 in local development.
 
-## Data Notes
+## Data Setup
 
+**Required:** Unzip `trace_comments.zip` before running any scraper or migration workflows:
+
+```bash
+unzip trace_comments.zip -d backend/Better_Scraper/output_data/
+```
+
+Additional notes:
 - Scraper files are in backend/Better_Scraper.
 - CSV outputs are stored in backend/Better_Scraper/output_data.
 - The backend runtime serves data from CockroachDB, so CSV files are for ingestion/migration workflows.
-- If you are running scraper workflows that depend on TRACE comments, unzip trace_comments.zip into backend/Better_Scraper/output_data.
 
 ## Project Structure
 
@@ -112,6 +126,7 @@ The frontend calls the backend API on port 5001 in local development.
 │       ├── components/
 │       ├── context/
 │       └── pages/
+│                             
 └── README.md
 ```
 

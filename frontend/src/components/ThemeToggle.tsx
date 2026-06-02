@@ -6,15 +6,36 @@ const ThemeToggle = () => {
     return localStorage.getItem('theme') === 'dark';
   });
 
+  // Apply theme and notify other components
+  const applyTheme = (dark: boolean) => {
+    document.documentElement.classList.toggle('dark', dark);
+    localStorage.setItem('theme', dark ? 'dark' : 'light');
+    // Update mobile browser chrome color
+    const color = dark ? '#1a1a1a' : '#ffffff';
+    document.querySelectorAll('meta[name="theme-color"]').forEach(m => {
+      (m as HTMLMetaElement).content = color;
+    });
+    window.dispatchEvent(new CustomEvent('themechange', { detail: { isDark: dark } }));
+  };
+
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', isDark);
-    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+    applyTheme(isDark);
   }, [isDark]);
+
+  // Sync with Navbar or other theme togglers
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const dark = (e as CustomEvent<{ isDark: boolean }>).detail.isDark;
+      setIsDark(dark);
+    };
+    window.addEventListener('themechange', handler);
+    return () => window.removeEventListener('themechange', handler);
+  }, []);
 
   return (
     <button
       className="theme-toggle"
-      onClick={() => setIsDark(!isDark)}
+      onClick={() => setIsDark(prev => !prev)}
       aria-label="Toggle dark mode"
     >
       {isDark ? (

@@ -7,8 +7,13 @@ import Dropdown from '../components/Dropdown';
 import StarRating from '../components/StarRating';
 import RatingBar from '../components/RatingBar';
 import Breadcrumbs from '../components/Breadcrumbs';
-import { fetchProfessorData } from '../api/api';
+import {
+  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+  ResponsiveContainer, Legend, Tooltip as RechartsTooltip,
+} from 'recharts';
+import { fetchProfessorFull } from '../api/api';
 import type { ProfessorProfile, ProfessorReview, TraceComment } from '../api/api';
+import { termSortKey } from '../utils/termUtils';
 import { useAuth } from '../context/AuthContext';
 import SignInModal from '../components/SignInModal';
 import neuIcon from '../assets/neu-circle-icon.png';
@@ -66,6 +71,41 @@ const AnimatedNumber = ({
   return <span ref={ref}>{display}</span>;
 };
 
+/* ───────── term collapse chevron ───────── */
+const TermCollapseChevron = () => {
+  const ref = useRef<SVGSVGElement>(null);
+  const [hasLeftSibling, setHasLeftSibling] = useState(false);
+
+  useLayoutEffect(() => {
+    const svg = ref.current;
+    if (!svg) return;
+    const wrapper = svg.parentElement;
+    if (!wrapper) return;
+    const check = () => {
+      const prev = wrapper.previousElementSibling as HTMLElement | null;
+      if (prev) {
+        const wTop = wrapper.getBoundingClientRect().top;
+        const prevTop = prev.getBoundingClientRect().top;
+        setHasLeftSibling(Math.abs(prevTop - wTop) < 5);
+      } else {
+        setHasLeftSibling(false);
+      }
+    };
+    check();
+    const frame = requestAnimationFrame(check);
+    const container = wrapper.parentElement;
+    const ro = container ? new ResizeObserver(check) : null;
+    if (container && ro) ro.observe(container);
+    return () => { ro?.disconnect(); cancelAnimationFrame(frame); };
+  });
+
+  return hasLeftSibling ? (
+    <svg ref={ref} className="prof-term-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+  ) : (
+    <svg ref={ref} className="prof-term-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15" /></svg>
+  );
+};
+
 /* ───────── sort / filter options ───────── */
 const sortOptions = [
   { value: 'newest', label: 'Newest First' },
@@ -77,17 +117,21 @@ const sortOptions = [
 const traceSortOptions = [
   { value: 'popular', label: 'Most Popular' },
   { value: 'newest', label: 'Most Recent' },
-  { value: 'alphabetical', label: 'A-Z' },
 ];
 
 // Strictly extract "Season Year" from messy term titles
 const cleanTerm = (t: string): string => {
+  // Match terms like "Fall 2025", "Fall A 2025", "Summer 2 2025"
+  const fullMatch = t.match(/(Spring|Fall|Summer|Winter)\s*([A-Z]|\d)?\s*(20\d{2})/i);
+  if (fullMatch) {
+    const season = fullMatch[1].charAt(0).toUpperCase() + fullMatch[1].slice(1).toLowerCase();
+    const modifier = (fullMatch[2] ?? '').trim();
+    const year = fullMatch[3];
+    return modifier ? `${season} ${modifier} ${year}` : `${season} ${year}`;
+  }
   const seasonMatch = t.match(/(Spring|Fall|Summer|Winter)/i);
   if (!seasonMatch) return t.trim();
   const season = seasonMatch[1].charAt(0).toUpperCase() + seasonMatch[1].slice(1).toLowerCase();
-  // Try standard 4-digit year first (e.g. "Fall 2019")
-  const yearMatch = t.match(/\b(20\d{2})\b/);
-  if (yearMatch) return `${season} ${yearMatch[1]}`;
   // Fallback: extract year from 6-digit term codes like "202130" → "2021"
   const termCodeMatch = t.match(/(20\d{2})\d{2}/);
   if (termCodeMatch) return `${season} ${termCodeMatch[1]}`;
@@ -164,6 +208,7 @@ const Professor = () => {
   const [reviews, setReviews] = useState<ProfessorReview[]>([]);
   const [traceComments, setTraceComments] = useState<TraceComment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [reviewsLoading, setReviewsLoading] = useState(true);
   const [error, setError] = useState('');
   const [reviewTabRestored] = useState(() => sessionStorage.getItem('prof_review_tab') === 'trace');
   const [reviewTab, setReviewTab] = useState<'rmp' | 'trace'>(() => {
@@ -191,6 +236,7 @@ const Professor = () => {
   const COURSES_COLLAPSED_LIMIT = 5;
   const MAX_VISIBLE_TERMS = 3;
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('prof_course_tip_dismissed') !== '1');
 
   /* ── review pill ── */
   const updateReviewPill = useCallback(() => {
@@ -231,7 +277,8 @@ const Professor = () => {
     };
   }, [updateReviewPill, loading]);
 
-  /* ── data loading ── */
+  /* ── profile loading ── */
+  /* ── combined profile + reviews load (single round-trip) ── */
   useEffect(() => {
     if (!slug) {
       setLoading(false);
@@ -240,30 +287,65 @@ const Professor = () => {
     }
     let cancelled = false;
     async function load() {
-      setLoading(true); setError('');
+      setLoading(true); setReviewsLoading(true); setError('');
       try {
-        const data = await fetchProfessorData(slug!);
+        const data = await fetchProfessorFull(slug!);
         if (cancelled) return;
         if (!data) {
           setError('Professor not found.');
-        } else { 
-          setProfile(data); 
-          setReviews(data.reviews || []); 
-          setTraceComments(data.traceComments || []); 
+        } else {
+          setProfile(data);
+          setReviews(data.reviews || []);
+          setTraceComments(data.traceComments || []);
         }
       } catch { if (!cancelled) setError('Failed to load professor data.'); }
-      finally { if (!cancelled) setLoading(false); }
+      finally { if (!cancelled) { setLoading(false); setReviewsLoading(false); } }
     }
     load();
     return () => { cancelled = true; };
+  }, [slug]);
+
+  /* ── re-fetch profile + reviews on auth change ── */
+  const isInitialMount = useRef(true);
+  useEffect(() => {
+    if (isInitialMount.current) { isInitialMount.current = false; return; }
+    if (!slug) return;
+    let cancelled = false;
+    async function loadOnAuthChange() {
+      setReviewsLoading(true);
+      try {
+        const data = await fetchProfessorFull(slug!);
+        if (cancelled) return;
+        if (data) {
+          setProfile(data);
+          setReviews(data.reviews || []);
+          setTraceComments(data.traceComments || []);
+        }
+      } catch { /* non-critical */ }
+      finally { if (!cancelled) setReviewsLoading(false); }
+    }
+    loadOnAuthChange();
+    return () => { cancelled = true; };
   }, [slug, user]);
 
-  /* ── scroll to reviews after sign-in redirect ── */
+  /* ── scroll to reviews after sign-in redirect (mobile: page reload) ── */
   useEffect(() => {
     if (reviewTabRestored && !loading && user && reviewsRef.current) {
       reviewsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, [reviewTabRestored, loading, user]);
+
+  /* ── scroll to reviews after sign-in popup (desktop: no reload) ── */
+  const prevUserRef = useRef<typeof user>(undefined);
+  useEffect(() => {
+    const wasLoggedOut = !prevUserRef.current;
+    prevUserRef.current = user;
+    if (wasLoggedOut && user && sessionStorage.getItem('prof_review_tab') === 'trace') {
+      sessionStorage.removeItem('prof_review_tab');
+      setReviewTab('trace');
+      setTimeout(() => reviewsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+    }
+  }, [user]);
 
   /* ── back to top ── */
   useEffect(() => {
@@ -314,9 +396,18 @@ const Professor = () => {
 
   const hasInitializedSelection = useRef(false);
   useEffect(() => {
-    if (allCourseCodes.length > 0 && !hasInitializedSelection.current) {
+    if (allCourseCodes.length === 0) return;
+    if (!hasInitializedSelection.current) {
       setSelectedCourses(new Set(allCourseCodes));
       hasInitializedSelection.current = true;
+    } else {
+      // Merge any new course codes from reviews into the existing selection
+      setSelectedCourses(prev => {
+        const next = new Set(prev);
+        let changed = false;
+        allCourseCodes.forEach(c => { if (!next.has(c)) { next.add(c); changed = true; } });
+        return changed ? next : prev;
+      });
     }
   }, [allCourseCodes]);
 
@@ -333,32 +424,67 @@ const Professor = () => {
     });
   }, [profile, selectedCourses]);
 
+  /* ── TRACE radar: precomputed by backend for most-recent term ── */
+  const radarData = useMemo(() => {
+    if (!profile?.radarData) return null;
+    const hasData = profile.radarData.some(p => !p.profMissing);
+    return hasData ? profile.radarData : null;
+  }, [profile?.radarData]);
+
+  const radarDomainMin = useMemo(() => {
+    if (!radarData) return 4;
+    const allVals = radarData.flatMap(p => [
+      p.profMissing ? null : p.professor,
+      p.deptMissing ? null : p.department,
+    ]).filter((v): v is number => v !== null && v > 0);
+    const min = allVals.length > 0 ? Math.min(...allVals) : 4;
+    if (min < 3) return 2;
+    if (min < 4) return 3;
+    return 4;
+  }, [radarData]);
+
   const stats = useMemo(() => {
     if (!profile) return null;
 
+    const noneSelected = selectedCourses.size === 0;
     const allSelected = allCourseCodes.length > 0 && selectedCourses.size === allCourseCodes.length;
 
+    if (noneSelected) {
+      return {
+        avgRating: null,
+        rmpRating: null,
+        traceRating: null,
+        difficulty: null,
+        totalRatings: null,
+        wouldTakeAgainPct: profile.wouldTakeAgainPct,
+        hoursPerWeek: null,
+      };
+    }
+
+    if (allSelected) {
+      const traceCompleted = profile.traceRatingCounts
+        ? Object.values(profile.traceRatingCounts).reduce((sum, rc) => sum + (rc.completed || 0), 0)
+        : 0;
+      return {
+        avgRating: profile.avgRating,
+        rmpRating: profile.rmpRating,
+        traceRating: profile.traceRating,
+        difficulty: profile.difficulty ?? 0,
+        totalRatings: filteredRmpReviews.length + traceCompleted,
+        wouldTakeAgainPct: profile.wouldTakeAgainPct,
+        hoursPerWeek: profile.hoursPerWeek,
+      };
+    }
+
+    // Course-filtered: use RMP data for rating/difficulty; fall back to profile-level for TRACE values
     const rmpRating = filteredRmpReviews.length > 0
       ? filteredRmpReviews.reduce((acc, r) => acc + r.quality, 0) / filteredRmpReviews.length
       : null;
-    
-    let traceSum = 0, traceWeight = 0;
-    filteredTraceCourses.forEach(c => {
-      const overall = c.scores.find(s => {
-        const q = s.question.toLowerCase().replace(/\s+/g, ' ');
-        return q === 'overall rating of teaching' || q.includes('overall rating') || q.includes('overall');
-      });
-      if (overall) {
-        const weight = overall.totalResponses ?? overall.completed;
-        if (weight > 0) {
-          traceSum += overall.mean * weight;
-          traceWeight += weight;
-        }
-      }
-    });
+    const rmpDifficulty = filteredRmpReviews.length > 0
+      ? filteredRmpReviews.reduce((acc, r) => acc + r.difficulty, 0) / filteredRmpReviews.length
+      : null;
 
-    const traceRating = traceWeight > 0 ? traceSum / traceWeight : null;
-
+    const traceRating = profile.traceRating;
     let avgRating = 0;
     if (rmpRating !== null && traceRating !== null) {
       avgRating = (rmpRating + traceRating) / 2;
@@ -368,31 +494,50 @@ const Professor = () => {
       avgRating = traceRating;
     }
 
-    if (allSelected) {
-      return {
-        avgRating: profile.avgRating,
-        rmpRating: profile.rmpRating,
-        traceRating: profile.traceRating,
-        difficulty: profile.difficulty ?? 0,
-        totalRatings: profile.totalRatings,
-        wouldTakeAgainPct: profile.wouldTakeAgainPct,
-      };
+    const coursesWithHours = filteredTraceCourses.filter(c => c.hoursPerWeek != null);
+    const filteredHoursPerWeek = coursesWithHours.length > 0
+      ? Math.round(coursesWithHours.reduce((acc, c) => acc + c.hoursPerWeek!, 0) / coursesWithHours.length * 10) / 10
+      : null;
+
+    let traceWeightedSum = 0, traceResponses = 0;
+    for (const c of filteredTraceCourses) {
+      if (c.challengeWeightedSum != null && c.challengeResponses != null) {
+        traceWeightedSum += c.challengeWeightedSum;
+        traceResponses += c.challengeResponses;
+      }
+    }
+    const traceDifficulty = traceResponses > 0 ? traceWeightedSum / traceResponses : null;
+
+    let difficulty: number;
+    if (rmpDifficulty !== null && traceDifficulty !== null) {
+      difficulty = (rmpDifficulty + traceDifficulty) / 2;
+    } else if (rmpDifficulty !== null) {
+      difficulty = rmpDifficulty;
+    } else if (traceDifficulty !== null) {
+      difficulty = traceDifficulty;
+    } else {
+      difficulty = profile.difficulty ?? 0;
     }
 
     return {
       avgRating,
       rmpRating,
       traceRating,
-      difficulty: filteredRmpReviews.length > 0
-        ? filteredRmpReviews.reduce((acc, r) => acc + r.difficulty, 0) / filteredRmpReviews.length
-        : 0,
-      totalRatings: filteredRmpReviews.length + traceWeight,
+      difficulty,
+      totalRatings: filteredRmpReviews.length + (profile.traceRatingCounts
+        ? Array.from(selectedCourses).reduce((sum, code) => sum + (profile.traceRatingCounts![code]?.completed || 0), 0)
+        : 0),
       wouldTakeAgainPct: profile.wouldTakeAgainPct,
+      hoursPerWeek: filteredHoursPerWeek,
     };
   }, [profile, filteredRmpReviews, filteredTraceCourses, allCourseCodes, selectedCourses]);
 
   const ratingDistribution = useMemo(() => {
     const counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+
+    if (selectedCourses.size === 0) {
+      return [5, 4, 3, 2, 1].map(star => ({ star, count: 0 }));
+    }
 
     // RMP
     filteredRmpReviews.forEach(r => {
@@ -402,26 +547,25 @@ const Professor = () => {
       }
     });
 
-    // TRACE
-    filteredTraceCourses.forEach(c => {
-      const overall = c.scores.find(s => {
-        const q = s.question.toLowerCase().replace(/\s+/g, ' ');
-        return q === 'overall rating of teaching' || q.includes('overall rating') || q.includes('overall');
-      });
-      if (overall) {
-        counts[1] += overall.count1 ?? 0;
-        counts[2] += overall.count2 ?? 0;
-        counts[3] += overall.count3 ?? 0;
-        counts[4] += overall.count4 ?? 0;
-        counts[5] += overall.count5 ?? 0;
+    // TRACE — use course-keyed rating counts, filtered by selected courses
+    if (profile?.traceRatingCounts) {
+      for (const code of selectedCourses) {
+        const rc = profile.traceRatingCounts[code];
+        if (rc) {
+          counts[1] += rc.count1;
+          counts[2] += rc.count2;
+          counts[3] += rc.count3;
+          counts[4] += rc.count4;
+          counts[5] += rc.count5;
+        }
       }
-    });
+    }
 
     return [5, 4, 3, 2, 1].map(star => ({
       star,
       count: counts[star as 1 | 2 | 3 | 4 | 5],
     }));
-  }, [filteredRmpReviews, filteredTraceCourses]);
+  }, [filteredRmpReviews, selectedCourses, profile?.traceRatingCounts]);
 
   const maxCount = useMemo(() => Math.max(...ratingDistribution.map(d => d.count), 1), [ratingDistribution]);
 
@@ -477,41 +621,25 @@ const Professor = () => {
     return map;
   }, [profile]);
 
-  // Map courseUrl → course code for TRACE comments
+  // Map courseId → course code for TRACE comments
   const commentCourseMap = useMemo(() => {
-    const map = new Map<string, string>();
+    const map = new Map<number, string>();
     if (!profile?.traceCourses) return map;
 
-    // Build courseId → code lookup
-    const idToCode = new Map<number, string>();
     profile.traceCourses.forEach(c => {
       const m = c.displayName.match(/^([A-Z]+\d+)/i);
       const code = m ? m[1].toUpperCase() : '';
-      if (code) idToCode.set(c.courseId, code);
-    });
-
-    // For each trace comment, extract courseId from URL and map to code
-    traceComments.forEach(c => {
-      if (c.courseUrl) {
-        const spMatches = c.courseUrl.match(/sp=(\d+)/g);
-        if (spMatches && spMatches.length >= 1) {
-          const courseId = parseInt(spMatches[0].replace('sp=', ''));
-          const code = idToCode.get(courseId);
-          if (code) {
-            map.set(c.courseUrl, code);
-          }
-        }
-      }
+      if (code) map.set(c.courseId, code);
     });
 
     return map;
-  }, [profile, traceComments]);
+  }, [profile]);
 
   const groupedTrace = useMemo(() => {
     const groups: Record<string, TraceComment[]> = {};
-    const ids = new Set(filteredTraceCourses.map(c => c.termId));
+    const ids = new Set(filteredTraceCourses.map(c => c.courseId));
     traceComments.forEach(c => {
-      if (ids.has(c.termId)) {
+      if (ids.has(c.courseId)) {
         if (!groups[c.question]) groups[c.question] = [];
         groups[c.question].push(c);
       }
@@ -520,10 +648,11 @@ const Professor = () => {
     for (const q of Object.keys(groups)) {
       groups[q] = deduplicateByText(groups[q], c => c.comment);
     }
+    const termKey = (termId: number) => termSortKey(termIdMap.get(termId) || '');
     const searchLower = traceSearch.toLowerCase();
     return Object.entries(groups).map(([q, cs]) => ({
       question: q,
-      maxTermId: Math.max(...cs.map(c => c.termId || 0)),
+      maxTermSortKey: Math.max(...cs.map(c => termKey(c.termId || 0))),
       count: cs.length,
       comments: [...cs].sort((a, b) => {
         // If searching, boost comments containing the search term
@@ -533,11 +662,11 @@ const Professor = () => {
           if (aMatch && !bMatch) return -1;
           if (!aMatch && bMatch) return 1;
         }
-        if (traceSort === 'newest') return (b.termId || 0) - (a.termId || 0);
+        if (traceSort === 'newest') return termKey(b.termId || 0) - termKey(a.termId || 0);
         return b.comment.length - a.comment.length;
       }),
-    })).filter(g => 
-      !traceSearch || 
+    })).filter(g =>
+      !traceSearch ||
       g.question.toLowerCase().includes(searchLower) ||
       g.comments.some(c => c.comment.toLowerCase().includes(searchLower))
     ).sort((a, b) => {
@@ -547,11 +676,11 @@ const Professor = () => {
         if (aM && !bM) return -1;
         if (!aM && bM) return 1;
       }
-      if (traceSort === 'newest') return b.maxTermId - a.maxTermId;
+      if (traceSort === 'newest') return b.maxTermSortKey - a.maxTermSortKey;
       if (traceSort === 'popular') return b.count - a.count;
       return a.question.localeCompare(b.question);
     });
-  }, [traceComments, traceSearch, traceSort, filteredTraceCourses]);
+  }, [traceComments, traceSearch, traceSort, filteredTraceCourses, termIdMap]);
 
   const toggleCourse = (code: string) => {
     setSelectedCourses(prev => {
@@ -607,13 +736,13 @@ const Professor = () => {
 
   return (
     <div className="prof-page">
-      <Breadcrumbs items={[
-        { label: 'Professors', to: '/professors' },
-        { label: profile.name },
-      ]} />
       <header className="prof-hero">
         <div className="prof-hero-bg" style={{ backgroundImage: `url(${neuIcon})` }} />
         <div className="prof-hero-glow" />
+        <Breadcrumbs items={[
+          { label: 'Professors', to: '/professors' },
+          { label: profile.name },
+        ]} />
         <div className="prof-hero-inner">
           <div
             className={`prof-avatar ${profile.imageUrl ? 'prof-avatar-clickable' : ''}`}
@@ -660,11 +789,11 @@ const Professor = () => {
 
       <section className="prof-stats">
         <div className="prof-stat-card prof-stat-clickable">
-          <span className="prof-stat-value"><AnimatedNumber value={stats.avgRating} /></span>
-          <span className="prof-stat-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+          <span className="prof-stat-value">{stats.avgRating !== null ? <AnimatedNumber value={stats.avgRating} /> : '—'}</span>
+          <span className="prof-stat-label" style={{ display: 'block', textAlign: 'center', position: 'relative' }}>
             Overall Rating
             {(stats.rmpRating !== null || stats.traceRating !== null) && (
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', marginLeft: '4px', opacity: 0.6 }}><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
             )}
           </span>
           <StarRating rating={stats.avgRating ?? 0} size="lg" />
@@ -676,7 +805,7 @@ const Professor = () => {
           )}
         </div>
         <div className="prof-stat-card">
-          <span className="prof-stat-value"><AnimatedNumber value={stats.difficulty} /></span>
+          <span className="prof-stat-value">{stats.difficulty != null && stats.difficulty > 0 ? <AnimatedNumber value={stats.difficulty} /> : '—'}</span>
           <span className="prof-stat-label">Difficulty</span>
           <div className="prof-difficulty-bar">
             <div className="prof-difficulty-fill" style={{ 
@@ -694,13 +823,19 @@ const Professor = () => {
           </div>
         </div>
         <div className="prof-stat-card">
-          <span className="prof-stat-value green">
+          <span className={`prof-stat-value ${stats.wouldTakeAgainPct !== null ? 'green' : ''}`}>
             {stats.wouldTakeAgainPct !== null ? <AnimatedNumber value={stats.wouldTakeAgainPct} decimals={0} suffix="%" /> : '—'}
           </span>
           <span className="prof-stat-label">Would Take Again</span>
         </div>
+        <div className="prof-stat-card">
+          <span className="prof-stat-value">
+            {stats.hoursPerWeek !== null && stats.hoursPerWeek !== undefined ? <AnimatedNumber value={stats.hoursPerWeek} decimals={1} suffix="h" /> : '—'}
+          </span>
+          <span className="prof-stat-label">Hrs / Week</span>
+        </div>
         <div className="prof-stat-card prof-stat-clickable" onClick={() => chartsRef.current?.scrollIntoView({ behavior: 'smooth' })}>
-          <span className="prof-stat-value">{stats.totalRatings.toLocaleString()}</span>
+          <span className="prof-stat-value">{stats.totalRatings ? stats.totalRatings.toLocaleString() : '—'}</span>
           <span className="prof-stat-label">Total Ratings</span>
           <span className="prof-stat-hint">View distribution ↓</span>
         </div>
@@ -752,6 +887,129 @@ const Professor = () => {
         )}
       </section>
 
+      {!user && (profile?.traceCourses?.length ?? 0) > 0 && (
+        <section className="prof-radar-section">
+          <div className="prof-radar-header">
+            <h2 className="prof-section-title">TRACE In-Depth Evaluation</h2>
+          </div>
+          <div className="prof-trace-paywall">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="paywall-lock-icon">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            <p>Sign in with your <span className="husky-email">husky.neu.edu</span> account to view the full radar breakdown.</p>
+            <button className="paywall-signin-btn" onClick={() => { sessionStorage.setItem('prof_review_tab', 'trace'); setShowSignIn(true); }}>Sign In</button>
+          </div>
+        </section>
+      )}
+
+      {radarData && user && (
+        <section className="prof-radar-section">
+          <div className="prof-radar-header">
+            <h2 className="prof-section-title">TRACE In-Depth Evaluation</h2>
+            {profile?.radarTermTitle && (
+              <span className="prof-radar-term">{cleanTerm(profile.radarTermTitle)}</span>
+            )}
+          </div>
+          <p className="prof-radar-subtitle">
+            How this professor scores across key teaching dimensions compared to their department.
+          </p>
+          <div className="prof-radar-charts">
+            <ResponsiveContainer width="100%" height={340}>
+              <RadarChart
+                data={radarData}
+                margin={{ top: 20, right: 40, bottom: 20, left: 40 }}
+              >
+                <PolarGrid stroke="var(--radar-grid, #e0e0e0)" />
+                <PolarAngleAxis
+                  dataKey="metric"
+                  tick={(props: any) => {
+                    const { x, y, cy, payload, textAnchor } = props;
+                    const point = radarData?.find(p => p.metric === payload.value);
+                    const rating = point && !point.profMissing ? point.professor.toFixed(2) : null;
+                    // Shift the whole label up when it's above center; extra offset for the topmost label
+                    const isTop = y < cy;
+                    const adjustedY = rating && isTop ? y - (payload.value === 'Teaching' ? 22 : 10) : y;
+                    return (
+                      <text x={x} y={adjustedY} textAnchor={textAnchor} fill="var(--radar-label, #555)" fontFamily="Nunito, sans-serif">
+                        <tspan x={x} fontSize={12} fontWeight={600}>{payload.value}</tspan>
+                        {rating && (
+                          <tspan x={x} dy={15} fontSize={11} fontWeight={400} fill="var(--radar-label, #777)">{rating} / 5.0</tspan>
+                        )}
+                      </text>
+                    );
+                  }}
+                />
+                <PolarRadiusAxis
+                  domain={[radarDomainMin, 5]}
+                  tick={(props: any) => {
+                    const { x, y, payload } = props;
+                    return (
+                      <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={600} fontFamily="Nunito, sans-serif" fill="#444" stroke="#fff" strokeWidth={2} paintOrder="stroke">{payload.value}</text>
+                    );
+                  }}
+                  axisLine={false}
+                  ticks={radarDomainMin === 2 ? [2, 3, 4, 5] : radarDomainMin === 3 ? [3, 4, 5] : [4, 5]}
+                  angle={90}
+                />
+                <RechartsTooltip
+                  contentStyle={{
+                    background: 'var(--radar-tooltip-bg, #fff)',
+                    border: '1px solid var(--radar-tooltip-border, #e0e0e0)',
+                    borderRadius: 8,
+                    fontSize: 13,
+                    color: 'var(--radar-tooltip-text, #333)',
+                    fontFamily: 'Nunito, sans-serif',
+                  }}
+                  formatter={(value, name) =>
+                    typeof value === 'number' && value > 0 ? [`${value.toFixed(2)} / 5`, String(name)] : ['N/A', String(name)]
+                  }
+                />
+                <Legend
+                  wrapperStyle={{ fontFamily: 'Nunito, sans-serif', fontSize: 13, fontWeight: 700, paddingTop: 8 }}
+                />
+                {/* Professor — red, rendered first (behind) */}
+                <Radar
+                  name="This Professor"
+                  dataKey="professor"
+                  stroke="#d6394c"
+                  fill="#d6394c"
+                  fillOpacity={0.35}
+                  strokeWidth={2}
+                  dot={{ r: 3, fill: '#d6394c', strokeWidth: 0 }}
+                />
+                {/* Department average — gray, rendered on top */}
+                {radarData && radarData.some(p => !p.deptMissing) && (
+                  <Radar
+                    name="Dept. Average"
+                    dataKey="department"
+                    stroke="#888"
+                    fill="#888"
+                    fillOpacity={0.45}
+                    strokeWidth={2}
+                    dot={{ r: 3, fill: '#888', strokeWidth: 0 }}
+                  />
+                )}
+              </RadarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="prof-radar-legend-labels">
+            {([
+              { short: 'Teaching', desc: 'Overall teaching effectiveness & clear communication' },
+              { short: 'Organization', desc: 'Course materials, syllabus accuracy & time usage' },
+              { short: 'Rigor', desc: 'Intellectual challenge & how much students learned' },
+              { short: 'Grading', desc: 'Fair evaluation & quality of feedback' },
+              { short: 'Accessibility', desc: 'Office hours availability & inclusive environment' },
+            ] as const).map(m => (
+              <div key={m.short} className="prof-radar-metric-info">
+                <span className="prof-radar-metric-name">{m.short}</span>
+                <span className="prof-radar-metric-desc">{m.desc}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {isImageModalOpen && profile.imageUrl && (
         <div className="prof-image-modal-overlay" onClick={() => setIsImageModalOpen(false)}>
           <div className="prof-image-modal" onClick={(e) => e.stopPropagation()}>
@@ -779,7 +1037,29 @@ const Professor = () => {
           const code = getFormattedCourseCode(r.course).toUpperCase();
           if (code && !grouped.has(code)) grouped.set(code, []);
         });
-        const sorted = Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b));
+        // Build a map of course code -> most recent review date
+        const recentReviewDate = new Map<string, number>();
+        reviews.forEach(r => {
+          const code = getFormattedCourseCode(r.course).toUpperCase();
+          if (code && r.date) {
+            const ts = new Date(r.date).getTime();
+            if (!recentReviewDate.has(code) || ts > recentReviewDate.get(code)!) {
+              recentReviewDate.set(code, ts);
+            }
+          }
+        });
+        const sorted = Array.from(grouped.entries()).sort(([a, secA], [b, secB]) => {
+          // Primary: most recent review date (descending)
+          const reviewA = recentReviewDate.get(a) || 0;
+          const reviewB = recentReviewDate.get(b) || 0;
+          if (reviewA !== reviewB) return reviewB - reviewA;
+          // Secondary: most recent term from trace data (descending by proper chronological order)
+          const termA = secA.length > 0 ? Math.max(...secA.map(s => termSortKey(s.termTitle))) : 0;
+          const termB = secB.length > 0 ? Math.max(...secB.map(s => termSortKey(s.termTitle))) : 0;
+          if (termA !== termB) return termB - termA;
+          // Tertiary: alphabetical
+          return a.localeCompare(b);
+        });
         return (
           <section className="prof-section">
             <div className="prof-section-header">
@@ -793,15 +1073,7 @@ const Professor = () => {
               {sorted.slice(0, COURSES_COLLAPSED_LIMIT).map(([code, sections]) => {
                 const nameMatch = sections[0]?.displayName.match(/\((.+?)\)/);
                 const courseName = nameMatch ? nameMatch[1] : '';
-                const terms = [...new Set(sections.map(s => cleanTerm(s.termTitle)))].filter(t => /\b20\d{2}\b/.test(t)).sort((a, b) => {
-                  const yA = parseInt(a.match(/\d{4}/)?.[0] || '0');
-                  const yB = parseInt(b.match(/\d{4}/)?.[0] || '0');
-                  if (yA !== yB) return yB - yA;
-                  const order: Record<string, number> = { Spring: 1, Summer: 2, Fall: 3, Winter: 4 };
-                  const seasonA = a.split(' ')[0];
-                  const seasonB = b.split(' ')[0];
-                  return (order[seasonB] || 0) - (order[seasonA] || 0);
-                });
+                const terms = [...new Set(sections.map(s => cleanTerm(s.termTitle)))].filter(t => /\b20\d{2}\b/.test(t)).sort((a, b) => termSortKey(b) - termSortKey(a));
                 const termsExpanded = expandedTerms.has(code);
                 const hiddenTermCount = terms.length - MAX_VISIBLE_TERMS;
                 const isSelected = selectedCourses.has(code);
@@ -818,40 +1090,54 @@ const Professor = () => {
                         {sections.length > 0 ? `${sections.length} section${sections.length > 1 ? 's' : ''}` : 'RMP reviews only'}
                       </span>
                     </div>
-                    {terms.length > 0 && (
-                      <div className="prof-course-term-tags">
-                        {terms.slice(0, MAX_VISIBLE_TERMS).map(t => <span key={t} className="prof-course-term-tag">{t}</span>)}
-                        {hiddenTermCount > 0 && !termsExpanded && !closingTerms.has(code) && (
-                          <span
-                            className="prof-course-term-tag prof-course-term-more"
-                            onClick={(e) => { e.stopPropagation(); setExpandedTerms(prev => { const next = new Set(prev); next.add(code); return next; }); }}
+                    <div className="prof-course-lower">
+                      {terms.length > 0 && (
+                        <div className="prof-course-term-tags">
+                          {terms.slice(0, MAX_VISIBLE_TERMS).map(t => <span key={t} className="prof-course-term-tag">{t}</span>)}
+                          {hiddenTermCount > 0 && !termsExpanded && !closingTerms.has(code) && (
+                            <span
+                              className="prof-course-term-tag prof-course-term-more"
+                              onClick={(e) => { e.stopPropagation(); setExpandedTerms(prev => { const next = new Set(prev); next.add(code); return next; }); }}
+                            >
+                              +{hiddenTermCount} more
+                            </span>
+                          )}
+                          {terms.slice(MAX_VISIBLE_TERMS).map((t, i) => {
+                            const isClosing = closingTerms.has(code);
+                            const reverseI = hiddenTermCount - 1 - i;
+                            return <span key={t} className={`prof-course-term-tag prof-course-term-hidden ${termsExpanded || isClosing ? 'visible' : ''} ${isClosing ? 'closing' : ''}`} style={isClosing ? { animationDelay: `${reverseI * 0.04}s` } : termsExpanded ? { animationDelay: `${i * 0.04}s` } : undefined}>{t}</span>;
+                          })}
+                          {hiddenTermCount > 0 && (termsExpanded || closingTerms.has(code)) && (
+                            <span
+                              className={`prof-course-term-tag prof-course-term-more ${closingTerms.has(code) ? 'closing' : ''}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (closingTerms.has(code)) return;
+                                setClosingTerms(prev => { const next = new Set(prev); next.add(code); return next; });
+                                setTimeout(() => {
+                                  setExpandedTerms(prev => { const next = new Set(prev); next.delete(code); return next; });
+                                  setClosingTerms(prev => { const next = new Set(prev); next.delete(code); return next; });
+                                }, hiddenTermCount * 40 + 200);
+                              }}
+                            >
+                              <TermCollapseChevron />
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {sections.length > 0 && (
+                        <div className="prof-course-view">
+                          <Link
+                            to={`/courses/${code.toLowerCase()}`}
+                            state={{ fromPage: { label: profile.name, url: `/professors/${slug}` } }}
+                            className="prof-course-view-btn"
+                            onClick={(e) => e.stopPropagation()}
                           >
-                            +{hiddenTermCount} more
-                          </span>
-                        )}
-                        {terms.slice(MAX_VISIBLE_TERMS).map((t, i) => {
-                          const isClosing = closingTerms.has(code);
-                          const reverseI = hiddenTermCount - 1 - i;
-                          return <span key={t} className={`prof-course-term-tag prof-course-term-hidden ${termsExpanded || isClosing ? 'visible' : ''} ${isClosing ? 'closing' : ''}`} style={isClosing ? { animationDelay: `${reverseI * 0.04}s` } : termsExpanded ? { animationDelay: `${i * 0.04}s` } : undefined}>{t}</span>;
-                        })}
-                        {hiddenTermCount > 0 && (termsExpanded || closingTerms.has(code)) && (
-                          <span
-                            className={`prof-course-term-tag prof-course-term-more ${closingTerms.has(code) ? 'closing' : ''}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (closingTerms.has(code)) return;
-                              setClosingTerms(prev => { const next = new Set(prev); next.add(code); return next; });
-                              setTimeout(() => {
-                                setExpandedTerms(prev => { const next = new Set(prev); next.delete(code); return next; });
-                                setClosingTerms(prev => { const next = new Set(prev); next.delete(code); return next; });
-                              }, hiddenTermCount * 40 + 200);
-                            }}
-                          >
-                            <svg className="prof-term-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15" /></svg>
-                          </span>
-                        )}
-                      </div>
-                    )}
+                            View Course
+                          </Link>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -861,15 +1147,7 @@ const Professor = () => {
                     <div>{sorted.slice(COURSES_COLLAPSED_LIMIT).map(([code, sections]) => {
                       const nameMatch = sections[0]?.displayName.match(/\((.+?)\)/);
                       const courseName = nameMatch ? nameMatch[1] : '';
-                      const terms = [...new Set(sections.map(s => cleanTerm(s.termTitle)))].filter(t => /\b20\d{2}\b/.test(t)).sort((a, b) => {
-                        const yA = parseInt(a.match(/\d{4}/)?.[0] || '0');
-                        const yB = parseInt(b.match(/\d{4}/)?.[0] || '0');
-                        if (yA !== yB) return yB - yA;
-                        const order: Record<string, number> = { Spring: 1, Summer: 2, Fall: 3, Winter: 4 };
-                        const seasonA = a.split(' ')[0];
-                        const seasonB = b.split(' ')[0];
-                        return (order[seasonB] || 0) - (order[seasonA] || 0);
-                      });
+                      const terms = [...new Set(sections.map(s => cleanTerm(s.termTitle)))].filter(t => /\b20\d{2}\b/.test(t)).sort((a, b) => termSortKey(b) - termSortKey(a));
                       const termsExpanded = expandedTerms.has(code);
                             const hiddenTermCount = terms.length - MAX_VISIBLE_TERMS;
                       const isSelected = selectedCourses.has(code);
@@ -886,40 +1164,54 @@ const Professor = () => {
                               {sections.length > 0 ? `${sections.length} section${sections.length > 1 ? 's' : ''}` : 'RMP reviews only'}
                             </span>
                           </div>
-                          {terms.length > 0 && (
-                            <div className="prof-course-term-tags">
-                              {terms.slice(0, MAX_VISIBLE_TERMS).map(t => <span key={t} className="prof-course-term-tag">{t}</span>)}
-                              {hiddenTermCount > 0 && !termsExpanded && !closingTerms.has(code) && (
-                                <span
-                                  className="prof-course-term-tag prof-course-term-more"
-                                  onClick={(e) => { e.stopPropagation(); setExpandedTerms(prev => { const next = new Set(prev); next.add(code); return next; }); }}
+                          <div className="prof-course-lower">
+                            {terms.length > 0 && (
+                              <div className="prof-course-term-tags">
+                                {terms.slice(0, MAX_VISIBLE_TERMS).map(t => <span key={t} className="prof-course-term-tag">{t}</span>)}
+                                {hiddenTermCount > 0 && !termsExpanded && !closingTerms.has(code) && (
+                                  <span
+                                    className="prof-course-term-tag prof-course-term-more"
+                                    onClick={(e) => { e.stopPropagation(); setExpandedTerms(prev => { const next = new Set(prev); next.add(code); return next; }); }}
+                                  >
+                                    +{hiddenTermCount} more
+                                  </span>
+                                )}
+                                {terms.slice(MAX_VISIBLE_TERMS).map((t, i) => {
+                                  const isClosing = closingTerms.has(code);
+                                  const reverseI = hiddenTermCount - 1 - i;
+                                  return <span key={t} className={`prof-course-term-tag prof-course-term-hidden ${termsExpanded || isClosing ? 'visible' : ''} ${isClosing ? 'closing' : ''}`} style={isClosing ? { animationDelay: `${reverseI * 0.04}s` } : termsExpanded ? { animationDelay: `${i * 0.04}s` } : undefined}>{t}</span>;
+                                })}
+                                {hiddenTermCount > 0 && (termsExpanded || closingTerms.has(code)) && (
+                                  <span
+                                    className={`prof-course-term-tag prof-course-term-more ${closingTerms.has(code) ? 'closing' : ''}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (closingTerms.has(code)) return;
+                                      setClosingTerms(prev => { const next = new Set(prev); next.add(code); return next; });
+                                      setTimeout(() => {
+                                        setExpandedTerms(prev => { const next = new Set(prev); next.delete(code); return next; });
+                                        setClosingTerms(prev => { const next = new Set(prev); next.delete(code); return next; });
+                                      }, hiddenTermCount * 40 + 200);
+                                    }}
+                                  >
+                                    <TermCollapseChevron />
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            {sections.length > 0 && (
+                              <div className="prof-course-view">
+                                <Link
+                                  to={`/courses/${code.toLowerCase()}`}
+                                  state={{ fromPage: { label: profile.name, url: `/professors/${slug}` } }}
+                                  className="prof-course-view-btn"
+                                  onClick={(e) => e.stopPropagation()}
                                 >
-                                  +{hiddenTermCount} more
-                                </span>
-                              )}
-                              {terms.slice(MAX_VISIBLE_TERMS).map((t, i) => {
-                                const isClosing = closingTerms.has(code);
-                                const reverseI = hiddenTermCount - 1 - i;
-                                return <span key={t} className={`prof-course-term-tag prof-course-term-hidden ${termsExpanded || isClosing ? 'visible' : ''} ${isClosing ? 'closing' : ''}`} style={isClosing ? { animationDelay: `${reverseI * 0.04}s` } : termsExpanded ? { animationDelay: `${i * 0.04}s` } : undefined}>{t}</span>;
-                              })}
-                              {hiddenTermCount > 0 && (termsExpanded || closingTerms.has(code)) && (
-                                <span
-                                  className={`prof-course-term-tag prof-course-term-more ${closingTerms.has(code) ? 'closing' : ''}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (closingTerms.has(code)) return;
-                                    setClosingTerms(prev => { const next = new Set(prev); next.add(code); return next; });
-                                    setTimeout(() => {
-                                      setExpandedTerms(prev => { const next = new Set(prev); next.delete(code); return next; });
-                                      setClosingTerms(prev => { const next = new Set(prev); next.delete(code); return next; });
-                                    }, hiddenTermCount * 40 + 200);
-                                  }}
-                                >
-                                  <svg className="prof-term-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15" /></svg>
-                                </span>
-                              )}
-                            </div>
-                          )}
+                                  View Course
+                                </Link>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       );
                     })}</div>
@@ -943,6 +1235,32 @@ const Professor = () => {
         );
       })()}
 
+      {showCourseTip && allCourseCodes.length > 0 && (
+        <div className="prof-course-tip-wrapper">
+          <div className="prof-course-tip">
+            <div className="prof-course-tip-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+            </div>
+            <div className="prof-course-tip-body">
+              <div className="prof-course-tip-label">Tip</div>
+              <p className="prof-course-tip-text">
+                To filter reviews by course, click <strong>Clear All</strong> in the Courses Taught section, then select the course you want to see reviews for.
+              </p>
+            </div>
+            <button className="prof-course-tip-close" onClick={() => { localStorage.setItem('prof_course_tip_dismissed', '1'); setShowCourseTip(false); }} aria-label="Dismiss tip">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
       <section className="prof-section prof-reviews-section" ref={reviewsRef}>
         <div className="prof-reviews-header">
           <h2 className="prof-section-title">Reviews</h2>
@@ -965,7 +1283,13 @@ const Professor = () => {
           </div>
         </div>
 
-        {reviewTab === 'rmp' && (
+        {reviewsLoading && (
+          <div className="prof-loading" style={{ padding: '2rem 0' }}>
+            <div className="prof-loading-spinner" />
+          </div>
+        )}
+
+        {!reviewsLoading && reviewTab === 'rmp' && (
           <>
             <div className="prof-reviews-filters">
               <Dropdown className="feedback-dropdown" options={sortOptions} value={sortBy} onChange={setSortBy} placeholder="Sort by…" />
@@ -1020,7 +1344,7 @@ const Professor = () => {
           </>
         )}
 
-        {reviewTab === 'trace' && (
+        {!reviewsLoading && reviewTab === 'trace' && (
           <div className="prof-trace-container">
             {user && (
               <div className="prof-trace-controls">
@@ -1057,7 +1381,7 @@ const Professor = () => {
                           <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                           <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                         </svg>
-                        <p>Sign in with your <strong>husky.neu.edu</strong> account to read these comments.</p>
+                        <p>Sign in with your <span className="husky-email">husky.neu.edu</span> account to read these comments.</p>
                         <button className="paywall-signin-btn small" onClick={(e) => { e.stopPropagation(); sessionStorage.setItem('prof_review_tab', 'trace'); setShowSignIn(true); }}>Sign In</button>
                       </div>
                     )}
@@ -1070,14 +1394,12 @@ const Professor = () => {
                           return (
                           <div
                             key={ci}
-                            className={`trace-comment-bubble ${c.courseUrl ? 'clickable' : ''}`}
-                            onClick={() => c.courseUrl && window.open(c.courseUrl, '_blank')}
-                            title={c.courseUrl ? "Click to view original TRACE report" : ""}
+                            className="trace-comment-bubble"
                           >
                             <div className="trace-comment-meta">
                               {hasYear && <span className="trace-comment-term">{term}</span>}
                               {(() => {
-                                const courseCode = commentCourseMap.get(c.courseUrl || '') || commentCourseMap.get(String(c.termId)) || '';
+                                const courseCode = commentCourseMap.get(c.courseId) || '';
                                 return courseCode ? <span className="trace-comment-course">{courseCode}</span> : null;
                               })()}
                             </div>

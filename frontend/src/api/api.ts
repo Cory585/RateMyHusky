@@ -12,30 +12,22 @@ export interface Professor {
   rmpRating: number | null;
   traceRating: number | null;
   avgRating: number;
-  rmpReviews: number;
-  traceReviews: number;
-  totalReviews: number;
-  url: string;
+  totalComments?: number;
 }
 
-export interface RandomProfessor extends Professor {
+export interface RandomProfessor {
+  name: string;
+  dept: string;
   college: string;
 }
 
 /* ---- Professor page types ---- */
-export interface TraceCourseScore {
-  question: string;
-  mean: number;
-  median: number;
-  stdDev: number;
-  enrollment: number;
-  completed: number;
-  totalResponses?: number;
-  count1?: number;
-  count2?: number;
-  count3?: number;
-  count4?: number;
-  count5?: number;
+export interface RadarDataPoint {
+  metric: string;
+  professor: number;
+  department: number;
+  profMissing: boolean;
+  deptMissing: boolean;
 }
 
 export interface TraceCourse {
@@ -44,9 +36,19 @@ export interface TraceCourse {
   termTitle: string;
   departmentName: string;
   displayName: string;
-  section: string;
-  enrollment: number;
-  scores: TraceCourseScore[];
+  hoursPerWeek?: number | null;
+  challengeWeightedSum?: number | null;
+  challengeResponses?: number | null;
+  overallRating?: number | null;
+}
+
+export interface TraceRatingCounts {
+  count1: number;
+  count2: number;
+  count3: number;
+  count4: number;
+  count5: number;
+  completed: number;
 }
 
 export interface ProfessorProfile {
@@ -55,21 +57,25 @@ export interface ProfessorProfile {
   rmpRating: number | null;
   traceRating: number | null;
   avgRating: number;
-  numRatings: number;
   wouldTakeAgainPct: number | null;
   difficulty: number | null;
   totalRatings: number;
+  totalComments: number;
   professorUrl: string | null;
   traceCourses: TraceCourse[];
+  imageUrl: string | null;
+  hoursPerWeek: number | null;
+  traceRatingCounts?: Record<string, TraceRatingCounts>;
+  radarData?: RadarDataPoint[] | null;
+  radarTermTitle?: string | null;
+}
+
+export interface ProfessorReviews {
   reviews: ProfessorReview[];
   traceComments: TraceComment[];
-  imageUrl: string | null;
 }
 
 export interface ProfessorReview {
-  professorName: string;
-  department: string;
-  overallRating: number;
   course: string;
   quality: number;
   difficulty: number;
@@ -83,11 +89,19 @@ export interface ProfessorReview {
 }
 
 export interface TraceComment {
-  courseUrl: string;
+  courseId: number;
   question: string;
   comment: string;
   termId: number;
 }
+
+/* ---- Session caches (cleared on page refresh, keyed by slug/code) ---- */
+const _profCache = new Map<string, ProfessorProfile>();
+const _profReviewsCache = new Map<string, ProfessorReviews>();
+const _courseCache = new Map<string, CourseDetail>();
+
+type ProfessorFull = ProfessorProfile & ProfessorReviews;
+const _profFullCache = new Map<string, ProfessorFull>();
 
 /* ---- Fetchers ---- */
 async function get<T>(path: string): Promise<T> {
@@ -96,7 +110,7 @@ async function get<T>(path: string): Promise<T> {
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  const res = await fetch(`${API_BASE}${path}`, { headers });
+  const res = await fetch(`${API_BASE}${path}`, { headers, cache: token ? 'no-cache' : 'default' });
   if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
   return res.json();
 }
@@ -110,10 +124,43 @@ export const fetchGoatProfessors = (college: string, limit = 10) =>
 
 export const fetchRandomProfessor = () => get<RandomProfessor>("/api/random-professor");
 
-/* ---- Professor page fetcher (single call returns everything) ---- */
-export async function fetchProfessorData(slug: string): Promise<ProfessorProfile | null> {
+/* ---- Professor page fetchers ---- */
+export async function fetchProfessorFull(slug: string): Promise<ProfessorFull | null> {
+  const token = localStorage.getItem('auth_token');
+  const reviewsKey = `${slug}:${token ?? 'u'}`;
+  if (_profFullCache.has(reviewsKey)) return _profFullCache.get(reviewsKey)!;
   try {
-    return await get<ProfessorProfile>(`/api/professors/${encodeURIComponent(slug)}`);
+    const data = await get<ProfessorFull>(`/api/professors/${encodeURIComponent(slug)}/full`);
+    _profFullCache.set(reviewsKey, data);
+    _profCache.set(reviewsKey, data);
+    _profReviewsCache.set(reviewsKey, data);
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchProfessorData(slug: string): Promise<ProfessorProfile | null> {
+  const token = localStorage.getItem('auth_token');
+  const key = `${slug}:${token ?? 'u'}`;
+  if (_profCache.has(key)) return _profCache.get(key)!;
+  try {
+    const data = await get<ProfessorProfile>(`/api/professors/${encodeURIComponent(slug)}`);
+    _profCache.set(key, data);
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchProfessorReviews(slug: string): Promise<ProfessorReviews | null> {
+  const token = localStorage.getItem('auth_token');
+  const key = `${slug}:${token ?? 'u'}`;
+  if (_profReviewsCache.has(key)) return _profReviewsCache.get(key)!;
+  try {
+    const data = await get<ProfessorReviews>(`/api/professors/${encodeURIComponent(slug)}/reviews`);
+    _profReviewsCache.set(key, data);
+    return data;
   } catch {
     return null;
   }
@@ -150,6 +197,7 @@ export interface CatalogProfessor {
   rmpRating: number | null;
   traceRating: number | null;
   totalReviews: number;
+  totalComments: number;
   wouldTakeAgainPct: number | null;
   imageUrl: string | null;
 }
@@ -166,12 +214,6 @@ export interface CatalogCourse {
   name: string;
   department: string;
   avgRating: number | null;
-  totalSections: number;
-  totalInstructors: number;
-  totalEnrollment: number;
-  totalResponses: number;
-  latestTermTitle: string;
-  latestTermId: number;
 }
 
 export interface CourseCatalogResponse {
@@ -186,12 +228,8 @@ export interface CourseSummary {
   name: string;
   department: string;
   avgRating: number | null;
-  totalSections: number;
-  totalInstructors: number;
-  totalEnrollment: number;
-  totalResponses: number;
+  avgEnrollment: number | null;
   latestTermTitle: string;
-  latestTermId: number;
 }
 
 export interface CourseInstructorBreakdown {
@@ -201,29 +239,24 @@ export interface CourseInstructorBreakdown {
   difficulty: number | null;
   wouldTakeAgainPct: number | null;
   totalReviews: number;
-  sections: number;
-  totalEnrollment: number;
-  totalResponses: number;
+  totalComments: number;
+  latestTermTitle: string;
   avgRating: number | null;
+  courseAvgDifficulty: number | null;
+  courseAvgHoursPerWeek: number | null;
 }
 
 export interface CourseSection {
-  courseId: number;
-  instructorId: number;
   termId: number;
   termTitle: string;
-  section: string;
   instructor: string;
-  enrollment: number;
   overallRating: number | null;
-  totalResponses: number;
-  completed: number;
+  rmpRating: number | null;
 }
 
 export interface CourseQuestionScore {
   question: string;
   avgRating: number | null;
-  totalResponses: number;
 }
 
 export interface CourseDetail {
@@ -241,7 +274,7 @@ export function fetchProfessorsCatalog(params: {
   maxRating?: number;
   minReviews?: number;
   maxReviews?: number;
-  sort?: 'alpha' | 'rating' | 'reviews';
+  sort?: 'alpha' | 'rating' | 'comments';
   page?: number;
   limit?: number;
 }): Promise<CatalogResponse> {
@@ -287,9 +320,31 @@ export function fetchCoursesCatalog(params: {
   return get<CourseCatalogResponse>(`/api/courses-catalog?${sp.toString()}`);
 }
 
+export async function submitFeedback(payload: {
+  feedbackType: string;
+  description: string;
+  email?: string;
+  turnstileToken?: string;
+}): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `API ${res.status}`);
+  }
+}
+
 export async function fetchCourseData(code: string): Promise<CourseDetail | null> {
+  const token = localStorage.getItem('auth_token');
+  const key = `${code}:${token ?? 'u'}`;
+  if (_courseCache.has(key)) return _courseCache.get(key)!;
   try {
-    return await get<CourseDetail>(`/api/courses/${encodeURIComponent(code)}`);
+    const data = await get<CourseDetail>(`/api/courses/${encodeURIComponent(code)}`);
+    _courseCache.set(key, data);
+    return data;
   } catch {
     return null;
   }

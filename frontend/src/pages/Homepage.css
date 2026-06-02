@@ -81,6 +81,7 @@
   padding: 48px 24px;
   background: #d6394c;
   color: #fff;
+  contain: content;
 }
 
 .stat-item {
@@ -93,6 +94,7 @@
 .stat-value {
   font-size: 2rem;
   font-weight: 900;
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-label {
@@ -237,6 +239,38 @@
   color: #fff !important;
 }
 
+.goat-scroll-wrap {
+  position: relative;
+}
+
+.goat-scroll-wrap::before,
+.goat-scroll-wrap::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 72px;
+  pointer-events: none;
+  z-index: 3;
+  opacity: 0;
+  transition: opacity 0.2s;
+  border-radius: 16px;
+  display: none;
+}
+
+.goat-scroll-wrap::before {
+  left: 0;
+  background: linear-gradient(to right, rgba(255,255,255,0.97) 20%, transparent);
+}
+
+.goat-scroll-wrap::after {
+  right: 0;
+  background: linear-gradient(to left, rgba(255,255,255,0.97) 20%, transparent);
+}
+
+.goat-scroll-wrap.fade-left::before  { opacity: 1; }
+.goat-scroll-wrap.fade-right::after  { opacity: 1; }
+
 .goat-leaderboard {
   background: #fff;
   border-radius: 16px;
@@ -247,50 +281,66 @@
   min-height: 608px; /* header (48px) + 10 rows (56px each) */
 }
 
-.goat-leaderboard.goat-loading .goat-row {
-  opacity: 0.35;
+
+/* ---- skeleton loading rows ---- */
+.goat-skeleton-row {
   pointer-events: none;
-  transition: opacity 0.15s;
 }
 
-.goat-leaderboard.goat-loading::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 28px;
-  height: 28px;
-  border: 3px solid rgba(214, 57, 76, 0.2);
-  border-top-color: #d6394c;
-  border-radius: 50%;
-  animation: goatSpin 0.6s linear infinite;
-  z-index: 10;
+.skeleton-bone {
+  display: inline-block;
+  height: 14px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #e8e8e8 25%, #f5f5f5 50%, #e8e8e8 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.4s ease-in-out infinite;
 }
 
-@keyframes goatSpin {
-  to { transform: translate(-50%, -50%) rotate(360deg); }
+.skeleton-rank { width: 20px; }
+.skeleton-name { width: 70%; }
+.skeleton-dept { width: 60%; }
+.skeleton-rating { width: 50px; }
+.skeleton-reviews { width: 36px; }
+
+@keyframes skeletonShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.dark .skeleton-bone {
+  background: linear-gradient(90deg, #2a2a2a 25%, #333 50%, #2a2a2a 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.4s ease-in-out infinite;
 }
 
 .goat-view-all {
-  display: block;
-  text-align: center;
-  margin-top: 16px;
-  font-size: 0.88rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  margin: 16px auto 0;
+  padding: 8px 22px;
+  font-family: 'Nunito', sans-serif;
+  font-size: 0.84rem;
   font-weight: 700;
   color: #d6394c;
   text-decoration: none;
-  transition: color 0.15s;
+  border: 1.5px solid rgba(214, 57, 76, 0.35);
+  border-radius: 999px;
+  background: transparent;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
 .goat-view-all:hover {
+  background: #fff2f4;
+  border-color: #d6394c;
   color: #b82e3f;
-  text-decoration: underline;
+  text-decoration: none;
 }
 
 .goat-header-row {
   display: grid;
-  grid-template-columns: 60px 2fr 1.5fr 1.5fr 0.8fr;
+  grid-template-columns: 36px 1.6fr 2.2fr 1.4fr 0.7fr;
   align-items: center;
   padding: 0 24px;
   height: 48px;
@@ -303,9 +353,15 @@
   color: #999;
 }
 
+.goat-header-row > span {
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+}
+
 .goat-row {
   display: grid;
-  grid-template-columns: 60px 2fr 1.5fr 1.5fr 0.8fr;
+  grid-template-columns: 36px 1.6fr 2.2fr 1.4fr 0.7fr;
   align-items: center;
   padding: 0 24px;
   height: 56px;
@@ -334,10 +390,10 @@
   font-size: 1.1rem;
   font-weight: 900;
   color: #888;
-  text-align: center;
   display: flex;
   align-items: center;
   justify-content: center;
+  text-align: center;
 }
 
 .goat-top3 .goat-col-rank {
@@ -347,22 +403,32 @@
 .goat-col-name {
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 
 .goat-name-text {
   font-weight: 900;
   font-size: 0.92rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .goat-col-dept {
   font-size: 0.82rem;
   color: #888;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .goat-col-rating {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   padding-right: 24px;
 }
 
@@ -376,7 +442,7 @@
   font-size: 0.85rem;
   color: #888;
   font-weight: 700;
-  padding-left: 8px;
+  text-align: left;
 }
 
 /* ---- partial stars ---- */
@@ -771,10 +837,13 @@
 
 .dark .goat-view-all {
   color: #e06070;
+  border-color: rgba(224, 96, 112, 0.35);
 }
 
 .dark .goat-view-all:hover {
-  color: #d6394c;
+  color: #e06070;
+  background: #3a2328;
+  border-color: #e06070;
 }
 
 .dark .goat-leaderboard {
@@ -782,9 +851,12 @@
   box-shadow: 0 2px 12px rgba(0,0,0,0.2);
 }
 
-.dark .goat-leaderboard.goat-loading::after {
-  border-color: rgba(214, 57, 76, 0.15);
-  border-top-color: #d6394c;
+.dark .goat-scroll-wrap::before {
+  background: linear-gradient(to right, rgba(36,36,36,0.97) 20%, transparent);
+}
+
+.dark .goat-scroll-wrap::after {
+  background: linear-gradient(to left, rgba(36,36,36,0.97) 20%, transparent);
 }
 
 .dark .goat-header-row {
@@ -962,11 +1034,17 @@
   .goat-leaderboard {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    min-height: 548px; /* header (48px) + 10 rows (50px each) */
+  }
+
+  .goat-scroll-wrap::before,
+  .goat-scroll-wrap::after {
+    display: block;
   }
 
   .goat-header-row,
   .goat-row {
-    min-width: 600px;
+    min-width: 660px;
     padding: 0 16px;
     height: 50px;
   }
@@ -978,6 +1056,18 @@
   .goat-tab {
     padding: 6px 14px;
     font-size: 0.78rem;
+  }
+
+  .goat-col-name {
+    padding-left: 6px;
+  }
+
+  .goat-col-dept {
+    padding-left: 12px;
+  }
+
+  .goat-col-reviews {
+    padding-left: 12px;
   }
 
   .goat-name-text {
@@ -1044,9 +1134,13 @@
     font-size: 1.1rem;
   }
 
+  .goat-leaderboard {
+    min-height: 528px; /* header (48px) + 10 rows (48px each) */
+  }
+
   .goat-header-row,
   .goat-row {
-    min-width: 560px;
+    min-width: 620px;
     padding: 0 12px;
     height: 48px;
   }
@@ -1063,12 +1157,19 @@
     font-size: 1.1rem;
   }
 
+  .goat-col-name {
+    padding-left: 6px;
+  }
+
   .goat-col-dept {
     font-size: 0.72rem;
+    padding-left: 12px;
   }
 
   .goat-col-reviews {
     font-size: 0.75rem;
+    text-align: left;
+    padding-left: 12px;
   }
 
   .randomizer-desc {

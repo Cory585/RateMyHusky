@@ -1,5 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, NavLink, useLocation } from 'react-router-dom';
+
 import { useAuth } from '../context/AuthContext';
 import SignInModal from './SignInModal';
 import './Navbar.css';
@@ -16,11 +18,22 @@ const Navbar = () => {
   const location = useLocation();
   const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') === 'dark');
 
+  // Sync with floating ThemeToggle
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const dark = (e as CustomEvent<{ isDark: boolean }>).detail.isDark;
+      setIsDark(dark);
+    };
+    window.addEventListener('themechange', handler);
+    return () => window.removeEventListener('themechange', handler);
+  }, []);
+
   const toggleDark = () => {
     const next = !isDark;
     setIsDark(next);
-    localStorage.setItem('theme', next ? 'dark' : 'light');
     document.documentElement.classList.toggle('dark', next);
+    localStorage.setItem('theme', next ? 'dark' : 'light');
+    window.dispatchEvent(new CustomEvent('themechange', { detail: { isDark: next } }));
   };
 
   const updatePill = useCallback(() => {
@@ -70,20 +83,6 @@ const Navbar = () => {
     };
   }, [updatePill]);
 
-  // Lock body scroll and close menu on scroll when mobile menu is open
-  useEffect(() => {
-    if (menuOpen) {
-      document.body.style.overflow = 'hidden';
-      const handleScroll = () => setMenuOpen(false);
-      window.addEventListener('scroll', handleScroll, { passive: true });
-      return () => {
-        document.body.style.overflow = '';
-        window.removeEventListener('scroll', handleScroll);
-      };
-    } else {
-      document.body.style.overflow = '';
-    }
-  }, [menuOpen]);
 
   // Close user dropdown on outside click
   useEffect(() => {
@@ -99,14 +98,23 @@ const Navbar = () => {
   return (
     <>
     <nav className="navbar">
-      <Link to="/" className="navbar-logo">
+      <Link
+        to="/"
+        className="navbar-logo"
+        onClick={(e) => {
+          if (location.pathname === '/') {
+            e.preventDefault();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        }}
+      >
         <span>Rate</span>MyHusky
       </Link>
 
       {/* Hamburger button — mobile only */}
       <button
         className={`hamburger ${menuOpen ? 'open' : ''}`}
-        onClick={() => setMenuOpen(!menuOpen)}
+        onClick={() => { if (!menuOpen) window.dispatchEvent(new CustomEvent('close-filter-sidebar')); setMenuOpen(!menuOpen); }}
         aria-label="Toggle menu"
       >
         <span />
@@ -153,7 +161,7 @@ const Navbar = () => {
         </div>
         {authLoading ? null : user ? (
           <div className="navbar-user" ref={userMenuRef}>
-            <button className="navbar-user-btn" onClick={() => setShowUserMenu(v => !v)}>
+            <button className="navbar-user-btn" onClick={() => setShowUserMenu(v => { if (!v) window.dispatchEvent(new CustomEvent('close-filter-sidebar')); return !v; })}>
               {user.picture && <img src={user.picture} alt="" className="navbar-user-avatar" referrerPolicy="no-referrer" />}
               <span className="navbar-user-name">{user.name.split(' ')[0]}</span>
             </button>
@@ -196,6 +204,10 @@ const Navbar = () => {
       </div>
 
     </nav>
+    {(showUserMenu || menuOpen) && createPortal(
+      <div className="safari-tint-sentinel" aria-hidden="true" />,
+      document.body
+    )}
     {/* Overlay behind mobile menu — outside nav so it covers everything */}
     {menuOpen && (
       <div

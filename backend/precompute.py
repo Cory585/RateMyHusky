@@ -6,6 +6,7 @@ Usage: python precompute.py
 """
 
 import os, re, unicodedata
+from html import unescape
 import numpy as np
 import pandas as pd
 import psycopg2
@@ -35,12 +36,58 @@ def upgrade_image_url(url):
 
 
 ALIAS_MAP = {
+    "ant woodall": "anthony woodall",
+    "dan matthew": "daniel matthew",
+    "ben boossarangsi": "benjamin boossarangsi",
+    "cali collin": "cali-ryan collin",
+    "stephani laverdiere": "stephanie laverdiere",
+    "dan grindle": "daniel grindle",
+    "mary kate dodgson": "mary dodgson",
     "laney strange": "elena strange",
     "ben tasker": "benjamin tasker",
     "alberto de la torre": "alberto de la torre duran",
     "justin wang": "hsiao-an wang",
     "sakib miazi": "md nazmus sakib miazi",
     "nazmus miazi": "md nazmus sakib miazi",
+    "alex depaoli": "alexander depaoli",
+    "denisee spencer": "denise spencer",
+    "chris bruell": "christopher bruell",
+    "hande ondemir": "hande musdal ondemir",
+    "francis frank georges": "francis georges",
+    "isabel campos": "isabel sobral campos",
+    "mary sue potts-santone": "mary-susan potts-santone",
+    "ronald c. zullo": "ronald zullo",
+    "steve granelli": "steven granelli",
+    "william (bill) goldman": "william goldman",
+    "virgiliu pavlu": "virgil pavlu",
+    "zhiyuan (katherine) zhang": "zhiyuan zhang",
+    "katherine zhang": "zhiyuan zhang",
+    "bill goldman": "william goldman",
+    "aarti sathyanaran": "aarti sathyanarayana",
+    "akash murty": "akash murthy",
+    "ali chaleshtari": "ali shirzadeh chaleshtari",
+    "sriram rajagopalan": "sriramasundarar rajagopalan",
+    "mauricio codesso": "mauricio mello codesso",
+    "magda cooney": "magdalena cooney",
+    "john lowery": "john lowrey",
+    "iesha karasik": "ieshia karasik",
+    "ifa khan": "iffat khan",
+    "h. david sherman": "h sherman",
+    "ganish krisnamoorthy": "ganesh krishnamoorthy",
+    "farena sultan": "fareena sultan",
+    "cathy merlo": "catherine merlo",
+    "ye yin": "yi yin",
+    "silvio amir": "silvio amir alves moreira",
+    "olin shivers": "olin shivers iii",
+    "rush sanghrajka": "rushit sanghrajka",
+    "john alexis gomez": "john alexis guerra gomez",
+    "ji yong shin": "ji-yong shin",
+    "ghita amor tijani": "ghita amor-tijani",
+    "bob lupi": "robert lupi",
+    "hany sadaka": "hanai sadaka",
+    "mary- susan potts": "mary-susan potts-santone",
+    "xiaotao (kelvin) liu": "xiaotao liu",
+    "kelvin liu": "xiaotao liu",
 }
 
 COLLEGE_MAP = {
@@ -66,6 +113,7 @@ COLLEGE_MAP = {
     "Managerial Science": "Business", "Organizational Behavior": "Business",
     "Organizational Leadership": "Business", "Human Resources Management": "Business",
     "Leadership": "Business",
+    "Dean of College of Sciences": "Science",
     "Mathematics": "Science", "Physics": "Science", "Chemistry": "Science",
     "Biology": "Science", "Biochemistry": "Science",
     "Environmental Science": "Science", "Environmental Studies": "Science",
@@ -108,6 +156,7 @@ COLLEGE_MAP = {
     "Public Policy": "CSSH", "Public Administration": "CSSH",
     "Urban Studies": "CSSH", "Humanities": "CSSH",
     "Education": "Professional Studies", "Professional Studies": "Professional Studies",
+    "Col of Professional Studies": "Professional Studies",
     "Counseling & Educational Psych": "Professional Studies",
     "Counseling amp Educational Psych": "Professional Studies",
     "Counseling  Educational Psych": "Professional Studies",
@@ -153,6 +202,19 @@ def main():
         "instructorLastName": "instructor_last_name", "departmentName": "department_name",
         "displayName": "display_name",
     }, inplace=True)
+    tc["department_name"] = tc["department_name"].astype(str).apply(unescape)
+
+    # Backfill missing departments using course prefix (e.g. "ENGW" -> "English")
+    # Affects future terms scraped before department metadata was populated
+    tc["_prefix"] = tc["display_name"].str.extract(r"^([A-Z]+)\d")
+    prefix_dept_map = (
+        tc[tc["department_name"].notna() & (tc["department_name"] != "nan")]
+        .groupby("_prefix")["department_name"]
+        .agg(lambda x: x.value_counts().index[0])
+    )
+    missing = tc["department_name"].isna() | (tc["department_name"] == "nan")
+    tc.loc[missing, "department_name"] = tc.loc[missing, "_prefix"].map(prefix_dept_map)
+    tc.drop(columns=["_prefix"], inplace=True)
     ts.rename(columns={
         "courseId": "course_id", "instructorId": "instructor_id", "termId": "term_id",
     }, inplace=True)
@@ -161,19 +223,43 @@ def main():
     photos["_key"] = photos["name"].astype(str).apply(normalize_name)
     photos["_url"] = photos["image_url"].astype(str).apply(upgrade_image_url)
     photo_lookup = dict(zip(photos["_key"], photos["_url"]))
+    # Also map alias sources → canonical targets so both names find the photo
+    for alias_src, alias_tgt in ALIAS_MAP.items():
+        if alias_src in photo_lookup and alias_tgt not in photo_lookup:
+            photo_lookup[alias_tgt] = photo_lookup[alias_src]
+        elif alias_tgt in photo_lookup and alias_src not in photo_lookup:
+            photo_lookup[alias_src] = photo_lookup[alias_tgt]
 
     # ── Clean RMP data ──
     rmp_profs["rating"] = pd.to_numeric(rmp_profs["rating"], errors="coerce")
     rmp_profs["num_ratings"] = pd.to_numeric(rmp_profs["num_ratings"], errors="coerce")
     rmp_profs.dropna(subset=["rating", "num_ratings"], inplace=True)
     rmp_profs["name"] = rmp_profs["name"].astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
+    rmp_profs["department"] = rmp_profs["department"].astype(str).str.replace(r'\bamp\b', '&', regex=True)
 
     # ── Fix TRACE scores ──
     for col in ["count_1", "count_2", "count_3", "count_4", "count_5", "completed"]:
         ts[col] = pd.to_numeric(ts[col], errors="coerce").fillna(0).astype(int)
     ts["total_responses"] = ts["count_1"] + ts["count_2"] + ts["count_3"] + ts["count_4"] + ts["count_5"]
     ts["_weighted_sum"] = 1*ts["count_1"] + 2*ts["count_2"] + 3*ts["count_3"] + 4*ts["count_4"] + 5*ts["count_5"]
-    ts["mean"] = np.where(ts["total_responses"] > 0, ts["_weighted_sum"] / ts["total_responses"], np.nan)
+    # Preserve the original CSV mean when individual counts are all zeros (newer data may only have mean/median)
+    ts["_csv_mean"] = pd.to_numeric(ts["mean"], errors="coerce")
+    is_hours = ts["question"].str.lower().str.contains("hours", na=False)
+    ts["mean"] = np.where(
+        is_hours,
+        ts["_csv_mean"],  # always preserve scraper-computed mean for hours (uses real hour midpoints)
+        np.where(
+            ts["total_responses"] > 0,
+            ts["_weighted_sum"] / ts["total_responses"],
+            ts["_csv_mean"]
+        )
+    )
+    # Use completed count as total_responses when individual counts are missing but mean exists
+    ts["total_responses"] = np.where(
+        (ts["total_responses"] == 0) & ts["mean"].notna(),
+        ts["completed"],
+        ts["total_responses"]
+    )
 
     # ── Merge RMP aliases ──
     def merge_rmp_aliases(df):
@@ -221,7 +307,7 @@ def main():
 
     # ── TRACE proper name lookup ──
     name_sorted = tc.sort_values("term_id", ascending=False).drop_duplicates(subset=["name_key"])
-    name_sorted["_full"] = name_sorted["instructor_first_name"].astype(str).str.strip() + " " + name_sorted["instructor_last_name"].astype(str).str.strip()
+    name_sorted["_full"] = (name_sorted["instructor_first_name"].astype(str).str.strip() + " " + name_sorted["instructor_last_name"].astype(str).str.strip()).str.title()
     valid = name_sorted["instructor_first_name"].astype(str).str.strip().ne("") & name_sorted["instructor_last_name"].astype(str).str.strip().ne("")
     trace_name_lookup = dict(zip(name_sorted.loc[valid, "name_key"], name_sorted.loc[valid, "_full"]))
 
@@ -243,6 +329,13 @@ def main():
     trace_lookup = dict(zip(trace_avg["name_key"], trace_avg["trace_overall"]))
     print(f"Matched {len(trace_lookup)} instructors to TRACE overall scores")
 
+    # ── TRACE hours per week (weighted avg of hours question) ──
+    hours_q = ts[ts["question"].str.lower().str.contains("hours per week", na=False)].copy()
+    hours_q.dropna(subset=["mean"], inplace=True)
+    hours_merged = hours_q.merge(instructor_courses, on=["course_id", "instructor_id"], how="inner")
+    hours_avg = hours_merged.groupby("name_key").apply(weighted_avg, include_groups=False).reset_index().rename(columns={0: "avg_hours"})
+    hours_lookup = dict(zip(hours_avg["name_key"], hours_avg["avg_hours"]))
+
     # ── TRACE review counts ──
     instructor_sections = tc[["course_id", "instructor_id", "term_id", "name_key"]].drop_duplicates(
         subset=["course_id", "instructor_id", "term_id"]
@@ -258,6 +351,7 @@ def main():
     rmp_profs["trace_overall"] = rmp_profs["_name_key"].map(trace_lookup)
     rmp_profs["trace_reviews"] = rmp_profs["_name_key"].map(trace_reviews_lookup).fillna(0).astype(int)
     rmp_profs["trace_dept"] = rmp_profs["_name_key"].map(trace_dept_lookup)
+    rmp_profs["avg_hours"] = rmp_profs["_name_key"].map(hours_lookup)
 
     # Fuzzy match unmatched
     trace_by_last = {}
@@ -279,6 +373,8 @@ def main():
                 rmp_profs.at[idx, "trace_overall"] = trace_lookup.get(tc_name)
                 rmp_profs.at[idx, "trace_reviews"] = trace_reviews_lookup.get(tc_name, 0)
                 rmp_profs.at[idx, "trace_dept"] = trace_dept_lookup.get(tc_name)
+                if rmp_profs.at[idx, "avg_hours"] != rmp_profs.at[idx, "avg_hours"]:  # isnan
+                    rmp_profs.at[idx, "avg_hours"] = hours_lookup.get(tc_name)
                 break
 
     rmp_profs["trace_reviews"] = rmp_profs["trace_reviews"].fillna(0).astype(int)
@@ -294,6 +390,27 @@ def main():
     )
     rmp_profs["avg_rating"] = rmp_profs["avg_rating"].where(rmp_profs["avg_rating"].notna(), other=None)
 
+    # ── Comment counts per name_key ──
+    # RMP comments
+    rmp_rev = rmp_reviews[rmp_reviews["comment"].notna() & (rmp_reviews["comment"].astype(str).str.strip() != "")].copy()
+    rmp_rev["_name_key"] = rmp_rev["professor_name"].apply(normalize_name).replace(ALIAS_MAP)
+    rmp_comment_counts = rmp_rev.groupby("_name_key").size()
+
+    # TRACE comments
+    tc_id_cols = tc[["course_id", "instructor_id", "term_id", "name_key"]].drop_duplicates()
+    tcomments_parsed = tcomments[tcomments["comment"].notna() & (tcomments["comment"].astype(str).str.strip() != "")].copy()
+    tcomments_parsed[["_cid", "_iid", "_tid"]] = tcomments_parsed["course_url"].str.extractall(r"sp=(\d+)").unstack().droplevel(0, axis=1)[[0, 1, 2]].astype(float)
+    tcomments_parsed = tcomments_parsed.dropna(subset=["_cid", "_iid", "_tid"])
+    tcomments_parsed[["_cid", "_iid", "_tid"]] = tcomments_parsed[["_cid", "_iid", "_tid"]].astype(int)
+    trace_with_nk = tcomments_parsed.merge(
+        tc_id_cols, left_on=["_cid", "_iid", "_tid"], right_on=["course_id", "instructor_id", "term_id"], how="inner"
+    )
+    trace_comment_counts = trace_with_nk.groupby("name_key").size()
+
+    # Combine
+    comment_counts_lookup = (rmp_comment_counts.add(trace_comment_counts, fill_value=0)).fillna(0).astype(int).to_dict()
+    print(f"Computed comment counts for {len(comment_counts_lookup)} professors")
+
     # ── Build catalog rows ──
     catalog_rows = []
     rmp_name_keys = set(rmp_profs["_name_key"].values)
@@ -302,7 +419,15 @@ def main():
     for _, row in rmp_profs.iterrows():
         has_rmp = int(row["num_ratings"]) > 0 and float(row["rating"]) > 0
         has_trace = pd.notna(row["trace_overall"]) and int(row["trace_reviews"]) > 0
-        dept = str(row["trace_dept"]) if pd.notna(row["trace_dept"]) else str(row["department"])
+        rmp_dept = str(row["department"])
+        trace_dept_val = str(row["trace_dept"]) if pd.notna(row["trace_dept"]) else None
+        # Prefer trace_dept, but fall back to RMP dept if trace would move the professor to a different college
+        if trace_dept_val and get_college(trace_dept_val) != "Other" and get_college(trace_dept_val) == get_college(rmp_dept):
+            dept = trace_dept_val
+        elif get_college(rmp_dept) != "Other":
+            dept = rmp_dept
+        else:
+            dept = trace_dept_val or rmp_dept
         college = get_college(dept)
 
         wta = None
@@ -330,6 +455,10 @@ def main():
             slug = slug + "-2"
         seen_slugs.add(slug)
 
+        avg_hours = None
+        if pd.notna(row.get("avg_hours")) and float(row["avg_hours"]) > 0:
+            avg_hours = round(float(row["avg_hours"]), 2)
+
         catalog_rows.append((
             slug, display_name, row["_name_key"], dept, college,
             float(row["avg_rating"]) if pd.notna(row["avg_rating"]) else None,
@@ -339,6 +468,8 @@ def main():
             wta, difficulty,
             row.get("professor_url", None) or None,
             photo_lookup.get(row["_name_key"], None),
+            avg_hours,
+            comment_counts_lookup.get(row["_name_key"], 0),
         ))
 
     # TRACE-only professors
@@ -357,12 +488,15 @@ def main():
         if slug in seen_slugs:
             slug = slug + "-2"
         seen_slugs.add(slug)
+        avg_hours_t = round(float(hours_lookup[nk]), 2) if nk in hours_lookup and pd.notna(hours_lookup[nk]) else None
         catalog_rows.append((
             slug, display_name, nk, dept, get_college(dept),
             avg, None, avg,
             0, t_rev, t_rev,
             None, None, None,
             photo_lookup.get(nk, None),
+            avg_hours_t,
+            comment_counts_lookup.get(nk, 0),
         ))
 
     print(f"Built catalog with {len(catalog_rows)} professors")
@@ -377,7 +511,7 @@ def main():
     tc["_cname"] = tc["_parsed"].apply(lambda x: x[1])
     course_df = tc[tc["_code"].notna()][["_code", "_cname", "department_name"]].drop_duplicates(subset=["_code"])
     course_rows = [
-        (r["_code"], r["_cname"], r["department_name"], r["_code"].lower() + " " + str(r["_cname"]).lower())
+        (r["_code"], r["_cname"], str(r["department_name"]) if pd.notna(r["department_name"]) else "", r["_code"].lower() + " " + str(r["_cname"]).lower())
         for _, r in course_df.iterrows()
     ]
 
@@ -414,14 +548,16 @@ def main():
             would_take_again_pct FLOAT,
             difficulty FLOAT,
             professor_url TEXT,
-            image_url TEXT
+            image_url TEXT,
+            avg_hours FLOAT,
+            total_comments INT DEFAULT 0
         )
     """)
     chunk_insert(cur, """
         INSERT INTO professors_catalog
         (slug, name, name_key, department, college, avg_rating, rmp_rating, trace_rating,
          num_ratings, trace_reviews, total_reviews, would_take_again_pct, difficulty,
-         professor_url, image_url)
+         professor_url, image_url, avg_hours, total_comments)
         VALUES %s
     """, catalog_rows)
     cur.execute("CREATE INDEX idx_pc_name_key ON professors_catalog (name_key)")
@@ -442,6 +578,7 @@ def main():
         )
     """)
     chunk_insert(cur, "INSERT INTO course_catalog (code, name, department, search_text) VALUES %s", course_rows)
+    cur.execute("CREATE INDEX idx_cc_dept ON course_catalog (department)")
     conn.commit()
     print(f"  Inserted {len(course_rows)} courses")
 
@@ -495,6 +632,31 @@ def main():
         conn.rollback()
         cur = conn.cursor()
     print(f"  Updated {len(unique_instructors)} unique instructors")
+
+    # 4b. Add precomputed course_code to trace_courses
+    print("Adding course_code to trace_courses...")
+    try:
+        cur.execute("ALTER TABLE trace_courses ADD COLUMN course_code TEXT")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE trace_courses SET course_code = UPPER(REGEXP_REPLACE(
+            SPLIT_PART(display_name, ':', 1), '[^A-Za-z0-9]', '', 'g'
+        ))
+        WHERE course_code IS NULL AND display_name IS NOT NULL
+    """)
+    conn.commit()
+
+    try:
+        cur.execute("CREATE INDEX idx_tc_course_code ON trace_courses (course_code)")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        cur = conn.cursor()
+    print("  Done")
 
     # 5. Add name_key to rmp_reviews (batch via temp table)
     print("Adding name_key to rmp_reviews...")
@@ -623,20 +785,29 @@ def main():
     chunk_insert(cur, "INSERT INTO _url_ids (course_url, cid, iid, tid) VALUES %s", mapping_rows)
     print(f"  Parsed {len(mapping_rows)} unique URLs")
 
-    # Batch join-update
+    # Batch join-update (smaller batches to avoid CockroachDB serialization failures)
+    COMMENT_BATCH = 5000
     while True:
-        cur.execute("""
-            UPDATE trace_comments tc SET
-                tc_course_id = m.cid,
-                tc_instructor_id = m.iid,
-                tc_term_id = m.tid
-            FROM _url_ids m
-            WHERE tc.course_url = m.course_url
-              AND tc.tc_course_id IS NULL
-            LIMIT %s
-        """, (BATCH_SIZE,))
-        updated = cur.rowcount
-        conn.commit()
+        try:
+            cur.execute("""
+                UPDATE trace_comments tc SET
+                    tc_course_id = m.cid,
+                    tc_instructor_id = m.iid,
+                    tc_term_id = m.tid
+                FROM _url_ids m
+                WHERE tc.course_url = m.course_url
+                  AND tc.tc_course_id IS NULL
+                LIMIT %s
+            """, (COMMENT_BATCH,))
+            updated = cur.rowcount
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            cur = conn.cursor()
+            if "restart transaction" in str(e).lower() or "serialization" in str(e).lower():
+                print(f"    retry (serialization conflict)...")
+                continue
+            raise
         if updated == 0:
             break
         print(f"    updated {updated} rows...")
