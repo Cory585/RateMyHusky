@@ -177,7 +177,7 @@ BLOCKED_USER_AGENTS = [
 @app.before_request
 def block_bots():
     ua = (request.headers.get("User-Agent") or "").lower()
-    if not ua or any(bot in ua for bot in BLOCKED_USER_AGENTS):
+    if ua and any(bot in ua for bot in BLOCKED_USER_AGENTS):
         return jsonify({"error": "Forbidden"}), 403
 
 
@@ -746,7 +746,17 @@ def professor_profile(slug):
                            CASE WHEN COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0) > 0
                                 THEN (COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0))::float
                                 ELSE CASE WHEN mean IS NOT NULL THEN 1.0 ELSE 0 END END
-                           ELSE 0 END)::float AS challeng_weight
+                           ELSE 0 END)::float AS challeng_weight,
+                       SUM(CASE WHEN LOWER(question) LIKE '%%overall%%' THEN
+                           CASE WHEN COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0) > 0
+                                THEN (1.0*COALESCE(count_1,0)::float+2.0*COALESCE(count_2,0)::float+3.0*COALESCE(count_3,0)::float+4.0*COALESCE(count_4,0)::float+5.0*COALESCE(count_5,0)::float)
+                                ELSE COALESCE(mean::float, 0) END
+                           ELSE 0 END)::float AS overall_sum,
+                       SUM(CASE WHEN LOWER(question) LIKE '%%overall%%' THEN
+                           CASE WHEN COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0) > 0
+                                THEN (COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0))::float
+                                ELSE CASE WHEN mean IS NOT NULL THEN 1.0 ELSE 0 END END
+                           ELSE 0 END)::float AS overall_weight
                 FROM trace_scores
                 WHERE (course_id, instructor_id, term_id) IN %s
                 GROUP BY course_id, instructor_id, term_id
@@ -797,11 +807,14 @@ def professor_profile(slug):
                 hs = float(agg["hours_sum"] or 0)
                 cw = float(agg["challeng_weight"] or 0)
                 cs = float(agg["challeng_sum"] or 0)
+                ow = float(agg["overall_weight"] or 0)
+                os_ = float(agg["overall_sum"] or 0)
                 challeng_sum += cs
                 challeng_weight += cw
             else:
-                hw, hs, cw, cs = 0, 0, 0, 0
+                hw, hs, cw, cs, ow, os_ = 0, 0, 0, 0, 0, 0
             course_hours = round(hs / hw, 1) if hw > 0 else None
+            course_overall = round(os_ / ow, 2) if ow > 0 else None
             trace_course_list.append({
                 "courseId": cid,
                 "termId": tid,
@@ -811,6 +824,7 @@ def professor_profile(slug):
                 "hoursPerWeek": course_hours,
                 "challengeWeightedSum": cs if cw > 0 else None,
                 "challengeResponses": cw if cw > 0 else None,
+                "overallRating": course_overall,
             })
 
         trace_avg_difficulty = round(challeng_sum / challeng_weight, 2) if challeng_weight > 0 else None
@@ -1343,8 +1357,8 @@ def professors_catalog():
         # No search - use SQL sorting
         if sort == "rating":
             order = "avg_rating DESC NULLS LAST"
-        elif sort == "reviews":
-            order = "total_reviews DESC"
+        elif sort == "comments":
+            order = "total_comments DESC"
         else:
             order = "lower(name) ASC"
 
@@ -1360,32 +1374,6 @@ def professors_catalog():
             params + [limit, offset]
         )
 
-    # Batch-count RMP + TRACE comments for this page
-    comment_counts = {}
-    if page_rows:
-        name_keys = [row["name_key"] for row in page_rows]
-        placeholders = ",".join(["%s"] * len(name_keys))
-
-        combined_counts = query(
-            f"SELECT name_key, SUM(cnt) as cnt FROM ("
-            f"  SELECT name_key, COUNT(*) as cnt FROM rmp_reviews "
-            f"  WHERE name_key IN ({placeholders}) AND comment IS NOT NULL AND comment != '' "
-            f"  GROUP BY name_key"
-            f"  UNION ALL "
-            f"  SELECT tc2.name_key, COUNT(*) as cnt "
-            f"  FROM trace_comments tc "
-            f"  JOIN trace_courses tc2 ON tc.tc_course_id = tc2.course_id "
-            f"    AND tc.tc_instructor_id = tc2.instructor_id "
-            f"    AND tc.tc_term_id = tc2.term_id "
-            f"  WHERE tc2.name_key IN ({placeholders}) "
-            f"  AND tc.comment IS NOT NULL AND tc.comment != '' "
-            f"  GROUP BY tc2.name_key"
-            f") sub GROUP BY name_key",
-            name_keys + name_keys
-        )
-        for r in combined_counts:
-            comment_counts[r["name_key"]] = int(r["cnt"])
-
     professors = []
     for row in page_rows:
         professors.append({
@@ -1397,7 +1385,7 @@ def professors_catalog():
             "rmpRating": round(row["rmp_rating"], 2) if row["rmp_rating"] else None,
             "traceRating": round(row["trace_rating"], 2) if row["trace_rating"] else None,
             "totalReviews": row["total_reviews"],
-            "totalComments": comment_counts.get(row["name_key"], 0),
+            "totalComments": row.get("total_comments", 0) or 0,
             "wouldTakeAgainPct": round(row["would_take_again_pct"], 1) if row["would_take_again_pct"] else None,
             "imageUrl": row["image_url"],
         })

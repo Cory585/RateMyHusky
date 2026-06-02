@@ -441,7 +441,7 @@
 	font-weight: 800;
 	font-size: 0.72rem;
 	color: #7b7b7b;
-	word-break: keep-all;
+	word-break: break-word;
 }
 
 .compare-lock-icon {

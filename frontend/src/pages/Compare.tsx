@@ -43,7 +43,7 @@ const parseMaybeNumber = (value: number | null | undefined) => {
 
 const formatMetric = (value: number | null | undefined, digits = 2) => {
 	const parsed = parseMaybeNumber(value);
-	return parsed === null ? 'N/A' : parsed.toFixed(digits);
+	return parsed === null ? '—' : parsed.toFixed(digits);
 };
 
 const getDifficultyClass = (value: number | null | undefined) => {
@@ -80,19 +80,22 @@ const pickWinner = (
 const cleanTermTitle = (t: string): string => t.replace(/^\d{6}:\s*/, '').replace(/\s*\d{6}/g, '').trim();
 
 const getRecentTraceSnapshot = (profile: ProfessorProfile | null): TraceSnapshot | null => {
-	if (!profile?.traceCourses?.length || profile.traceRating == null) return null;
+	if (!profile?.traceCourses?.length) return null;
 
-	const mostRecent = [...profile.traceCourses].sort((a, b) => {
+	const sorted = [...profile.traceCourses].sort((a, b) => {
 		const ka = termSortKey(a.termTitle);
 		const kb = termSortKey(b.termTitle);
 		if (ka !== kb) return kb - ka;
 		return b.courseId - a.courseId;
-	})[0];
+	});
+
+	const mostRecent = sorted.find((c) => c.overallRating != null);
+	if (!mostRecent || mostRecent.overallRating == null) return null;
 
 	return {
 		term: cleanTermTitle(mostRecent.termTitle),
 		course: mostRecent.displayName,
-		score: profile.traceRating,
+		score: mostRecent.overallRating,
 	};
 };
 
@@ -451,12 +454,12 @@ function Compare() {
 		? `${leftCatalogProfessor.department} (${leftCatalogProfessor.college})`
 		: leftProfile?.department
 			? leftProfile.department
-			: 'N/A';
+			: '—';
 	const rightDept = rightCatalogProfessor
 		? `${rightCatalogProfessor.department} (${rightCatalogProfessor.college})`
 		: rightProfile?.department
 			? rightProfile.department
-			: 'N/A';
+			: '—';
 
 	const compareRows = [
 		{
@@ -498,8 +501,8 @@ function Compare() {
 		},
 		{
 			label: 'Total Reviews',
-			left: leftProfile?.totalComments?.toLocaleString() ?? leftCatalogProfessor?.totalComments?.toLocaleString() ?? 'N/A',
-			right: rightProfile?.totalComments?.toLocaleString() ?? rightCatalogProfessor?.totalComments?.toLocaleString() ?? 'N/A',
+			left: leftProfile?.totalComments?.toLocaleString() ?? leftCatalogProfessor?.totalComments?.toLocaleString() ?? '—',
+			right: rightProfile?.totalComments?.toLocaleString() ?? rightCatalogProfessor?.totalComments?.toLocaleString() ?? '—',
 			winner: pickWinner(leftProfile?.totalComments ?? leftCatalogProfessor?.totalComments, rightProfile?.totalComments ?? rightCatalogProfessor?.totalComments, 'higher', 0),
 			weight: 0.5,
 		},
@@ -507,11 +510,11 @@ function Compare() {
 			label: 'Would Take Again',
 			left:
 				leftProfile?.wouldTakeAgainPct === null || leftProfile?.wouldTakeAgainPct === undefined
-					? 'N/A'
+					? '—'
 					: `${leftProfile.wouldTakeAgainPct.toFixed(0)}%`,
 			right:
 				rightProfile?.wouldTakeAgainPct === null || rightProfile?.wouldTakeAgainPct === undefined
-					? 'N/A'
+					? '—'
 					: `${rightProfile.wouldTakeAgainPct.toFixed(0)}%`,
 			winner: pickWinner(leftProfile?.wouldTakeAgainPct, rightProfile?.wouldTakeAgainPct, 'higher', 0),
 			weight: 2,
@@ -521,13 +524,13 @@ function Compare() {
 			left: leftSnapshot
 				? `${leftSnapshot.score.toFixed(2)} (${leftSnapshot.term})`
 				: user
-					? 'N/A'
-					: 'Sign in to view',
+					? '—'
+					: 'Sign in to view TRACE',
 			right: rightSnapshot
 				? `${rightSnapshot.score.toFixed(2)} (${rightSnapshot.term})`
 				: user
-					? 'N/A'
-					: 'Sign in to view',
+					? '—'
+					: 'Sign in to view TRACE',
 			footnoteLeft: leftSnapshot?.course,
 			footnoteRight: rightSnapshot?.course,
 			winner: pickWinner(leftSnapshot?.score, rightSnapshot?.score),
@@ -697,7 +700,7 @@ function Compare() {
 									>
 										<span className="compare-suggestion-main">{prof.name}</span>
 										<span className="compare-suggestion-meta">
-											{prof.dept} • {prof.rating !== null ? prof.rating.toFixed(2) : 'N/A'}
+											{prof.dept} • {prof.rating !== null ? prof.rating.toFixed(2) : '—'}
 										</span>
 									</button>
 								);
@@ -760,7 +763,7 @@ function Compare() {
 									>
 										<span className="compare-suggestion-main">{prof.name}</span>
 										<span className="compare-suggestion-meta">
-											{prof.dept} • {prof.rating !== null ? prof.rating.toFixed(2) : 'N/A'}
+											{prof.dept} • {prof.rating !== null ? prof.rating.toFixed(2) : '—'}
 										</span>
 									</button>
 								);
@@ -793,14 +796,14 @@ function Compare() {
 						const showLeft = Boolean(leftSlug) && !leftLoading;
 						const showRight = Boolean(rightSlug) && !rightLoading;
 						const renderValue = (value: string, showValue: boolean) => {
-							if (!authLoading && showValue && row.label === 'Recent TRACE Snapshot' && value === 'Sign in to view') {
+							if (!authLoading && showValue && row.label === 'Recent TRACE Snapshot' && value === 'Sign in to view TRACE') {
 								return (
 									<span className="compare-lock-prompt">
 										<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="compare-lock-icon">
 											<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
 											<path d="M7 11V7a5 5 0 0 1 10 0v4" />
 										</svg>
-										<span>Sign in to view</span>
+										<span>Sign in with your <span className="husky-email">husky.neu.edu</span> account to view</span>
 									</span>
 								);
 							}

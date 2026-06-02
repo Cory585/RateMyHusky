@@ -14,7 +14,10 @@ declare global {
   }
 }
 
-const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY || '1x00000000000000000000AA'; // test key fallback
+const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY;
+if (!TURNSTILE_SITE_KEY && import.meta.env.PROD) {
+  throw new Error('VITE_TURNSTILE_SITE_KEY environment variable is required in production');
+}
 
 const feedbackOptions = [
   { value: 'bug', label: 'Bug Report' },
@@ -43,7 +46,7 @@ const FeedbackTab = () => {
   }, []);
 
   const renderTurnstile = useCallback(() => {
-    if (!turnstileRef.current || !window.turnstile) return;
+    if (!turnstileRef.current || !window.turnstile || !TURNSTILE_SITE_KEY) return;
     if (widgetIdRef.current !== null) {
       window.turnstile.remove(widgetIdRef.current);
       widgetIdRef.current = null;

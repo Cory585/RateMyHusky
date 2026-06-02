@@ -17,7 +17,7 @@ import './ProfessorCatalog.css';
 const SORT_OPTIONS = [
   { value: 'alpha',   label: 'A – Z' },
   { value: 'rating',  label: 'Highest Rating' },
-  { value: 'reviews', label: 'Most Reviews' },
+  { value: 'comments', label: 'Most Comments' },
 ];
 
 const REVIEW_SLIDER_MAX = 1000;
@@ -49,7 +49,7 @@ const DEFAULT_FILTERS: Filters = {
 
 function getFiltersFromSearchParams(sp: URLSearchParams): Filters {
   const sortValue = sp.get('sort');
-  const sort = sortValue === 'rating' || sortValue === 'reviews' || sortValue === 'alpha'
+  const sort = sortValue === 'rating' || sortValue === 'comments' || sortValue === 'alpha'
     ? sortValue
     : 'alpha';
 
@@ -197,7 +197,7 @@ export default function ProfessorCatalog() {
       maxRating:  filters.maxRating  < 5 ? filters.maxRating  : undefined,
       minReviews: filters.minReviews > 0 ? filters.minReviews : undefined,
       maxReviews: filters.maxReviews ?? undefined,
-      sort:       filters.sort as 'alpha' | 'rating' | 'reviews',
+      sort:       filters.sort as 'alpha' | 'rating' | 'comments',
       page:       filters.page,
       limit:      pageSize,
     })

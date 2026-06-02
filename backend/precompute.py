@@ -390,6 +390,27 @@ def main():
     )
     rmp_profs["avg_rating"] = rmp_profs["avg_rating"].where(rmp_profs["avg_rating"].notna(), other=None)
 
+    # ── Comment counts per name_key ──
+    # RMP comments
+    rmp_rev = rmp_reviews[rmp_reviews["comment"].notna() & (rmp_reviews["comment"].astype(str).str.strip() != "")].copy()
+    rmp_rev["_name_key"] = rmp_rev["professor_name"].apply(normalize_name).replace(ALIAS_MAP)
+    rmp_comment_counts = rmp_rev.groupby("_name_key").size()
+
+    # TRACE comments
+    tc_id_cols = tc[["course_id", "instructor_id", "term_id", "name_key"]].drop_duplicates()
+    tcomments_parsed = tcomments[tcomments["comment"].notna() & (tcomments["comment"].astype(str).str.strip() != "")].copy()
+    tcomments_parsed[["_cid", "_iid", "_tid"]] = tcomments_parsed["course_url"].str.extractall(r"sp=(\d+)").unstack().droplevel(0, axis=1)[[0, 1, 2]].astype(float)
+    tcomments_parsed = tcomments_parsed.dropna(subset=["_cid", "_iid", "_tid"])
+    tcomments_parsed[["_cid", "_iid", "_tid"]] = tcomments_parsed[["_cid", "_iid", "_tid"]].astype(int)
+    trace_with_nk = tcomments_parsed.merge(
+        tc_id_cols, left_on=["_cid", "_iid", "_tid"], right_on=["course_id", "instructor_id", "term_id"], how="inner"
+    )
+    trace_comment_counts = trace_with_nk.groupby("name_key").size()
+
+    # Combine
+    comment_counts_lookup = (rmp_comment_counts.add(trace_comment_counts, fill_value=0)).fillna(0).astype(int).to_dict()
+    print(f"Computed comment counts for {len(comment_counts_lookup)} professors")
+
     # ── Build catalog rows ──
     catalog_rows = []
     rmp_name_keys = set(rmp_profs["_name_key"].values)
@@ -448,6 +469,7 @@ def main():
             row.get("professor_url", None) or None,
             photo_lookup.get(row["_name_key"], None),
             avg_hours,
+            comment_counts_lookup.get(row["_name_key"], 0),
         ))
 
     # TRACE-only professors
@@ -474,6 +496,7 @@ def main():
             None, None, None,
             photo_lookup.get(nk, None),
             avg_hours_t,
+            comment_counts_lookup.get(nk, 0),
         ))
 
     print(f"Built catalog with {len(catalog_rows)} professors")
@@ -526,14 +549,15 @@ def main():
             difficulty FLOAT,
             professor_url TEXT,
             image_url TEXT,
-            avg_hours FLOAT
+            avg_hours FLOAT,
+            total_comments INT DEFAULT 0
         )
     """)
     chunk_insert(cur, """
         INSERT INTO professors_catalog
         (slug, name, name_key, department, college, avg_rating, rmp_rating, trace_rating,
          num_ratings, trace_reviews, total_reviews, would_take_again_pct, difficulty,
-         professor_url, image_url, avg_hours)
+         professor_url, image_url, avg_hours, total_comments)
         VALUES %s
     """, catalog_rows)
     cur.execute("CREATE INDEX idx_pc_name_key ON professors_catalog (name_key)")

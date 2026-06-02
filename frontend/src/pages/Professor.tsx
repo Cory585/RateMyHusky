@@ -451,11 +451,11 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
 
     if (noneSelected) {
       return {
-        avgRating: 0,
+        avgRating: null,
         rmpRating: null,
         traceRating: null,
-        difficulty: 0,
-        totalRatings: 0,
+        difficulty: null,
+        totalRatings: null,
         wouldTakeAgainPct: profile.wouldTakeAgainPct,
         hoursPerWeek: null,
       };
@@ -470,7 +470,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
         rmpRating: profile.rmpRating,
         traceRating: profile.traceRating,
         difficulty: profile.difficulty ?? 0,
-        totalRatings: profile.totalRatings + traceCompleted,
+        totalRatings: filteredRmpReviews.length + traceCompleted,
         wouldTakeAgainPct: profile.wouldTakeAgainPct,
         hoursPerWeek: profile.hoursPerWeek,
       };
@@ -789,7 +789,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
 
       <section className="prof-stats">
         <div className="prof-stat-card prof-stat-clickable">
-          <span className="prof-stat-value"><AnimatedNumber value={stats.avgRating} /></span>
+          <span className="prof-stat-value">{stats.avgRating !== null ? <AnimatedNumber value={stats.avgRating} /> : '—'}</span>
           <span className="prof-stat-label" style={{ display: 'block', textAlign: 'center', position: 'relative' }}>
             Overall Rating
             {(stats.rmpRating !== null || stats.traceRating !== null) && (
@@ -805,7 +805,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
           )}
         </div>
         <div className="prof-stat-card">
-          <span className="prof-stat-value">{stats.difficulty > 0 ? <AnimatedNumber value={stats.difficulty} /> : '—'}</span>
+          <span className="prof-stat-value">{stats.difficulty != null && stats.difficulty > 0 ? <AnimatedNumber value={stats.difficulty} /> : '—'}</span>
           <span className="prof-stat-label">Difficulty</span>
           <div className="prof-difficulty-bar">
             <div className="prof-difficulty-fill" style={{ 
@@ -835,7 +835,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
           <span className="prof-stat-label">Hrs / Week</span>
         </div>
         <div className="prof-stat-card prof-stat-clickable" onClick={() => chartsRef.current?.scrollIntoView({ behavior: 'smooth' })}>
-          <span className="prof-stat-value">{stats.totalRatings.toLocaleString()}</span>
+          <span className="prof-stat-value">{stats.totalRatings ? stats.totalRatings.toLocaleString() : '—'}</span>
           <span className="prof-stat-label">Total Ratings</span>
           <span className="prof-stat-hint">View distribution ↓</span>
         </div>
@@ -897,7 +897,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
               <path d="M7 11V7a5 5 0 0 1 10 0v4" />
             </svg>
-            <p>Sign in with your <strong>husky.neu.edu</strong> account to view the full radar breakdown.</p>
+            <p>Sign in with your <span className="husky-email">husky.neu.edu</span> account to view the full radar breakdown.</p>
             <button className="paywall-signin-btn" onClick={() => { sessionStorage.setItem('prof_review_tab', 'trace'); setShowSignIn(true); }}>Sign In</button>
           </div>
         </section>
@@ -1381,7 +1381,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
                           <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                           <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                         </svg>
-                        <p>Sign in with your <strong>husky.neu.edu</strong> account to read these comments.</p>
+                        <p>Sign in with your <span className="husky-email">husky.neu.edu</span> account to read these comments.</p>
                         <button className="paywall-signin-btn small" onClick={(e) => { e.stopPropagation(); sessionStorage.setItem('prof_review_tab', 'trace'); setShowSignIn(true); }}>Sign In</button>
                       </div>
                     )}

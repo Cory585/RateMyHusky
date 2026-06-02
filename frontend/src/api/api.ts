@@ -39,6 +39,7 @@ export interface TraceCourse {
   hoursPerWeek?: number | null;
   challengeWeightedSum?: number | null;
   challengeResponses?: number | null;
+  overallRating?: number | null;
 }
 
 export interface TraceRatingCounts {
@@ -273,7 +274,7 @@ export function fetchProfessorsCatalog(params: {
   maxRating?: number;
   minReviews?: number;
   maxReviews?: number;
-  sort?: 'alpha' | 'rating' | 'reviews';
+  sort?: 'alpha' | 'rating' | 'comments';
   page?: number;
   limit?: number;
 }): Promise<CatalogResponse> {
