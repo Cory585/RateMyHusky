@@ -12,32 +12,22 @@ export interface Professor {
   rmpRating: number | null;
   traceRating: number | null;
   avgRating: number;
-  rmpReviews: number;
-  traceReviews: number;
-  totalReviews: number;
   totalComments?: number;
-  url: string;
 }
 
-export interface RandomProfessor extends Professor {
+export interface RandomProfessor {
+  name: string;
+  dept: string;
   college: string;
 }
 
 /* ---- Professor page types ---- */
-export interface TraceCourseScore {
-  question: string;
-  mean: number;
-  median: number;
-  stdDev: number;
-  enrollment: number;
-  completed: number;
-  totalResponses?: number;
-  count1?: number;
-  count2?: number;
-  count3?: number;
-  count4?: number;
-  count5?: number;
-  deptMean?: number;
+export interface RadarDataPoint {
+  metric: string;
+  professor: number;
+  department: number;
+  profMissing: boolean;
+  deptMissing: boolean;
 }
 
 export interface TraceCourse {
@@ -46,9 +36,18 @@ export interface TraceCourse {
   termTitle: string;
   departmentName: string;
   displayName: string;
-  section: string;
-  enrollment: number;
-  scores: TraceCourseScore[];
+  hoursPerWeek?: number | null;
+  challengeWeightedSum?: number | null;
+  challengeResponses?: number | null;
+}
+
+export interface TraceRatingCounts {
+  count1: number;
+  count2: number;
+  count3: number;
+  count4: number;
+  count5: number;
+  completed: number;
 }
 
 export interface ProfessorProfile {
@@ -57,14 +56,17 @@ export interface ProfessorProfile {
   rmpRating: number | null;
   traceRating: number | null;
   avgRating: number;
-  numRatings: number;
   wouldTakeAgainPct: number | null;
   difficulty: number | null;
   totalRatings: number;
+  totalComments: number;
   professorUrl: string | null;
   traceCourses: TraceCourse[];
   imageUrl: string | null;
   hoursPerWeek: number | null;
+  traceRatingCounts?: Record<string, TraceRatingCounts>;
+  radarData?: RadarDataPoint[] | null;
+  radarTermTitle?: string | null;
 }
 
 export interface ProfessorReviews {
@@ -73,9 +75,6 @@ export interface ProfessorReviews {
 }
 
 export interface ProfessorReview {
-  professorName: string;
-  department: string;
-  overallRating: number;
   course: string;
   quality: number;
   difficulty: number;
@@ -110,7 +109,7 @@ async function get<T>(path: string): Promise<T> {
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  const res = await fetch(`${API_BASE}${path}`, { headers });
+  const res = await fetch(`${API_BASE}${path}`, { headers, cache: token ? 'no-cache' : 'default' });
   if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
   return res.json();
 }
@@ -127,14 +126,13 @@ export const fetchRandomProfessor = () => get<RandomProfessor>("/api/random-prof
 /* ---- Professor page fetchers ---- */
 export async function fetchProfessorFull(slug: string): Promise<ProfessorFull | null> {
   const token = localStorage.getItem('auth_token');
-  const key = `${slug}:${token ?? 'u'}`;
-  if (_profFullCache.has(key)) return _profFullCache.get(key)!;
+  const reviewsKey = `${slug}:${token ?? 'u'}`;
+  if (_profFullCache.has(reviewsKey)) return _profFullCache.get(reviewsKey)!;
   try {
     const data = await get<ProfessorFull>(`/api/professors/${encodeURIComponent(slug)}/full`);
-    _profFullCache.set(key, data);
-    // Also populate individual caches so Compare page hits don't re-fetch
-    _profCache.set(slug, data);
-    _profReviewsCache.set(key, data);
+    _profFullCache.set(reviewsKey, data);
+    _profCache.set(reviewsKey, data);
+    _profReviewsCache.set(reviewsKey, data);
     return data;
   } catch {
     return null;
@@ -142,10 +140,12 @@ export async function fetchProfessorFull(slug: string): Promise<ProfessorFull | 
 }
 
 export async function fetchProfessorData(slug: string): Promise<ProfessorProfile | null> {
-  if (_profCache.has(slug)) return _profCache.get(slug)!;
+  const token = localStorage.getItem('auth_token');
+  const key = `${slug}:${token ?? 'u'}`;
+  if (_profCache.has(key)) return _profCache.get(key)!;
   try {
     const data = await get<ProfessorProfile>(`/api/professors/${encodeURIComponent(slug)}`);
-    _profCache.set(slug, data);
+    _profCache.set(key, data);
     return data;
   } catch {
     return null;
@@ -162,21 +162,6 @@ export async function fetchProfessorReviews(slug: string): Promise<ProfessorRevi
     return data;
   } catch {
     return null;
-  }
-}
-
-export interface TraceDeptAvgItem {
-  question: string;
-  avgMean: number;
-}
-
-export async function fetchTraceDeptAvg(department: string, termId: number): Promise<TraceDeptAvgItem[]> {
-  try {
-    return await get<TraceDeptAvgItem[]>(
-      `/api/trace-dept-avg?department=${encodeURIComponent(department)}&term_id=${termId}`
-    );
-  } catch {
-    return [];
   }
 }
 
@@ -228,12 +213,6 @@ export interface CatalogCourse {
   name: string;
   department: string;
   avgRating: number | null;
-  totalSections: number;
-  totalInstructors: number;
-  totalEnrollment: number;
-  totalResponses: number;
-  latestTermTitle: string;
-  latestTermId: number;
 }
 
 export interface CourseCatalogResponse {
@@ -248,12 +227,8 @@ export interface CourseSummary {
   name: string;
   department: string;
   avgRating: number | null;
-  totalSections: number;
-  totalInstructors: number;
-  totalEnrollment: number;
-  totalResponses: number;
+  avgEnrollment: number | null;
   latestTermTitle: string;
-  latestTermId: number;
 }
 
 export interface CourseInstructorBreakdown {
@@ -264,32 +239,23 @@ export interface CourseInstructorBreakdown {
   wouldTakeAgainPct: number | null;
   totalReviews: number;
   totalComments: number;
-  sections: number;
-  totalEnrollment: number;
-  totalResponses: number;
+  latestTermTitle: string;
   avgRating: number | null;
   courseAvgDifficulty: number | null;
   courseAvgHoursPerWeek: number | null;
 }
 
 export interface CourseSection {
-  courseId: number;
-  instructorId: number;
   termId: number;
   termTitle: string;
-  section: string;
   instructor: string;
-  enrollment: number;
   overallRating: number | null;
   rmpRating: number | null;
-  totalResponses: number;
-  completed: number;
 }
 
 export interface CourseQuestionScore {
   question: string;
   avgRating: number | null;
-  totalResponses: number;
 }
 
 export interface CourseDetail {
@@ -357,6 +323,7 @@ export async function submitFeedback(payload: {
   feedbackType: string;
   description: string;
   email?: string;
+  turnstileToken?: string;
 }): Promise<void> {
   const res = await fetch(`${API_BASE}/api/feedback`, {
     method: "POST",
@@ -370,10 +337,12 @@ export async function submitFeedback(payload: {
 }
 
 export async function fetchCourseData(code: string): Promise<CourseDetail | null> {
-  if (_courseCache.has(code)) return _courseCache.get(code)!;
+  const token = localStorage.getItem('auth_token');
+  const key = `${code}:${token ?? 'u'}`;
+  if (_courseCache.has(key)) return _courseCache.get(key)!;
   try {
     const data = await get<CourseDetail>(`/api/courses/${encodeURIComponent(code)}`);
-    _courseCache.set(code, data);
+    _courseCache.set(key, data);
     return data;
   } catch {
     return null;

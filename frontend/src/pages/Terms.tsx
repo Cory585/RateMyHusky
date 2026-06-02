@@ -9,7 +9,7 @@ const Terms = () => {
           <header className="terms-header">
             <span className="terms-kicker">Legal</span>
             <h1>Terms &amp; Conditions</h1>
-            <p className="terms-meta">Effective March 31, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective April 9, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -79,9 +79,9 @@ const Terms = () => {
                   are never synced to our servers.
                 </li>
                 <li>
-                  <strong>Anonymous usage data:</strong> Vercel Analytics and Vercel Speed
-                  Insights collect anonymous page view and performance metrics. No personally
-                  identifiable information is included.
+                  <strong>Anonymous usage data:</strong> Vercel Analytics, Vercel Speed
+                  Insights, and Google Analytics collect anonymous page view and performance
+                  metrics. No personally identifiable information is included.
                 </li>
               </ul>
               <p>
@@ -94,9 +94,10 @@ const Terms = () => {
               <h2>5. Feedback Form</h2>
               <p>
                 RateMyHusky includes a feedback form that accepts a message type, description,
-                and an optional email address. At this time, submissions from this form are
-                not transmitted to or stored on our servers. If this changes, these Terms will
-                be updated accordingly.
+                and an optional email address. Submissions from this form are transmitted to
+                the RateMyHusky team via email and are not stored in our database. Submitted
+                information is used solely to improve the service and will not be shared with
+                third parties.
               </p>
             </section>
 
@@ -111,6 +112,19 @@ const Terms = () => {
                 <li>
                   <strong>Vercel Analytics &amp; Speed Insights</strong>: collects anonymous
                   performance and usage data to help improve the service.
+                </li>
+                <li>
+                  <strong>Google Analytics</strong>: collects anonymous usage data such as page
+                  views and engagement to help us understand how the service is used.
+                  Google Analytics may use cookies; no personally identifiable information is
+                  shared. Subject to{' '}
+                  <a
+                    href="https://policies.google.com/privacy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Google's Privacy Policy
+                  </a>.
                 </li>
                 <li>
                   <strong>RateMyProfessors</strong>: professor ratings and review data are
@@ -207,7 +221,7 @@ const Terms = () => {
                 RateMyHusky aggregates publicly available data from third-party sources. If you
                 believe content displayed on this platform infringes your copyright or should be
                 removed for another legal reason, please contact us at{' '}
-                <a href="mailto:support@ratemyhusky.com">support@ratemyhusky.com</a> with a
+                <a href="mailto:legal@ratemyhusky.com">legal@ratemyhusky.com</a> with a
                 description of the content and the basis for your removal request. We will
                 review and respond in good faith.
               </p>

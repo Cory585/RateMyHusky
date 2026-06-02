@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { fetchProfessorData, fetchProfessorsCatalog, fetchSearchSuggestions } from '../api/api';
+import { useAuth } from '../context/AuthContext';
 import { termSortKey } from '../utils/termUtils';
 import type { CatalogProfessor, ProfessorProfile, ProfessorSuggestion } from '../api/api';
 import StarRating from '../components/StarRating';
@@ -19,6 +20,9 @@ interface TraceSnapshot {
 type WinnerSide = 'left' | 'right' | null;
 
 const CATALOG_LIMIT = 10000;
+
+// Module-level cache so catalog survives component unmounts
+let cachedCatalog: CatalogProfessor[] | null = null;
 
 const slugify = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
@@ -76,31 +80,26 @@ const pickWinner = (
 const cleanTermTitle = (t: string): string => t.replace(/^\d{6}:\s*/, '').replace(/\s*\d{6}/g, '').trim();
 
 const getRecentTraceSnapshot = (profile: ProfessorProfile | null): TraceSnapshot | null => {
-	if (!profile?.traceCourses?.length) return null;
+	if (!profile?.traceCourses?.length || profile.traceRating == null) return null;
 
-	const sortedCourses = [...profile.traceCourses].sort((a, b) => {
+	const mostRecent = [...profile.traceCourses].sort((a, b) => {
 		const ka = termSortKey(a.termTitle);
 		const kb = termSortKey(b.termTitle);
 		if (ka !== kb) return kb - ka;
 		return b.courseId - a.courseId;
-	});
+	})[0];
 
-	for (const course of sortedCourses) {
-		const overallScore = course.scores.find((score) => /overall/i.test(score.question));
-		if (overallScore && typeof overallScore.mean === 'number') {
-			return {
-				term: cleanTermTitle(course.termTitle),
-				course: course.displayName,
-				score: overallScore.mean,
-			};
-		}
-	}
-
-	return null;
+	return {
+		term: cleanTermTitle(mostRecent.termTitle),
+		course: mostRecent.displayName,
+		score: profile.traceRating,
+	};
 };
+
 
 function Compare() {
 	const [searchParams, setSearchParams] = useSearchParams();
+	const { user, loading: authLoading } = useAuth();
 
 	const [catalog, setCatalog] = useState<CatalogProfessor[]>([]);
 	const [, setCatalogLoading] = useState(true);
@@ -119,6 +118,8 @@ function Compare() {
 	const rightWrapperRef = useRef<HTMLDivElement>(null);
 	const leftDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const rightDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const leftFetchGenRef = useRef(0);
+	const rightFetchGenRef = useRef(0);
 
 	const [leftProfile, setLeftProfile] = useState<ProfessorProfile | null>(null);
 	const [rightProfile, setRightProfile] = useState<ProfessorProfile | null>(null);
@@ -142,6 +143,11 @@ function Compare() {
 	}, [searchParams, setSearchParams]);
 
 	useEffect(() => {
+		if (cachedCatalog) {
+			setCatalog(cachedCatalog);
+			return;
+		}
+
 		let cancelled = false;
 
 		const loadCatalog = async () => {
@@ -150,6 +156,7 @@ function Compare() {
 				setCatalogError(null);
 				const result = await fetchProfessorsCatalog({ sort: 'alpha', limit: CATALOG_LIMIT, page: 1 });
 				if (!cancelled) {
+					cachedCatalog = result.professors;
 					setCatalog(result.professors);
 				}
 			} catch {
@@ -189,18 +196,26 @@ function Compare() {
 	}, [rightSlug, rightCatalogProfessor]);
 
 	useEffect(() => {
-		setLeftQuery(leftCatalogProfessor?.name ?? '');
+		if (!leftSlug) {
+			setLeftQuery('');
+		} else if (leftCatalogProfessor?.name) {
+			setLeftQuery(leftCatalogProfessor.name);
+		}
 		setLeftSuggestions([]);
 		setShowLeftSuggestions(false);
 		setLeftActiveIndex(-1);
-	}, [leftCatalogProfessor?.name]);
+	}, [leftSlug, leftCatalogProfessor?.name]);
 
 	useEffect(() => {
-		setRightQuery(rightCatalogProfessor?.name ?? '');
+		if (!rightSlug) {
+			setRightQuery('');
+		} else if (rightCatalogProfessor?.name) {
+			setRightQuery(rightCatalogProfessor.name);
+		}
 		setRightSuggestions([]);
 		setShowRightSuggestions(false);
 		setRightActiveIndex(-1);
-	}, [rightCatalogProfessor?.name]);
+	}, [rightSlug, rightCatalogProfessor?.name]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -228,7 +243,7 @@ function Compare() {
 		return () => {
 			cancelled = true;
 		};
-	}, [leftSlug]);
+	}, [leftSlug, user]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -256,7 +271,7 @@ function Compare() {
 		return () => {
 			cancelled = true;
 		};
-	}, [rightSlug]);
+	}, [rightSlug, user]);
 
 	const updateSlugs = (updates: { a?: string; b?: string }) => {
 		const next = new URLSearchParams(searchParams);
@@ -288,8 +303,20 @@ function Compare() {
 	};
 
 	const handleClear = (side: Side) => {
-		if (side === 'a') updateSlugs({ a: '' });
-		else updateSlugs({ b: '' });
+		if (side === 'a') {
+			setLeftQuery('');
+			setLeftSuggestions([]);
+			setShowLeftSuggestions(false);
+			setLeftActiveIndex(-1);
+			updateSlugs({ a: '' });
+			return;
+		}
+
+		setRightQuery('');
+		setRightSuggestions([]);
+		setShowRightSuggestions(false);
+		setRightActiveIndex(-1);
+		updateSlugs({ b: '' });
 	};
 
 	const getSlugForSuggestion = (name: string) => {
@@ -335,9 +362,12 @@ function Compare() {
 			return;
 		}
 
+		leftFetchGenRef.current += 1;
+		const gen = leftFetchGenRef.current;
 		leftDebounceRef.current = setTimeout(async () => {
 			try {
 				const results = await fetchSearchSuggestions(trimmedQuery, 'Professor');
+				if (gen !== leftFetchGenRef.current) return;
 				const professorResults = results
 					.filter((result): result is ProfessorSuggestion => result.type === 'professor')
 					.filter((result) => getSuggestionSlug(result) !== rightSlug)
@@ -347,6 +377,7 @@ function Compare() {
 				setShowLeftSuggestions(professorResults.length > 0);
 				setLeftActiveIndex(-1);
 			} catch {
+				if (gen !== leftFetchGenRef.current) return;
 				setLeftSuggestions([]);
 				setShowLeftSuggestions(false);
 			}
@@ -368,9 +399,12 @@ function Compare() {
 			return;
 		}
 
+		rightFetchGenRef.current += 1;
+		const gen = rightFetchGenRef.current;
 		rightDebounceRef.current = setTimeout(async () => {
 			try {
 				const results = await fetchSearchSuggestions(trimmedQuery, 'Professor');
+				if (gen !== rightFetchGenRef.current) return;
 				const professorResults = results
 					.filter((result): result is ProfessorSuggestion => result.type === 'professor')
 					.filter((result) => getSuggestionSlug(result) !== leftSlug)
@@ -380,6 +414,7 @@ function Compare() {
 				setShowRightSuggestions(professorResults.length > 0);
 				setRightActiveIndex(-1);
 			} catch {
+				if (gen !== rightFetchGenRef.current) return;
 				setRightSuggestions([]);
 				setShowRightSuggestions(false);
 			}
@@ -463,9 +498,9 @@ function Compare() {
 		},
 		{
 			label: 'Total Reviews',
-			left: leftProfile?.totalRatings?.toLocaleString() ?? leftCatalogProfessor?.totalReviews?.toLocaleString() ?? 'N/A',
-			right: rightProfile?.totalRatings?.toLocaleString() ?? rightCatalogProfessor?.totalReviews?.toLocaleString() ?? 'N/A',
-			winner: pickWinner(leftProfile?.totalRatings ?? leftCatalogProfessor?.totalReviews, rightProfile?.totalRatings ?? rightCatalogProfessor?.totalReviews, 'higher', 0),
+			left: leftProfile?.totalComments?.toLocaleString() ?? leftCatalogProfessor?.totalComments?.toLocaleString() ?? 'N/A',
+			right: rightProfile?.totalComments?.toLocaleString() ?? rightCatalogProfessor?.totalComments?.toLocaleString() ?? 'N/A',
+			winner: pickWinner(leftProfile?.totalComments ?? leftCatalogProfessor?.totalComments, rightProfile?.totalComments ?? rightCatalogProfessor?.totalComments, 'higher', 0),
 			weight: 0.5,
 		},
 		{
@@ -485,14 +520,14 @@ function Compare() {
 			label: 'Recent TRACE Snapshot',
 			left: leftSnapshot
 				? `${leftSnapshot.score.toFixed(2)} (${leftSnapshot.term})`
-				: leftProfile
-					? 'No TRACE overall score'
-					: 'N/A',
+				: user
+					? 'N/A'
+					: 'Sign in to view',
 			right: rightSnapshot
 				? `${rightSnapshot.score.toFixed(2)} (${rightSnapshot.term})`
-				: rightProfile
-					? 'No TRACE overall score'
-					: 'N/A',
+				: user
+					? 'N/A'
+					: 'Sign in to view',
 			footnoteLeft: leftSnapshot?.course,
 			footnoteRight: rightSnapshot?.course,
 			winner: pickWinner(leftSnapshot?.score, rightSnapshot?.score),
@@ -757,23 +792,38 @@ function Compare() {
 					{compareRows.map((row) => {
 						const showLeft = Boolean(leftSlug) && !leftLoading;
 						const showRight = Boolean(rightSlug) && !rightLoading;
+						const renderValue = (value: string, showValue: boolean) => {
+							if (!authLoading && showValue && row.label === 'Recent TRACE Snapshot' && value === 'Sign in to view') {
+								return (
+									<span className="compare-lock-prompt">
+										<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="compare-lock-icon">
+											<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+											<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+										</svg>
+										<span>Sign in to view</span>
+									</span>
+								);
+							}
+
+							return <span>{showValue ? value : '—'}</span>;
+						};
 						return (
 							<div className="compare-row" role="row" key={row.label}>
 								<div
-									className={`compare-cell compare-cell-left ${showLeft ? (row.leftClass ?? '') : ''} ${showLeft && row.winner === 'left' ? 'compare-cell-winner' : ''}`}
+									className={`compare-cell compare-cell-left ${showLeft ? (row.leftClass ?? '') : ''} ${bothSelected && showLeft && row.winner === 'left' ? 'compare-cell-winner' : ''}`}
 									role="cell"
 								>
-									<span>{showLeft ? row.left : '—'}</span>
+									{renderValue(row.left, showLeft)}
 									{showLeft && row.footnoteLeft && <small>{row.footnoteLeft}</small>}
 								</div>
 								<div className="compare-cell compare-cell-label" role="columnheader">
 									{row.label}
 								</div>
 								<div
-									className={`compare-cell compare-cell-right ${showRight ? (row.rightClass ?? '') : ''} ${showRight && row.winner === 'right' ? 'compare-cell-winner' : ''}`}
+									className={`compare-cell compare-cell-right ${showRight ? (row.rightClass ?? '') : ''} ${bothSelected && showRight && row.winner === 'right' ? 'compare-cell-winner' : ''}`}
 									role="cell"
 								>
-									<span>{showRight ? row.right : '—'}</span>
+									{renderValue(row.right, showRight)}
 									{showRight && row.footnoteRight && <small>{row.footnoteRight}</small>}
 								</div>
 							</div>
