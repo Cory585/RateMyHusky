@@ -2,7 +2,7 @@
 
 **https://ratemyhusky.com/**
 
-RateMyHusky is a full-stack web application built for Northeastern University students who want a clearer, more complete picture of their professors and courses before registering. Most students bounce between RateMyProfessors and Northeastern's official TRACE evaluation portal to piece together an opinion — RateMyHusky brings both data sources together in one place, normalizes them into a unified rating, and adds tools to search, filter, and compare.
+RateMyHusky is a full-stack web app for Northeastern University students to discover, search, and compare professors. It combines RateMyProfessors (RMP) crowdsourced reviews with Northeastern's official TRACE course evaluations into a single unified platform.
 
 ### Data Sources
 
