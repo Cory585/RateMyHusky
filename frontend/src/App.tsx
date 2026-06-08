@@ -12,6 +12,7 @@ import Compare from './pages/Compare';
 import NotFound from './pages/NotFound';
 import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
+import RedditPreview from './pages/RedditPreview';
 import Navbar from './components/Navbar';
 import FeedbackTab from './components/FeedbackTab';
 import ThemeToggle from './components/ThemeToggle';
@@ -41,6 +42,7 @@ function App() {
           <Route path="/compare" element={<Compare />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
+          <Route path="/reddit-preview" element={<RedditPreview />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
         <FeedbackTab />
