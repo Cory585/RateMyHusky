@@ -1,4 +1,6 @@
+import { useState, useMemo } from 'react';
 import './Professor.css';
+import Dropdown from '../components/Dropdown';
 
 interface RedditPost {
   id: string;
@@ -43,7 +45,33 @@ const MOCK_REDDIT_POSTS: RedditPost[] = [
   },
 ];
 
+const redditSortOptions = [
+  { value: 'popular', label: 'Most Popular' },
+  { value: 'newest', label: 'Most Recent' },
+];
+
 export default function RedditPreview() {
+  const [redditSearch, setRedditSearch] = useState('');
+  const [redditSort, setRedditSort] = useState('popular');
+
+  const filteredPosts = useMemo(() => {
+    const q = redditSearch.toLowerCase();
+    const filtered = redditSearch
+      ? MOCK_REDDIT_POSTS.filter(post =>
+          post.title.toLowerCase().includes(q) ||
+          post.body.toLowerCase().includes(q) ||
+          post.subreddit.toLowerCase().includes(q) ||
+          (post.course?.toLowerCase().includes(q) ?? false)
+        )
+      : [...MOCK_REDDIT_POSTS];
+
+    return filtered.sort((a, b) =>
+      redditSort === 'newest'
+        ? new Date(b.date).getTime() - new Date(a.date).getTime()
+        : b.score - a.score
+    );
+  }, [redditSearch, redditSort]);
+
   return (
     <div style={{ maxWidth: 800, margin: '40px auto', padding: '0 24px 80px' }}>
       <div style={{ marginBottom: 24, padding: '10px 16px', background: '#fffbea', border: '1px solid #f0d060', borderRadius: 10, fontSize: '0.85rem', color: '#7a6000' }}>
@@ -62,6 +90,18 @@ export default function RedditPreview() {
         </div>
 
         <div className="prof-reddit-container">
+          <div className="prof-trace-controls">
+            <div className="trace-search-container">
+              <input
+                type="text"
+                className="trace-search-input"
+                placeholder="Search posts..."
+                value={redditSearch}
+                onChange={e => setRedditSearch(e.target.value)}
+              />
+            </div>
+            <Dropdown className="trace-sort-dropdown" options={redditSortOptions} value={redditSort} onChange={setRedditSort} />
+          </div>
           <div className="prof-reddit-notice">
             <svg className="prof-reddit-notice-icon" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
@@ -69,7 +109,12 @@ export default function RedditPreview() {
             Posts sourced live from Reddit. Content reflects student opinions and is not verified.
           </div>
           <div className="prof-reviews-list">
-            {MOCK_REDDIT_POSTS.map(post => (
+            {filteredPosts.length === 0 && (
+              <p style={{ color: '#999', textAlign: 'center', padding: '32px 0', fontFamily: 'Nunito, sans-serif' }}>
+                No posts match your search.
+              </p>
+            )}
+            {filteredPosts.map(post => (
               <div key={post.id} className="prof-review-card prof-reddit-card">
                 <div className="prof-review-top">
                   <div className="prof-reddit-score">
