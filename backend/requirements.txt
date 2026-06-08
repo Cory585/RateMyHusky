@@ -7,3 +7,6 @@ requests
 python-dotenv
 gunicorn
 psycopg2-binary
+praw
+vaderSentiment
+rapidfuzz
