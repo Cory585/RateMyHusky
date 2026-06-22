@@ -131,3 +131,84 @@ def test_render_course_route_returns_html(render_client):
     body = resp.get_data(as_text=True)
     assert "<h1>ECON1115 — Macroeconomics</h1>" in body
     assert resp.headers["Cache-Control"] == "public, max-age=3600, s-maxage=86400"
+
+
+# ── TRACE review count (number only, never the comment text) ──
+
+def _base_profile(**over):
+    p = {
+        "name": "Francis Georges", "department": "Economics", "avgRating": 4.25,
+        "totalRatings": 2686, "wouldTakeAgainPct": 83, "difficulty": 2.9,
+        "rmpRating": None, "traceRating": None, "imageUrl": None,
+        "professorUrl": None, "traceCourses": [],
+    }
+    p.update(over)
+    return p
+
+
+def test_professor_html_shows_trace_review_count():
+    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x",
+                          trace_count=5662)
+    assert "<dt>TRACE reviews</dt><dd>5662</dd>" in html
+
+
+def test_professor_html_omits_trace_count_when_zero():
+    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x",
+                          trace_count=0)
+    assert "TRACE reviews" not in html
+
+
+def test_professor_html_never_shows_gated_trace_comment_text():
+    # Even if a gated (empty-text) trace entry were somehow passed as a review,
+    # only RMP review blockquotes are rendered; the trace count is a number only.
+    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x",
+                          trace_count=42)
+    # The count appears, but no blockquote section exists (no RMP review text given).
+    assert "<dd>42</dd>" in html
+    assert "<blockquote>" not in html
+
+
+def test_professor_html_shows_rmp_review_count():
+    reviews = [{"course": "ECON1115", "quality": 5, "difficulty": 3,
+                "date": "2024", "comment": "Great."}]
+    html = professor_html(_base_profile(), reviews, "https://ratemyhusky.com/professors/x",
+                          trace_count=10)
+    assert "<dt>RateMyProfessor reviews</dt><dd>1</dd>" in html
+
+
+# ── Social link-preview meta tags ──
+
+def test_professor_html_has_twitter_card_large_image_when_photo():
+    html = professor_html(_base_profile(imageUrl="https://img/x.jpg"), [],
+                          "https://ratemyhusky.com/professors/x")
+    assert '<meta name="twitter:card" content="summary_large_image">' in html
+    assert '<meta name="twitter:title" content="Francis Georges — Economics at Northeastern | RateMyHusky">' in html
+    assert '<meta name="twitter:image" content="https://img/x.jpg">' in html
+    assert '<meta property="og:image:alt"' in html
+
+
+def test_professor_html_twitter_summary_when_no_photo():
+    html = professor_html(_base_profile(imageUrl=None), [],
+                          "https://ratemyhusky.com/professors/x")
+    # Falls back to the bare logo → small summary card, not large image.
+    assert '<meta name="twitter:card" content="summary">' in html
+
+
+def test_course_html_has_twitter_tags():
+    detail = {
+        "summary": {"code": "ECON1115", "name": "Macroeconomics",
+                    "department": "Economics", "avgRating": 4.1,
+                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025"},
+        "instructors": [],
+    }
+    html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
+    assert '<meta name="twitter:card"' in html
+    assert '<meta name="twitter:title" content="ECON1115 — Macroeconomics at Northeastern | RateMyHusky">' in html
+
+
+def test_render_professor_route_exposes_trace_count(render_client):
+    # The conftest stub returns traceComments with entries; the route should
+    # surface their count without rendering any gated comment text.
+    resp = render_client.get("/render/professors/francis-georges")
+    body = resp.get_data(as_text=True)
+    assert "TRACE reviews" in body

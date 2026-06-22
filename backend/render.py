@@ -27,10 +27,16 @@ def _jsonld_script(obj) -> str:
 
 
 def _page(title: str, description: str, canonical: str, body: str,
-          jsonld: list, image: str | None = None, noindex: bool = False, og_type: str = "website") -> str:
+          jsonld: list, image: str | None = None, noindex: bool = False,
+          og_type: str = "website", image_alt: str | None = None) -> str:
     robots = '<meta name="robots" content="noindex">' if noindex else \
              '<meta name="robots" content="index, follow">'
+    # A real, content-bearing image gives social platforms a large card; the
+    # bare logo is only a last-resort fallback.
+    has_real_image = bool(image)
     img = image or f"{SITE}/logo.jpg"
+    alt = image_alt or title
+    twitter_card = "summary_large_image" if has_real_image else "summary"
     scripts = "\n".join(_jsonld_script(b) for b in jsonld)
     return f"""<!doctype html>
 <html lang="en">
@@ -46,6 +52,12 @@ def _page(title: str, description: str, canonical: str, body: str,
 <meta property="og:description" content="{_esc(description)}">
 <meta property="og:url" content="{_esc(canonical)}">
 <meta property="og:image" content="{_esc(img)}">
+<meta property="og:image:alt" content="{_esc(alt)}">
+<meta name="twitter:card" content="{twitter_card}">
+<meta name="twitter:title" content="{_esc(title)}">
+<meta name="twitter:description" content="{_esc(description)}">
+<meta name="twitter:image" content="{_esc(img)}">
+<meta name="twitter:image:alt" content="{_esc(alt)}">
 {scripts}
 </head>
 <body>
@@ -64,13 +76,15 @@ def _stat_rows(pairs) -> str:
     return "<dl>" + "".join(rows) + "</dl>" if rows else ""
 
 
-def professor_html(profile: dict, reviews: list, canonical: str) -> str:
+def professor_html(profile: dict, reviews: list, canonical: str,
+                   trace_count: int = 0) -> str:
     name = profile.get("name") or ""
     dept = profile.get("department") or ""
     avg = profile.get("avgRating") or 0
     total = profile.get("totalRatings") or 0
     wta = profile.get("wouldTakeAgainPct")
     diff = profile.get("difficulty")
+    rmp_count = len(reviews)
 
     title = f"{name} — {dept} at Northeastern | RateMyHusky"
     wta_txt = f", {wta}% would take again" if wta is not None else ""
@@ -87,6 +101,9 @@ def professor_html(profile: dict, reviews: list, canonical: str) -> str:
         ("Difficulty", f"{diff}/5" if diff is not None else None),
         ("RateMyProfessor rating", profile.get("rmpRating")),
         ("TRACE rating", profile.get("traceRating")),
+        # Count of TRACE evaluations only — the comment text stays gated.
+        ("TRACE reviews", trace_count if trace_count else None),
+        ("RateMyProfessor reviews", rmp_count if rmp_count else None),
     ])
 
     courses = profile.get("traceCourses") or []
@@ -130,7 +147,8 @@ def professor_html(profile: dict, reviews: list, canonical: str) -> str:
         }
 
     return _page(title, summary, canonical, body, [jsonld],
-                 image=profile.get("imageUrl"), og_type="profile")
+                 image=profile.get("imageUrl"), og_type="profile",
+                 image_alt=f"{name}, professor of {dept} at Northeastern University")
 
 
 def course_html(detail: dict, canonical: str) -> str:
@@ -224,9 +242,11 @@ def render_professor(slug):
     reviews_resp = _get_reviews_view()(slug)
     rdata, rerr = _json_or_404(reviews_resp)
     reviews = (rdata or {}).get("reviews", []) if not rerr else []
+    # TRACE evaluation count (comment text stays gated; we expose only the number).
+    trace_count = len((rdata or {}).get("traceComments", [])) if not rerr else 0
 
     canonical = f"{SITE}/professors/{slug}"
-    html = professor_html(data, reviews, canonical)
+    html = professor_html(data, reviews, canonical, trace_count=trace_count)
     resp = Response(html, mimetype="text/html")
     resp.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
     return resp

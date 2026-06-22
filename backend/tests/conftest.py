@@ -26,10 +26,16 @@ def render_client(monkeypatch):
         })
 
     def fake_professor_reviews(slug):
+        # Unauthenticated shape: RMP reviews carry text; TRACE comments are
+        # present (so their count is known) but their text is gated to "".
         return FakeResp({"reviews": [
             {"course": "ECON1115", "quality": 5, "difficulty": 3,
              "date": "2024", "comment": "Excellent lecturer."}
-        ], "traceComments": []})
+        ], "traceComments": [
+            {"question": "Comments", "comment": "", "termId": 901, "courseId": 1},
+            {"question": "Comments", "comment": "", "termId": 902, "courseId": 1},
+            {"question": "Comments", "comment": "", "termId": 903, "courseId": 1},
+        ]})
 
     def fake_course_detail(code):
         if code == "missing":
