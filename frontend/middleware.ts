@@ -76,6 +76,56 @@ async function proxyToBackend(request: Request, url: URL): Promise<Response> {
   });
 }
 
+const CRAWLER_UAS = [
+  'googlebot', 'google-extended', 'bingbot', 'gptbot', 'oai-searchbot',
+  'chatgpt-user', 'claudebot', 'claude-searchbot', 'claude-user',
+  'anthropic-ai', 'perplexitybot', 'perplexity-user', 'applebot',
+];
+
+function isCrawler(ua: string): boolean {
+  const lc = ua.toLowerCase();
+  return CRAWLER_UAS.some((bot) => lc.includes(bot));
+}
+
+// Matches /professors/<slug> and /courses/<code> (single trailing segment).
+const DETAIL_RE = /^\/(professors|courses)\/([^/]+)\/?$/;
+
+async function fetchSnapshot(pathname: string): Promise<Response | undefined> {
+  const origin = process.env.RAILWAY_ORIGIN;
+  if (!origin) return undefined;
+  const m = pathname.match(DETAIL_RE);
+  if (!m) return undefined;
+  const slug = m[2];
+  // Reject encoded slashes / traversal so the slug can't escape the
+  // /render/<kind>/ path segment (edge-to-origin SSRF hardening).
+  let decoded = slug;
+  try {
+    decoded = decodeURIComponent(slug);
+    // one more pass to catch double-encoding
+    decoded = decodeURIComponent(decoded);
+  } catch {
+    return undefined; // malformed percent-encoding
+  }
+  if (/[/\\]/.test(decoded) || decoded.includes('..')) {
+    return undefined;
+  }
+  const kind = m[1] === 'professors' ? 'professors' : 'courses';
+  const target = new URL(`/render/${kind}/${slug}`, origin);
+  const headers = new Headers();
+  const proxyKey = process.env.PROXY_SECRET;
+  if (proxyKey) headers.set('x-proxy-key', proxyKey);
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(target, { headers, signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok && res.status !== 404) return undefined; // fall back to SPA on 5xx
+    return res;
+  } catch {
+    return undefined; // any failure → SPA fallback
+  }
+}
+
 export default async function middleware(request: Request): Promise<Response | undefined> {
   const url = new URL(request.url);
 
@@ -92,6 +142,26 @@ export default async function middleware(request: Request): Promise<Response | u
 
   if (url.pathname.startsWith('/api/')) {
     return proxyToBackend(request, url);
+  }
+
+  if (
+    process.env.PRERENDER_ENABLED === 'true' &&
+    isCrawler(request.headers.get('user-agent') || '') &&
+    DETAIL_RE.test(url.pathname)
+  ) {
+    const snapshot = await fetchSnapshot(url.pathname);
+    if (snapshot) {
+      return new Response(snapshot.body, {
+        status: snapshot.status,
+        headers: {
+          'content-type': 'text/html; charset=utf-8',
+          'cache-control': snapshot.headers.get('cache-control') ||
+            'public, max-age=3600, s-maxage=86400',
+          'x-prerendered': '1',
+        },
+      });
+    }
+    // snapshot undefined → fall through to SPA below
   }
 
   // Fall through to vercel.json rewrites (SPA fallback).
