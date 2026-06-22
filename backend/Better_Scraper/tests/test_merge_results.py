@@ -81,3 +81,19 @@ def test_write_outputs_v2_has_only_photo_rows(tmp_path):
         out = list(csv.DictReader(f))
     assert [r["name"] for r in out] == ["Jane Doe"]
     assert list(out[0].keys()) == ["name", "image_url", "source_page"]
+
+
+def test_decide_row_logs_linkedin_even_when_no_photo():
+    # Agent confirmed a LinkedIn profile but found no usable photo.
+    prof = _prof("Brent Hailpern")
+    found = {"image_url": "", "source_page": "", "source_tier": "",
+             "confidence": "", "matched_name": "",
+             "linkedin_url": "https://www.linkedin.com/in/brenthailpern/"}
+    row = mr.decide_row(prof, found)
+    assert row["status"] == "not_found"
+    assert row["linkedin_url"] == "https://www.linkedin.com/in/brenthailpern/"
+
+
+def test_decide_row_linkedin_blank_when_absent():
+    row = mr.decide_row(_prof("Jane Doe"), None)
+    assert row["linkedin_url"] == ""

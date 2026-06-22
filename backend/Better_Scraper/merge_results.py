@@ -16,7 +16,7 @@ from precompute import normalize_name, upgrade_image_url  # noqa: E402
 import photo_research as pr  # noqa: E402
 
 AUDIT_FIELDS = ["name", "college", "department", "matched_name",
-                "source_tier", "confidence", "new_url", "old_url", "status"]
+                "source_tier", "confidence", "new_url", "old_url", "status", "linkedin_url"]
 
 
 def decide_row(prof, found):
@@ -31,7 +31,10 @@ def decide_row(prof, found):
         "new_url": "",
         "old_url": old,
         "status": "not_found",
+        "linkedin_url": "",
     }
+    if found:
+        base["linkedin_url"] = found.get("linkedin_url", "") or ""
     if found and pr.is_plausible_photo_url(found.get("image_url", "")):
         base.update({
             "matched_name": found.get("matched_name", ""),
