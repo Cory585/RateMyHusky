@@ -55,6 +55,12 @@ def _surname(name):
 
 
 def apply_dedup(rows):
+    """Blank new_url (mark as not_found) for URLs shared by 3+ profs or 2 profs
+    with unrelated surnames.
+
+    Idempotent: write_outputs() already calls this, so callers normally do not
+    call it directly.
+    """
     photo_rows = [r for r in rows if r.get("new_url")]
     counts = Counter(upgrade_image_url(r["new_url"]) for r in photo_rows)
 

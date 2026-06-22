@@ -49,6 +49,25 @@ def test_apply_dedup_drops_shared_url():
     assert all(r["new_url"] == "" and r["status"] == "not_found" for r in out)
 
 
+def test_apply_dedup_drops_two_unrelated_surnames():
+    rows = [
+        {"name": "Alice Anderson", "new_url": "https://x.edu/shared-400x400.jpg", "status": "new"},
+        {"name": "Bob Baker", "new_url": "https://x.edu/shared-400x400.jpg", "status": "new"},
+    ]
+    out = mr.apply_dedup(rows)
+    assert all(r["new_url"] == "" and r["status"] == "not_found" for r in out)
+
+
+def test_apply_dedup_keeps_two_related_surnames():
+    # Same surname -> likely the same person / name variant -> keep both.
+    rows = [
+        {"name": "Jon Smith", "new_url": "https://x.edu/smith-400x400.jpg", "status": "new"},
+        {"name": "Jonathan Smith", "new_url": "https://x.edu/smith-400x400.jpg", "status": "new"},
+    ]
+    out = mr.apply_dedup(rows)
+    assert all(r["new_url"] and r["status"] == "new" for r in out)
+
+
 def test_write_outputs_v2_has_only_photo_rows(tmp_path):
     rows = [
         mr.decide_row(_prof("Jane Doe"),
