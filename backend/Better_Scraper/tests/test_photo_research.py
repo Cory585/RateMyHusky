@@ -53,3 +53,13 @@ def test_is_plausible_photo_url():
     assert not pr.is_plausible_photo_url("https://x.edu/logo.png")          # SKIP pattern
     assert not pr.is_plausible_photo_url("https://x.edu/group-photo.jpg")   # SKIP pattern
     assert not pr.is_plausible_photo_url("https://x.edu/profile")           # no extension
+
+
+def test_dept_to_college_supplemental_mapping():
+    # Department strings present in the data but absent from precompute.COLLEGE_MAP
+    assert pr.dept_to_college("Art and Design") == "CAMD"
+    assert pr.dept_to_college("Chemistry  Chemical Biology") == "Science"   # double space
+    assert pr.dept_to_college("Mech  Industrial Engineering") == "Engineering"
+    # genuinely unmapped admin departments stay Unknown
+    assert pr.dept_to_college("Army ROTC") == "Unknown"
+    assert pr.dept_to_college("") == "Unknown"

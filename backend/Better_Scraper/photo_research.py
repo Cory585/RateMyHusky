@@ -97,6 +97,64 @@ SKIP_PATTERNS = [
     "promo", "graphic", "spiral", "cover-",
 ]
 
+# Local, photo-pipeline-only department->college mapping. Supplements
+# precompute.COLLEGE_MAP (which we intentionally do NOT modify) so the photo
+# run can organize the ~2,800 professors whose TRACE department strings are
+# not in the app's COLLEGE_MAP. Keys are verbatim from the data, including the
+# double-space artifacts left when "&" was stripped upstream.
+SUPPLEMENTAL_COLLEGE_MAP = {
+    # CAMD
+    "Art and Design": "CAMD",
+    "Theatre": "CAMD",
+    "Interdisc Studies - Arts/Media": "CAMD",
+    "Dean of Coll of Arts, Media": "CAMD",
+    # Science
+    "Chemistry  Chemical Biology": "Science",
+    "Marine  Environment Sciences": "Science",
+    "Interdisc Studies - Science": "Science",
+    "Medical Sciences": "Science",
+    # Health Sciences
+    "Phys Therapy/Movemnt/Rehab Sci": "Health Sciences",
+    "Public Health and Health Sci": "Health Sciences",
+    "Comm Sciences  Disorders": "Health Sciences",
+    "Pharmacy  Health Systems Sci": "Health Sciences",
+    "Pharmaceutical Science": "Health Sciences",
+    "Health Sci - Interdisciplinary": "Health Sciences",
+    "Health Informatics": "Health Sciences",
+    "Physician Assistant": "Health Sciences",
+    "Health  Physical Education": "Health Sciences",
+    # Engineering
+    "Mech  Industrial Engineering": "Engineering",
+    "Electrical and Comp Engineerng": "Engineering",
+    "Dean of Engineering": "Engineering",
+    "Civil  Environmental Engineer": "Engineering",
+    "General Engineering": "Engineering",
+    "Grad Engineering - Leadership": "Engineering",
+    # CSSH
+    "Pub Policy and Urban Affairs": "CSSH",
+    "Interdisc Studies - Soc Sc/Hum": "CSSH",
+    "Sociology and Anthropology": "CSSH",
+    "Criminology  Criminal Justice": "CSSH",
+    "Philosophy and Religion": "CSSH",
+    "American Sign Language": "CSSH",
+    "Dean of Coll of Soc Sci  Huma": "CSSH",
+    "Cultures/Societies/Global Stds": "CSSH",
+    "Lang, Literature and Culture": "CSSH",
+    "Managerial Economics": "CSSH",
+    # Business
+    "Entrepreneurship  Innovation": "Business",
+    "Finance  Insurance": "Business",
+    "International Bus  Strategy": "Business",
+    "Management Science": "Business",
+    "Management Information Systems": "Business",
+    "Technological Entrepreneurship": "Business",
+    # Khoury
+    "Information Assurance": "Khoury",
+    "Computer  Informational Tech.": "Khoury",
+    # Professional Studies
+    "Counseling  Educational Psych": "Professional Studies",
+}
+
 
 def dept_to_college(department):
     """Map a department string to its college via precompute.COLLEGE_MAP."""
@@ -109,6 +167,10 @@ def dept_to_college(department):
     low = raw.lower()
     for k, v in COLLEGE_MAP.items():
         if k.lower() == low:
+            return v
+    # Supplemental local mapping (collapse whitespace on keys to match `raw`)
+    for k, v in SUPPLEMENTAL_COLLEGE_MAP.items():
+        if re.sub(r"\s+", " ", k).strip() == raw:
             return v
     return "Unknown"
 
