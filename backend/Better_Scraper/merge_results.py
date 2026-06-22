@@ -58,36 +58,49 @@ def _surname(name):
 
 
 def apply_dedup(rows):
-    """Blank new_url (mark as not_found) for URLs shared by 3+ profs or 2 profs
-    with unrelated surnames.
+    """Blank new_url for URLs shared by 3+ profs or 2 profs with unrelated
+    surnames, UNLESS every row in the group is verified (status=="new" and
+    matched_name truthy) — in that case keep the photo on the first row and
+    mark the rest as "duplicate".
 
     Idempotent: write_outputs() already calls this, so callers normally do not
     call it directly.
     """
     photo_rows = [r for r in rows if r.get("new_url")]
-    counts = Counter(upgrade_image_url(r["new_url"]) for r in photo_rows)
 
-    url_surnames = defaultdict(set)
+    # Group rows by canonical URL
+    url_groups = defaultdict(list)
     for r in photo_rows:
-        u = upgrade_image_url(r["new_url"])
-        if counts[u] == 2:
-            url_surnames[u].add(_surname(r["name"]))
+        url_groups[upgrade_image_url(r["new_url"])].append(r)
 
-    bad = set()
-    for u, c in counts.items():
-        if c >= 3:
-            bad.add(u)
-        elif c == 2:
-            names = list(url_surnames.get(u, set()))
-            if len(names) == 2:
-                a, b = names
+    for u, group in url_groups.items():
+        if len(group) < 2:
+            continue  # unique URL, untouched
+
+        all_verified = all(
+            r.get("status") == "new" and r.get("matched_name")
+            for r in group
+        )
+
+        if all_verified:
+            # Keep first row; mark the rest as duplicates
+            for r in group[1:]:
+                r["new_url"] = ""
+                r["status"] = "duplicate"
+        else:
+            # Old safeguard: drop all if 3+, or if 2 with unrelated surnames
+            if len(group) >= 3:
+                for r in group:
+                    r["new_url"] = ""
+                    r["status"] = "not_found"
+            else:  # exactly 2
+                surnames = [_surname(r["name"]) for r in group]
+                a, b = surnames
                 if a and b and a not in b and b not in a:
-                    bad.add(u)
+                    for r in group:
+                        r["new_url"] = ""
+                        r["status"] = "not_found"
 
-    for r in rows:
-        if r.get("new_url") and upgrade_image_url(r["new_url"]) in bad:
-            r["new_url"] = ""
-            r["status"] = "not_found"
     return rows
 
 

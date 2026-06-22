@@ -97,3 +97,42 @@ def test_decide_row_logs_linkedin_even_when_no_photo():
 def test_decide_row_linkedin_blank_when_absent():
     row = mr.decide_row(_prof("Jane Doe"), None)
     assert row["linkedin_url"] == ""
+
+
+def _newrow(name, url, matched=None):
+    # a verified 'new' audit row as decide_row would produce
+    return {"name": name, "new_url": url, "status": "new",
+            "matched_name": matched or name}
+
+
+def test_dedup_keeps_one_when_both_verified_same_url():
+    rows = [
+        _newrow("Stavros Tripakis", "https://x/tripakis-400x400.jpg"),
+        _newrow("Stavros Trypakis", "https://x/tripakis-400x400.jpg"),
+    ]
+    out = mr.apply_dedup(rows)
+    kept = [r for r in out if r["new_url"]]
+    dup = [r for r in out if r["status"] == "duplicate"]
+    assert len(kept) == 1            # photo preserved on one
+    assert len(dup) == 1             # other marked duplicate, not lost-as-wrong
+    assert dup[0]["new_url"] == ""
+
+
+def test_dedup_still_drops_unverified_unrelated_pair():
+    # No matched_name => not verified => old collision safeguard applies
+    rows = [
+        {"name": "Alice Anderson", "new_url": "https://x/shared-400x400.jpg", "status": "new", "matched_name": ""},
+        {"name": "Bob Baker", "new_url": "https://x/shared-400x400.jpg", "status": "new", "matched_name": ""},
+    ]
+    out = mr.apply_dedup(rows)
+    assert all(r["new_url"] == "" and r["status"] == "not_found" for r in out)
+
+
+def test_dedup_drops_three_plus_unverified_shared():
+    rows = [
+        {"name": "A One", "new_url": "https://x/g.jpg", "status": "new", "matched_name": ""},
+        {"name": "B Two", "new_url": "https://x/g.jpg", "status": "new", "matched_name": ""},
+        {"name": "C Three", "new_url": "https://x/g.jpg", "status": "new", "matched_name": ""},
+    ]
+    out = mr.apply_dedup(rows)
+    assert all(r["new_url"] == "" and r["status"] == "not_found" for r in out)
