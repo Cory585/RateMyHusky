@@ -39,3 +39,17 @@ def test_name_match_accepts_alias():
     idx = pr.build_alias_index()
     # alias pair from ALIAS_MAP
     assert pr.name_matches("Virgil Pavlu", "Virgiliu Pavlu", idx)
+
+
+def test_dept_to_college_known_and_unknown():
+    assert pr.dept_to_college("Computer Science") == "Khoury"
+    assert pr.dept_to_college("Economics") == "CSSH"
+    assert pr.dept_to_college("Underwater Basket Weaving") == "Unknown"
+
+
+def test_is_plausible_photo_url():
+    assert pr.is_plausible_photo_url("https://x.edu/uploads/jane-doe-400x400.jpg")
+    assert pr.is_plausible_photo_url("https://x.edu/p.png?cb=1")
+    assert not pr.is_plausible_photo_url("https://x.edu/logo.png")          # SKIP pattern
+    assert not pr.is_plausible_photo_url("https://x.edu/group-photo.jpg")   # SKIP pattern
+    assert not pr.is_plausible_photo_url("https://x.edu/profile")           # no extension

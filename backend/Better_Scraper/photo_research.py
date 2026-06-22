@@ -83,3 +83,42 @@ def name_matches(neu_name, page_name, idx):
 
     # first + last, ignoring middles
     return np_[0] == pp[0] and np_[-1] == pp[-1]
+
+
+SKIP_PATTERNS = [
+    "placeholder", "silhouette", "no-photo", "avatar",
+    "generic", "blank", "mystery", "default-person", "headshot-placeholder",
+    "logo", "icon", "notched-n", "nu_rgb", "seal",
+    "person-banner", "featured-nav", "banner", "hero-image",
+    "graduates", "graduation", "commencement", "ceremony", "group",
+    "class-of", "cohort",
+    "centennial", "campus", "common", "building", "aerial", "quad",
+    "hall", "tulips", "entrance",
+    "promo", "graphic", "spiral", "cover-",
+]
+
+
+def dept_to_college(department):
+    """Map a department string to its college via precompute.COLLEGE_MAP."""
+    if not department:
+        return "Unknown"
+    raw = re.sub(r"\s+", " ", str(department)).strip()
+    if raw in COLLEGE_MAP:
+        return COLLEGE_MAP[raw]
+    # case-insensitive fallback
+    low = raw.lower()
+    for k, v in COLLEGE_MAP.items():
+        if k.lower() == low:
+            return v
+    return "Unknown"
+
+
+def is_plausible_photo_url(url):
+    """Cheap sanity filter on an image URL (no network)."""
+    if not url:
+        return False
+    low = str(url).lower()
+    if any(p in low for p in SKIP_PATTERNS):
+        return False
+    path = low.split("?")[0]
+    return any(path.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp"))
