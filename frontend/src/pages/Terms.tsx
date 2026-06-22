@@ -7,7 +7,6 @@ const Terms = () => {
       <main className="terms-main">
         <div className="terms-shell">
           <header className="terms-header">
-            <span className="terms-kicker">Legal</span>
             <h1>Terms &amp; Conditions</h1>
             <p className="terms-meta">Effective April 9, 2026 &middot; RateMyHusky</p>
           </header>

@@ -11,7 +11,6 @@ const NotFound = () => {
         <div className="not-found-shell">
           <section className="not-found-hero">
             <div className="not-found-copy">
-              <span className="not-found-kicker">Error 404</span>
               <h1>That page is off the map.</h1>
               <p>
                 The link you followed does not point to an active page. Head back to the

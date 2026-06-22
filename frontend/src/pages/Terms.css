@@ -22,29 +22,6 @@
   margin-bottom: 40px;
 }
 
-.terms-kicker {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  border-radius: 999px;
-  background: rgba(214, 57, 76, 0.1);
-  color: #d6394c;
-  font-size: 0.8rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  margin-bottom: 16px;
-}
-
-.terms-kicker::before {
-  content: '';
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
 .terms-header h1 {
   font-size: clamp(2rem, 5vw, 2.8rem);
   font-weight: 800;
