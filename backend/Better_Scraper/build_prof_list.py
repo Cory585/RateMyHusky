@@ -8,6 +8,7 @@ import os
 import sys
 import csv
 import json
+import re
 import argparse
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -66,6 +67,119 @@ def build_records(data_dir):
     return list(seen.values())
 
 
+def _name_tokens(name):
+    """Normalize a name and return its word tokens (lowercase alphanum only)."""
+    s = re.sub(r"[^a-z0-9 ]", " ", normalize_name(name))
+    return [t for t in s.split() if t]
+
+
+def collapse_duplicates(records, idx):
+    """Collapse records that refer to the same person (alias or name-swap).
+
+    Two records are the same person if:
+      1. Alias-equivalent: aliases_for(a) & aliases_for(b) is non-empty.
+      2. First/last swap (2-token names only): sorted token lists are equal.
+
+    Uses union-find over record indices.  Returns one merged record per group.
+    """
+    n = len(records)
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    # --- Rule 1: alias equivalence ---
+    # Map each record to its alias root (min of aliases_for set) then union
+    # records sharing the same root.
+    alias_root_to_idx = {}
+    for i, rec in enumerate(records):
+        eq = pr.aliases_for(rec["name"], idx)
+        root = min(eq)  # stable canonical key
+        if root in alias_root_to_idx:
+            union(i, alias_root_to_idx[root])
+        else:
+            alias_root_to_idx[root] = i
+
+    # --- Rule 2: name-swap / reorder for 2-token names ---
+    # Bucket by frozenset of tokens; records in the same bucket that have
+    # equal sorted-token lists are swap-equivalent.
+    bucket = {}  # frozenset(tokens) -> list of (i, tokens)
+    for i, rec in enumerate(records):
+        toks = _name_tokens(rec["name"])
+        if len(toks) == 2:
+            key = frozenset(toks)
+            bucket.setdefault(key, []).append((i, toks))
+
+    for group in bucket.values():
+        if len(group) < 2:
+            continue
+        # All entries in this bucket have the same frozenset; for 2-token
+        # names that means sorted() matches — union all of them.
+        first_idx = group[0][0]
+        for j in range(1, len(group)):
+            union(first_idx, group[j][0])
+
+    # --- Build groups ---
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for i in range(n):
+        groups[find(i)].append(i)
+
+    # --- Merge each group into one record ---
+    result = []
+    for members_idx in groups.values():
+        if len(members_idx) == 1:
+            result.append(records[members_idx[0]])
+            continue
+
+        members = [records[i] for i in members_idx]
+
+        # Canonical: (has_existing_url desc, token_count desc, name asc)
+        def sort_key(rec):
+            has_url = 0 if rec["existing_url"] else 1
+            tok_count = -len(_name_tokens(rec["name"]))
+            return (has_url, tok_count, normalize_name(rec["name"]))
+
+        members_sorted = sorted(members, key=sort_key)
+        canonical = members_sorted[0]
+        others = members_sorted[1:]
+
+        # Merge existing_url: canonical's first, already chosen above
+        existing_url = canonical["existing_url"]
+        if not existing_url:
+            for o in others:
+                if o["existing_url"]:
+                    existing_url = o["existing_url"]
+                    break
+
+        # Merge aliases: union of all members' aliases + other members'
+        # normalized names, minus the canonical's own normalized name.
+        canonical_norm = normalize_name(canonical["name"])
+        merged_aliases = set(canonical["aliases"])
+        for o in others:
+            merged_aliases.update(o["aliases"])
+            merged_aliases.add(normalize_name(o["name"]))
+        merged_aliases.discard(canonical_norm)
+
+        result.append({
+            "name": canonical["name"],
+            "department": canonical["department"],
+            "college": canonical["college"],
+            "aliases": sorted(merged_aliases),
+            "existing_url": existing_url,
+        })
+
+    return result
+
+
 def main():
     p = argparse.ArgumentParser(description="Build per-college professor list")
     p.add_argument("--data-dir", default=None)
@@ -77,6 +191,12 @@ def main():
     out_path = args.output or os.path.join(data_dir, "prof_list.json")
 
     records = build_records(data_dir)
+    import photo_research as pr
+    idx = pr.build_alias_index()
+    before = len(records)
+    records = collapse_duplicates(records, idx)
+    print(f"  collapsed {before - len(records)} duplicate (alias/name-swap) records -> {len(records)}")
+
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(records, f, ensure_ascii=False, indent=1)
 
