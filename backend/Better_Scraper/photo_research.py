@@ -5,6 +5,7 @@ photo pipeline groups and matches professors exactly like the app does.
 """
 import os
 import sys
+import re
 
 _BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _BACKEND_DIR not in sys.path:
@@ -51,3 +52,34 @@ def aliases_for(name, idx):
     """Return the set of normalized names equivalent to `name`."""
     key = normalize_name(name)
     return set(idx.get(key, {key}))
+
+
+def _parts(name):
+    s = normalize_name(name)
+    s = re.sub(r"[^a-z0-9 ]", " ", s)
+    return [p for p in s.split() if p]
+
+
+def name_matches(neu_name, page_name, idx):
+    """True if page_name refers to the same person as neu_name.
+
+    Accept: exact normalized match; first+last match ignoring middle names;
+    alias equivalence (either direction). Reject: surname-only, or different
+    first name with no alias evidence.
+    """
+    neu_eq = aliases_for(neu_name, idx)
+    page_norm = normalize_name(page_name)
+
+    # Alias / exact equivalence (covers documented variants)
+    if page_norm in neu_eq:
+        return True
+    page_eq = aliases_for(page_name, idx)
+    if neu_eq & page_eq:
+        return True
+
+    np_, pp = _parts(neu_name), _parts(page_name)
+    if len(np_) < 2 or len(pp) < 2:
+        return False  # need at least first+last on both sides
+
+    # first + last, ignoring middles
+    return np_[0] == pp[0] and np_[-1] == pp[-1]
