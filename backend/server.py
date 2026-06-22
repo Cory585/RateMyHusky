@@ -2233,6 +2233,9 @@ def trace_dept_avg():
     return resp
 
 
+from render import render_bp
+app.register_blueprint(render_bp)
+
 if __name__ == "__main__":
     print("Starting server on port 5001...")
     app.run(debug=True, port=5001, use_reloader=True)
