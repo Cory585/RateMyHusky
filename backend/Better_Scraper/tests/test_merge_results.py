@@ -136,3 +136,22 @@ def test_dedup_drops_three_plus_unverified_shared():
     ]
     out = mr.apply_dedup(rows)
     assert all(r["new_url"] == "" and r["status"] == "not_found" for r in out)
+
+
+def test_drop_old_urls_converts_kept_old_to_not_found():
+    # Policy: a prof keeps a photo only if re-verified THIS run; existing-CSV
+    # photos are NOT carried forward. kept_old -> not_found, new_url blanked.
+    rows = [
+        {"name": "Kept Person", "new_url": "https://x.edu/old.jpg",
+         "old_url": "https://x.edu/old.jpg", "status": "kept_old"},
+        {"name": "New Person", "new_url": "https://x.edu/fresh.jpg",
+         "old_url": "", "status": "new"},
+        {"name": "Empty Person", "new_url": "", "old_url": "", "status": "not_found"},
+    ]
+    out = mr.drop_old_urls(rows)
+    by = {r["name"]: r for r in out}
+    assert by["Kept Person"]["status"] == "not_found"
+    assert by["Kept Person"]["new_url"] == ""
+    assert by["New Person"]["status"] == "new"          # untouched
+    assert by["New Person"]["new_url"] == "https://x.edu/fresh.jpg"
+    assert by["Empty Person"]["status"] == "not_found"  # untouched

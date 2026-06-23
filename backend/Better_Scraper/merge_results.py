@@ -52,6 +52,20 @@ def decide_row(prof, found):
     return base
 
 
+def drop_old_urls(rows):
+    """Policy (user 2026-06-22): a professor keeps a photo only if it was
+    re-verified THIS run. Existing-CSV photos are NOT carried forward, so any
+    row that fell back to the old URL (status=="kept_old") is reset to
+    not_found with a blank new_url. Rows with a freshly verified photo
+    (status=="new") and photoless rows are untouched. Run BEFORE write_outputs.
+    """
+    for r in rows:
+        if r.get("status") == "kept_old":
+            r["new_url"] = ""
+            r["status"] = "not_found"
+    return rows
+
+
 def _surname(name):
     parts = [p for p in re.sub(r"[^a-z ]", " ", normalize_name(name)).split() if p]
     return parts[-1] if parts else ""
