@@ -3,6 +3,7 @@ import re
 from render import (
     professor_html, course_html, not_found_html, _esc, MAX_SNAPSHOT_REVIEWS,
 )
+from render import home_html  # noqa: E402
 
 
 def _extract_jsonld(html):
@@ -212,3 +213,41 @@ def test_render_professor_route_exposes_trace_count(render_client):
     resp = render_client.get("/render/professors/francis-georges")
     body = resp.get_data(as_text=True)
     assert "TRACE reviews" in body
+
+
+def test_home_html_title_canonical_h1_and_summary():
+    stats = [
+        {"label": "Professors", "value": "9.3K"},
+        {"label": "Courses", "value": "5K"},
+        {"label": "Comments", "value": "120K"},
+        {"label": "Departments", "value": "180"},
+    ]
+    top = [{"name": "Francis Georges", "slug": "francis-georges",
+            "department": "Economics", "avgRating": 4.25}]
+    html = home_html(stats, top, "https://ratemyhusky.com/")
+    assert "<!doctype html>" in html.lower()
+    assert "<title>RateMyHusky — Northeastern University professor &amp; course ratings</title>" in html
+    assert '<link rel="canonical" href="https://ratemyhusky.com/"' in html
+    assert "<h1>RateMyHusky — Northeastern University professor &amp; course ratings</h1>" in html
+    # stat values rendered as-is
+    assert "9.3K" in html and "Professors" in html
+    # top professor linked into its detail page
+    assert '<a href="https://ratemyhusky.com/professors/francis-georges">' in html
+
+
+def test_home_html_jsonld_website_with_searchaction():
+    html = home_html([], [], "https://ratemyhusky.com/")
+    block = _extract_jsonld(html)[0]
+    assert block["@type"] == "WebSite"
+    assert block["url"] == "https://ratemyhusky.com"
+    action = block["potentialAction"]
+    assert action["@type"] == "SearchAction"
+    assert "{search_term_string}" in action["target"]
+    assert action["query-input"] == "required name=search_term_string"
+
+
+def test_home_html_renders_without_top_professors():
+    # Graceful: empty top list still produces a valid page, no <a> prof links.
+    html = home_html([{"label": "Professors", "value": "9.3K"}], [], "https://ratemyhusky.com/")
+    assert "<h1>" in html
+    assert "/professors/" not in html.split("<body>")[1].split("Browse")[0]

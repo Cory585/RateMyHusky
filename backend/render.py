@@ -198,6 +198,53 @@ def course_html(detail: dict, canonical: str) -> str:
     return _page(title, summary, canonical, body, [jsonld])
 
 
+def home_html(stats: list, top_professors: list, canonical: str) -> str:
+    title = "RateMyHusky — Northeastern University professor & course ratings"
+    summary = (
+        "RateMyHusky aggregates TRACE course evaluations and RateMyProfessor "
+        "reviews for Northeastern University professors and courses. Browse "
+        "ratings, difficulty, and student comments to plan your schedule — free."
+    )
+
+    stat_rows = _stat_rows([(s.get("label"), s.get("value")) for s in (stats or [])])
+
+    prof_li = []
+    for p in (top_professors or []):
+        if not p.get("slug"):
+            continue
+        rating = p.get("avgRating")
+        suffix = f" ({rating}/5)" if rating is not None else ""
+        prof_li.append(
+            f'<li><a href="{SITE}/professors/{_esc(p.get("slug"))}">{_esc(p.get("name"))}</a>'
+            f' — {_esc(p.get("department"))}{suffix}</li>'
+        )
+    prof_items = "".join(prof_li)
+    profs_block = (
+        f"<h2>Top-rated professors</h2><ul>{prof_items}</ul>" if prof_items else ""
+    )
+
+    body = (
+        f"<h1>{_esc(title)}</h1>"
+        f"<p>{_esc(summary)}</p>"
+        f"{stat_rows}{profs_block}"
+        f'<p>Browse all <a href="{SITE}/professors">professors</a> and '
+        f'<a href="{SITE}/courses">courses</a>.</p>'
+    )
+
+    jsonld = {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "RateMyHusky",
+        "url": SITE,
+        "potentialAction": {
+            "@type": "SearchAction",
+            "target": f"{SITE}/professors?q={{search_term_string}}",
+            "query-input": "required name=search_term_string",
+        },
+    }
+    return _page(title, summary, canonical, body, [jsonld])
+
+
 def not_found_html(kind: str) -> str:
     body = f"<h1>{_esc(kind.title())} not found</h1>"
     return _page("Not found | RateMyHusky", "Not found", f"{SITE}/", body, [],
