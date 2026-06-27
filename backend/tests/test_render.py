@@ -1,9 +1,9 @@
 import json
 import re
 from render import (
-    professor_html, course_html, not_found_html, _esc, MAX_SNAPSHOT_REVIEWS,
+    professor_html, course_html, not_found_html, home_html, _esc,
+    MAX_SNAPSHOT_REVIEWS,
 )
-from render import home_html  # noqa: E402
 
 
 def _extract_jsonld(html):
