@@ -38,7 +38,8 @@ if hasattr(sys.stdout, "reconfigure"):
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REDDIT_DIR = os.path.join(SCRIPT_DIR, "reddit_data")
-MENTIONS_CSV = os.path.join(REDDIT_DIR, "reddit_mentions.csv")
+_VERIFIED_CSV = os.path.join(REDDIT_DIR, "reddit_mentions.verified.csv")
+MENTIONS_CSV = _VERIFIED_CSV if os.path.exists(_VERIFIED_CSV) else os.path.join(REDDIT_DIR, "reddit_mentions.csv")
 POSTS_CSV = os.path.join(REDDIT_DIR, "reddit_neu_posts.csv")
 COMMENTS_CSV = os.path.join(REDDIT_DIR, "reddit_neu_comments.csv")
 

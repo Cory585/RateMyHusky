@@ -96,14 +96,19 @@ def _is_topical(thread_text):
     return any(w in low for w in _TEACH_WORDS)
 
 
+_WORD_RE = re.compile(r"[a-z]+")
+
+
 def compute_hints(mention, mention_text, thread_text, surnames):
     hints = []
     own = (mention.get("matched_token") or "").strip().lower()
     own_last = own.split()[-1] if own else ""
     text_low = (mention_text or "").lower()
-    others = sorted({s for s in surnames
-                     if s != own_last and len(s) >= 4
-                     and re.search(r"\b" + re.escape(s) + r"\b", text_low)})
+    # Intersect the text's words with the surname set (O(words)) rather than
+    # regex-searching every catalog surname against the text (O(surnames)).
+    words = set(_WORD_RE.findall(text_low))
+    others = sorted(w for w in words
+                    if w in surnames and w != own_last and len(w) >= 4)
     if others:
         hints.append("another_prof_in_text: different surname(s) present: " + ", ".join(others[:3]))
     if not (mention.get("matched_token") or "").strip():
@@ -162,29 +167,31 @@ def build():
     manifest = []
     for i, batch in enumerate(batches, 1):
         lines = []
+        idx = 0  # per-batch target index; agents cite this, not the opaque mention_id
         for e in batch:
             tid = e["thread_id"]
             lines.append(f"########## THREAD {tid} ##########")
             lines.append(e["thread_text"])
             lines.append("\n--- VERIFY TARGETS for this thread ---")
             for m in by_thread[tid]:
+                idx += 1
                 mtext = _mention_text(m, posts_idx, comments_by_link)
                 hints = compute_hints(m, mtext, e["thread_text"], surnames)
-                lines.append(f"[mention {m['mention_id']}] PROF: {m['professor_name']} "
+                lines.append(f"[#{idx}] PROF: {m['professor_name']} "
                              f"({m['professor_slug']})  method={m['method']} "
                              f"conf={m['confidence']} token='{m['matched_token']}'")
                 lines.append("  SOURCE TEXT: " + (mtext.strip()[:600] or "<empty>"))
                 if hints:
                     lines.append("  notes: " + " | ".join(hints))
-                lines.append("  -> your call: keep / drop / reassign:<slug>  + quote + confidence")
-                manifest.append({"mention_id": m["mention_id"], "batch": i,
+                lines.append("  -> your call (cite #" + str(idx) + "): keep / drop / reassign:<slug>  + quote + confidence")
+                manifest.append({"idx": idx, "mention_id": m["mention_id"], "batch": i,
                                  "professor_slug": m["professor_slug"], "method": m["method"]})
             lines.append("")
         with open(os.path.join(DATA, "thread_packets", f"batch_{i:03d}.txt"), "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
 
     with open(os.path.join(DATA, "verify_targets.csv"), "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["mention_id", "batch", "professor_slug", "method"])
+        w = csv.DictWriter(f, fieldnames=["idx", "mention_id", "batch", "professor_slug", "method"])
         w.writeheader(); w.writerows(manifest)
     print(f"wrote {len(batches)} batches, {len(manifest)} verify targets")
 
