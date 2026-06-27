@@ -76,6 +76,10 @@ def _stat_rows(pairs) -> str:
     return "<dl>" + "".join(rows) + "</dl>" if rows else ""
 
 
+def _rating_suffix(avg) -> str:
+    return f" ({_esc(avg)}/5)" if avg is not None else ""
+
+
 def professor_html(profile: dict, reviews: list, canonical: str,
                    trace_count: int = 0) -> str:
     name = profile.get("name") or ""
@@ -213,7 +217,7 @@ def home_html(stats: list, top_professors: list, canonical: str) -> str:
         if not p.get("slug"):
             continue
         rating = p.get("avgRating")
-        suffix = f" ({_esc(rating)}/5)" if rating is not None else ""
+        suffix = _rating_suffix(rating)
         prof_li.append(
             f'<li><a href="{SITE}/professors/{_esc(p.get("slug"))}">{_esc(p.get("name"))}</a>'
             f' — {_esc(p.get("department"))}{suffix}</li>'
@@ -241,6 +245,47 @@ def home_html(stats: list, top_professors: list, canonical: str) -> str:
             "target": f"{SITE}/professors?q={{search_term_string}}",
             "query-input": "required name=search_term_string",
         },
+    }
+    return _page(title, summary, canonical, body, [jsonld])
+
+
+LISTING_CAP = 20
+
+
+def professors_listing_html(entries: list, total: int, canonical: str) -> str:
+    title = "Northeastern University professors | RateMyHusky"
+    total_txt = str(total) if total else "thousands of"
+    summary = (
+        f"Browse {total_txt} Northeastern University professors. Compare ratings, "
+        f"difficulty, and would-take-again from TRACE evaluations and "
+        f"RateMyProfessor reviews."
+    )
+
+    shown = [e for e in (entries or []) if e.get("slug")][:LISTING_CAP]
+    items = "".join(
+        f'<li><a href="{SITE}/professors/{_esc(e.get("slug"))}">{_esc(e.get("name"))}</a>'
+        f' — {_esc(e.get("department"))}'
+        f'{_rating_suffix(e.get("avgRating"))}</li>'
+        for e in shown
+    )
+    body = (
+        f"<h1>Northeastern University professors</h1>"
+        f"<p>{_esc(summary)}</p>"
+        f"<ul>{items}</ul>"
+    )
+
+    jsonld = {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": i + 1,
+                "name": e.get("name"),
+                "url": f"{SITE}/professors/{e.get('slug')}",
+            }
+            for i, e in enumerate(shown)
+        ],
     }
     return _page(title, summary, canonical, body, [jsonld])
 

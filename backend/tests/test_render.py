@@ -2,7 +2,7 @@ import json
 import re
 from render import (
     professor_html, course_html, not_found_html, home_html, _esc,
-    MAX_SNAPSHOT_REVIEWS,
+    MAX_SNAPSHOT_REVIEWS, professors_listing_html,
 )
 
 
@@ -251,3 +251,35 @@ def test_home_html_renders_without_top_professors():
     html = home_html([{"label": "Professors", "value": "9.3K"}], [], "https://ratemyhusky.com/")
     assert "<h1>" in html
     assert "/professors/" not in html.split("<body>")[1].split("Browse")[0]
+
+
+def test_professors_listing_title_total_and_entry_links():
+    entries = [{"name": "Francis Georges", "slug": "francis-georges",
+                "department": "Economics", "avgRating": 4.25}]
+    html = professors_listing_html(entries, 9329, "https://ratemyhusky.com/professors")
+    assert "<title>Northeastern University professors | RateMyHusky</title>" in html
+    assert "<h1>Northeastern University professors</h1>" in html
+    assert "9329" in html  # total mentioned in summary
+    assert '<a href="https://ratemyhusky.com/professors/francis-georges">Francis Georges</a>' in html
+
+
+def test_professors_listing_jsonld_itemlist():
+    entries = [
+        {"name": "A", "slug": "a", "department": "CS", "avgRating": 4.0},
+        {"name": "B", "slug": "b", "department": "CS", "avgRating": 3.0},
+    ]
+    block = _extract_jsonld(
+        professors_listing_html(entries, 2, "https://ratemyhusky.com/professors"))[0]
+    assert block["@type"] == "ItemList"
+    assert len(block["itemListElement"]) == 2
+    assert block["itemListElement"][0]["position"] == 1
+    assert block["itemListElement"][0]["url"] == "https://ratemyhusky.com/professors/a"
+
+
+def test_professors_listing_caps_at_20_and_escapes_name():
+    entries = [{"name": f"<b>P{i}</b>", "slug": f"p{i}",
+                "department": "X", "avgRating": 1.0} for i in range(40)]
+    html = professors_listing_html(entries, 40, "https://ratemyhusky.com/professors")
+    assert html.count("<li>") == 20
+    assert "<b>P0</b>" not in html
+    assert "&lt;b&gt;P0&lt;/b&gt;" in html
