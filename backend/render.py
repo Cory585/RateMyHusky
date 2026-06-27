@@ -290,6 +290,43 @@ def professors_listing_html(entries: list, total: int, canonical: str) -> str:
     return _page(title, summary, canonical, body, [jsonld])
 
 
+def courses_listing_html(entries: list, total: int, canonical: str) -> str:
+    title = "Northeastern University courses | RateMyHusky"
+    total_txt = str(total) if total else "thousands of"
+    summary = (
+        f"Browse {total_txt} Northeastern University courses. Compare instructors, "
+        f"average ratings, and enrollment from TRACE evaluations."
+    )
+
+    shown = [e for e in (entries or []) if e.get("code")][:LISTING_CAP]
+    items = "".join(
+        f'<li><a href="{SITE}/courses/{_esc(e.get("code"))}">'
+        f'{_esc(e.get("code"))} — {_esc(e.get("name"))}</a>'
+        f'{_rating_suffix(e.get("avgRating"))}</li>'
+        for e in shown
+    )
+    body = (
+        f"<h1>Northeastern University courses</h1>"
+        f"<p>{_esc(summary)}</p>"
+        f"<ul>{items}</ul>"
+    )
+
+    jsonld = {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": i + 1,
+                "name": f"{e.get('code')} — {e.get('name')}",
+                "url": f"{SITE}/courses/{e.get('code')}",
+            }
+            for i, e in enumerate(shown)
+        ],
+    }
+    return _page(title, summary, canonical, body, [jsonld])
+
+
 def not_found_html(kind: str) -> str:
     body = f"<h1>{_esc(kind.title())} not found</h1>"
     return _page("Not found | RateMyHusky", "Not found", f"{SITE}/", body, [],
@@ -357,3 +394,56 @@ def render_course(code):
     resp = Response(html, mimetype="text/html")
     resp.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
     return resp
+
+
+def _get_stats_view():
+    from server import stats
+    return stats
+
+
+def _get_professors_catalog_view():
+    from server import professors_catalog
+    return professors_catalog
+
+
+def _get_courses_catalog_view():
+    from server import courses_catalog
+    return courses_catalog
+
+
+def _cache_headers(resp):
+    resp.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
+    return resp
+
+
+@render_bp.route("/render/home")
+def render_home():
+    from flask import Response
+    stats_data, serr = _json_or_404(_get_stats_view()())
+    stats_list = stats_data if (not serr and isinstance(stats_data, list)) else []
+
+    cat_data, cerr = _json_or_404(_get_professors_catalog_view()())
+    top = (cat_data or {}).get("professors", [])[:10] if not cerr else []
+
+    html = home_html(stats_list, top, f"{SITE}/")
+    return _cache_headers(Response(html, mimetype="text/html"))
+
+
+@render_bp.route("/render/professors")
+def render_professors_listing():
+    from flask import Response
+    data, err = _json_or_404(_get_professors_catalog_view()())
+    entries = (data or {}).get("professors", []) if not err else []
+    total = (data or {}).get("total", 0) if not err else 0
+    html = professors_listing_html(entries, total, f"{SITE}/professors")
+    return _cache_headers(Response(html, mimetype="text/html"))
+
+
+@render_bp.route("/render/courses")
+def render_courses_listing():
+    from flask import Response
+    data, err = _json_or_404(_get_courses_catalog_view()())
+    entries = (data or {}).get("courses", []) if not err else []
+    total = (data or {}).get("total", 0) if not err else 0
+    html = courses_listing_html(entries, total, f"{SITE}/courses")
+    return _cache_headers(Response(html, mimetype="text/html"))

@@ -2,7 +2,7 @@ import json
 import re
 from render import (
     professor_html, course_html, not_found_html, home_html, _esc,
-    MAX_SNAPSHOT_REVIEWS, professors_listing_html,
+    MAX_SNAPSHOT_REVIEWS, professors_listing_html, courses_listing_html,
 )
 
 
@@ -283,3 +283,60 @@ def test_professors_listing_caps_at_20_and_escapes_name():
     assert html.count("<li>") == 20
     assert "<b>P0</b>" not in html
     assert "&lt;b&gt;P0&lt;/b&gt;" in html
+
+
+def test_courses_listing_title_total_and_entry_links():
+    entries = [{"code": "ECON1115", "name": "Macroeconomics",
+                "department": "Economics", "avgRating": 4.1}]
+    html = courses_listing_html(entries, 5013, "https://ratemyhusky.com/courses")
+    assert "<title>Northeastern University courses | RateMyHusky</title>" in html
+    assert "<h1>Northeastern University courses</h1>" in html
+    assert "5013" in html
+    assert '<a href="https://ratemyhusky.com/courses/ECON1115">ECON1115 — Macroeconomics</a>' in html
+
+
+def test_courses_listing_jsonld_itemlist():
+    entries = [{"code": "CS1", "name": "Intro", "department": "CS", "avgRating": 4.0}]
+    block = _extract_jsonld(
+        courses_listing_html(entries, 1, "https://ratemyhusky.com/courses"))[0]
+    assert block["@type"] == "ItemList"
+    assert block["itemListElement"][0]["url"] == "https://ratemyhusky.com/courses/CS1"
+
+
+def test_render_home_route(render_client):
+    resp = render_client.get("/render/home")
+    assert resp.status_code == 200
+    assert resp.mimetype == "text/html"
+    body = resp.get_data(as_text=True)
+    assert "<h1>RateMyHusky — Northeastern University professor &amp; course ratings</h1>" in body
+    assert "francis-georges" in body  # top professor linked
+    assert "Professors" in body and "9.3K" in body  # stats rendered
+    assert resp.headers["Cache-Control"] == "public, max-age=3600, s-maxage=86400"
+
+
+def test_render_professors_listing_route(render_client):
+    resp = render_client.get("/render/professors")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "<h1>Northeastern University professors</h1>" in body
+    assert "9329" in body
+    assert resp.headers["Cache-Control"] == "public, max-age=3600, s-maxage=86400"
+
+
+def test_render_courses_listing_route(render_client):
+    resp = render_client.get("/render/courses")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "<h1>Northeastern University courses</h1>" in body
+    assert "ECON1115" in body
+    assert resp.headers["Cache-Control"] == "public, max-age=3600, s-maxage=86400"
+
+
+def test_render_home_degrades_when_top_professors_fail(render_client, monkeypatch):
+    import render
+    monkeypatch.setattr(render, "_get_professors_catalog_view",
+                        lambda: (lambda: ({"error": "boom"}, 500)), raising=False)
+    resp = render_client.get("/render/home")
+    assert resp.status_code == 200  # still renders, top-prof section just omitted
+    body = resp.get_data(as_text=True)
+    assert "<h1>RateMyHusky" in body
