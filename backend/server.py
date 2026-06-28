@@ -421,6 +421,16 @@ def query_one(sql, params=None):
     rows = query(sql, params)
     return rows[0] if rows else None
 
+def _chat_write(sql, params=None):
+    """Write helper for the question path (ask_log INSERTs): execute + commit, never fetch.
+    The read-only query()/query_one() call fetchall(), which raises on a non-RETURNING INSERT;
+    and the pool is not autocommit, so writes must commit explicitly."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(sql, params or ())
+    conn.commit()
+
+
 
 # ──────────────────────────────────────────────
 #  Google OAuth config
@@ -738,7 +748,7 @@ def chat():
         gate_fn=lambda qq: gate(qq, _chat_adapter),
         retrieve_fn=lambda qq, hint: retrieve(qq, hint, query, query_one, _professor_search),
         generate_fn=lambda qq, r: generate(qq, r, _chat_adapter),
-        log_fn=query,
+        log_fn=_chat_write,
     )
     session_token = _claims["sub"]  # verified account id — unspoofable, never None
     ip_hash = _hash_ip(request.headers.get("CF-Connecting-IP", request.remote_addr))
