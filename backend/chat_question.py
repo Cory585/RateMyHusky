@@ -1,6 +1,6 @@
 import sys, argparse, time
 
-from chat_throttle import global_budget_hit, session_allowed
+from chat_throttle import global_budget_hit, session_allowed, minute_capacity_ok
 from chat_abuse import abuse_check
 from chat_cache import get_cached, set_cached
 from chat_validate import thin_data_check, validate_output
@@ -142,6 +142,16 @@ def handle_question(q, session_token, ip_hash, deps):
         payload["mode"] = "thin_data"
         return payload, 200
 
+    # 9b. Per-minute TPM guard (the concurrency bottleneck): if the pool's last-60s token use
+    # would exceed the per-minute ceiling, degrade gracefully BEFORE spending an LLM call —
+    # this is what catches a burst of concurrent users instead of waiting for a 429.
+    if not minute_capacity_ok(deps.query_one_fn, deps.num_keys):
+        _log("rate_limited", professor_slug=professor_slug,
+             retrieved_count=retrieval.get("comment_count", 0))
+        return _safe_fallback(
+            deps, q,
+            banner="High demand right now — showing matching Reddit comments. Try Ask again in a moment."), 200
+
     # 10. Generate
     try:
         gen = deps.generate_fn(q, retrieval)
@@ -267,6 +277,18 @@ def selftest():
     d_llm.generate_fn = types.MethodType(lambda self, q, r: (_ for _ in ()).throw(LLMUnavailable("down")), d_llm)
     payload, code = handle_question("is guha hard", "s", "iphash", d_llm)
     check("LLMUnavailable -> llm_error fallback", logged[-1][_status_idx()] == "llm_error" and code == 200)
+
+    # SATURATED MINUTE (per-minute TPM guard): pool used near-ceiling tokens in the last 60s ->
+    # degrade to keyword fallback, status rate_limited, NO LLM call.
+    d_tpm = Deps()
+    # high token sum for the per-minute query; zero for daily/session count queries
+    d_tpm.query_one_fn = types.MethodType(
+        lambda self, sql, params=None: {"t": 999999} if "sum(tokens_used)" in sql else {"c": 0}, d_tpm)
+    d_tpm.generate_fn = types.MethodType(
+        lambda self, q, r: (_ for _ in ()).throw(AssertionError("LLM must NOT be called when minute is saturated")), d_tpm)
+    payload, code = handle_question("is guha hard", "s", "iphash", d_tpm)
+    check("saturated minute -> rate_limited keyword fallback, no LLM",
+          logged[-1][_status_idx()] == "rate_limited" and code == 200 and "comments" in payload)
 
     # direct _is_bare_name assertions
     check("_is_bare_name single token", _is_bare_name("Lee") is True)
