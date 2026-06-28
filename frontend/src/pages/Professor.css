@@ -373,6 +373,9 @@
   border: none !important;
 }
 
+.prof-review-tab-short { display: none; }
+.prof-review-tab-full { display: inline; }
+
 .prof-reviews-filters { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .prof-reviews-filters .feedback-dropdown { width: auto; min-width: 180px; margin-bottom: 0; }
 .prof-reviews-list { display: flex; flex-direction: column; gap: 14px; }
@@ -918,6 +921,11 @@
 
   .prof-back-to-top { bottom: 20px; left: 16px; width: 40px; height: 40px; }
   .prof-back-to-top svg { width: 18px; height: 18px; }
+
+  .prof-review-tabs { width: 100%; gap: 4px; }
+  .prof-review-tab { flex: 1 1 0; padding: 8px 6px; font-size: 0.8rem; text-align: center; white-space: nowrap; }
+  .prof-review-tab-full { display: none; }
+  .prof-review-tab-short { display: inline; }
 }
 
 /* ═══════════════════════════════════════

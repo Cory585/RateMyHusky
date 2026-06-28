@@ -10,3 +10,7 @@ __pycache__/
 docs/
 node_modules/
 .DS_Store
+
+# LLM key-rotation pool — real keys, never committed
+backend/groq_keys.local.json
+*.local.json

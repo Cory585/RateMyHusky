@@ -212,7 +212,7 @@ const Professor = () => {
   const [reviewsLoading, setReviewsLoading] = useState(true);
   const [error, setError] = useState('');
   const [reviewTabRestored] = useState(() => sessionStorage.getItem('prof_review_tab') === 'trace');
-  const [reviewTab, setReviewTab] = useState<'rmp' | 'trace'>(() => {
+  const [reviewTab, setReviewTab] = useState<'rmp' | 'trace' | 'reddit'>(() => {
     const saved = sessionStorage.getItem('prof_review_tab');
     if (saved === 'trace') {
       sessionStorage.removeItem('prof_review_tab');
@@ -1308,10 +1308,17 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
               }} 
             />
             <button className={`prof-review-tab ${reviewTab === 'rmp' ? 'active' : ''}`} onClick={() => setReviewTab('rmp')}>
-              RateMyProfessor ({filteredRmpReviews.length})
+              <span className="prof-review-tab-full">RateMyProfessor ({filteredRmpReviews.length})</span>
+              <span className="prof-review-tab-short">RMP ({filteredRmpReviews.length})</span>
             </button>
             <button className={`prof-review-tab ${reviewTab === 'trace' ? 'active' : ''}`} onClick={() => setReviewTab('trace')}>
-              TRACE ({groupedTrace.reduce((acc, g) => acc + g.count, 0)})
+              <span className="prof-review-tab-full">TRACE ({groupedTrace.reduce((acc, g) => acc + g.count, 0)})</span>
+              <span className="prof-review-tab-short">TRACE ({groupedTrace.reduce((acc, g) => acc + g.count, 0)})</span>
+            </button>
+            <button className={`prof-review-tab ${reviewTab === 'reddit' ? 'active' : ''}`} onClick={() => setReviewTab('reddit')}>
+              {/* TODO(reddit-data): replace 0 with real Reddit mention count when data is wired */}
+              <span className="prof-review-tab-full">Reddit (0)</span>
+              <span className="prof-review-tab-short">Reddit (0)</span>
             </button>
           </div>
         </div>
