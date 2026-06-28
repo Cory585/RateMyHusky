@@ -108,7 +108,14 @@ def handle_question(q, session_token, ip_hash, deps):
         payload["mode"] = "out_of_scope"
         return payload, 200
 
-    # 6. Global budget + throttle
+    # 6. Cache hit (BEFORE throttle): a cached answer costs 0 LLM tokens, so it is always
+    # served and is never rate-limited. Use hint as the provisional slug key.
+    cached = get_cached(q, hint, deps.cache_get_fn)
+    if cached:
+        _log("ok", professor_slug=cached.get("professor_slug") or hint)
+        return cached, 200
+
+    # 7. Global budget + throttle (only gates paths that will actually spend an LLM call)
     if global_budget_hit(deps.query_one_fn, deps.num_keys):
         _log("rate_limited")
         return _safe_fallback(deps, q, banner="Daily question limit reached. Showing keyword results."), 200
@@ -117,12 +124,6 @@ def handle_question(q, session_token, ip_hash, deps):
     if not allowed:
         _log("rate_limited")
         return _safe_fallback(deps, q, banner="You've hit today's question limit. Showing keyword results."), 200
-
-    # 7. Cache hit (use hint as provisional slug key)
-    cached = get_cached(q, hint, deps.cache_get_fn)
-    if cached:
-        _log("ok", professor_slug=cached.get("professor_slug") or hint)
-        return cached, 200
 
     # 8. Retrieve
     retrieval = deps.retrieve_fn(q, hint)
@@ -289,6 +290,19 @@ def selftest():
     payload, code = handle_question("is guha hard", "s", "iphash", d_tpm)
     check("saturated minute -> rate_limited keyword fallback, no LLM",
           logged[-1][_status_idx()] == "rate_limited" and code == 200 and "comments" in payload)
+
+    # CACHE HIT is served BEFORE throttle: even with the budget/minute saturated, a cached
+    # answer returns ok (never rate_limited) and never calls the LLM.
+    d_cache = Deps()
+    # saturate the daily/minute budget + session counts, but NOT the abuse strike count
+    # (result_status = ANY(...)) -> not banned, but throttle would block if reached.
+    d_cache.query_one_fn = types.MethodType(
+        lambda self, sql, params=None: {"c": 0, "t": 0} if "ANY" in sql else {"t": 999999, "c": 999999}, d_cache)
+    d_cache.cache_get_fn = types.MethodType(lambda self, k: {"mode": "question", "answer": "cached fair [1].", "disclaimer": "x", "professor_slug": "guha-prof"}, d_cache)
+    d_cache.generate_fn = types.MethodType(lambda self, q, r: (_ for _ in ()).throw(AssertionError("LLM must NOT be called on a cache hit")), d_cache)
+    payload, code = handle_question("is guha hard", "s", "iphash", d_cache)
+    check("cache hit served before throttle, status ok, no LLM",
+          logged[-1][_status_idx()] == "ok" and payload.get("answer") == "cached fair [1]." and code == 200)
 
     # direct _is_bare_name assertions
     check("_is_bare_name single token", _is_bare_name("Lee") is True)

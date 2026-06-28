@@ -737,7 +737,6 @@ def chat():
         return jsonify({"mode": "error", "message": "Sign in to use Ask mode."}), 401
     deps = _types.SimpleNamespace(
         chat_enabled=CHAT_ENABLED,
-        adapter=_chat_adapter,
         num_keys=len(_chat_pool.entries) or 1,
         query_fn=query,
         query_one_fn=query_one,
@@ -750,7 +749,9 @@ def chat():
         generate_fn=lambda qq, r: generate(qq, r, _chat_adapter),
         log_fn=_chat_write,
     )
-    session_token = _claims["sub"]  # verified account id — unspoofable, never None
+    session_token = _claims.get("sub")  # verified account id — unspoofable, never None
+    if not session_token:
+        return jsonify({"mode": "error", "message": "Sign in to use Ask mode."}), 401
     ip_hash = _hash_ip(request.headers.get("CF-Connecting-IP", request.remote_addr))
     payload, code = handle_question(q, session_token, ip_hash, deps)
     return jsonify(payload), code
