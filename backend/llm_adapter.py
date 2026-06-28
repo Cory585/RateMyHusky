@@ -56,6 +56,9 @@ class GroqAdapter:
                     messages=[{"role": "system", "content": system},
                               {"role": "user", "content": user}],
                     temperature=0.1, max_tokens=max_tokens,
+                    # gpt-oss is a reasoning model; without low effort the reasoning trace
+                    # consumes the whole max_tokens budget and content comes back empty/truncated.
+                    reasoning_effort="low",
                 )
                 return {"text": resp.choices[0].message.content or "",
                         "tokens_used": getattr(resp.usage, "total_tokens", 0)}
