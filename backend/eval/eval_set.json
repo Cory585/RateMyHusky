@@ -1,0 +1,202 @@
+[
+  {
+    "question": "how hard is John Rachlin's grading?",
+    "expected_slug": "john-rachlin"
+  },
+  {
+    "question": "Is Virgil Pavlu a good professor?",
+    "expected_slug": "virgil-pavlu"
+  },
+  {
+    "question": "should I take a class with Kevin Gold as a beginner?",
+    "expected_slug": "kevin-gold"
+  },
+  {
+    "question": "Is Amit Shesh a good professor?",
+    "expected_slug": "amit-shesh"
+  },
+  {
+    "question": "is Walter Schnyder a tough grader or pretty chill?",
+    "expected_slug": "walter-schnyder"
+  },
+  {
+    "question": "Is Jude Mathews a good professor?",
+    "expected_slug": "jude-mathews"
+  },
+  {
+    "question": "what's the workload like in Peter Simon's courses?",
+    "expected_slug": "peter-simon"
+  },
+  {
+    "question": "Is Prasanth George a good professor?",
+    "expected_slug": "prasanth-george"
+  },
+  {
+    "question": "would you recommend Julius Marpaung for an intro course?",
+    "expected_slug": "julius-marpaung"
+  },
+  {
+    "question": "Is Hanai Sadaka a good professor?",
+    "expected_slug": "hanai-sadaka"
+  },
+  {
+    "question": "is Kathleen Durant good at explaining the material?",
+    "expected_slug": "kathleen-durant"
+  },
+  {
+    "question": "Is John Lindhe a good professor?",
+    "expected_slug": "john-lindhe"
+  },
+  {
+    "question": "how are Matthias Felleisen's exams \u2014 fair or brutal?",
+    "expected_slug": "matthias-felleisen"
+  },
+  {
+    "question": "Is Mark Fontenot a good professor?",
+    "expected_slug": "mark-fontenot"
+  },
+  {
+    "question": "Is Alden Jackson a good professor?",
+    "expected_slug": "alden-jackson"
+  },
+  {
+    "question": "is Benjamin Lerner worth taking?",
+    "expected_slug": "benjamin-lerner"
+  },
+  {
+    "question": "Is Lesley Ricci a good professor?",
+    "expected_slug": "lesley-ricci"
+  },
+  {
+    "question": "Is Adeel Bhutta a good professor?",
+    "expected_slug": "adeel-bhutta"
+  },
+  {
+    "question": "does Martin Schedlbauer give a lot of homework?",
+    "expected_slug": "martin-schedlbauer"
+  },
+  {
+    "question": "Is Sumi Seo a good professor?",
+    "expected_slug": "sumi-seo"
+  },
+  {
+    "question": "Is Gene Cooperman a good professor?",
+    "expected_slug": "gene-cooperman"
+  },
+  {
+    "question": "what do students think of Valerie Hower?",
+    "expected_slug": "valerie-hower"
+  },
+  {
+    "question": "Is John Kimani a good professor?",
+    "expected_slug": "john-kimani"
+  },
+  {
+    "question": "Is Sheila Winborne a good professor?",
+    "expected_slug": "sheila-winborne"
+  },
+  {
+    "question": "is Rainho strict about attendance?",
+    "expected_slug": "marco-rainho"
+  },
+  {
+    "question": "Is Karen Spikes a good professor?",
+    "expected_slug": "karen-spikes"
+  },
+  {
+    "question": "Is Jamie Henzy a good professor?",
+    "expected_slug": "jamie-henzy"
+  },
+  {
+    "question": "how's Elena Strange as a lecturer?",
+    "expected_slug": "elena-strange"
+  },
+  {
+    "question": "Is Jose Annunziato a good professor?",
+    "expected_slug": "jose-annunziato"
+  },
+  {
+    "question": "Is Jason Hemann a good professor?",
+    "expected_slug": "jason-hemann"
+  },
+  {
+    "question": "Is David Lang a good professor?",
+    "expected_slug": "david-lang"
+  },
+  {
+    "question": "is Park approachable during office hours?",
+    "expected_slug": "john-park"
+  },
+  {
+    "question": "Is Nathaniel Tuck a good professor?",
+    "expected_slug": "nathaniel-tuck"
+  },
+  {
+    "question": "Is Jianqiu Bai a good professor?",
+    "expected_slug": "jianqiu-bai"
+  },
+  {
+    "question": "Is Elena Bernal Mor a good professor?",
+    "expected_slug": "elena-bernal-mor"
+  },
+  {
+    "question": "Is Martin Dias a good professor?",
+    "expected_slug": "martin-dias"
+  },
+  {
+    "question": "are Ferdinand Vesely's classes manageable?",
+    "expected_slug": "ferdinand-vesely"
+  },
+  {
+    "question": "Is Gary Porter a good professor?",
+    "expected_slug": "gary-porter"
+  },
+  {
+    "question": "Is Ravi Sundaram a good professor?",
+    "expected_slug": "ravi-sundaram"
+  },
+  {
+    "question": "Is Justin Caouette a good professor?",
+    "expected_slug": "justin-caouette"
+  },
+  {
+    "question": "Is Christo Wilson a good professor?",
+    "expected_slug": "christo-wilson"
+  },
+  {
+    "question": "Is Olin Shivers Iii a good professor?",
+    "expected_slug": "olin-shivers-iii"
+  },
+  {
+    "question": "would you take Jude Matthews again?",
+    "expected_slug": "jude-matthews"
+  },
+  {
+    "question": "Is Thomas Consi a good professor?",
+    "expected_slug": "thomas-consi"
+  },
+  {
+    "question": "Is Leena Razzaq a good professor?",
+    "expected_slug": "leena-razzaq"
+  },
+  {
+    "question": "Is Sean Gallagher a good professor?",
+    "expected_slug": "sean-gallagher"
+  },
+  {
+    "question": "Is John Kane a good professor?",
+    "expected_slug": "john-kane"
+  },
+  {
+    "question": "Is Andrew Van Der Poel a good professor?",
+    "expected_slug": "andrew-van-der-poel"
+  },
+  {
+    "question": "Is Elizabeth Wilson a good professor?",
+    "expected_slug": "elizabeth-wilson"
+  },
+  {
+    "question": "Is Natalia Ptitsyna a good professor?",
+    "expected_slug": "natalia-ptitsyna"
+  }
+]
