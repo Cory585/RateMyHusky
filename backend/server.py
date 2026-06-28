@@ -24,6 +24,7 @@ from urllib.parse import urlencode, urlparse
 from datetime import datetime, timedelta, timezone
 from threading import Lock, Thread, Event
 import time
+from chat_search import keyword_search
 
 load_dotenv()
 
@@ -680,6 +681,26 @@ def search():
                 "dept": r["department"],
             })
         return jsonify(results)
+
+
+# ──────────────────────────────────────────────
+#  Reddit RAG chatbot
+# ──────────────────────────────────────────────
+@app.route("/api/chat")
+def chat():
+    q = (request.args.get("q") or "").strip()
+    mode = request.args.get("mode", "keyword")
+    if len(q) < 2:
+        return jsonify({"mode": mode, "results": []})
+    if mode == "keyword":
+        try:
+            limit = min(int(request.args.get("limit", "20")), 50)
+        except (TypeError, ValueError):
+            limit = 20
+        data = keyword_search(q, query, _professor_search, limit=limit)
+        return jsonify({"mode": "keyword", "results": data["comments"], "professors": data["professors"]})
+    # 'question' mode is added in Plan B; until then, refuse cleanly.
+    return jsonify({"error": "question mode not available yet"}), 503
 
 
 # ──────────────────────────────────────────────
