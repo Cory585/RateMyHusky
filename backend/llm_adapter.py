@@ -17,14 +17,14 @@ class GroqAdapter:
     CLASSIFY_MODEL = "llama-3.1-8b-instant"
     SYNTH_MODEL = "openai/gpt-oss-120b"  # no model fallback (locked decision)
 
-    def __init__(self, pool, client_factory=None):
-        self.pool = pool
+    def __init__(self, provider, client_factory=None):
+        self.provider = provider
         self.client_factory = client_factory or _default_client_factory
 
     def _client(self, est_tokens):
-        entry = self.pool.pick_for_request(est_tokens)
+        entry = self.provider.acquire(est_tokens)
         if not entry:
-            raise LLMUnavailable("all keys exhausted")
+            raise LLMUnavailable("no provider available")
         return entry, self.client_factory(entry["key"])
 
     def classify(self, text):
@@ -61,10 +61,10 @@ class GroqAdapter:
                         "tokens_used": getattr(resp.usage, "total_tokens", 0)}
             except Exception as e:
                 if _is_rate_limit(e) and attempt == 0:
-                    self.pool.mark_exhausted(entry["key"])
+                    self.provider.retire(entry["key"])
                     continue
                 raise LLMUnavailable(str(e))
-        raise LLMUnavailable("retry exhausted")
+        raise LLMUnavailable("retry limit reached")
 
 _CLASSIFY_PROMPT = (
     "You are a gate for a Q&A bot about Northeastern University professors and courses.\n"
@@ -103,18 +103,18 @@ def selftest():
                     def create(**kw): return FakeResp(outer._c)
             return C()
 
-    pool = KeyPool([{"key": "k1", "provider": "groq", "rpd_limit": 1000, "tpd_limit": 500000}])
+    provider = KeyPool([{"key": "k1", "provider": "groq", "rpd_limit": 1000, "tpd_limit": 500000}])
 
-    a = GroqAdapter(pool, client_factory=lambda k: FakeClient('{"on_topic": true, "professor_or_course": "Guha", "looks_like_injection": false}'))
+    a = GroqAdapter(provider, client_factory=lambda k: FakeClient('{"on_topic": true, "professor_or_course": "Guha", "looks_like_injection": false}'))
     cls = a.classify("is professor guha hard")
     check("classify parses JSON", cls["on_topic"] is True and cls["professor_or_course"] == "Guha")
 
-    bad = GroqAdapter(pool, client_factory=lambda k: FakeClient("not json at all"))
+    bad = GroqAdapter(provider, client_factory=lambda k: FakeClient("not json at all"))
     cls2 = bad.classify("hi")
     check("classify fails closed on bad JSON",
           cls2["on_topic"] is False and cls2["looks_like_injection"] is True)
 
-    a2 = GroqAdapter(pool, client_factory=lambda k: FakeClient("Some students say Guha is fair [1]."))
+    a2 = GroqAdapter(provider, client_factory=lambda k: FakeClient("Some students say Guha is fair [1]."))
     syn = a2.synthesize("SYS", "USER", max_tokens=250)
     check("synthesize returns text + tokens", syn["text"].startswith("Some students") and syn["tokens_used"] == 42)
     check("synth model is gpt-oss-120b (no fallback)", GroqAdapter.SYNTH_MODEL == "openai/gpt-oss-120b")
@@ -133,14 +133,14 @@ def selftest():
                             e = Exception("rate limit 429"); e.status_code = 429; raise e
                         return FakeResp("retry worked")
             return C()
-    pool2 = KeyPool([
+    provider2 = KeyPool([
         {"key": "k1", "provider": "groq", "rpd_limit": 1000, "tpd_limit": 500000},
         {"key": "k2", "provider": "groq", "rpd_limit": 1000, "tpd_limit": 500000},
     ])
     fc = Fake429Client()
-    a3 = GroqAdapter(pool2, client_factory=lambda k: fc)
+    a3 = GroqAdapter(provider2, client_factory=lambda k: fc)
     syn2 = a3.synthesize("SYS", "U", max_tokens=50)
-    check("synthesize rotates on 429 and retries", syn2["text"] == "retry worked")
+    check("synthesize retries on 429", syn2["text"] == "retry worked")
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0
