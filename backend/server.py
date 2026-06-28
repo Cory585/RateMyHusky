@@ -25,8 +25,24 @@ from datetime import datetime, timedelta, timezone
 from threading import Lock, Thread, Event
 import time
 from chat_search import keyword_search
+from chat_question import handle_question
+from llm_adapter import GroqAdapter
+from key_pool import KeyPool
+from chat_gate import gate
+from chat_retrieve import retrieve
+from chat_answer import generate
 
 load_dotenv()
+
+import types as _types
+
+CHAT_ENABLED = os.getenv("CHAT_ENABLED", "true").lower() == "true"
+_IP_SALT = os.getenv("ASK_IP_SALT", "rmh-default-salt")
+_chat_pool = KeyPool()
+_chat_adapter = GroqAdapter(_chat_pool)
+
+def _hash_ip(ip):
+    return hashlib.sha256((_IP_SALT + (ip or "")).encode()).hexdigest()[:16]
 
 
 # ──────────────────────────────────────────────
@@ -686,6 +702,7 @@ def search():
 # ──────────────────────────────────────────────
 #  Reddit RAG chatbot
 # ──────────────────────────────────────────────
+@limiter.limit("30 per minute")
 @app.route("/api/chat")
 def chat():
     q = (request.args.get("q") or "").strip()
@@ -699,8 +716,25 @@ def chat():
             limit = 20
         data = keyword_search(q, query, _professor_search, limit=limit)
         return jsonify({"mode": "keyword", "results": data["comments"], "professors": data["professors"]})
-    # 'question' mode is added in Plan B; until then, refuse cleanly.
-    return jsonify({"error": "question mode not available yet"}), 503
+    deps = _types.SimpleNamespace(
+        chat_enabled=CHAT_ENABLED,
+        adapter=_chat_adapter,
+        num_keys=len(_chat_pool.entries) or 1,
+        query_fn=query,
+        query_one_fn=query_one,
+        prof_search_fn=_professor_search,
+        cache_get_fn=cache_get,
+        cache_set_fn=cache_set,
+        keyword_search_fn=lambda qq: keyword_search(qq, query, _professor_search),
+        gate_fn=lambda qq: gate(qq, _chat_adapter),
+        retrieve_fn=lambda qq, hint: retrieve(qq, hint, query, query_one, _professor_search),
+        generate_fn=lambda qq, r: generate(qq, r, _chat_adapter),
+        log_fn=query,
+    )
+    session_token = request.headers.get("X-Session-Token")
+    ip_hash = _hash_ip(request.headers.get("CF-Connecting-IP", request.remote_addr))
+    payload, code = handle_question(q, session_token, ip_hash, deps)
+    return jsonify(payload), code
 
 
 # ──────────────────────────────────────────────

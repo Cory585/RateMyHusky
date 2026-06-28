@@ -28,7 +28,12 @@ def test_chat_keyword_returns_results(chat_client):
     assert "professors" in data
     assert data["professors"][0]["slug"] == "ada-lovelace"
 
-def test_chat_question_mode_gated(chat_client):
+def test_chat_question_mode_gated(monkeypatch, chat_client):
+    import server
+    monkeypatch.setattr(server, "handle_question",
+        lambda q, session_token, ip_hash, deps: (
+            {"mode": "error", "message": "The question feature is temporarily disabled."}, 503
+        ))
     resp = chat_client.get("/api/chat?q=is+Guha+hard&mode=question",
                            headers={"Origin": "http://localhost:5173"})
     assert resp.status_code == 503
