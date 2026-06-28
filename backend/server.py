@@ -716,6 +716,15 @@ def chat():
             limit = 20
         data = keyword_search(q, query, _professor_search, limit=limit)
         return jsonify({"mode": "keyword", "results": data["comments"], "professors": data["professors"]})
+    # 'question' mode is account-gated: identity comes from the verified JWT (not a spoofable
+    # header), so the abuse ladder keys on a server-trusted user id that can't be forged or omitted.
+    token = _get_auth_token()
+    if not token:
+        return jsonify({"mode": "error", "message": "Sign in to use Ask mode."}), 401
+    try:
+        _claims = pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+    except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+        return jsonify({"mode": "error", "message": "Sign in to use Ask mode."}), 401
     deps = _types.SimpleNamespace(
         chat_enabled=CHAT_ENABLED,
         adapter=_chat_adapter,
@@ -731,7 +740,7 @@ def chat():
         generate_fn=lambda qq, r: generate(qq, r, _chat_adapter),
         log_fn=query,
     )
-    session_token = request.headers.get("X-Session-Token")
+    session_token = _claims["sub"]  # verified account id — unspoofable, never None
     ip_hash = _hash_ip(request.headers.get("CF-Connecting-IP", request.remote_addr))
     payload, code = handle_question(q, session_token, ip_hash, deps)
     return jsonify(payload), code
