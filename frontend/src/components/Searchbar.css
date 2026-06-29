@@ -274,7 +274,7 @@
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.04);
   z-index: 200;
   animation: suggestionsIn 0.15s ease-out;
-  max-height: 60vh;
+  max-height: calc(30vh - 20px);
   overflow-y: auto;
   text-align: left;
   font-family: 'Nunito', sans-serif;
