@@ -157,10 +157,10 @@ const Course = () => {
 	const hasExpandableInstructors = course.instructors.length > INITIAL_INSTRUCTORS_VISIBLE;
 
 	const courseSeoDescription =
-		`${summary.code} — ${summary.name} (${summary.department}) at Northeastern University. ` +
+		`${summary.code} — ${summary.name} (${summary.department}) at Northeastern. ` +
 		(summary.avgRating != null ? `Average rating ${summary.avgRating.toFixed(1)}/5. ` : '') +
 		(summary.latestTermTitle ? `Last taught ${summary.latestTermTitle}. ` : '') +
-		`Compare instructors with TRACE evaluations and RateMyProfessor reviews.`;
+		`Compare instructors with TRACE & RateMyProfessor reviews.`;
 
 	return (
 		<div className="course-page">

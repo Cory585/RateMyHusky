@@ -2,6 +2,7 @@ import json
 import re
 from render import (
     professor_html, course_html, not_found_html, home_html, _esc,
+    _clip_description, MAX_DESCRIPTION,
     MAX_SNAPSHOT_REVIEWS, professors_listing_html, courses_listing_html,
 )
 
@@ -11,6 +12,11 @@ def _extract_jsonld(html):
         r'<script type="application/ld\+json">(.*?)</script>', html, re.DOTALL
     )
     return [json.loads(b) for b in blocks]
+
+
+def _meta_description(html):
+    m = re.search(r'<meta name="description" content="(.*?)">', html)
+    return m.group(1) if m else None
 
 
 def test_esc_escapes_html_and_handles_none():
@@ -36,7 +42,10 @@ def test_professor_html_has_title_canonical_and_h1():
     assert "4.25" in html and "2686" in html and "83%" in html
 
 
-def test_professor_html_jsonld_person_with_aggregate_rating():
+def test_professor_html_jsonld_person_never_has_aggregate_rating():
+    # schema.org Person does not support aggregateRating and Google rejects it
+    # as an invalid object type in Rich Results, so it must be omitted even
+    # when ratings exist (the numbers still appear in the human-readable summary).
     profile = {
         "name": "Francis Georges", "department": "Economics",
         "avgRating": 4.25, "totalRatings": 2686, "wouldTakeAgainPct": 83,
@@ -49,8 +58,7 @@ def test_professor_html_jsonld_person_with_aggregate_rating():
     block = blocks[0]
     assert block["@type"] == "Person"
     assert block["name"] == "Francis Georges"
-    assert block["aggregateRating"]["ratingValue"] == "4.25"
-    assert block["aggregateRating"]["ratingCount"] == 2686
+    assert "aggregateRating" not in block
 
 
 def test_professor_html_omits_aggregate_rating_when_no_ratings():
@@ -340,3 +348,50 @@ def test_render_home_degrades_when_top_professors_fail(render_client, monkeypatc
     assert resp.status_code == 200  # still renders, top-prof section just omitted
     body = resp.get_data(as_text=True)
     assert "<h1>RateMyHusky" in body
+
+
+# ── Meta description length (Bing flags outside ~120–160) ──
+
+def test_clip_description_leaves_short_text_unchanged():
+    short = "A short description."
+    assert _clip_description(short) == short
+
+
+def test_clip_description_truncates_at_word_boundary_with_ellipsis():
+    long = "word " * 60  # 300 chars, well over the cap
+    clipped = _clip_description(long)
+    assert len(clipped) <= MAX_DESCRIPTION + 1  # +1 for the ellipsis char
+    assert clipped.endswith("…")
+    assert "word…" in clipped and clipped[:-1].strip().split()[-1] == "word"
+
+
+def test_professor_meta_description_within_limit_even_with_long_name():
+    profile = _base_profile(
+        name="Maximilian Alexander Bartholomew Featherstonehaugh III",
+        department="Interdisciplinary Engineering and Public Policy Studies",
+        wouldTakeAgainPct=88,
+    )
+    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
+    desc = _meta_description(html)
+    assert len(desc) <= MAX_DESCRIPTION + 1
+
+
+def test_course_meta_description_within_limit_even_with_long_name():
+    detail = {
+        "summary": {
+            "code": "INPC9999",
+            "name": "Advanced Topics in Interdisciplinary Engineering and Public Policy",
+            "department": "Interdisciplinary Engineering and Public Policy",
+            "avgRating": 4.1, "avgEnrollment": 120, "latestTermTitle": "Fall 2025",
+        },
+        "instructors": [],
+    }
+    html = course_html(detail, "https://ratemyhusky.com/courses/x")
+    desc = _meta_description(html)
+    assert len(desc) <= MAX_DESCRIPTION + 1
+
+
+def test_home_meta_description_within_limit():
+    html = home_html([], [], "https://ratemyhusky.com/")
+    desc = _meta_description(html)
+    assert len(desc) <= MAX_DESCRIPTION + 1

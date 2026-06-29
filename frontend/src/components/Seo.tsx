@@ -10,6 +10,17 @@
 
 const DEFAULT_IMAGE = 'https://ratemyhusky.com/logo.jpg';
 
+// Search engines (incl. Bing Webmaster) flag meta descriptions outside the
+// ~120–160 char band. Dynamic descriptions grow with names/courses, so clip
+// at a word boundary to stay safely under the ceiling.
+const MAX_DESCRIPTION = 155;
+
+function clipDescription(text: string): string {
+  if (text.length <= MAX_DESCRIPTION) return text;
+  const cut = text.slice(0, MAX_DESCRIPTION).replace(/\s+\S*$/, '').replace(/[ .,;:—-]+$/, '');
+  return cut + '…';
+}
+
 interface SeoProps {
   /** Full <title>. Include the site name yourself if you want it. */
   title: string;
@@ -33,6 +44,7 @@ export default function Seo({
   jsonLd,
 }: SeoProps) {
   const img = image || DEFAULT_IMAGE;
+  const desc = clipDescription(description);
   const blocks = jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : [];
 
   // Serialize JSON-LD safely for embedding in a <script> tag. Escaping "<"
@@ -45,20 +57,20 @@ export default function Seo({
   return (
     <>
       <title>{title}</title>
-      <meta name="description" content={description} />
+      <meta name="description" content={desc} />
       <link rel="canonical" href={canonical} />
 
       {/* Open Graph (og:site_name is a constant fallback set in index.html) */}
       <meta property="og:type" content={ogType} />
       <meta property="og:title" content={title} />
-      <meta property="og:description" content={description} />
+      <meta property="og:description" content={desc} />
       <meta property="og:url" content={canonical} />
       <meta property="og:image" content={img} />
 
       {/* Twitter */}
       <meta name="twitter:card" content="summary" />
       <meta name="twitter:title" content={title} />
-      <meta name="twitter:description" content={description} />
+      <meta name="twitter:description" content={desc} />
       <meta name="twitter:image" content={img} />
 
       {blocks.map((block, i) => (

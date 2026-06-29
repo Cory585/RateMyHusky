@@ -12,6 +12,18 @@ from flask import Blueprint  # noqa: F401  (used by the route task)
 MAX_SNAPSHOT_REVIEWS = 15
 SITE = "https://ratemyhusky.com"
 
+# Search engines (incl. Bing Webmaster) flag meta descriptions outside the
+# ~120–160 char band. Dynamic summaries grow with names/courses, so clip at a
+# word boundary to stay safely under the ceiling.
+MAX_DESCRIPTION = 155
+
+
+def _clip_description(text: str) -> str:
+    if len(text) <= MAX_DESCRIPTION:
+        return text
+    cut = text[:MAX_DESCRIPTION].rsplit(" ", 1)[0].rstrip(" .,;:—-")
+    return cut + "…"
+
 
 def _esc(value) -> str:
     """HTML-escape a value; None -> ''. Quotes escaped for attribute safety."""
@@ -37,6 +49,7 @@ def _page(title: str, description: str, canonical: str, body: str,
     img = image or f"{SITE}/logo.jpg"
     alt = image_alt or title
     twitter_card = "summary_large_image" if has_real_image else "summary"
+    description = _clip_description(description)
     scripts = "\n".join(_jsonld_script(b) for b in jsonld)
     return f"""<!doctype html>
 <html lang="en">
@@ -93,9 +106,9 @@ def professor_html(profile: dict, reviews: list, canonical: str,
     title = f"{name} — {dept} at Northeastern | RateMyHusky"
     wta_txt = f", {wta}% would take again" if wta is not None else ""
     summary = (
-        f"{name} teaches {dept} at Northeastern University. "
+        f"{name} teaches {dept} at Northeastern. "
         f"Average rating {avg}/5 across {total} ratings{wta_txt}. "
-        f"Data is aggregated from TRACE evaluations and RateMyProfessor reviews."
+        f"TRACE & RateMyProfessor reviews."
     )
 
     stats = _stat_rows([
@@ -141,14 +154,8 @@ def professor_html(profile: dict, reviews: list, canonical: str,
     }
     if profile.get("imageUrl"):
         jsonld["image"] = profile["imageUrl"]
-    if total and total > 0:
-        jsonld["aggregateRating"] = {
-            "@type": "AggregateRating",
-            "ratingValue": f"{avg:.2f}" if isinstance(avg, (int, float)) else str(avg),
-            "ratingCount": total,
-            "bestRating": "5",
-            "worstRating": "1",
-        }
+    # NB: schema.org Person does not support aggregateRating, and Google rejects
+    # it ("Invalid object type" in Rich Results), so we do not emit one here.
 
     return _page(title, summary, canonical, body, [jsonld],
                  image=profile.get("imageUrl"), og_type="profile",
@@ -167,9 +174,9 @@ def course_html(detail: dict, canonical: str) -> str:
     avg_txt = f"Average rating {avg}/5. " if avg is not None else ""
     last_txt = f"Last taught {last}. " if last else ""
     summary = (
-        f"{code} — {cname} ({dept}) at Northeastern University. "
+        f"{code} — {cname} ({dept}) at Northeastern. "
         f"{avg_txt}{last_txt}"
-        f"Compare instructors using TRACE evaluations and RateMyProfessor reviews."
+        f"Compare instructors with TRACE & RateMyProfessor reviews."
     )
 
     stats = _stat_rows([
@@ -205,9 +212,9 @@ def course_html(detail: dict, canonical: str) -> str:
 def home_html(stats: list, top_professors: list, canonical: str) -> str:
     title = "RateMyHusky — Northeastern University professor & course ratings"
     summary = (
-        "RateMyHusky aggregates TRACE course evaluations and RateMyProfessor "
-        "reviews for Northeastern University professors and courses. Browse "
-        "ratings, difficulty, and student comments to plan your schedule — free."
+        "RateMyHusky combines TRACE evaluations and RateMyProfessor reviews for "
+        "Northeastern professors and courses. Compare ratings, difficulty, and "
+        "reviews — free."
     )
 
     stat_rows = _stat_rows([(s.get("label"), s.get("value")) for s in (stats or [])])

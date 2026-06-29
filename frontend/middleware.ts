@@ -78,7 +78,7 @@ async function proxyToBackend(request: Request, url: URL): Promise<Response> {
 
 const CRAWLER_UAS = [
   // Search & AI crawlers
-  'googlebot', 'google-extended', 'bingbot', 'gptbot', 'oai-searchbot',
+  'googlebot', 'google-inspectiontool', 'google-extended', 'bingbot', 'gptbot', 'oai-searchbot',
   'chatgpt-user', 'claudebot', 'claude-searchbot', 'claude-user',
   'anthropic-ai', 'perplexitybot', 'perplexity-user', 'applebot',
   // Social link-preview scrapers (none run JS, so they need the snapshot

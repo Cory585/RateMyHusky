@@ -412,7 +412,7 @@ const Homepage = () => {
     <div className="homepage">
       <Seo
         title="RateMyHusky — Northeastern Professor & Course Ratings"
-        description="Find the right Northeastern professor every semester. RateMyHusky combines TRACE evaluations and RateMyProfessor ratings for thousands of professors and courses in one place."
+        description="Find the right Northeastern professor every semester. RateMyHusky combines TRACE evaluations and RateMyProfessor ratings in one place."
         canonical="https://ratemyhusky.com/"
         jsonLd={{
           '@context': 'https://schema.org',
