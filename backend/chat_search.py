@@ -1,4 +1,22 @@
-import sys, argparse
+import sys, re, argparse
+
+# A course code mentioned inside a comment body, e.g. "PHIL 3100", "BIO3100": 2–5 letters
+# then 4 digits, optional space. Used to link a citation to a course profile.
+_BODY_COURSE_RE = re.compile(r"\b([A-Za-z]{2,5})\s?(\d{4})\b")
+
+def _resolve_link(comment, query_fn):
+    """Pick the [N] citation's link target. Prefer the curated professor_slug (from
+    reddit_mentions); else a course code mentioned in the body that exists in the catalog;
+    else None (rendered as a plain, unlinked [N])."""
+    slugs = comment.get("professor_slugs") or []
+    if slugs:
+        return {"type": "professor", "value": slugs[0]}
+    for letters, digits in _BODY_COURSE_RE.findall(comment.get("body") or ""):
+        code = f"{letters}{digits}".upper()
+        row = query_fn("SELECT code FROM course_catalog WHERE code = %s", (code,))
+        if row:
+            return {"type": "course", "value": row[0]["code"]}
+    return None
 
 def keyword_search(q, query_fn, prof_search_fn, limit=20):
     rows = query_fn("""
@@ -47,6 +65,7 @@ def keyword_search(q, query_fn, prof_search_fn, limit=20):
             "subreddit": r.get("subreddit"),
             "permalink": r.get("permalink"),
             "rank": r.get("rank"),
+            "link": _resolve_link(r, query_fn),
         })
 
     return {"comments": comments, "professors": prof_search_fn(q, limit=5)}
@@ -90,6 +109,32 @@ def selftest():
     check("sentiment carries data for slug",
           result["comments"][0]["sentiments"].get("ada-lovelace", {}).get("sentiment") == "positive")
     check("professors == stub list", result["professors"] == [{"slug": "ada-lovelace", "name": "Ada Lovelace"}])
+
+    # ── per-comment link target ([N] should link to a profile) ──
+    # A comment WITH a professor_slug links to that professor (curated data wins).
+    check("comment with slug -> professor link",
+          result["comments"][0].get("link") == {"type": "professor", "value": "ada-lovelace"})
+
+    # A comment with NO slug but a catalog-verified course code in its body -> course link.
+    # One without any resolvable entity -> link is None (rendered as plain [N], no anchor).
+    def link_query_fn(sql, params):
+        if "reddit_sentiment" in sql and "ANY(%s)" in sql:
+            return []
+        if "course_catalog" in sql:
+            check("course lookup normalizes/uppercases code", params and params[0] == "PHIL3100")
+            return [{"code": "PHIL3100"}]   # PHIL3100 exists; off-topic comment's code won't
+        return [
+            {"source_id": "c2", "body": "PHIL 3100: Religious Worlds — anyone have the syllabus?",
+             "subreddit": "NEU", "permalink": "/r/a", "professor_slugs": [], "rank": 0.8},
+            {"source_id": "c3", "body": "How does Oakland compare to Boston, no course here",
+             "subreddit": "NEU", "permalink": "/r/b", "professor_slugs": [], "rank": 0.5},
+        ]
+    res2 = keyword_search("3100", link_query_fn, lambda q, limit=5: [], limit=20)
+    by_id = {c["source_id"]: c for c in res2["comments"]}
+    check("comment w/ course code in body -> course link",
+          by_id["c2"].get("link") == {"type": "course", "value": "PHIL3100"})
+    check("comment with no entity -> link is None", by_id["c3"].get("link") is None)
+
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0
 

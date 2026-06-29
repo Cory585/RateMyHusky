@@ -73,6 +73,7 @@ export interface ProfessorProfile {
 export interface ProfessorReviews {
   reviews: ProfessorReview[];
   traceComments: TraceComment[];
+  redditMentions: RedditMention[];
 }
 
 export interface ProfessorReview {
@@ -93,6 +94,16 @@ export interface TraceComment {
   question: string;
   comment: string;
   termId: number;
+}
+
+export interface RedditMention {
+  body: string;
+  sentiment: 'positive' | 'neutral' | 'negative' | null;
+  sentiment_score: number | null;  // signed -1..+1 (negative=left, 0=neutral, positive=right)
+  score: number | null;
+  subreddit: string | null;
+  permalink: string | null;
+  created_utc: string | null;  // RFC-822 timestamp string from the backend (TIMESTAMPTZ → jsonify)
 }
 
 /* ---- Session caches (cleared on page refresh, keyed by slug/code) ---- */
@@ -199,6 +210,45 @@ export type SearchSuggestion = ProfessorSuggestion | CourseSuggestion;
 
 export const fetchSearchSuggestions = (query: string, type: string) =>
   get<SearchSuggestion[]>(`/api/search?q=${encodeURIComponent(query)}&type=${encodeURIComponent(type)}`);
+
+/* ---- Ask mode (Reddit RAG question path) ---- */
+export interface ChatSource {
+  source_id: number;
+  snippet: string;
+  permalink: string;
+  subreddit: string;
+}
+
+export interface ChatProfessorMatch {
+  name: string;
+  department: string;
+}
+
+export type ChatResponse =
+  | { mode: 'question'; answer: string; sources: ChatSource[]; professor_slug: string; course_code: string | null; disclaimer: string }
+  | { mode: 'disambiguation'; message: string; matches: ChatProfessorMatch[] }
+  | { mode: 'out_of_scope' | 'thin_data' | 'keyword'; banner?: string; message?: string; comments: unknown[]; professors: unknown[] }
+  | { mode: 'error'; message: string };
+
+/* Ask does its own fetch instead of get<T>(): get() throws on any non-2xx, but Ask must read
+   the 401 body and the various 200 modes. Returns a synthetic error on network failure so the
+   caller never has to try/catch. */
+export async function askChat(q: string): Promise<{ status: number; body: ChatResponse }> {
+  const headers: Record<string, string> = {};
+  const token = localStorage.getItem('auth_token');
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  try {
+    const res = await fetch(`${API_BASE}/api/chat?mode=question&q=${encodeURIComponent(q)}`, {
+      headers,
+      cache: 'no-cache',
+    });
+    if (maintenanceGuard(res)) throw new Error('Site is under maintenance');
+    const body = (await res.json()) as ChatResponse;
+    return { status: res.status, body };
+  } catch {
+    return { status: 0, body: { mode: 'error', message: 'Something went wrong — try again.' } };
+  }
+}
 
 /* ---- Professor catalog (browse page) ---- */
 export interface CatalogProfessor {

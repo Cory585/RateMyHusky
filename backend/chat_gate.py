@@ -2,6 +2,7 @@ import sys, re, argparse
 
 MAX_QUERY_LEN = 500
 _REFUSAL = "I can only answer questions about Northeastern professors and courses."
+_GATE_ERROR = "Couldn't check that question right now. Try again in a moment."
 
 INJECTION_PATTERNS = [
     re.compile(r"ignore (all |the |any |previous )?(instructions|rules|prompts?)", re.I),
@@ -22,6 +23,12 @@ def gate(query, adapter):
         return {"ok": False, "status": "injection_blocked",
                 "professor_or_course": None, "message": _REFUSAL}
     verdict = adapter.classify(q)
+    # A fail-closed verdict from a transient classifier failure (timeout/429/bad JSON) must
+    # NOT be charged as an abuse strike — the user did nothing wrong. Surface it as a
+    # non-strike 'gate_error' so the orchestrator degrades to keyword results instead.
+    if verdict.get("error"):
+        return {"ok": False, "status": "gate_error",
+                "professor_or_course": None, "message": _GATE_ERROR}
     if verdict.get("looks_like_injection"):
         return {"ok": False, "status": "injection_blocked",
                 "professor_or_course": None, "message": _REFUSAL}
@@ -59,6 +66,15 @@ def selftest():
 
     g_inj = gate("Is Guha a fair grader for beginners?", inj)
     check("classifier injection flag refused", g_inj["ok"] is False and g_inj["status"] == "injection_blocked")
+
+    # A fail-closed classifier (error=True, e.g. timeout/429/bad JSON) must NOT be charged
+    # as a strike: it gets the non-strike 'gate_error' status, never 'injection_blocked'.
+    err = FakeAdapter({"on_topic": False, "professor_or_course": None,
+                       "looks_like_injection": True, "error": True})
+    g_err = gate("Is Guha a hard grader?", err)
+    check("classifier failure -> non-strike gate_error",
+          g_err["ok"] is False and g_err["status"] == "gate_error")
+    check("gate_error is NOT a strike status", "gate_error" not in __import__("chat_abuse").STRIKE_STATUSES)
 
     g_fp = gate("Can you bypass the waitlist for CS3500?", on)
     check("legit 'bypass the' question is not blocked", g_fp["ok"] is True and g_fp["status"] == "ok")

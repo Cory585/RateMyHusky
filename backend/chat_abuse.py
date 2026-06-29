@@ -7,12 +7,16 @@ _BAN_MSG = ("Your access to the question feature has been suspended for repeated
             "You can appeal through the feedback form.")
 # strike count -> that day's question cap (strikes 1-2 = warn-only; 6+ = ban, handled separately)
 _CAPS = {3: 5, 4: 3, 5: 1}
+# strikes age out: only the last N days count, so a transient bad streak (or an old mistake)
+# doesn't pin an account on the cap/ban ladder forever.
+STRIKE_WINDOW_DAYS = 7
 
 def strike_count(session_token, query_one_fn):
     row = query_one_fn(
         "SELECT count(*) AS c FROM ask_log "
-        "WHERE session_token = %s AND result_status = ANY(%s)",
-        (session_token, list(STRIKE_STATUSES)))
+        "WHERE session_token = %s AND result_status = ANY(%s) "
+        "AND created_at > now() - %s * INTERVAL '1 day'",
+        (session_token, list(STRIKE_STATUSES), STRIKE_WINDOW_DAYS))
     return (row or {}).get("c", 0) or 0
 
 def daily_question_count(session_token, query_one_fn):
@@ -43,13 +47,21 @@ def selftest():
         if not cond: fails.append(label)
         print(("PASS" if cond else "FAIL") + ": " + label)
 
+    seen = {}
     def make_q(strikes, today):
         def q(sql, params=None):
-            return {"c": strikes} if "result_status = ANY" in sql else {"c": today}
+            if "result_status = ANY" in sql:
+                seen["strike_sql"] = sql
+                seen["strike_params"] = params
+                return {"c": strikes}
+            return {"c": today}
         return q
 
     r0 = abuse_check("s", make_q(0, 0))
     check("no strikes allowed", r0["allowed"] is True and r0["banned"] is False)
+    # strikes must age out: the count query is windowed (rolling STRIKE_WINDOW_DAYS), not all-time.
+    check("strike query is time-windowed", "INTERVAL '1 day'" in seen["strike_sql"])
+    check("strike query passes the window size", STRIKE_WINDOW_DAYS in seen["strike_params"])
 
     r1 = abuse_check("s", make_q(1, 0))
     check("first strike warns but allows", r1["allowed"] is True and r1["message"])

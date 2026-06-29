@@ -29,8 +29,10 @@ from chat_question import handle_question
 from llm_adapter import GroqAdapter
 from key_pool import KeyPool
 from chat_gate import gate
-from chat_retrieve import retrieve
+from chat_retrieve import retrieve, fetch_reddit_mentions
 from chat_answer import generate
+from professor_full import build_full
+import usage_alert
 
 load_dotenv()
 
@@ -430,6 +432,14 @@ def _chat_write(sql, params=None):
     cur.execute(sql, params or ())
     conn.commit()
 
+def _chat_write_rc(sql, params=None):
+    """Like _chat_write but returns the executed statement's rowcount."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(sql, params or ())
+    conn.commit()
+    return cur.rowcount
+
 
 
 # ──────────────────────────────────────────────
@@ -450,6 +460,10 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 # ──────────────────────────────────────────────
 def _professor_search(q, limit=5):
     """Search professors with tiered relevance ranking."""
+    # Normalize first: name_key is stored lowercase/ASCII, and CockroachDB LIKE is
+    # case-sensitive. Callers like the chat/Ask path pass a raw gate hint ("Wu Chieh"),
+    # so without this the LIKE filter (and the lowercase ALIAS_MAP) never match.
+    q = normalize_name(q)
     # Resolve full-query alias first (e.g. "virgiliu pavlu" → "virgil pavlu")
     q_resolved = resolve_alias(q)
 
@@ -748,6 +762,8 @@ def chat():
         retrieve_fn=lambda qq, hint: retrieve(qq, hint, query, query_one, _professor_search),
         generate_fn=lambda qq, r: generate(qq, r, _chat_adapter),
         log_fn=_chat_write,
+        usage_alert_fn=lambda: usage_alert.maybe_alert(
+            query, query_one, _chat_write_rc, len(_chat_pool.entries) or 1),
     )
     session_token = _claims.get("sub")  # verified account id — unspoofable, never None
     if not session_token:
@@ -1307,7 +1323,11 @@ def professor_reviews(slug):
                         "courseId": item["courseId"],
                     })
 
-    result = {"reviews": reviews, "traceComments": comments}
+    reddit_mentions = fetch_reddit_mentions(slug, query)
+    for m in reddit_mentions:
+        m["body"] = sanitize(m["body"]) if m["body"] else ""
+
+    result = {"reviews": reviews, "traceComments": comments, "redditMentions": reddit_mentions}
     cache_set(cache_key, result)
     resp = jsonify(result)
     resp.headers["Cache-Control"] = "private, max-age=3600" if is_authed else "public, max-age=3600"
@@ -1317,21 +1337,13 @@ def professor_reviews(slug):
 
 @app.route("/api/professors/<slug>/full")
 def professor_full(slug):
-    """Combined profile + reviews in one request to halve round-trips."""
-    profile_resp = professor_profile(slug)
-    if isinstance(profile_resp, tuple):
-        return profile_resp  # propagate 404/errors
+    """Combined profile + reviews in one request.
 
-    reviews_resp = professor_reviews(slug)
-    if isinstance(reviews_resp, tuple):
-        reviews_data = {"reviews": [], "traceComments": []}
-    else:
-        reviews_data = reviews_resp.get_json()
-
-    profile_data = profile_resp.get_json()
-    profile_data["reviews"] = reviews_data.get("reviews", [])
-    profile_data["traceComments"] = reviews_data.get("traceComments", [])
-
+    Unauthenticated (the public cold path): build_full shares the catalog +
+    trace_courses lookups and runs a single trace_scores scan, cutting the
+    cold-cache round-trips from ~10 to ~6. Authenticated requests keep the
+    radar-bearing profile branch via the two sub-endpoints.
+    """
     is_authed = False
     token = _get_auth_token()
     if token:
@@ -1341,6 +1353,37 @@ def professor_full(slug):
         except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
             pass
 
+    cache_key = f"prof_full:{slug}:{'a' if is_authed else 'u'}"
+    cached = cache_get(cache_key)
+    if cached:
+        resp = jsonify(cached)
+        resp.headers["Cache-Control"] = "private, max-age=3600" if is_authed else "public, max-age=3600"
+        resp.headers["Vary"] = "Authorization"
+        return resp
+
+    if not is_authed:
+        profile_data = build_full(slug, query, query_one, sanitize,
+                                  fetch_reddit_mentions=fetch_reddit_mentions,
+                                  is_authed=False)
+        if profile_data is None:
+            return jsonify({"error": "Professor not found"}), 404
+    else:
+        profile_resp = professor_profile(slug)
+        if isinstance(profile_resp, tuple):
+            return profile_resp  # propagate 404/errors
+
+        reviews_resp = professor_reviews(slug)
+        if isinstance(reviews_resp, tuple):
+            reviews_data = {"reviews": [], "traceComments": [], "redditMentions": []}
+        else:
+            reviews_data = reviews_resp.get_json()
+
+        profile_data = profile_resp.get_json()
+        profile_data["reviews"] = reviews_data.get("reviews", [])
+        profile_data["traceComments"] = reviews_data.get("traceComments", [])
+        profile_data["redditMentions"] = reviews_data.get("redditMentions", [])
+
+    cache_set(cache_key, profile_data)
     resp = jsonify(profile_data)
     resp.headers["Cache-Control"] = "private, max-age=3600" if is_authed else "public, max-age=3600"
     resp.headers["Vary"] = "Authorization"
@@ -1623,7 +1666,7 @@ def courses_catalog():
             for rr in rating_rows:
                 tr = _safe_float(rr["total_responses"])
                 rating_map[rr["course_code"]] = (
-                    _safe_float(rr["weighted_sum"]) / tr if tr > 0 else None
+                    round(_safe_float(rr["weighted_sum"]) / tr, 2) if tr > 0 else None
                 )
 
         # Build course list with ratings
@@ -1700,7 +1743,7 @@ def courses_catalog():
             for rr in rating_rows:
                 tr = _safe_float(rr["total_responses"])
                 rating_map[rr["course_code"]] = (
-                    _safe_float(rr["weighted_sum"]) / tr if tr > 0 else None
+                    round(_safe_float(rr["weighted_sum"]) / tr, 2) if tr > 0 else None
                 )
 
         courses = []

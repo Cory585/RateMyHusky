@@ -3,7 +3,7 @@ import sys, re, argparse
 MIN_COMMENTS = 4
 MIN_TOTAL_WORDS = 200
 CANARY = "RMH-CANARY-7Q"
-_THIN_MSG = "Not enough Reddit discussion to answer this confidently. Showing related comments."
+_THIN_MSG = "Not enough information to answer this confidently. Showing related comments."
 
 DEFAMATION_MARKERS = [
     re.compile(r"\b(arrested|convicted|criminal|lawsuit|sued|fired|harass|abus|assault|"
@@ -15,14 +15,36 @@ LEAK_MARKERS = [
     re.compile(re.escape(CANARY), re.I),
 ]
 
-def thin_data_check(retrieval):
+def has_structured_evidence(facts):
+    """True when the RMP/TRACE structured facts carry something substantive to answer from
+    (any rating/difficulty/hours, would-take-again, or a non-zero review count). Mirrors the
+    fields the professor & course pages display, so Ask treats them as real evidence."""
+    if not facts:
+        return False
+    if facts.get("kind") == "course":
+        return any(facts.get(k) is not None
+                   for k in ("avg_rating", "avg_difficulty", "hours_per_week"))
+    # professor (default)
+    if (facts.get("total_reviews") or 0) > 0:
+        return True
+    return any(facts.get(k) is not None
+               for k in ("avg_rating", "rmp_rating", "trace_rating",
+                         "difficulty", "would_take_again_pct"))
+
+def has_reddit_evidence(retrieval):
+    """True when the Reddit discussion clears the comment-count and total-word bar."""
     n = retrieval.get("comment_count", 0)
     if n < MIN_COMMENTS:
-        return False, _THIN_MSG
+        return False
     total_words = sum(len((c.get("body") or "").split()) for c in retrieval.get("comments", []))
-    if total_words < MIN_TOTAL_WORDS:
-        return False, _THIN_MSG
-    return True, None
+    return total_words >= MIN_TOTAL_WORDS
+
+def thin_data_check(retrieval):
+    """Answerable when EITHER the structured RMP/TRACE facts are substantive OR the Reddit
+    discussion clears its bar. Only 'thin' when neither source has enough to answer."""
+    if has_structured_evidence(retrieval.get("facts")) or has_reddit_evidence(retrieval):
+        return True, None
+    return False, _THIN_MSG
 
 def validate_output(answer, retrieval):
     fail = {"ok": False, "status": "validation_failed",
@@ -47,9 +69,36 @@ def selftest():
     thin = {"comment_count": 2, "comments": [{"body": "short"}, {"body": "tiny"}]}
 
     ok, _ = thin_data_check(thick)
-    check("thick evidence can synthesize", ok is True)
+    check("thick Reddit alone can synthesize", ok is True)
     bad, reason = thin_data_check(thin)
-    check("thin evidence blocked", bad is False and reason)
+    check("thin Reddit + no facts blocked", bad is False and reason)
+
+    # COMBINED EVIDENCE: thin Reddit but substantive RMP/TRACE facts -> answerable.
+    prof_facts_thin_reddit = dict(thin, facts={"kind": "professor", "total_reviews": 31})
+    ok2, _ = thin_data_check(prof_facts_thin_reddit)
+    check("prof RMP/TRACE facts answer despite thin Reddit", ok2 is True)
+
+    rating_only = dict(thin, facts={"kind": "professor", "total_reviews": 0, "avg_rating": 4.2})
+    check("a single real rating counts as evidence", thin_data_check(rating_only)[0] is True)
+
+    course_facts_thin = dict(thin, facts={"kind": "course", "avg_rating": 4.0, "avg_difficulty": None})
+    check("course TRACE facts answer despite thin Reddit", thin_data_check(course_facts_thin)[0] is True)
+
+    # EMPTY facts (entity exists but has no ratings/reviews) + thin Reddit -> still thin.
+    empty_prof = dict(thin, facts={"kind": "professor", "total_reviews": 0,
+                                   "avg_rating": None, "rmp_rating": None, "trace_rating": None,
+                                   "difficulty": None, "would_take_again_pct": None})
+    check("no facts + thin Reddit -> thin", thin_data_check(empty_prof)[0] is False)
+
+    empty_course = dict(thin, facts={"kind": "course", "avg_rating": None,
+                                     "avg_difficulty": None, "hours_per_week": None})
+    check("empty course facts + thin Reddit -> thin", thin_data_check(empty_course)[0] is False)
+
+    # helper-level assertions
+    check("has_structured_evidence False on None", has_structured_evidence(None) is False)
+    check("has_structured_evidence True on review count", has_structured_evidence({"total_reviews": 5}) is True)
+    check("has_reddit_evidence True on thick", has_reddit_evidence(thick) is True)
+    check("has_reddit_evidence False on thin", has_reddit_evidence(thin) is False)
 
     good = validate_output("Some students say Guha is hard but fair [1].", {"comment_count": 3})
     check("grounded cited answer passes", good["ok"] is True and good["status"] == "ok")

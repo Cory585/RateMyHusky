@@ -28,6 +28,13 @@ const Navbar = () => {
     return () => window.removeEventListener('themechange', handler);
   }, []);
 
+  // Open the sign-in modal on request from elsewhere (e.g. Ask-mode 401 in SearchBar)
+  useEffect(() => {
+    const handler = () => setShowSignIn(true);
+    window.addEventListener('open-signin', handler);
+    return () => window.removeEventListener('open-signin', handler);
+  }, []);
+
   const toggleDark = () => {
     const next = !isDark;
     setIsDark(next);

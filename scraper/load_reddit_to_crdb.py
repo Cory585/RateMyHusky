@@ -81,6 +81,13 @@ CREATE TABLE IF NOT EXISTS ask_log (
 );
 CREATE INDEX IF NOT EXISTS al_session ON ask_log (session_token, created_at DESC);
 CREATE INDEX IF NOT EXISTS al_status ON ask_log (result_status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS usage_alerts (
+    alert_date  DATE NOT NULL,
+    tier        INT  NOT NULL,
+    sent_at     TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (alert_date, tier)
+);
 """
 
 
@@ -305,6 +312,7 @@ def selftest() -> int:
     check("reddit_sentiment table in DDL", "CREATE TABLE IF NOT EXISTS reddit_sentiment" in ddl)
     check("reddit_text table in DDL", "CREATE TABLE IF NOT EXISTS reddit_text" in ddl)
     check("ask_log table in DDL", "CREATE TABLE IF NOT EXISTS ask_log" in ddl)
+    check("usage_alerts table in DDL", "CREATE TABLE IF NOT EXISTS usage_alerts" in ddl)
     check("reddit_text has body_tsv", "body_tsv" in ddl)
     check("reddit_text has flagged col", "flagged" in ddl)
     check("GIN index on body_tsv", "USING GIN" in ddl and "body_tsv" in ddl)
