@@ -8,7 +8,7 @@ const Privacy = () => {
         <div className="terms-shell">
           <header className="terms-header">
             <h1>Privacy Policy</h1>
-            <p className="terms-meta">Effective April 9, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective June 29, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -47,12 +47,26 @@ const Privacy = () => {
                   <strong>Feedback form:</strong> the feedback form collects a message type,
                   description, and an optional email address. Submissions are transmitted to
                   the RateMyHusky team via email and are not stored in a database. Submitted
-                  information is used solely to improve the service.
+                  information is used solely to improve the service. The form is protected by
+                  a CAPTCHA challenge (see Third-Party Services). If you submit an "Ask Ban
+                  Appeal," an email address is required so we can respond, and (if you are
+                  signed in) your account identifier is included so we can locate and review
+                  your Ask activity.
+                </li>
+                <li>
+                  <strong>Ask (AI question) feature:</strong> when you are signed in and submit
+                  a question to the Ask feature, we log the question to operate the feature and
+                  to detect abuse. Each logged entry includes the question text, the AI-generated
+                  answer, the professor or course identified, how many tokens were used, the
+                  response time, an identifier derived from your session token, and a one-way
+                  hash of your IP address (your raw IP address is never stored). These logs are
+                  retained on our servers — see <em>How We Store Your Information</em> below.
                 </li>
               </ul>
               <p>
-                We do <strong>not</strong> log your search queries, which professor or course
-                pages you viewed, or any other browsing activity on our servers.
+                Outside of the Ask feature, we do <strong>not</strong> log your search queries,
+                which professor or course pages you viewed, or any other browsing activity on
+                our servers.
               </p>
             </section>
 
@@ -63,6 +77,11 @@ const Privacy = () => {
                 <li>Authenticate your identity and confirm your <code>@husky.neu.edu</code> affiliation</li>
                 <li>Restrict access to TRACE course evaluation comments to signed-in users</li>
                 <li>Display your name and profile photo in the navigation bar while signed in</li>
+                <li>
+                  Answer your Ask questions, enforce per-account and per-IP rate limits, and
+                  detect and prevent abuse of the Ask feature (such as off-topic or
+                  prompt-injection attempts)
+                </li>
               </ul>
               <p>
                 We do not use your information for advertising, profiling, or any purpose beyond
@@ -84,6 +103,13 @@ const Privacy = () => {
               </p>
               <p>
                 Signing out deletes the token from your browser immediately.
+              </p>
+              <p>
+                Separately, if you use the Ask feature, the question logs described above are
+                stored server-side in our database. These logs are keyed to a session-derived
+                identifier and a hashed IP address (never your raw IP) and are retained to
+                operate the feature and detect abuse. You may request deletion of your Ask logs
+                by contacting us — see <em>Your Rights &amp; Choices</em>.
               </p>
             </section>
 
@@ -130,8 +156,45 @@ const Privacy = () => {
                   </a>.
                 </li>
                 <li>
-                  <strong>RateMyProfessors &amp; Northeastern TRACE</strong>: these are data
-                  sources only. We do not send any user data to these services.
+                  <strong>Groq</strong>: powers the Ask feature. When you submit an Ask question,
+                  your question text and the relevant professor, course, and Reddit information
+                  we retrieve are sent to Groq to classify the question and generate an answer.
+                  We do not send Groq your name, email, or profile photo. Subject to{' '}
+                  <a
+                    href="https://groq.com/privacy-policy/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Groq's Privacy Policy
+                  </a>.
+                </li>
+                <li>
+                  <strong>Resend</strong>: delivers email for the feedback form. When you submit
+                  feedback, your message and any optional reply email address are transmitted
+                  through Resend to reach our team. Subject to{' '}
+                  <a
+                    href="https://resend.com/legal/privacy-policy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Resend's Privacy Policy
+                  </a>.
+                </li>
+                <li>
+                  <strong>Cloudflare Turnstile</strong>: a CAPTCHA that protects the feedback
+                  form from automated abuse. It may process your IP address and browser signals
+                  to verify you are human. Subject to{' '}
+                  <a
+                    href="https://www.cloudflare.com/privacypolicy/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Cloudflare's Privacy Policy
+                  </a>.
+                </li>
+                <li>
+                  <strong>RateMyProfessors, Northeastern TRACE &amp; Reddit</strong>: these are
+                  data sources only. We do not send any user data to these services.
                 </li>
               </ul>
               <p>
@@ -174,21 +237,48 @@ const Privacy = () => {
 
             <section className="terms-section">
               <h2>7. Your Rights &amp; Choices</h2>
-              <p>Because we do not maintain a persistent user database, your data controls are simple:</p>
+              <p>
+                Because we keep so little data, most of your data is under your direct control.
+                The rights below describe what you can request and how to exercise them:
+              </p>
               <ul>
                 <li>
-                  <strong>Sign out</strong> at any time to immediately delete your JWT token
-                  from your browser.
+                  <strong>Right to access:</strong> you may request a copy of the data we hold
+                  that is associated with you. In practice this is limited to your Ask feature
+                  logs (if any); your sign-in details and preferences live only in your own
+                  browser and are not accessible to us.
                 </li>
                 <li>
-                  <strong>Clear localStorage</strong> in your browser settings to remove your
-                  session token and any stored preferences.
+                  <strong>Right to deletion:</strong> you can <strong>sign out</strong> at any
+                  time to immediately delete your JWT token from your browser, and{' '}
+                  <strong>clear localStorage</strong> in your browser settings to remove your
+                  session token and stored preferences. To delete the Ask feature logs we hold,
+                  email{' '}
+                  <a href="mailto:support@ratemyhusky.com">support@ratemyhusky.com</a> and
+                  request erasure, and we will delete all Ask logs associated with your session.
+                  This is a separate request from appealing an Ask suspension: an{' '}
+                  <strong>Ask Ban Appeal</strong> (submitted through the feedback form) asks us
+                  to review and restore your access, whereas a <strong>deletion request</strong>{' '}
+                  removes your Ask data from our servers entirely.
                 </li>
                 <li>
-                  There is no account to delete. Once your token is cleared, no personal data
-                  remains in our systems.
+                  <strong>Right to correction:</strong> the only personal data we receive (your
+                  name, email, and photo) comes directly from Google and is never stored on our
+                  servers, so corrections are made through your Google account. If you believe
+                  professor or course data displayed on the site is inaccurate, you can report
+                  it through the feedback form.
+                </li>
+                <li>
+                  <strong>Right to raise a concern:</strong> you may contact us at any time at{' '}
+                  <a href="mailto:support@ratemyhusky.com">support@ratemyhusky.com</a> with any
+                  question or complaint about how your data is handled.
                 </li>
               </ul>
+              <p>
+                Note that there is no account to delete. Once your token is cleared, no personal
+                data remains in our systems, except for any Ask feature logs, which remain until
+                you request their deletion.
+              </p>
             </section>
 
             <section className="terms-section">

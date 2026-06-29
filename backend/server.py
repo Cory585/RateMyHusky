@@ -2196,6 +2196,7 @@ def submit_feedback():
     description = data.get("description", "").strip()
     reply_email = data.get("email", "").strip()
     turnstile_token = data.get("turnstileToken", "").strip()
+    account_token = (data.get("accountSub") or "").strip()
 
     # Verify Cloudflare Turnstile CAPTCHA
     turnstile_secret = os.getenv("TURNSTILE_SECRET_KEY")
@@ -2216,8 +2217,21 @@ def submit_feedback():
     if not feedback_type or not description:
         return jsonify({"error": "feedbackType and description are required"}), 400
 
+    # An Ask ban appeal is useless without a reply address — require it (other types stay optional).
+    if feedback_type == "banappeal" and not reply_email:
+        return jsonify({"error": "Email is required for an Ask Ban Appeal"}), 400
+
     if reply_email and not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', reply_email):
         return jsonify({"error": "Invalid email address"}), 400
+
+    # Resolve the appealing account from its JWT (verified server-side, never trust a
+    # client-supplied id) so support can locate/clear its ask_log rows by session_token.
+    appeal_account = None
+    if feedback_type == "banappeal" and account_token:
+        try:
+            appeal_account = pyjwt.decode(account_token, JWT_SECRET, algorithms=["HS256"]).get("sub")
+        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+            appeal_account = None
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     with _feedback_lock:
@@ -2238,6 +2252,7 @@ def submit_feedback():
         "feature": "Feature Request",
         "missing": "Missing Data",
         "incorrectdata": "Incorrect Data",
+        "banappeal": "Ask Ban Appeal",
         "general": "General Feedback",
     }
     type_label = type_labels.get(feedback_type, feedback_type)
@@ -2249,6 +2264,9 @@ def submit_feedback():
     ]
     if reply_email:
         lines.append(f"From:        {reply_email}")
+    if feedback_type == "banappeal":
+        # surface the session_token to clear via clear_ask_strikes.py --account <sub>
+        lines.append(f"Account:     {appeal_account or 'not signed in / token invalid'}")
     lines += ["", "Description:", description]
     body = "\n".join(lines)
 

@@ -24,6 +24,7 @@ const feedbackOptions = [
   { value: 'feature', label: 'Feature Request' },
   { value: 'missing', label: 'Missing Data' },
   { value: 'incorrectdata', label: 'Incorrect Data' },
+  { value: 'banappeal', label: 'Ask Ban Appeal' },
   { value: 'general', label: 'General Feedback' },
 ];
 
@@ -84,6 +85,10 @@ const FeedbackTab = () => {
       setError('Please select a feedback type and enter a description.');
       return;
     }
+    if (feedbackType === 'banappeal' && !email.trim()) {
+      setError('Email is required for an Ask Ban Appeal so we can respond.');
+      return;
+    }
     if (!turnstileToken) {
       setError('Please complete the CAPTCHA verification.');
       return;
@@ -91,7 +96,12 @@ const FeedbackTab = () => {
     setError('');
     setLoading(true);
     try {
-      await submitFeedback({ feedbackType, description, email: email || undefined, turnstileToken });
+      // For a ban appeal, include the signed-in account id so support can locate the
+      // ask_log rows; null when not logged in (the email body notes that case).
+      const accountSub = feedbackType === 'banappeal'
+        ? (localStorage.getItem('auth_token') ?? undefined)
+        : undefined;
+      await submitFeedback({ feedbackType, description, email: email || undefined, turnstileToken, accountSub });
       setSubmitted(true);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '';
@@ -136,6 +146,8 @@ const FeedbackTab = () => {
         return "What data is missing? Please include the professor name and any relevant links.";
       case 'incorrectdata':
         return "What data is incorrect? Please include the professor name and what the correct information should be.";
+      case 'banappeal':
+        return "Explain why your access to Ask should be restored. Include any context about the questions you asked.";
       case 'general':
         return "Share your thoughts, suggestions, or anything else on your mind.";
       default:
@@ -211,7 +223,9 @@ const FeedbackTab = () => {
                 />
 
                 <label className="feedback-label">
-                  Email (Optional)
+                  Email {feedbackType === 'banappeal'
+                    ? <span className="feedback-required">*</span>
+                    : '(Optional)'}
                 </label>
                 <input
                   className="feedback-input"
