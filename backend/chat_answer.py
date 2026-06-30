@@ -37,6 +37,13 @@ COURSE_LIST_SYSTEM_PROMPT = (
     "No opinions, no citations, no course you were not given."
 )
 
+COURSE_RANKING_SYSTEM_PROMPT = (
+    "You report a ranking of Northeastern University courses. The courses are given already "
+    "sorted best-first for the asked metric, each with its value. Write 1-2 plain sentences "
+    "naming the top course (and a couple of runners-up) with their values. Use ONLY the "
+    "provided courses and values; do not invent any. No opinions, no citations."
+)
+
 _ZERO_WIDTH = dict.fromkeys(map(ord, "​‌‍﻿"), None)
 
 def _sanitize(text):
@@ -193,6 +200,27 @@ def generate_course_list(topic, courses, adapter, max_tokens=160):
         "Write 1-2 sentences naming the most relevant matches."
     )
     out = adapter.synthesize(COURSE_LIST_SYSTEM_PROMPT, user, max_tokens=max_tokens)
+    return {"text": _strip_datamark(out["text"]), "tokens_used": out["tokens_used"]}
+
+_METRIC_LABEL = {"rating": "overall rating", "difficulty": "difficulty", "hours": "hours/week"}
+
+def generate_course_ranking(subject, metric, direction, courses, adapter, max_tokens=180):
+    label = _METRIC_LABEL.get(metric, metric)
+    superlative = {"rating": "highest-rated", "difficulty": "hardest" if direction == "desc" else "easiest",
+                   "hours": "most work" if direction == "desc" else "least work"}.get(metric, "top")
+    lines = []
+    for c in courses:
+        nm = _sanitize(c.get("name") or "")
+        lines.append(f"- {c.get('code')} {nm}: {label} {c.get('value')}"
+                     + (f"/5" if metric in ("rating", "difficulty") else "")
+                     + f" (n={c.get('responses')})")
+    user = (
+        f"<query_subject>{_sanitize(subject)}</query_subject>\n"
+        f"<asking_for>the {superlative} {subject} course by {label}</asking_for>\n\n"
+        f"<ranked_courses>\n" + "\n".join(lines) + "\n</ranked_courses>\n\n"
+        "Write 1-2 sentences naming the top course and a couple of runners-up with their values."
+    )
+    out = adapter.synthesize(COURSE_RANKING_SYSTEM_PROMPT, user, max_tokens=max_tokens)
     return {"text": _strip_datamark(out["text"]), "tokens_used": out["tokens_used"]}
 
 
@@ -374,6 +402,22 @@ def selftest():
     generate_course_list("database",
         [{"code": "CS3200", "name": "Database Design", "department": "Khoury"}], CapAdapter())
     check("no rating text in prompt when absent", "/5" not in captured_user["u"])
+
+    # ── course ranking summary ──
+    rank_user = {}
+    class RankAdapter:
+        def synthesize(self, system, user, max_tokens=250):
+            rank_user["u"] = user
+            check("ranking uses its own system prompt", system == COURSE_RANKING_SYSTEM_PROMPT)
+            return {"text": "CS3100 (4.45/5) is the highest-rated CS course, then CS2000 (4.40).", "tokens_used": 35}
+    cr = generate_course_ranking("CS", "rating", "desc",
+            [{"code": "CS3100", "name": "PDI 2", "department": "CS", "value": 4.45, "responses": 100},
+             {"code": "CS2000", "name": "Intro", "department": "CS", "value": 4.40, "responses": 200}],
+            RankAdapter())
+    check("ranking returns text + tokens", cr["text"].startswith("CS3100") and cr["tokens_used"] == 35)
+    check("ranking answer has no [N] citations", "[1]" not in cr["text"])
+    check("ranking prompt lists ranked courses with values", "CS3100" in rank_user["u"] and "4.45" in rank_user["u"])
+    check("ranking prompt states the superlative", "highest-rated" in rank_user["u"])
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0

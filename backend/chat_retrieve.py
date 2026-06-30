@@ -102,6 +102,63 @@ def resolve_course_by_name(name, query_fn, limit=6):
     named = [m for m in matches if term in (m.get("name") or "").lower()]
     return _distinct_courses(named)
 
+# Superlative / ranking questions: "which CS course has the highest rating", "easiest math
+# course", "hardest cs class". metric + direction come from the ranking word; subject is the
+# course-prefix token. The metric maps to the TRACE question LIKE term.
+_METRIC_LIKE = {"rating": "%overall%", "difficulty": "%challeng%", "hours": "%hours%"}
+# (pattern, metric, direction) — direction "desc" = bigger is the answer, "asc" = smaller is.
+_RANK_WORDS = [
+    (re.compile(r"\b(highest[- ]?rated|highest rating|best[- ]?rated|best|top[- ]?rated|top)\b", re.I), "rating", "desc"),
+    (re.compile(r"\b(lowest[- ]?rated|lowest rating|worst[- ]?rated|worst)\b", re.I), "rating", "asc"),
+    (re.compile(r"\b(hardest|most difficult|most challenging|toughest)\b", re.I), "difficulty", "desc"),
+    (re.compile(r"\b(easiest|least difficult|least challenging)\b", re.I), "difficulty", "asc"),
+    (re.compile(r"\b(most work|most hours|heaviest|most workload)\b", re.I), "hours", "desc"),
+    (re.compile(r"\b(least work|fewest hours|lightest|least workload)\b", re.I), "hours", "asc"),
+]
+# subject token sitting right before "course"/"class" (e.g. "CS course", "math class").
+_SUBJECT_RE = re.compile(r"\b([A-Za-z]{2,5})\s+(?:course|class|courses|classes)\b", re.I)
+
+def parse_course_superlative(query):
+    """Return {subject, metric, direction} for a superlative course question, else None.
+    Requires a ranking word AND a subject token before 'course'/'class'."""
+    q = str(query or "")
+    m = _SUBJECT_RE.search(q)
+    if not m:
+        return None
+    subject = m.group(1).upper()
+    for pat, metric, direction in _RANK_WORDS:
+        if pat.search(q):
+            return {"subject": subject, "metric": metric, "direction": direction}
+    return None
+
+def rank_courses_by_metric(subject, metric, direction, query_fn, limit=5, min_responses=30):
+    """Rank a subject's courses by a weighted TRACE metric. Filters out courses with fewer than
+    min_responses (tiny-sample noise) and returns the top `limit` in the asked direction."""
+    like = _METRIC_LIKE.get(metric)
+    if not like:
+        return []
+    rows = query_fn("""
+        SELECT tc.course_code AS code, cc.name AS name, cc.department AS department,
+          SUM(CASE WHEN lower(ts.question) LIKE %s THEN CAST(ts.mean AS FLOAT) * CAST(ts.total_responses AS FLOAT) ELSE 0 END) AS m_w,
+          SUM(CASE WHEN lower(ts.question) LIKE %s THEN CAST(ts.total_responses AS FLOAT) ELSE 0 END) AS m_r
+        FROM trace_scores ts
+        JOIN trace_courses tc ON ts.course_id = tc.course_id
+          AND ts.instructor_id = tc.instructor_id AND ts.term_id = tc.term_id
+        LEFT JOIN course_catalog cc ON cc.code = tc.course_code
+        WHERE regexp_replace(tc.course_code, '[0-9].*', '') = %s
+        GROUP BY tc.course_code, cc.name, cc.department
+    """, (like, like, subject))
+    ranked = []
+    for r in rows:
+        resp = float(r.get("m_r") or 0)
+        if resp < min_responses:
+            continue
+        val = round(float(r.get("m_w") or 0) / resp, 2)
+        ranked.append({"code": r.get("code"), "name": r.get("name"),
+                       "department": r.get("department"), "value": val, "responses": int(resp)})
+    ranked.sort(key=lambda c: c["value"], reverse=(direction == "desc"))
+    return ranked[:limit]
+
 def _clean_course_label(display_name):
     """trace_courses.display_name looks like 'ENGW3302:09 (Advanced Writing in Tech Prof)
     - Laurie Nardone'. For "courses taught" we want just the code + course name, with no
@@ -331,6 +388,22 @@ def fetch_reddit_mentions(slug, query_fn):
     return out
 
 def retrieve(query, hint, query_fn, query_one_fn, prof_search_fn, limit=8):
+    # Superlative / ranking question ("which CS course has the highest rating"). Keys on the
+    # query text, so it wins even when the gate hands back a junk hint like "CS course" — but a
+    # genuine professor hint must win (don't turn "which CS course did Guha call hardest" into a
+    # global ranking that drops Guha). A junk subject hint won't resolve to a professor.
+    sup = parse_course_superlative(query)
+    if sup and hint and prof_search_fn(hint, limit=1):
+        sup = None
+    if sup:
+        ranked = rank_courses_by_metric(sup["subject"], sup["metric"], sup["direction"], query_fn)
+        if ranked:
+            return {"kind": "course_ranking", "subject": sup["subject"], "metric": sup["metric"],
+                    "direction": sup["direction"], "courses": ranked, "course_count": len(ranked),
+                    "entity_key": f"rank:{sup['subject']}:{sup['metric']}", "course_code": None,
+                    "professor_slug": None, "facts": {}, "comments": [], "comment_count": 0}
+        # no qualifying courses (unknown subject / none clear the threshold) → fall through
+
     # Only treat as a topic-listing when the gate found NO specific entity hint — a named
     # professor/course must win ("what database courses does Guha teach" → answer about Guha).
     topic = is_course_topic_query(query) if not hint else None
@@ -712,6 +785,70 @@ def selftest():
                   lambda q, limit=1: [{"slug": "guha-prof", "name": "Olin Guha", "name_key": "olin guha"}], limit=8)
     check("non-course name hint falls through to professor", rp.get("professor_slug") == "guha-prof")
     check("professor fallthrough not a disambiguation", rp.get("kind") != "course_disambiguation")
+
+    # ── superlative / ranking detection ──
+    s1 = parse_course_superlative("Which CS course has the highest rating?")
+    check("superlative: highest rating -> CS/rating/desc",
+          s1 == {"subject": "CS", "metric": "rating", "direction": "desc"})
+    s2 = parse_course_superlative("what's the easiest math course")
+    check("superlative: easiest -> MATH/difficulty/asc",
+          s2 == {"subject": "MATH", "metric": "difficulty", "direction": "asc"})
+    s3 = parse_course_superlative("hardest cs class")
+    check("superlative: hardest -> CS/difficulty/desc",
+          s3 == {"subject": "CS", "metric": "difficulty", "direction": "desc"})
+    s4 = parse_course_superlative("which DS course has the most work")
+    check("superlative: most work -> DS/hours/desc",
+          s4 == {"subject": "DS", "metric": "hours", "direction": "desc"})
+    # misses: a code-vs-code compare, a professor question, a plain topic listing
+    check("superlative: rejects code compare", parse_course_superlative("is CS 3500 harder than CS 3000") is None)
+    check("superlative: rejects professor q", parse_course_superlative("is Guha hard") is None)
+    check("superlative: rejects topic listing", parse_course_superlative("what database courses are there") is None)
+
+    # rank_courses_by_metric: SQL shape + threshold filter + direction
+    rank_calls = {}
+    def rank_query(sql, params):
+        rank_calls["sql"] = sql; rank_calls["params"] = list(params)
+        return [
+            {"code": "CS7870", "name": "Seminar", "department": "CS", "m_w": 10.0, "m_r": 2.0},   # below threshold
+            {"code": "CS3100", "name": "PDI 2", "department": "CS", "m_w": 445.0, "m_r": 100.0},  # 4.45
+            {"code": "CS2000", "name": "Intro", "department": "CS", "m_w": 880.0, "m_r": 200.0},  # 4.40
+        ]
+    ranked = rank_courses_by_metric("CS", "rating", "desc", rank_query, limit=5, min_responses=30)
+    check("ranking uses subject exact-prefix match", "regexp_replace(tc.course_code" in rank_calls["sql"])
+    check("ranking passes the metric LIKE term", "%overall%" in rank_calls["params"])
+    check("ranking passes the subject", "CS" in rank_calls["params"])
+    check("ranking drops below-threshold courses (CS7870 n=2)", all(c["code"] != "CS7870" for c in ranked))
+    check("ranking sorts desc by value", [c["code"] for c in ranked] == ["CS3100", "CS2000"])
+    check("ranking carries computed value", ranked[0]["value"] == 4.45 and ranked[0]["responses"] == 100)
+    # asc direction (easiest)
+    ranked_asc = rank_courses_by_metric("CS", "difficulty", "asc", rank_query, limit=5, min_responses=30)
+    check("ranking asc sorts low first", [c["code"] for c in ranked_asc] == ["CS2000", "CS3100"])
+
+    # retrieve() returns a course_ranking block on a superlative query (even with a junk hint)
+    def sup_retrieve_query(sql, params):
+        if "trace_scores" in sql and "regexp_replace" in sql:
+            return [{"code": "CS3100", "name": "PDI 2", "department": "CS", "m_w": 445.0, "m_r": 100.0}]
+        return []
+    rr = retrieve("Which CS course has the highest rating?", "CS course",
+                  sup_retrieve_query, lambda s, p=None: None, lambda q, limit=1: [], limit=8)
+    check("retrieve returns course_ranking kind", rr.get("kind") == "course_ranking")
+    check("retrieve course_ranking carries ranked courses", rr["courses"][0]["code"] == "CS3100")
+    check("retrieve course_ranking metric tagged", rr.get("metric") == "rating")
+
+    # unknown/empty subject ranking -> no block (falls through)
+    rr0 = retrieve("Which ZZ course has the highest rating?", "ZZ course",
+                   lambda sql, params: [], lambda s, p=None: None, lambda q, limit=1: [], limit=8)
+    check("empty ranking falls through (no course_ranking)", rr0.get("kind") != "course_ranking")
+
+    # a REAL professor hint must win over the ranking branch (don't drop the named professor)
+    def prof_hit_query(sql, params):
+        if "trace_scores" in sql and "regexp_replace" in sql:
+            return [{"code": "CS3100", "name": "PDI 2", "department": "CS", "m_w": 445.0, "m_r": 100.0}]
+        return query_fn(sql, params)  # reuse the prof-facts fakes defined earlier in selftest
+    rrp = retrieve("which CS course did Guha call hardest", "Guha",
+                   prof_hit_query, query_one_fn, prof_search_fn, limit=8)
+    check("professor hint suppresses ranking branch", rrp.get("kind") != "course_ranking")
+    check("professor hint resolves the professor", rrp.get("professor_slug") == "guha-prof")
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0

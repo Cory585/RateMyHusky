@@ -101,6 +101,50 @@ def _handle_course_list(q, block, deps, _log, session_token, ip_hash):
     return payload, 200
 
 
+def _handle_course_ranking(q, block, deps, _log, session_token, ip_hash):
+    subject = block.get("subject"); metric = block.get("metric"); direction = block.get("direction")
+    courses = block.get("courses", [])
+    cache_key = block.get("entity_key") or f"rank:{subject}:{metric}"
+
+    cached = get_cached(q, [cache_key], deps.cache_get_fn)
+    if cached:
+        _log("ok")
+        _fire_usage_alert(deps)
+        return cached, 200
+
+    if global_budget_hit(deps.query_one_fn, deps.num_keys):
+        _log("rate_limited")
+        return _safe_fallback(deps, q, banner="Daily question limit reached. Showing keyword results."), 200
+    allowed, _ = session_allowed(session_token, deps.query_one_fn, deps.num_keys)
+    if not allowed:
+        _log("rate_limited")
+        return _safe_fallback(deps, q, banner="You've hit today's question limit. Showing keyword results."), 200
+    if not minute_capacity_ok(deps.query_one_fn, deps.num_keys):
+        _log("rate_limited")
+        return _safe_fallback(deps, q, banner="High demand right now. Showing keyword results."), 200
+
+    try:
+        gen = deps.generate_course_ranking_fn(subject, metric, direction, courses)
+    except LLMUnavailable:
+        _log("llm_error")
+        return _safe_fallback(deps, q, banner="AI generation failed. Showing keyword results."), 200
+
+    # Reuse the course_list frontend mode. Carry the metric value as `rating` ONLY when the
+    # metric is rating, so the frontend's ★ badge stays meaningful; for difficulty/hours the
+    # value lives in the summary prose.
+    payload = {
+        "mode": "course_list", "answer": gen.get("text", ""),
+        "topic": f"{subject} courses by {metric}",
+        "courses": [{"code": c.get("code"), "name": c.get("name"), "department": c.get("department"),
+                     "rating": c.get("value") if metric == "rating" else None} for c in courses],
+        "disclaimer": "AI-generated ranking of Northeastern courses by TRACE data; may be incomplete.",
+    }
+    set_cached(q, [cache_key], payload, deps.cache_set_fn)
+    _log("ok", retrieved_count=len(courses), answer_text=payload["answer"], tokens_used=gen.get("tokens_used", 0))
+    _fire_usage_alert(deps)
+    return payload, 200
+
+
 def handle_question(q, session_token, ip_hash, deps):
     t0 = time.monotonic()
 
@@ -195,6 +239,10 @@ def handle_question(q, session_token, ip_hash, deps):
     blocks = []
     for hint in hints:
         r = deps.retrieve_fn(q, hint)
+        # A superlative/ranking question ("which CS course has the highest rating") resolves to
+        # a ranked-course block regardless of the (often junk) hint; answer it directly.
+        if r.get("kind") == "course_ranking":
+            return _handle_course_ranking(q, r, deps, _log, session_token, ip_hash)
         # A course named by title that matches several distinct courses → disambiguate
         # (mirrors the professor name-collision flow); stop the whole question, no LLM.
         if r.get("kind") == "course_disambiguation":
@@ -331,6 +379,7 @@ def selftest():
         def usage_alert_fn(self):
             self.usage_alert_calls.append(1)
         def generate_course_list_fn(self, topic, courses): return {"text": f"Courses about {topic}.", "tokens_used": 20}
+        def generate_course_ranking_fn(self, subject, metric, direction, courses): return {"text": f"Top {subject} by {metric}.", "tokens_used": 22}
     Deps.log_fn = staticmethod(_outer_log_fn)
 
     # kill switch
@@ -637,6 +686,56 @@ def selftest():
     payload, code = handle_question("How tough is Discrete Structures?", "s", "iphash", d_cn)
     check("single course-name -> question answer", code == 200 and payload.get("mode") == "question" and payload.get("answer"))
     check("single course-name carries course_code", payload.get("course_code") == "CS1800")
+
+    # ── superlative/ranking: a course_ranking block from the loop -> course_list payload, one LLM call ──
+    d_rk = Deps(); d_rk.usage_alert_calls = []
+    d_rk.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": ["CS course"], "professor_or_course": "CS course", "message": None}, d_rk)
+    d_rk.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "kind": "course_ranking", "subject": "CS", "metric": "rating", "direction": "desc",
+        "courses": [{"code": "CS3100", "name": "PDI 2", "department": "CS", "value": 4.45, "responses": 100},
+                    {"code": "CS2000", "name": "Intro", "department": "CS", "value": 4.40, "responses": 200}],
+        "course_count": 2, "entity_key": "rank:CS:rating", "course_code": None,
+        "professor_slug": None, "facts": {}, "comments": [], "comment_count": 0}, d_rk)
+    rk_calls = []
+    d_rk.generate_course_ranking_fn = types.MethodType(
+        lambda self, subject, metric, direction, courses: (rk_calls.append((subject, metric, len(courses))) or
+            {"text": "CS3100 (4.45/5) is the highest-rated CS course.", "tokens_used": 30}), d_rk)
+    d_rk.generate_fn = types.MethodType(
+        lambda self, q, blocks: (_ for _ in ()).throw(AssertionError("Reddit generate must not run for ranking")), d_rk)
+    payload, code = handle_question("Which CS course has the highest rating?", "s", "iphash", d_rk)
+    check("ranking -> course_list mode", code == 200 and payload.get("mode") == "course_list")
+    check("ranking carries the summary answer", payload.get("answer").startswith("CS3100"))
+    check("ranking lists the ranked courses", [c["code"] for c in payload["courses"]] == ["CS3100", "CS2000"])
+    check("ranking carries rating value (metric is rating)", payload["courses"][0]["rating"] == 4.45)
+    check("ranking calls the ranking generator once", rk_calls == [("CS", "rating", 2)])
+    check("ranking logged ok", logged[-1][_status_idx()] == "ok")
+
+    # difficulty ranking: rating field left None (value lives in prose, not the ★ badge)
+    d_rkd = Deps()
+    d_rkd.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": ["CS course"], "professor_or_course": "CS course", "message": None}, d_rkd)
+    d_rkd.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "kind": "course_ranking", "subject": "CS", "metric": "difficulty", "direction": "asc",
+        "courses": [{"code": "CS1200", "name": "FY Seminar", "department": "CS", "value": 1.8, "responses": 60}],
+        "course_count": 1, "entity_key": "rank:CS:difficulty", "course_code": None,
+        "professor_slug": None, "facts": {}, "comments": [], "comment_count": 0}, d_rkd)
+    payload, code = handle_question("easiest CS course?", "s", "iphash", d_rkd)
+    check("difficulty ranking leaves rating field None", payload["courses"][0]["rating"] is None)
+
+    # LLMUnavailable during ranking generation -> keyword fallback
+    d_rke = Deps()
+    d_rke.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": ["CS course"], "professor_or_course": "CS course", "message": None}, d_rke)
+    d_rke.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "kind": "course_ranking", "subject": "CS", "metric": "rating", "direction": "desc",
+        "courses": [{"code": "CS3100", "name": "PDI 2", "department": "CS", "value": 4.45, "responses": 100}],
+        "course_count": 1, "entity_key": "rank:CS:rating", "course_code": None,
+        "professor_slug": None, "facts": {}, "comments": [], "comment_count": 0}, d_rke)
+    d_rke.generate_course_ranking_fn = types.MethodType(
+        lambda self, subject, metric, direction, courses: (_ for _ in ()).throw(LLMUnavailable("down")), d_rke)
+    payload, code = handle_question("Which CS course has the highest rating?", "s", "iphash", d_rke)
+    check("ranking LLMUnavailable -> keyword fallback", code == 200 and "comments" in payload)
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0
