@@ -195,6 +195,19 @@ def handle_question(q, session_token, ip_hash, deps):
     blocks = []
     for hint in hints:
         r = deps.retrieve_fn(q, hint)
+        # A course named by title that matches several distinct courses → disambiguate
+        # (mirrors the professor name-collision flow); stop the whole question, no LLM.
+        if r.get("kind") == "course_disambiguation":
+            _log("ambiguous")
+            matches = r.get("matches", [])
+            listed = ", ".join(f"{m['code']} {m['name']}" for m in matches)
+            return {
+                "mode": "disambiguation",
+                "message": (f"Several courses match \"{hint}\": {listed}. "
+                            "Ask again using the course code."),
+                "matches": [{"name": f"{m['code']} {m['name']}", "department": m.get("department", "")}
+                            for m in matches],
+            }, 200
         if r.get("entity_key") or r.get("professor_slug"):
             blocks.append(r)
     if not blocks:
@@ -593,6 +606,37 @@ def selftest():
         lambda self, topic, courses: (_ for _ in ()).throw(LLMUnavailable("down")), d_cle)
     payload, code = handle_question("what database courses are there", "s", "iphash", d_cle)
     check("course-list LLMUnavailable -> keyword fallback", code == 200 and "comments" in payload)
+
+    # ── course-by-NAME: several matches -> disambiguation, no LLM ──
+    d_cd = Deps()
+    d_cd.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": ["Data Science"], "professor_or_course": "Data Science", "message": None}, d_cd)
+    d_cd.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "kind": "course_disambiguation",
+        "matches": [{"code": "DS2000", "name": "Intro to Data Science", "department": "Khoury"},
+                    {"code": "DS3000", "name": "Foundations of Data Science", "department": "Khoury"}],
+        "entity_key": None, "course_code": None, "professor_slug": None,
+        "facts": {}, "comments": [], "comment_count": 0}, d_cd)
+    d_cd.generate_fn = types.MethodType(
+        lambda self, q, blocks: (_ for _ in ()).throw(AssertionError("no LLM for course disambiguation")), d_cd)
+    payload, code = handle_question("is data science hard", "s", "iphash", d_cd)
+    check("course disambiguation -> disambiguation mode", payload.get("mode") == "disambiguation")
+    check("course disambiguation lists both courses",
+          "DS2000 Intro to Data Science" in payload["message"] and "DS3000 Foundations of Data Science" in payload["message"])
+    check("course disambiguation logged ambiguous", logged[-1][_status_idx()] == "ambiguous")
+
+    # ── course-by-NAME: single match -> normal question answer (regression through generate) ──
+    d_cn = Deps(); d_cn.usage_alert_calls = []
+    d_cn.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": ["Discrete Structures"], "professor_or_course": "Discrete Structures", "message": None}, d_cn)
+    d_cn.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "professor_slug": None, "course_code": "CS1800", "entity_key": "CS1800",
+        "entity_name": "Discrete Structures", "comment_count": 3,
+        "comments": [{"body": "word " * 60} for _ in range(3)],
+        "facts": {"kind": "course", "code": "CS1800", "name": "Discrete Structures", "avg_rating": 3.5}}, d_cn)
+    payload, code = handle_question("How tough is Discrete Structures?", "s", "iphash", d_cn)
+    check("single course-name -> question answer", code == 200 and payload.get("mode") == "question" and payload.get("answer"))
+    check("single course-name carries course_code", payload.get("course_code") == "CS1800")
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0

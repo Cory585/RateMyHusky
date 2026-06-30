@@ -77,6 +77,28 @@ def fetch_courses_by_topic(topic, query_fn, limit=8, with_ratings=False):
         courses.sort(key=lambda c: (c.get("rating") is not None, c.get("rating") or 0), reverse=True)
     return courses
 
+def _distinct_courses(matches):
+    """De-dupe catalog matches by code, keeping first occurrence (the LIKE query may return
+    the same course once; this also collapses any incidental dupes)."""
+    seen, out = set(), []
+    for m in matches:
+        code = m.get("code")
+        if code and code not in seen:
+            seen.add(code); out.append(m)
+    return out
+
+def resolve_course_by_name(name, query_fn, limit=6):
+    """A course named by TITLE ('Discrete Structures') rather than code. Search the catalog,
+    then keep only matches whose course NAME actually contains the hint as a phrase — so a
+    row that matched solely via the code portion of search_text isn't treated as a name hit.
+    Returns the list of distinct matching courses."""
+    term = str(name or "").strip().lower()
+    if len(term) < 2:
+        return []
+    matches = fetch_courses_by_topic(name, query_fn, limit=limit)
+    named = [m for m in matches if term in (m.get("name") or "").lower()]
+    return _distinct_courses(named)
+
 def _clean_course_label(display_name):
     """trace_courses.display_name looks like 'ENGW3302:09 (Advanced Writing in Tech Prof)
     - Laurie Nardone'. For "courses taught" we want just the code + course name, with no
@@ -331,6 +353,24 @@ def retrieve(query, hint, query_fn, query_one_fn, prof_search_fn, limit=8):
                     "entity_name": cfacts.get("name"), "facts": cfacts,
                     "comments": comments, "comment_count": len(comments)}
         # unknown course code → fall through to professor resolution
+
+    # Course-by-NAME path: a hint that is a course TITLE ("Discrete Structures") rather than a
+    # code. One clear match → answer that course; several distinct → disambiguate.
+    if hint and not is_course_code(hint):
+        named = resolve_course_by_name(hint, query_fn, limit=6)
+        if len(named) == 1:
+            cfacts = fetch_course_facts(named[0]["code"], query_one_fn, query_fn)
+            if cfacts:
+                code = cfacts["code"]
+                comments = fetch_course_comments(code, query_fn, limit=limit)
+                return {"professor_slug": None, "course_code": code, "entity_key": code,
+                        "entity_name": cfacts.get("name"), "facts": cfacts,
+                        "comments": comments, "comment_count": len(comments)}
+        elif len(named) > 1:
+            return {"kind": "course_disambiguation", "matches": named,
+                    "entity_key": None, "course_code": None, "professor_slug": None,
+                    "facts": {}, "comments": [], "comment_count": 0}
+        # 0 name matches (or facts missing) → fall through to professor resolution
 
     ent = resolve_entity(query, hint, prof_search_fn, limit=1)
     if not ent:
@@ -598,6 +638,68 @@ def selftest():
         return [{"code": "DS3000", "name": "Foundations of Data Science", "department": "Khoury"}]
     got = fetch_courses_by_topic("data_science", topic_q)
     check("underscore in topic neutralized to space", got[0]["code"] == "DS3000")
+
+    # ── course-by-NAME resolution ──
+    # single clear match by title -> resolves to that course (facts + comments), like the code path
+    def name_one_query(sql, params):
+        if "course_catalog" in sql:
+            return [{"code": "CS1800", "name": "Discrete Structures", "department": "Khoury"}]
+        if "trace_scores" in sql:
+            return [{"o_w": 8.0, "o_r": 2, "c_w": 6.0, "c_r": 2, "h_w": 14.0, "h_r": 2}]
+        if "instructor_first_name" in sql and "course_code = %s" in sql:
+            return [{"instructor_first_name": "A", "instructor_last_name": "B", "term_title": "Fall 2024"}]
+        if "reddit_text" in sql:
+            return [{"source_id": "x", "body": "tough class", "reddit_score": 3,
+                     "subreddit": "NEU", "permalink": "/r/x", "created_utc": None}]
+        return []
+    def name_one_query_one(sql, params):
+        if "course_catalog" in sql:
+            return {"code": "CS1800", "name": "Discrete Structures", "department": "Khoury"}
+        if "trace_scores" in sql:
+            return {"o_w": 8.0, "o_r": 2, "c_w": 6.0, "c_r": 2, "h_w": 14.0, "h_r": 2}
+        return None
+    rn = retrieve("How tough is Discrete Structures?", "Discrete Structures",
+                  name_one_query, name_one_query_one, lambda q, limit=1: [], limit=8)
+    check("course-by-name resolves to the course code", rn.get("course_code") == "CS1800")
+    check("course-by-name facts kind is course", rn.get("facts", {}).get("kind") == "course")
+    check("course-by-name pulls course comments", rn.get("comment_count") == 1)
+
+    # several distinct matches by title -> course_disambiguation block (no resolution)
+    def name_multi_query(sql, params):
+        if "course_catalog" in sql:
+            return [{"code": "DS2000", "name": "Intro to Data Science", "department": "Khoury"},
+                    {"code": "DS3000", "name": "Foundations of Data Science", "department": "Khoury"}]
+        return []
+    rd = retrieve("is data science hard", "Data Science",
+                  name_multi_query, lambda s, p=None: None, lambda q, limit=1: [], limit=8)
+    check("course-by-name multiple -> course_disambiguation", rd.get("kind") == "course_disambiguation")
+    check("course-by-name disambiguation lists both", {m["code"] for m in rd["matches"]} == {"DS2000", "DS3000"})
+
+    # name filter: a row that matched only via code noise (name lacks the hint) is NOT a name hit
+    def name_codenoise_query(sql, params):
+        if "course_catalog" in sql:
+            # search_text matched on the code, but the NAME doesn't contain "operating"
+            return [{"code": "CS3650", "name": "Computer Systems", "department": "Khoury"}]
+        return []
+    nc = resolve_course_by_name("operating", name_codenoise_query)
+    check("course-by-name drops code-only noise (name lacks hint)", nc == [])
+
+    # professor-name hint that matches NO catalog name -> falls through to professor resolution
+    def prof_fallthrough_query(sql, params):
+        return []  # no catalog rows at all
+    def prof_fallthrough_one(sql, params):
+        if "professors_catalog" in sql:
+            return {"slug": "guha-prof", "name_key": "olin guha", "name": "Olin Guha",
+                    "department": "Khoury", "rmp_rating": 4.1, "trace_rating": 4.3,
+                    "avg_rating": 4.2, "difficulty": 3.5, "would_take_again_pct": 88.0,
+                    "total_reviews": 31, "avg_hours": 7.5}
+        if "rmp_reviews" in sql or "trace_comments" in sql:
+            return {"cnt": 5}
+        return None
+    rp = retrieve("is guha hard", "Guha", prof_fallthrough_query, prof_fallthrough_one,
+                  lambda q, limit=1: [{"slug": "guha-prof", "name": "Olin Guha", "name_key": "olin guha"}], limit=8)
+    check("non-course name hint falls through to professor", rp.get("professor_slug") == "guha-prof")
+    check("professor fallthrough not a disambiguation", rp.get("kind") != "course_disambiguation")
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0
