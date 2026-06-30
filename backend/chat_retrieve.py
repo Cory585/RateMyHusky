@@ -10,6 +10,70 @@ def _norm_course_code(text):
 def is_course_code(text):
     return bool(text) and bool(_COURSE_CODE_RE.match(str(text).strip()))
 
+# Topic-listing questions name a subject, not a specific course/professor:
+# "what database courses are there", "courses about machine learning".
+_TOPIC_PATTERNS = [
+    re.compile(r"(?:what|which|are there any|any|list|show me)\s+(?:are\s+)?(?:the\s+)?(.+?)\s+(?:courses|classes|electives)\b", re.I),
+    re.compile(r"(?:courses|classes|electives)\s+(?:about|on|in|for|related to)\s+(.+)", re.I),
+]
+_TOPIC_STOPWORDS = {"a", "an", "the", "any", "some", "these", "those", "all"}
+_TOPIC_RATING_ADJECTIVES = {"best", "top", "highest", "good", "great", "easiest", "hardest", "easy", "hard", "worst", "lowest"}
+_RATINGS_RE = re.compile(r"\b(rated|rating|ratings|best|top|highest|good|easiest|hardest|which is)\b", re.I)
+
+def is_course_topic_query(text):
+    """Return the lowercased topic when the text asks to LIST courses by subject, else None.
+    Rejects topics that are actually course codes (so 'what is CS3500' isn't hijacked)."""
+    t = (text or "").strip()
+    for pat in _TOPIC_PATTERNS:
+        m = pat.search(t)
+        if not m:
+            continue
+        topic = m.group(1).strip().strip("?.! ").lower()
+        toks = topic.split()
+        while toks and (toks[0] in _TOPIC_STOPWORDS or toks[0] in _TOPIC_RATING_ADJECTIVES):
+            toks = toks[1:]
+        topic = " ".join(toks)
+        if topic and not is_course_code(topic):
+            return topic
+    return None
+
+def wants_ratings(text):
+    """True when the listing question also asks about quality/ratings."""
+    return bool(_RATINGS_RE.search(text or ""))
+
+def _course_overall_rating(code, query_fn):
+    """Weighted overall TRACE rating for one course code (same pattern as fetch_course_facts)."""
+    rows = query_fn("""
+        SELECT
+          SUM(CASE WHEN lower(ts.question) LIKE '%%overall%%' THEN CAST(ts.mean AS FLOAT) * CAST(ts.total_responses AS FLOAT) ELSE 0 END) AS o_w,
+          SUM(CASE WHEN lower(ts.question) LIKE '%%overall%%' THEN CAST(ts.total_responses AS INT) ELSE 0 END) AS o_r
+        FROM trace_scores ts
+        JOIN trace_courses tc ON ts.course_id = tc.course_id
+          AND ts.instructor_id = tc.instructor_id AND ts.term_id = tc.term_id
+        WHERE tc.course_code = %s
+    """, (_norm_course_code(code),))
+    if not rows:
+        return None
+    w = float(rows[0].get("o_w") or 0); r = float(rows[0].get("o_r") or 0)
+    return round(w / r, 2) if r > 0 else None
+
+def fetch_courses_by_topic(topic, query_fn, limit=8, with_ratings=False):
+    """Catalog courses whose search_text matches the topic. Reuses the /api/search course
+    query. Per-course rating lookups happen ONLY when with_ratings is True."""
+    like = f"%{topic}%"
+    rows = query_fn("""
+        SELECT code, name, department FROM course_catalog
+        WHERE search_text LIKE %s
+        ORDER BY CASE WHEN lower(code) LIKE %s THEN 0 ELSE 1 END, code
+        LIMIT %s
+    """, (like, f"{topic}%", limit))
+    courses = [{"code": r["code"], "name": r["name"], "department": r.get("department")} for r in rows]
+    if with_ratings:
+        for c in courses:
+            c["rating"] = _course_overall_rating(c["code"], query_fn)
+        courses.sort(key=lambda c: (c.get("rating") is not None, c.get("rating") or 0), reverse=True)
+    return courses
+
 def _clean_course_label(display_name):
     """trace_courses.display_name looks like 'ENGW3302:09 (Advanced Writing in Tech Prof)
     - Laurie Nardone'. For "courses taught" we want just the code + course name, with no
@@ -239,6 +303,17 @@ def fetch_reddit_mentions(slug, query_fn):
     return out
 
 def retrieve(query, hint, query_fn, query_one_fn, prof_search_fn, limit=8):
+    topic = is_course_topic_query(query)
+    if topic:
+        with_ratings = wants_ratings(query)
+        courses = fetch_courses_by_topic(topic, query_fn, limit=limit, with_ratings=with_ratings)
+        if courses:
+            return {"kind": "course_list", "topic": topic, "courses": courses,
+                    "course_count": len(courses), "with_ratings": with_ratings,
+                    "entity_key": f"topic:{topic}", "course_code": None,
+                    "professor_slug": None, "facts": {}, "comments": [], "comment_count": 0}
+        # topic phrasing but no catalog match → fall through to normal resolution
+
     # Course path: a course-code hint (e.g. "DS3000") resolves to course facts + that
     # course's Reddit discussion, instead of trying to find a professor by that name.
     course_term = next((t for t in (hint, query) if is_course_code(t)), None)
@@ -425,6 +500,78 @@ def selftest():
         return [{"slug": "guha-prof", "name": "Olin Guha"}] if term == "olin guha review" else []
     rq = retrieve("olin guha review", None, query_fn, query_one_fn, query_only_search, limit=8)
     check("resolve_entity falls back to the raw query", rq["professor_slug"] == "guha-prof")
+
+    # ── topic-course listing ──
+    check("topic query: 'what database courses are there' -> 'database'",
+          is_course_topic_query("what database courses are there") == "database")
+    check("topic query: 'which CS classes are there' -> 'cs'",
+          is_course_topic_query("which cs classes are there") == "cs")
+    check("topic query: 'courses about machine learning' -> 'machine learning'",
+          is_course_topic_query("courses about machine learning") == "machine learning")
+    check("topic query: strips leading article",
+          is_course_topic_query("what are the database courses") == "database")
+    check("topic query: strips leading rating adjective 'best'",
+          is_course_topic_query("what are the best database courses") == "database")
+    check("topic query: strips leading 'top' adjective",
+          is_course_topic_query("which top cs classes are there") == "cs")
+    check("topic query: keeps subject when rating word is internal-only",
+          is_course_topic_query("what machine learning courses are there") == "machine learning")
+    check("topic query: rejects a specific course code question",
+          is_course_topic_query("what is CS3500") is None)
+    check("topic query: rejects a professor question", is_course_topic_query("is guha hard") is None)
+    check("topic query: rejects bare name", is_course_topic_query("Olin Guha") is None)
+
+    check("wants_ratings true on 'which is best'",
+          wants_ratings("what database courses are there and which is best") is True)
+    check("wants_ratings true on 'highest rated'", wants_ratings("highest rated cs courses") is True)
+    check("wants_ratings false on plain listing", wants_ratings("what database courses are there") is False)
+
+    # fetch_courses_by_topic: default = one catalog query, no per-course query
+    topic_calls = []
+    def topic_query(sql, params):
+        topic_calls.append(sql)
+        if "course_catalog" in sql:
+            check("topic search uses search_text LIKE", "search_text LIKE %s" in sql)
+            check("topic search orders code-prefix first", "lower(code) LIKE %s" in sql)
+            return [{"code": "CS3200", "name": "Database Design", "department": "Khoury"},
+                    {"code": "DS3000", "name": "Foundations of Data Science", "department": "Khoury"}]
+        raise AssertionError("default topic search must not issue per-course queries")
+    courses = fetch_courses_by_topic("database", topic_query, limit=8)
+    check("topic search returns matched courses", [c["code"] for c in courses] == ["CS3200", "DS3000"])
+    check("default topic search issues exactly one query", len(topic_calls) == 1)
+    check("default courses carry no rating", "rating" not in courses[0])
+
+    # with_ratings=True: attaches a rating per course and re-sorts desc
+    def topic_query_rated(sql, params):
+        if "course_catalog" in sql:
+            return [{"code": "CS3200", "name": "Database Design", "department": "Khoury"},
+                    {"code": "DS3000", "name": "Foundations of Data Science", "department": "Khoury"}]
+        if "trace_scores" in sql:  # per-course overall rating
+            code = params[0]
+            return [{"o_w": 8.0, "o_r": 2}] if code == "CS3200" else [{"o_w": 9.0, "o_r": 2}]
+        return []
+    rated = fetch_courses_by_topic("database", topic_query_rated, limit=8, with_ratings=True)
+    check("rated courses carry a rating", all("rating" in c for c in rated))
+    check("rated courses sorted by rating desc", [c["code"] for c in rated] == ["DS3000", "CS3200"])
+    check("rated values computed (8/2, 9/2)", rated[0]["rating"] == 4.5 and rated[1]["rating"] == 4.0)
+
+    # retrieve() returns a course_list block on a topic query (hint is None — gate found no entity)
+    def topic_retrieve_query(sql, params):
+        if "course_catalog" in sql and "search_text LIKE" in sql:
+            return [{"code": "CS3200", "name": "Database Design", "department": "Khoury"}]
+        return []
+    rb = retrieve("what database courses are there", None, topic_retrieve_query,
+                  lambda s, p=None: None, lambda q, limit=1: [], limit=8)
+    check("retrieve returns course_list kind", rb["kind"] == "course_list")
+    check("retrieve course_list topic", rb["topic"] == "database")
+    check("retrieve course_list carries courses", rb["courses"][0]["code"] == "CS3200")
+    check("retrieve course_list entity_key tagged", rb["entity_key"] == "topic:database")
+    check("retrieve course_list with_ratings false by default", rb["with_ratings"] is False)
+
+    # topic regex fires but 0 courses match -> fall through (NOT a course_list block)
+    rb0 = retrieve("what zzzz courses are there", None,
+                   lambda sql, params: [], lambda s, p=None: None, lambda q, limit=1: [], limit=8)
+    check("zero-match topic falls through (no course_list)", rb0.get("kind") != "course_list")
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0
