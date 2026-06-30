@@ -18,24 +18,25 @@ def gate(query, adapter):
     q = (query or "").strip()
     if len(q) > MAX_QUERY_LEN:
         return {"ok": False, "status": "injection_blocked",
-                "professor_or_course": None, "message": _REFUSAL}
+                "professors_or_courses": [], "professor_or_course": None, "message": _REFUSAL}
     if any(p.search(q) for p in INJECTION_PATTERNS):
         return {"ok": False, "status": "injection_blocked",
-                "professor_or_course": None, "message": _REFUSAL}
+                "professors_or_courses": [], "professor_or_course": None, "message": _REFUSAL}
     verdict = adapter.classify(q)
     # A fail-closed verdict from a transient classifier failure (timeout/429/bad JSON) must
     # NOT be charged as an abuse strike — the user did nothing wrong. Surface it as a
     # non-strike 'gate_error' so the orchestrator degrades to keyword results instead.
     if verdict.get("error"):
         return {"ok": False, "status": "gate_error",
-                "professor_or_course": None, "message": _GATE_ERROR}
+                "professors_or_courses": [], "professor_or_course": None, "message": _GATE_ERROR}
     if verdict.get("looks_like_injection"):
         return {"ok": False, "status": "injection_blocked",
-                "professor_or_course": None, "message": _REFUSAL}
+                "professors_or_courses": [], "professor_or_course": None, "message": _REFUSAL}
     if not verdict.get("on_topic"):
         return {"ok": False, "status": "off_topic",
-                "professor_or_course": None, "message": _REFUSAL}
+                "professors_or_courses": [], "professor_or_course": None, "message": _REFUSAL}
     return {"ok": True, "status": "ok",
+            "professors_or_courses": verdict.get("professors_or_courses") or [],
             "professor_or_course": verdict.get("professor_or_course"), "message": None}
 
 def selftest():
@@ -75,6 +76,13 @@ def selftest():
     check("classifier failure -> non-strike gate_error",
           g_err["ok"] is False and g_err["status"] == "gate_error")
     check("gate_error is NOT a strike status", "gate_error" not in __import__("chat_abuse").STRIKE_STATUSES)
+
+    multi = FakeAdapter({"on_topic": True, "professors_or_courses": ["Wu", "Rachlin"],
+                         "professor_or_course": "Wu", "looks_like_injection": False})
+    g_multi = gate("compare Wu and Rachlin", multi)
+    check("gate passes through entity list", g_multi["professors_or_courses"] == ["Wu", "Rachlin"])
+    check("gate single field = first entity", g_multi["professor_or_course"] == "Wu")
+    check("gate off-topic gives empty entity list", g_off["professors_or_courses"] == [])
 
     g_fp = gate("Can you bypass the waitlist for CS3500?", on)
     check("legit 'bypass the' question is not blocked", g_fp["ok"] is True and g_fp["status"] == "ok")
