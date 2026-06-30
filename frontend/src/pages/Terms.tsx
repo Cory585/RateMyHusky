@@ -129,16 +129,26 @@ const Terms = () => {
                 we can respond, and if you are signed in your account identifier is included so we
                 can review and, where appropriate, restore your access.
               </p>
+              <p>
+                You may request deletion of the Ask logs we hold by signing in and submitting a
+                "Data Deletion Request" through the feedback form. As with an appeal, an email
+                address is required and your signed-in account identifier is included so we can
+                verify your identity and erase every Ask log tied to your account. See our{' '}
+                <a href="/privacy">Privacy Policy</a> for details.
+              </p>
             </section>
 
             <section className="terms-section">
               <h2>6. Feedback Form</h2>
               <p>
                 RateMyHusky includes a feedback form that accepts a message type, description,
-                and an optional email address. Submissions from this form are transmitted to
+                and an email address. Submissions from this form are transmitted to
                 the RateMyHusky team via email and are not stored in our database. Submitted
                 information is used solely to improve the service and will not be shared with
-                third parties.
+                third parties. The email address is optional for most message types but is
+                required for an "Ask Ban Appeal" or a "Data Deletion Request," for which (if you
+                are signed in) your account identifier is also included so we can act on the
+                correct account.
               </p>
             </section>
 

@@ -298,6 +298,9 @@ _feedback_lock = Lock()
 _feedback_count = 0
 _feedback_date = None   # "YYYY-MM-DD" UTC, resets counter each day
 FEEDBACK_DAILY_LIMIT = 300
+# feedback types that require a reply email and carry the signed-in account's verified sub,
+# so support can act on the right ask_log rows (review an appeal, or erase the user's data)
+_ACCOUNT_FEEDBACK_TYPES = {"banappeal", "datadeletion"}
 
 
 
@@ -2217,17 +2220,18 @@ def submit_feedback():
     if not feedback_type or not description:
         return jsonify({"error": "feedbackType and description are required"}), 400
 
-    # An Ask ban appeal is useless without a reply address — require it (other types stay optional).
-    if feedback_type == "banappeal" and not reply_email:
-        return jsonify({"error": "Email is required for an Ask Ban Appeal"}), 400
+    # Ask ban appeals and data-deletion requests are useless without a reply address — require
+    # it (other types stay optional).
+    if feedback_type in _ACCOUNT_FEEDBACK_TYPES and not reply_email:
+        return jsonify({"error": "Email is required for this request"}), 400
 
     if reply_email and not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', reply_email):
         return jsonify({"error": "Invalid email address"}), 400
 
-    # Resolve the appealing account from its JWT (verified server-side, never trust a
-    # client-supplied id) so support can locate/clear its ask_log rows by session_token.
+    # Resolve the account from its JWT (verified server-side, never trust a client-supplied id)
+    # so we can locate/clear its ask_log rows by session_token (appeal review or data erasure).
     appeal_account = None
-    if feedback_type == "banappeal" and account_token:
+    if feedback_type in _ACCOUNT_FEEDBACK_TYPES and account_token:
         try:
             appeal_account = pyjwt.decode(account_token, JWT_SECRET, algorithms=["HS256"]).get("sub")
         except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
@@ -2253,6 +2257,7 @@ def submit_feedback():
         "missing": "Missing Data",
         "incorrectdata": "Incorrect Data",
         "banappeal": "Ask Ban Appeal",
+        "datadeletion": "Data Deletion Request",
         "general": "General Feedback",
     }
     type_label = type_labels.get(feedback_type, feedback_type)
@@ -2264,8 +2269,9 @@ def submit_feedback():
     ]
     if reply_email:
         lines.append(f"From:        {reply_email}")
-    if feedback_type == "banappeal":
-        # surface the session_token to clear via clear_ask_strikes.py --account <sub>
+    if feedback_type in _ACCOUNT_FEEDBACK_TYPES:
+        # surface the session_token to act on via clear_ask_strikes.py
+        # (--account <sub> for appeals, --purge-account <sub> for data deletion)
         lines.append(f"Account:     {appeal_account or 'not signed in / token invalid'}")
     lines += ["", "Description:", description]
     body = "\n".join(lines)

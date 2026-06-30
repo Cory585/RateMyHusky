@@ -49,9 +49,11 @@ const Privacy = () => {
                   the RateMyHusky team via email and are not stored in a database. Submitted
                   information is used solely to improve the service. The form is protected by
                   a CAPTCHA challenge (see Third-Party Services). If you submit an "Ask Ban
-                  Appeal," an email address is required so we can respond, and (if you are
-                  signed in) your account identifier is included so we can locate and review
-                  your Ask activity.
+                  Appeal" or a "Data Deletion Request," an email address is required so we can
+                  respond, and (if you are signed in) your account identifier is included so we
+                  can locate your Ask activity to review it or delete it. That account identifier
+                  is derived from your sign-in token at the time you submit and is not retained
+                  beyond handling your request.
                 </li>
                 <li>
                   <strong>Ask (AI question) feature:</strong> when you are signed in and submit
@@ -109,7 +111,8 @@ const Privacy = () => {
                 stored server-side in our database. These logs are keyed to a session-derived
                 identifier and a hashed IP address (never your raw IP) and are retained to
                 operate the feature and detect abuse. You may request deletion of your Ask logs
-                by contacting us — see <em>Your Rights &amp; Choices</em>.
+                by submitting a <strong>Data Deletion Request</strong> through the feedback form
+                while signed in — see <em>Your Rights &amp; Choices</em>.
               </p>
             </section>
 
@@ -253,13 +256,17 @@ const Privacy = () => {
                   time to immediately delete your JWT token from your browser, and{' '}
                   <strong>clear localStorage</strong> in your browser settings to remove your
                   session token and stored preferences. To delete the Ask feature logs we hold,
-                  email{' '}
-                  <a href="mailto:support@ratemyhusky.com">support@ratemyhusky.com</a> and
-                  request erasure, and we will delete all Ask logs associated with your session.
+                  sign in and submit a <strong>Data Deletion Request</strong> through the feedback
+                  form: an email address is required, and your signed-in account identifier is
+                  included so we can verify your identity and delete every Ask log tied to your
+                  account. (You may also email{' '}
+                  <a href="mailto:support@ratemyhusky.com">support@ratemyhusky.com</a>, though
+                  because we never store your email address, we can only act on a request we can
+                  tie to your account — submitting the form while signed in is the reliable path.)
                   This is a separate request from appealing an Ask suspension: an{' '}
-                  <strong>Ask Ban Appeal</strong> (submitted through the feedback form) asks us
-                  to review and restore your access, whereas a <strong>deletion request</strong>{' '}
-                  removes your Ask data from our servers entirely.
+                  <strong>Ask Ban Appeal</strong> asks us to review and restore your access,
+                  whereas a <strong>Data Deletion Request</strong> removes your Ask data from our
+                  servers entirely.
                 </li>
                 <li>
                   <strong>Right to correction:</strong> the only personal data we receive (your
