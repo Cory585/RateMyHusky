@@ -180,6 +180,7 @@ const Homepage = () => {
   const shuffleSectionRef = useRef<HTMLElement>(null);
   const [shuffling, setShuffling] = useState(false);
   const [openTooltip, setOpenTooltip] = useState<number | null>(null);
+  const [showAskTip, setShowAskTip] = useState(() => localStorage.getItem('home_ask_tip_dismissed') !== '1');
   const tabsRef = useRef<HTMLDivElement>(null);
   const [tabsAtEnd, setTabsAtEnd] = useState(false);
   const [tabsAtStart, setTabsAtStart] = useState(true);
@@ -422,6 +423,29 @@ const Homepage = () => {
           description: 'Northeastern University professor and course ratings combining TRACE evaluations and RateMyProfessor reviews.',
         }}
       />
+
+      {showAskTip && (
+        <div className="home-ask-bubble" role="status">
+          <div className="home-ask-bubble-icon">✨</div>
+          <div className="home-ask-bubble-body">
+            <div className="home-ask-bubble-label">New</div>
+            <p className="home-ask-bubble-text">
+              Get AI-powered answers about professors and courses. Switch the search bar to <strong>Ask</strong>.
+            </p>
+          </div>
+          <button
+            className="home-ask-bubble-close"
+            onClick={() => { localStorage.setItem('home_ask_tip_dismissed', '1'); setShowAskTip(false); }}
+            aria-label="Dismiss update"
+          >
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       {/* ======== Hero ======== */}
       <main className="homepage-hero">
         <div

@@ -53,18 +53,63 @@ const SearchBar = () => {
     "ARTF 1122", "MUSC 1201", "PHIL 1101", "ENVR 1101", "FINA 2201"
   ], []);
 
+  const askExamples = useMemo(() => [
+    // single professor / course
+    "Is Guha hard?",
+    "How are Mislove's lectures?",
+    "Is Fundies 1 a lot of work?",
+    "Does Abhi Shelat give hard exams?",
+    "Is Rachlin an easy grader?",
+    "Is CS 3000 worth taking?",
+    "How tough is Discrete Structures?",
+    "Does Felushko curve grades?",
+    "Is Schedlbauer a good teacher?",
+    "Is Networks hard with Choffnes?",
+    "Should I take Theory of Computation?",
+    "Is Operating Systems brutal?",
+    "Is Software Engineering project-heavy?",
+    // comparisons (two entities)
+    "Mislove or Rachlin for CS 2500?",
+    "Is CS 3500 harder than CS 3000?",
+    "Shesh vs Cooperman — who's better?",
+    "Should I take CS 3650 or CS 3700 first?",
+    "Lieberherr or Tip for software engineering?",
+    "Is MATH 1341 or MATH 1342 more work?",
+    "Nita-Rotaru vs Choffnes for Networks?",
+    // multi-entity / both at once
+    "How do Rachlin and Felushko teach Fundies 1?",
+    "Are CS 2500 and CS 2510 a big jump?",
+    "Tell me about Ullman and Ene for Algorithms",
+    // stats-targeting
+    "What's Mislove's average rating?",
+    "What's the difficulty score for CS 3000?",
+    "What percent would take Abhi Shelat again?",
+    "How does Rachlin's rating compare to the average?",
+    "Which CS course has the highest rating?",
+    "Is CS 3500's workload above average?",
+    "What's Guha's would-take-again percentage?",
+    // comments-targeting
+    "What do students say about Felushko?",
+    "What are the reviews like for CS 3650?",
+    "What's the common complaint about CS 4500?",
+    "Do reviews say Cooperman's exams are fair?",
+    "What do comments say about Mislove's grading?",
+    "Are there reviews about CS 2510's workload?",
+    "What do students think of Schedlbauer's lectures?"
+  ], []);
+
   // Typing animation logic
   useEffect(() => {
-    if (isAsk) {
-      setPlaceholder('Ask about a professor… e.g. "is Guha hard?"');
-      return;
-    }
     if (isFocused || query) {
-      setPlaceholder(searchType === 'Professor' ? 'Search by professor name...' : 'Search by course name or code...');
+      setPlaceholder(
+        isAsk ? 'Ask about a professor or course...'
+        : searchType === 'Professor' ? 'Search by professor name...'
+        : 'Search by course name or code...'
+      );
       return;
     }
 
-    const examples = searchType === 'Professor' ? professorExamples : courseExamples;
+    const examples = isAsk ? askExamples : searchType === 'Professor' ? professorExamples : courseExamples;
     let currentExampleIndex = Math.floor(Math.random() * examples.length);
     let currentText = "";
     let isDeleting = false;
@@ -72,7 +117,7 @@ const SearchBar = () => {
 
     const type = () => {
       const fullText = examples[currentExampleIndex];
-      
+
       if (isDeleting) {
         currentText = fullText.substring(0, currentText.length - 1);
         typingSpeed = 50;
@@ -81,7 +126,7 @@ const SearchBar = () => {
         typingSpeed = 100;
       }
 
-      setPlaceholder(`Search for "${currentText}"`);
+      setPlaceholder(isAsk ? currentText : `Search for "${currentText}"`);
 
       if (!isDeleting && currentText === fullText) {
         isDeleting = true;
@@ -97,7 +142,7 @@ const SearchBar = () => {
 
     let timeoutId = setTimeout(type, typingSpeed);
     return () => clearTimeout(timeoutId);
-  }, [isFocused, query, searchType, isAsk, professorExamples, courseExamples]);
+  }, [isFocused, query, searchType, isAsk, professorExamples, courseExamples, askExamples]);
 
   const handleSearchTypeChange = (newType: string) => {
     setSearchType(newType);
@@ -360,6 +405,27 @@ function AskResult({ result }: { result: ChatResponse }) {
 
   if (result.mode === 'error') {
     return <p className="ask-answer">{result.message}</p>;
+  }
+
+  if (result.mode === 'course_list') {
+    return (
+      <>
+        <p className="ask-answer">{result.answer}</p>
+        {result.courses.length > 0 && (
+          <ol className="ask-sources">
+            {result.courses.map((c) => (
+              <li key={c.code}>
+                <Link className="ask-source-link" to={`/courses/${c.code.toLowerCase()}`}>{c.code}</Link>
+                <span className="ask-source-snippet">
+                  {c.name}{c.rating != null ? ` · ${c.rating.toFixed(1)}★` : ''}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+        <p className="ask-disclaimer">{result.disclaimer}</p>
+      </>
+    );
   }
 
   // out_of_scope | thin_data | keyword — banner/message + any keyword comments
