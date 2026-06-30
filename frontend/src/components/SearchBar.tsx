@@ -317,28 +317,36 @@ const SearchBar = () => {
 
 function AskResult({ result }: { result: ChatResponse }) {
   if (result.mode === 'question') {
-    // The answer is about one professor or course; link each numbered source to that
-    // RateMyHusky page (course codes are lowercased to match the /courses/:code route).
-    const entityHref = result.course_code
+    // Fallback entity (used when a source has no per-source tag, e.g. old cached answers).
+    const fallbackHref = result.course_code
       ? `/courses/${result.course_code.toLowerCase()}`
       : result.professor_slug
       ? `/professors/${result.professor_slug}`
       : null;
+    // Show a source only if the answer text actually cites it with [N].
+    const cited = result.sources.filter((s) => result.answer.includes(`[${s.source_id}]`));
     return (
       <>
         <p className="ask-answer">{result.answer}</p>
-        {result.sources.length > 0 && (
+        {cited.length > 0 && (
           <ol className="ask-sources">
-            {result.sources.map((s) => (
-              <li key={s.source_id}>
-                {entityHref ? (
-                  <Link className="ask-source-link" to={entityHref}>[{s.source_id}]</Link>
-                ) : (
-                  <span className="ask-source-link">[{s.source_id}]</span>
-                )}
-                <span className="ask-source-snippet">{s.snippet}</span>
-              </li>
-            ))}
+            {cited.map((s) => {
+              const href = s.course_code
+                ? `/courses/${s.course_code.toLowerCase()}`
+                : s.professor_slug
+                ? `/professors/${s.professor_slug}`
+                : fallbackHref;
+              return (
+                <li key={s.source_id}>
+                  {href ? (
+                    <Link className="ask-source-link" to={href}>[{s.source_id}]</Link>
+                  ) : (
+                    <span className="ask-source-link">[{s.source_id}]</span>
+                  )}
+                  <span className="ask-source-snippet">{s.snippet}</span>
+                </li>
+              );
+            })}
           </ol>
         )}
         <p className="ask-disclaimer">{result.disclaimer}</p>
