@@ -196,17 +196,20 @@ def handle_question(q, session_token, ip_hash, deps):
     num_sources = gen.get("num_sources", 0)
     source_entities = gen.get("source_entities", [])
 
-    # 11. Output gate (validate against the combined evidence)
-    validation = validate_output(answer_text, combined_evidence)
+    # 11. Output gate. Bound cited [N] by num_sources (the capped count the model actually
+    # saw), not the uncapped pooled total — otherwise a hallucinated [N] in
+    # (num_sources, total_comments] would slip through the range gate.
+    validation = validate_output(answer_text, {"comment_count": num_sources})
     if not validation["ok"]:
         _log("validation_failed", professor_slug=primary_slug, retrieved_count=total_comments,
              tokens_used=tokens_used)
         return _safe_fallback(deps, q, banner=validation.get("message")), 200
 
-    # 12. Success — build sources tagged with their owning entity (global index order).
-    all_comments = combined_evidence["comments"]
+    # 12. Success — sources come from the EXACT capped, in-prompt comment list the model
+    # numbered (gen["sources_comments"]), so snippet [N] and its entity tag always agree.
+    sources_comments = gen.get("sources_comments", [])
     sources = []
-    for i, c in enumerate(all_comments[:num_sources]):
+    for i, c in enumerate(sources_comments[:num_sources]):
         tag = source_entities[i] if i < len(source_entities) else {}
         sources.append({
             "source_id": i + 1,
@@ -421,9 +424,14 @@ def selftest():
     gen_calls = []
     def _gen_multi(self, q, blocks):
         gen_calls.append(len(blocks))
+        # sources_comments is the EXACT capped, in-prompt list generate numbered: first 5 are
+        # Guha's, next 3 are Rachlin's — 1:1 with source_entities. The orchestrator must build
+        # payload["sources"] from THIS list so each snippet and its entity tag agree.
         return {"text": "Guha fair [1]; Rachlin tough [6].", "tokens_used": 80, "num_sources": 8,
                 "source_entities": [{"professor_slug": "guha-prof", "course_code": None}] * 5
-                                   + [{"professor_slug": "rachlin-prof", "course_code": None}] * 3}
+                                   + [{"professor_slug": "rachlin-prof", "course_code": None}] * 3,
+                "sources_comments": [{"body": f"g{i}", "permalink": f"/g/{i}", "subreddit": "NEU"} for i in range(5)]
+                                   + [{"body": f"r{i}", "permalink": f"/r/{i}", "subreddit": "NEU"} for i in range(3)]}
     d_multi.generate_fn = types.MethodType(_gen_multi, d_multi)
     payload, code = handle_question("compare Guha and Rachlin", "s", "iphash", d_multi)
     check("multi: retrieve called per entity", retrieved == ["Guha", "Rachlin"])
@@ -432,6 +440,14 @@ def selftest():
           {e["name"] for e in payload["entities"]} == {"Olin Guha", "John Rachlin"})
     check("multi: sources tagged per entity",
           payload["sources"][0]["professor_slug"] == "guha-prof"
+          and payload["sources"][5]["professor_slug"] == "rachlin-prof")
+    # snippet/entity agreement: a Guha-tagged source must carry a Guha comment, and a
+    # Rachlin-tagged source a Rachlin comment — built from generate's capped list, not the pool.
+    check("multi: source[0] snippet is Guha's AND tagged guha-prof",
+          payload["sources"][0]["snippet"].startswith("g")
+          and payload["sources"][0]["professor_slug"] == "guha-prof")
+    check("multi: source[5] snippet is Rachlin's AND tagged rachlin-prof",
+          payload["sources"][5]["snippet"].startswith("r")
           and payload["sources"][5]["professor_slug"] == "rachlin-prof")
     check("multi: primary slug is first resolved entity", payload["professor_slug"] == "guha-prof")
     check("multi: logged ok once", logged[-1][_status_idx()] == "ok")

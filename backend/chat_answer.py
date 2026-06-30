@@ -139,14 +139,20 @@ def generate(question, retrieval, adapter, max_tokens=250):
 
     out = adapter.synthesize(SYSTEM_PROMPT, user, max_tokens=max_tokens)
 
-    # source_entities[i] = the entity that owns global source i+1
+    # source_entities[i] and sources_comments[i] both describe global source i+1, in the
+    # exact order the prompt numbered them (over the capped `norm` comments) — so a citation's
+    # snippet text and its entity tag can never disagree downstream.
     source_entities = []
+    sources_comments = []
     for blk in norm:
         tag = {"professor_slug": blk.get("professor_slug"), "course_code": blk.get("course_code")}
-        source_entities.extend(tag for _ in blk.get("comments", []))
+        for c in blk.get("comments", []):
+            source_entities.append(tag)
+            sources_comments.append(c)
 
     return {"text": _strip_datamark(out["text"]), "tokens_used": out["tokens_used"],
-            "num_sources": len(source_entities), "source_entities": source_entities}
+            "num_sources": len(source_entities), "source_entities": source_entities,
+            "sources_comments": sources_comments}
 
 def selftest():
     fails = []
@@ -252,6 +258,28 @@ def selftest():
           gm["source_entities"][0]["professor_slug"] == "olin-guha"
           and gm["source_entities"][2]["professor_slug"] == "john-rachlin")
 
+    # ── REAL-generate cap alignment: block A has 6 comments, block B has 3. The cap of 4
+    # truncates A to its first 4, so num_sources == 7 (NOT 9), and the returned
+    # sources_comments must stay 1:1 with source_entities (the EXACT capped list the model
+    # numbered) — so a citation's snippet and its entity tag can never disagree.
+    cap_a = [{"body": f"g{i}", "score": 1, "subreddit": "NEU", "permalink": f"/a/{i}"} for i in range(6)]
+    cap_b = [{"body": f"r{i}", "score": 1, "subreddit": "NEU", "permalink": f"/b/{i}"} for i in range(3)]
+    cap_blocks = [
+        {"facts": facts, "comments": cap_a, "professor_slug": "olin-guha", "course_code": None},
+        {"facts": facts_b, "comments": cap_b, "professor_slug": "john-rachlin", "course_code": None},
+    ]
+    gm2 = generate("compare Guha and Rachlin", cap_blocks, MultiAdapter())
+    check("multi cap: num_sources reflects the per-entity cap (4+3=7, not 9)",
+          gm2["num_sources"] == 7)
+    check("multi cap: sources_comments is 1:1 with source_entities at num_sources",
+          len(gm2["source_entities"]) == len(gm2["sources_comments"]) == 7)
+    check("multi cap: every snippet belongs to the same entity as its tag",
+          all((c["body"].startswith("g") if se["professor_slug"] == "olin-guha"
+               else c["body"].startswith("r"))
+              for c, se in zip(gm2["sources_comments"], gm2["source_entities"])))
+    check("multi cap: A contributes its first 4 (capped), B its 3",
+          [c["body"] for c in gm2["sources_comments"]] == ["g0", "g1", "g2", "g3", "r0", "r1", "r2"])
+
     # single block still works through the same generate (regression)
     gs = generate("is guha hard", [{"facts": facts, "comments": comments,
                                     "professor_slug": "olin-guha", "course_code": None}], FakeAdapter())
@@ -259,6 +287,8 @@ def selftest():
           gs["num_sources"] == 2 and gs["text"].endswith("[1]."))
     check("single-block source_entities tags the one entity",
           all(se["professor_slug"] == "olin-guha" for se in gs["source_entities"]))
+    check("single-block sources_comments == that block's comments, 1:1 with source_entities",
+          gs["sources_comments"] == comments and len(gs["sources_comments"]) == gs["num_sources"])
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0
