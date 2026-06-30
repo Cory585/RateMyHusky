@@ -760,7 +760,7 @@ def chat():
         keyword_search_fn=lambda qq: keyword_search(qq, query, _professor_search),
         gate_fn=lambda qq: gate(qq, _chat_adapter),
         retrieve_fn=lambda qq, hint: retrieve(qq, hint, query, query_one, _professor_search),
-        generate_fn=lambda qq, r: generate(qq, r, _chat_adapter),
+        generate_fn=lambda qq, blocks: generate(qq, blocks, _chat_adapter),
         log_fn=_chat_write,
         usage_alert_fn=lambda: usage_alert.maybe_alert(
             query, query_one, _chat_write_rc, len(_chat_pool.entries) or 1),

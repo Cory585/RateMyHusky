@@ -95,130 +95,144 @@ def handle_question(q, session_token, ip_hash, deps):
         _log(status, flagged=True)
         return {"mode": "error", "message": gate.get("message") or "Question not allowed."}, 200
 
-    hint = _strip_titles(gate.get("professor_or_course"))
+    # Build the entity list (≤2), title-stripped, de-duplicated, order preserved.
+    raw_entities = gate.get("professors_or_courses") or (
+        [gate.get("professor_or_course")] if gate.get("professor_or_course") else [])
+    hints = []
+    for e in raw_entities:
+        h = _strip_titles(e)
+        if h and h not in hints:
+            hints.append(h)
+        if len(hints) == 2:
+            break
 
-    # 4. Ambiguity check (bare single-token name with >1 match). A course code (e.g. "DS3000")
-    # is a single token too, but it's an exact entity — never a professor to disambiguate.
-    if hint and _is_bare_name(hint) and not is_course_code(hint):
-        raw = deps.prof_search_fn(hint, limit=DISAMBIGUATION_LIMIT)
-        # keep only profs where the hint is a whole NAME TOKEN, not a substring
-        # ("Lee" must match "Jung Lee" / "Lee Moreau", never "Leena" / "Kathleen").
-        token = hint.strip().lower()
-        matches = [m for m in raw
-                   if token in [t.strip("-.,").lower() for t in (m.get("name") or "").split()]]
-        if len(matches) > 1:
-            _log("ambiguous")
-            listed = ", ".join(
-                m["name"] + (f" ({m['department']})" if m.get("department") else "")
-                for m in matches)
-            return {
-                "mode": "disambiguation",
-                "message": (f"Several professors named {hint} have reviews: {listed}. "
-                            "Ask again using the full name."),
-                "matches": [{"name": m["name"], "department": m.get("department", "")} for m in matches],
-            }, 200
+    # 4. Ambiguity check per entity — first ambiguous bare surname stops the whole question.
+    for hint in hints:
+        if _is_bare_name(hint) and not is_course_code(hint):
+            raw = deps.prof_search_fn(hint, limit=DISAMBIGUATION_LIMIT)
+            token = hint.strip().lower()
+            matches = [m for m in raw
+                       if token in [t.strip("-.,").lower() for t in (m.get("name") or "").split()]]
+            if len(matches) > 1:
+                _log("ambiguous")
+                listed = ", ".join(
+                    m["name"] + (f" ({m['department']})" if m.get("department") else "")
+                    for m in matches)
+                return {
+                    "mode": "disambiguation",
+                    "message": (f"Several professors named {hint} have reviews: {listed}. "
+                                "Ask again using the full name."),
+                    "matches": [{"name": m["name"], "department": m.get("department", "")} for m in matches],
+                }, 200
 
-    # 5. Out-of-scope (on_topic but no professor/course hint)
-    if not hint:
+    # 5. Out-of-scope (on_topic but no entity named)
+    if not hints:
         _log("out_of_scope")
         payload = _safe_fallback(deps, q, banner="Try searching for a specific professor or course.")
         payload["mode"] = "out_of_scope"
         return payload, 200
 
-    # 6. Cache hit (BEFORE throttle): a cached answer costs 0 LLM tokens, so it is always
-    # served and is never rate-limited. Use hint as the provisional slug key.
-    cached = get_cached(q, hint, deps.cache_get_fn)
+    # 6. Cache hit (BEFORE throttle) — keyed on the full entity list.
+    cached = get_cached(q, hints, deps.cache_get_fn)
     if cached:
-        _log("ok", professor_slug=cached.get("professor_slug") or hint)
+        _log("ok", professor_slug=cached.get("professor_slug") or hints[0])
         _fire_usage_alert(deps)
         return cached, 200
 
-    # 7. Global budget + throttle (only gates paths that will actually spend an LLM call)
+    # 7. Global budget + throttle (one check for the whole question)
     if global_budget_hit(deps.query_one_fn, deps.num_keys):
         _log("rate_limited")
         return _safe_fallback(deps, q, banner="Daily question limit reached. Showing keyword results."), 200
-
     allowed, _ = session_allowed(session_token, deps.query_one_fn, deps.num_keys)
     if not allowed:
         _log("rate_limited")
         return _safe_fallback(deps, q, banner="You've hit today's question limit. Showing keyword results."), 200
 
-    # 8. Retrieve. entity_key is the professor slug OR the course code — either is a valid
-    # entity to answer about.
-    retrieval = deps.retrieve_fn(q, hint)
-    professor_slug = retrieval.get("professor_slug")
-    entity_key = retrieval.get("entity_key") or professor_slug
-    if not entity_key:
+    # 8. Retrieve per entity; keep blocks that resolve to a real entity (slug or course code).
+    blocks = []
+    for hint in hints:
+        r = deps.retrieve_fn(q, hint)
+        if r.get("entity_key") or r.get("professor_slug"):
+            blocks.append(r)
+    if not blocks:
         _log("out_of_scope")
         payload = _safe_fallback(deps, q, banner="Couldn't find that professor or course. Showing keyword results.")
         payload["mode"] = "out_of_scope"
         return payload, 200
 
-    # 9. Thin-data check over ALL evidence (RMP/TRACE structured facts + Reddit): only fall
-    # back when neither the structured ratings nor the Reddit discussion can answer.
-    ok, thin_msg = thin_data_check(retrieval)
+    primary_slug = blocks[0].get("professor_slug") or blocks[0].get("entity_key")
+    total_comments = sum(b.get("comment_count", 0) for b in blocks)
+
+    # 9. Thin-data check over the COMBINED evidence (RMP/TRACE facts + Reddit across all
+    # resolved entities): only fall back when neither structured ratings nor Reddit can answer.
+    combined_evidence = {
+        "comment_count": total_comments,
+        "comments": [c for b in blocks for c in b.get("comments", [])],
+        "facts": blocks[0].get("facts", {}),
+    }
+    ok, thin_msg = thin_data_check(combined_evidence)
     if not ok:
-        _log("thin_data", professor_slug=professor_slug,
-             retrieved_count=retrieval.get("comment_count", 0))
+        _log("thin_data", professor_slug=primary_slug, retrieved_count=total_comments)
         payload = _safe_fallback(deps, q, banner=thin_msg)
         payload["mode"] = "thin_data"
         return payload, 200
 
-    # 9b. Per-minute TPM guard (the concurrency bottleneck): if the pool's last-60s token use
-    # would exceed the per-minute ceiling, degrade gracefully BEFORE spending an LLM call —
-    # this is what catches a burst of concurrent users instead of waiting for a 429.
+    # 9b. Per-minute TPM guard (one check)
     if not minute_capacity_ok(deps.query_one_fn, deps.num_keys):
-        _log("rate_limited", professor_slug=professor_slug,
-             retrieved_count=retrieval.get("comment_count", 0))
+        _log("rate_limited", professor_slug=primary_slug, retrieved_count=total_comments)
         return _safe_fallback(
             deps, q,
             banner="High demand right now — showing matching Reddit comments. Try Ask again in a moment."), 200
 
-    # 10. Generate
+    # 10. Generate (one call over all blocks)
     try:
-        gen = deps.generate_fn(q, retrieval)
+        gen = deps.generate_fn(q, blocks)
     except LLMUnavailable:
-        _log("llm_error", professor_slug=professor_slug,
-             retrieved_count=retrieval.get("comment_count", 0))
+        _log("llm_error", professor_slug=primary_slug, retrieved_count=total_comments)
         return _safe_fallback(deps, q, banner="AI generation failed. Showing keyword results."), 200
 
     answer_text = gen.get("text", "")
     tokens_used = gen.get("tokens_used", 0)
     num_sources = gen.get("num_sources", 0)
+    source_entities = gen.get("source_entities", [])
 
-    # 11. Output gate
-    validation = validate_output(answer_text, retrieval)
+    # 11. Output gate (validate against the combined evidence)
+    validation = validate_output(answer_text, combined_evidence)
     if not validation["ok"]:
-        _log("validation_failed", professor_slug=professor_slug,
-             retrieved_count=retrieval.get("comment_count", 0),
+        _log("validation_failed", professor_slug=primary_slug, retrieved_count=total_comments,
              tokens_used=tokens_used)
         return _safe_fallback(deps, q, banner=validation.get("message")), 200
 
-    # 12. Success
-    comments = retrieval.get("comments", [])
-    sources = [
-        {
+    # 12. Success — build sources tagged with their owning entity (global index order).
+    all_comments = combined_evidence["comments"]
+    sources = []
+    for i, c in enumerate(all_comments[:num_sources]):
+        tag = source_entities[i] if i < len(source_entities) else {}
+        sources.append({
             "source_id": i + 1,
             "snippet": c.get("body", "")[:200],
             "permalink": c.get("permalink", ""),
             "subreddit": c.get("subreddit", ""),
-        }
-        for i, c in enumerate(comments[:num_sources])
-    ]
-    is_course = bool(retrieval.get("course_code"))
+            "professor_slug": tag.get("professor_slug"),
+            "course_code": tag.get("course_code"),
+        })
+    any_course = any(b.get("course_code") for b in blocks)
+    entities = [{"name": b.get("facts", {}).get("name") or b.get("facts", {}).get("code") or b.get("entity_key"),
+                 "professor_slug": b.get("professor_slug"),
+                 "course_code": b.get("course_code")} for b in blocks]
     answer_payload = {
         "mode": "question",
         "answer": answer_text,
         "sources": sources,
-        "professor_slug": professor_slug or entity_key,
-        "course_code": retrieval.get("course_code"),
+        "entities": entities,
+        "professor_slug": primary_slug,
+        "course_code": blocks[0].get("course_code"),
         "disclaimer": ("AI-generated summary of RateMyHusky ratings and Reddit discussion; "
-                       "may be inaccurate." if is_course else
+                       "may be inaccurate." if any_course else
                        "AI-generated summary of Reddit discussion; may be inaccurate."),
     }
-    set_cached(q, hint, answer_payload, deps.cache_set_fn)
-    _log("ok", professor_slug=professor_slug,
-         retrieved_count=retrieval.get("comment_count", 0),
+    set_cached(q, hints, answer_payload, deps.cache_set_fn)
+    _log("ok", professor_slug=primary_slug, retrieved_count=total_comments,
          answer_text=answer_text, tokens_used=tokens_used)
     _fire_usage_alert(deps)
     return answer_payload, 200
@@ -244,14 +258,17 @@ def selftest():
         def cache_get_fn(self, k): return None
         def cache_set_fn(self, k, v): pass
         def keyword_search_fn(self, q): return {"comments": [{"snippet": "x"}], "professors": []}
-        def gate_fn(self, q): return {"ok": True, "status": "ok", "professor_or_course": "Guha", "message": None}
+        def gate_fn(self, q): return {"ok": True, "status": "ok",
+            "professors_or_courses": ["Guha"], "professor_or_course": "Guha", "message": None}
         # default: hint resolves to exactly ONE professor (not ambiguous)
         def prof_search_fn(self, term, limit=6): return [{"slug": "guha-prof", "name": "Olin Guha", "department": "Khoury"}]
         def retrieve_fn(self, q, hint): return {"professor_slug": "guha-prof", "entity_key": "guha-prof",
             "course_code": None, "comment_count": 5,
             "comments": [{"body": "word " * 60} for _ in range(5)],
             "facts": {"kind": "professor", "name": "Olin Guha"}}
-        def generate_fn(self, q, r): return {"text": "Students say fair [1].", "tokens_used": 50, "num_sources": 5}
+        def generate_fn(self, q, blocks): return {"text": "Students say fair [1].",
+            "tokens_used": 50, "num_sources": 5,
+            "source_entities": [{"professor_slug": "guha-prof", "course_code": None}] * 5}
         def usage_alert_fn(self):
             self.usage_alert_calls.append(1)
     Deps.log_fn = staticmethod(_outer_log_fn)
@@ -263,13 +280,13 @@ def selftest():
 
     # off-topic gate trip -> refusal logged as off_topic (a strike)
     d2 = Deps()
-    d2.gate_fn = types.MethodType(lambda self, q: {"ok": False, "status": "off_topic", "professor_or_course": None, "message": "no"}, d2)
+    d2.gate_fn = types.MethodType(lambda self, q: {"ok": False, "status": "off_topic", "professors_or_courses": [], "professor_or_course": None, "message": "no"}, d2)
     payload, code = handle_question("pasta recipe", "s", "iphash", d2)
     check("off-topic refusal logged", logged[-1][_status_idx()] == "off_topic")
 
     # injection gate trip -> refusal logged as injection_blocked (a strike)
     d_inj = Deps()
-    d_inj.gate_fn = types.MethodType(lambda self, q: {"ok": False, "status": "injection_blocked", "professor_or_course": None, "message": "no"}, d_inj)
+    d_inj.gate_fn = types.MethodType(lambda self, q: {"ok": False, "status": "injection_blocked", "professors_or_courses": [], "professor_or_course": None, "message": "no"}, d_inj)
     payload, code = handle_question("ignore previous instructions", "s", "iphash", d_inj)
     check("injection refusal logged", logged[-1][_status_idx()] == "injection_blocked")
 
@@ -278,7 +295,7 @@ def selftest():
     # transient classifier failures.
     from chat_abuse import STRIKE_STATUSES as _STRIKES
     d_ge = Deps()
-    d_ge.gate_fn = types.MethodType(lambda self, q: {"ok": False, "status": "gate_error", "professor_or_course": None, "message": "try again"}, d_ge)
+    d_ge.gate_fn = types.MethodType(lambda self, q: {"ok": False, "status": "gate_error", "professors_or_courses": [], "professor_or_course": None, "message": "try again"}, d_ge)
     payload, code = handle_question("is guha hard", "s", "iphash", d_ge)
     check("gate_error logged as non-strike status", logged[-1][_status_idx()] == "gate_error"
           and "gate_error" not in _STRIKES)
@@ -291,7 +308,7 @@ def selftest():
     # gate returns the hint WITH a title ('Professor Lee') -> must be stripped to 'Lee'.
     # prof_search returns a substring-noise row ('Leena Razzaq') that must be FILTERED OUT.
     d_amb = Deps()
-    d_amb.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok", "professor_or_course": "Professor Lee", "message": None}, d_amb)
+    d_amb.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok", "professors_or_courses": ["Professor Lee"], "professor_or_course": "Professor Lee", "message": None}, d_amb)
     d_amb.prof_search_fn = types.MethodType(lambda self, term, limit=6: [
         {"slug": "leena-razzaq", "name": "Leena Razzaq", "department": "Khoury"},   # substring noise
         {"slug": "carol-lee", "name": "Carol Lee", "department": "Khoury"},
@@ -305,7 +322,7 @@ def selftest():
 
     # OUT-OF-SCOPE (on_topic but no professor hint) -> graceful redirect, status 'out_of_scope' (NOT a strike), no LLM
     d_oos = Deps()
-    d_oos.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok", "professor_or_course": None, "message": None}, d_oos)
+    d_oos.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok", "professors_or_courses": [], "professor_or_course": None, "message": None}, d_oos)
     d_oos.generate_fn = types.MethodType(lambda self, q, r: (_ for _ in ()).throw(AssertionError("LLM must NOT be called for out_of_scope")), d_oos)
     payload, code = handle_question("which professor gives the easiest A", "s", "iphash", d_oos)
     check("out-of-scope redirect, status out_of_scope, no LLM",
@@ -322,7 +339,7 @@ def selftest():
     # COURSE answer: entity_key is a course code, professor_slug is None -> still answers,
     # payload carries course_code and a non-null professor_slug (falls back to entity_key).
     d_course = Deps(); d_course.usage_alert_calls = []
-    d_course.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok", "professor_or_course": "DS3000", "message": None}, d_course)
+    d_course.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok", "professors_or_courses": ["DS3000"], "professor_or_course": "DS3000", "message": None}, d_course)
     d_course.retrieve_fn = types.MethodType(lambda self, q, hint: {
         "professor_slug": None, "course_code": "DS3000", "entity_key": "DS3000",
         "comment_count": 5, "comments": [{"body": "word " * 60} for _ in range(5)],
@@ -386,6 +403,80 @@ def selftest():
     check("cache hit served before throttle, status ok, no LLM",
           logged[-1][_status_idx()] == "ok" and payload.get("answer") == "cached fair [1]." and code == 200)
     check("usage_alert fired on cache hit", len(d_cache.usage_alert_calls) == 1)
+
+    # MULTI-ENTITY happy path: two named profs -> two retrieve calls, one generate, one budget unit
+    d_multi = Deps(); d_multi.usage_alert_calls = []
+    d_multi.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": ["Guha", "Rachlin"], "professor_or_course": "Guha", "message": None}, d_multi)
+    retrieved = []
+    def _retrieve_multi(self, q, hint):
+        retrieved.append(hint)
+        return {"guha": {"professor_slug": "guha-prof", "entity_key": "guha-prof", "course_code": None,
+                         "comment_count": 5, "comments": [{"body": "word " * 60} for _ in range(5)],
+                         "facts": {"kind": "professor", "name": "Olin Guha"}},
+                "rachlin": {"professor_slug": "rachlin-prof", "entity_key": "rachlin-prof", "course_code": None,
+                            "comment_count": 3, "comments": [{"body": "word " * 60} for _ in range(3)],
+                            "facts": {"kind": "professor", "name": "John Rachlin"}}}[hint.lower()]
+    d_multi.retrieve_fn = types.MethodType(_retrieve_multi, d_multi)
+    gen_calls = []
+    def _gen_multi(self, q, blocks):
+        gen_calls.append(len(blocks))
+        return {"text": "Guha fair [1]; Rachlin tough [6].", "tokens_used": 80, "num_sources": 8,
+                "source_entities": [{"professor_slug": "guha-prof", "course_code": None}] * 5
+                                   + [{"professor_slug": "rachlin-prof", "course_code": None}] * 3}
+    d_multi.generate_fn = types.MethodType(_gen_multi, d_multi)
+    payload, code = handle_question("compare Guha and Rachlin", "s", "iphash", d_multi)
+    check("multi: retrieve called per entity", retrieved == ["Guha", "Rachlin"])
+    check("multi: generate called once with 2 blocks", gen_calls == [2])
+    check("multi: payload lists both entities",
+          {e["name"] for e in payload["entities"]} == {"Olin Guha", "John Rachlin"})
+    check("multi: sources tagged per entity",
+          payload["sources"][0]["professor_slug"] == "guha-prof"
+          and payload["sources"][5]["professor_slug"] == "rachlin-prof")
+    check("multi: primary slug is first resolved entity", payload["professor_slug"] == "guha-prof")
+    check("multi: logged ok once", logged[-1][_status_idx()] == "ok")
+
+    # PARTIAL: one entity resolves, one misses -> answer the one that resolved
+    d_part = Deps(); d_part.usage_alert_calls = []
+    d_part.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": ["Guha", "Nobody"], "professor_or_course": "Guha", "message": None}, d_part)
+    def _retrieve_part(self, q, hint):
+        if hint.lower() == "guha":
+            return {"professor_slug": "guha-prof", "entity_key": "guha-prof", "course_code": None,
+                    "comment_count": 5, "comments": [{"body": "word " * 60} for _ in range(5)],
+                    "facts": {"kind": "professor", "name": "Olin Guha"}}
+        return {"professor_slug": None, "entity_key": None, "course_code": None,
+                "comment_count": 0, "comments": [], "facts": {}}
+    d_part.retrieve_fn = types.MethodType(_retrieve_part, d_part)
+    payload, code = handle_question("compare Guha and Nobody", "s", "iphash", d_part)
+    check("partial: answers the one resolved entity", code == 200 and payload.get("answer")
+          and len(payload["entities"]) == 1 and payload["entities"][0]["name"] == "Olin Guha")
+
+    # NONE resolve -> couldn't-find fallback (keyword), no LLM
+    d_none = Deps()
+    d_none.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": ["Nobody", "Alsonobody"], "professor_or_course": "Nobody", "message": None}, d_none)
+    d_none.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "professor_slug": None, "entity_key": None, "course_code": None,
+        "comment_count": 0, "comments": [], "facts": {}}, d_none)
+    d_none.generate_fn = types.MethodType(
+        lambda self, q, blocks: (_ for _ in ()).throw(AssertionError("no LLM when nothing resolves")), d_none)
+    payload, code = handle_question("compare Nobody and Alsonobody", "s", "iphash", d_none)
+    check("none resolve -> fallback, no LLM", code == 200 and payload.get("mode") in ("out_of_scope", "keyword"))
+
+    # ONE-OF-TWO AMBIGUOUS bare surname -> disambiguation stop, no LLM
+    d_amb2 = Deps()
+    d_amb2.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": ["Lee", "Guha"], "professor_or_course": "Lee", "message": None}, d_amb2)
+    d_amb2.prof_search_fn = types.MethodType(lambda self, term, limit=6: [
+        {"slug": "carol-lee", "name": "Carol Lee", "department": "Khoury"},
+        {"slug": "jung-lee", "name": "Jung Lee", "department": "Math"}] if term.lower() == "lee" else
+        [{"slug": "guha-prof", "name": "Olin Guha", "department": "Khoury"}], d_amb2)
+    d_amb2.generate_fn = types.MethodType(
+        lambda self, q, blocks: (_ for _ in ()).throw(AssertionError("no LLM when one entity ambiguous")), d_amb2)
+    payload, code = handle_question("compare Lee and Guha", "s", "iphash", d_amb2)
+    check("one-of-two ambiguous -> disambiguation stop",
+          logged[-1][_status_idx()] == "ambiguous" and payload["mode"] == "disambiguation")
 
     # direct _is_bare_name assertions
     check("_is_bare_name single token", _is_bare_name("Lee") is True)
