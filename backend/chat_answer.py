@@ -30,6 +30,13 @@ SYSTEM_PROMPT = (
     " When several entities are provided, briefly address EACH one."
 )
 
+COURSE_LIST_SYSTEM_PROMPT = (
+    "You list Northeastern University courses matching a topic. Given the topic and the "
+    "matched courses, write 1-2 plain sentences naming the most relevant ones. Use ONLY the "
+    "provided courses. Mention a course's rating ONLY if a rating is given for it. "
+    "No opinions, no citations, no course you were not given."
+)
+
 _ZERO_WIDTH = dict.fromkeys(map(ord, "​‌‍﻿"), None)
 
 def _sanitize(text):
@@ -153,6 +160,25 @@ def generate(question, retrieval, adapter, max_tokens=250):
     return {"text": _strip_datamark(out["text"]), "tokens_used": out["tokens_used"],
             "num_sources": len(source_entities), "source_entities": source_entities,
             "sources_comments": sources_comments}
+
+def generate_course_list(topic, courses, adapter, max_tokens=160):
+    lines = []
+    for c in courses:
+        line = f"{c.get('code')} {_sanitize(c.get('name') or '')}"
+        dept = c.get("department")
+        if dept:
+            line += f" ({_sanitize(dept)})"
+        if c.get("rating") is not None:
+            line += f" · {c['rating']}/5"
+        lines.append("- " + line)
+    user = (
+        f"<topic>{_sanitize(topic)}</topic>\n\n"
+        f"<matched_courses>\n" + "\n".join(lines) + "\n</matched_courses>\n\n"
+        "Write 1-2 sentences naming the most relevant matches."
+    )
+    out = adapter.synthesize(COURSE_LIST_SYSTEM_PROMPT, user, max_tokens=max_tokens)
+    return {"text": _strip_datamark(out["text"]), "tokens_used": out["tokens_used"]}
+
 
 def selftest():
     fails = []
@@ -289,6 +315,34 @@ def selftest():
           all(se["professor_slug"] == "olin-guha" for se in gs["source_entities"]))
     check("single-block sources_comments == that block's comments, 1:1 with source_entities",
           gs["sources_comments"] == comments and len(gs["sources_comments"]) == gs["num_sources"])
+
+    # ── course-list summary ──
+    class CourseListAdapter:
+        def synthesize(self, system, user, max_tokens=250):
+            check("course-list uses its own system prompt", system == COURSE_LIST_SYSTEM_PROMPT)
+            check("course-list prompt names the topic", "database" in user.lower())
+            check("course-list prompt lists course codes", "CS3200" in user and "DS3000" in user)
+            return {"text": "NEU offers CS3200 Database Design and DS3000 Foundations of Data Science.", "tokens_used": 40}
+    cl = generate_course_list("database",
+            [{"code": "CS3200", "name": "Database Design", "department": "Khoury"},
+             {"code": "DS3000", "name": "Foundations of Data Science", "department": "Khoury"}],
+            CourseListAdapter())
+    check("course-list returns text + tokens", cl["text"].startswith("NEU offers") and cl["tokens_used"] == 40)
+    check("course-list answer has no [N] citations", "[1]" not in cl["text"])
+
+    # ratings appear in the prompt ONLY when a course carries a rating
+    captured_user = {}
+    class CapAdapter:
+        def synthesize(self, system, user, max_tokens=250):
+            captured_user["u"] = user
+            return {"text": "CS3200 (4.5/5) is the top database course.", "tokens_used": 30}
+    generate_course_list("database",
+        [{"code": "CS3200", "name": "Database Design", "department": "Khoury", "rating": 4.5}], CapAdapter())
+    check("rating shown in prompt when present", "4.5" in captured_user["u"])
+    captured_user.clear()
+    generate_course_list("database",
+        [{"code": "CS3200", "name": "Database Design", "department": "Khoury"}], CapAdapter())
+    check("no rating text in prompt when absent", "/5" not in captured_user["u"])
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0
