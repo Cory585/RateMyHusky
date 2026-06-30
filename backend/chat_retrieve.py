@@ -60,7 +60,10 @@ def _course_overall_rating(code, query_fn):
 def fetch_courses_by_topic(topic, query_fn, limit=8, with_ratings=False):
     """Catalog courses whose search_text matches the topic. Reuses the /api/search course
     query. Per-course rating lookups happen ONLY when with_ratings is True."""
-    topic = re.sub(r"[%_]", " ", str(topic or "")).strip()
+    # search_text is stored lowercased (precompute builds code.lower()+" "+name.lower()), and
+    # LIKE is case-sensitive — so the term MUST be lowercased or a capitalized hint like
+    # "Discrete Structures" matches nothing.
+    topic = re.sub(r"[%_]", " ", str(topic or "")).strip().lower()
     if len(topic) < 2:
         return []
     like = f"%{topic}%"
@@ -638,6 +641,15 @@ def selftest():
         return [{"code": "DS3000", "name": "Foundations of Data Science", "department": "Khoury"}]
     got = fetch_courses_by_topic("data_science", topic_q)
     check("underscore in topic neutralized to space", got[0]["code"] == "DS3000")
+
+    # search_text is stored lowercase + LIKE is case-sensitive: a capitalized hint MUST be
+    # lowercased before the query, else "Discrete Structures" matches nothing.
+    cap = {}
+    def case_q(sql, params):
+        cap["like"] = params[0]
+        return [{"code": "CS1800", "name": "Discrete Structures", "department": "Computer Science"}]
+    fetch_courses_by_topic("Discrete Structures", case_q)
+    check("topic search lowercases the LIKE term", cap["like"] == "%discrete structures%")
 
     # ── course-by-NAME resolution ──
     # single clear match by title -> resolves to that course (facts + comments), like the code path

@@ -121,15 +121,31 @@ def build_multi_user_message(question, blocks):
         + "\n\nAnswer the question using ONLY the provided evidence. "
         "Briefly cover EACH named entity; cite [N] for any qualitative claim.")
 
+# The model sometimes emits citations with fullwidth/CJK brackets (【1】, ［1］) instead of
+# ASCII [1]. Both the output validator (regex \[(\d+)\]) and the frontend source filter
+# (answer.includes("[N]")) only recognize ASCII brackets, so an un-normalized 【1】 leaves the
+# citation visible in the text but renders NO source. Normalize bracket variants to ASCII.
+_CITATION_OPEN = str.maketrans({"【": "[", "［": "[", "〔": "["})
+_CITATION_CLOSE = str.maketrans({"】": "]", "］": "]", "〕": "]"})
+
+def _normalize_citations(text):
+    return (text or "").translate(_CITATION_OPEN).translate(_CITATION_CLOSE)
+
 def _strip_datamark(text):
     """Remove the spotlighting marker the model sometimes echoes from the datamarked
-    Reddit text. ▁ renders as a thin/odd space, so drop it and collapse the spacing."""
-    return re.sub(r"\s+", " ", (text or "").replace(DATAMARK, " ")).strip()
+    Reddit text. ▁ renders as a thin/odd space, so drop it and collapse the spacing. Also
+    normalize fullwidth citation brackets (【1】) to ASCII ([1]) so sources resolve."""
+    cleaned = _normalize_citations((text or "").replace(DATAMARK, " "))
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 def generate(question, retrieval, adapter, max_tokens=250):
     # Accept the old single-dict shape OR a list of per-entity blocks.
     blocks = retrieval if isinstance(retrieval, list) else [retrieval]
     multi = len(blocks) > 1
+    # A multi-entity comparison must cover BOTH entities' facts + Reddit, so 250 tokens
+    # truncates it mid-sentence (worse on the reasoning synth model, whose trace also eats the
+    # budget). Scale the ceiling per entity so the answer can finish.
+    out_tokens = max(max_tokens, 220 * len(blocks)) if multi else max_tokens
     # cap comments per entity when answering about several, to bound prompt size
     norm = []
     for blk in blocks:
@@ -144,7 +160,7 @@ def generate(question, retrieval, adapter, max_tokens=250):
         b = norm[0]
         user = build_user_message(question, b.get("facts", {}), b.get("comments", []))
 
-    out = adapter.synthesize(SYSTEM_PROMPT, user, max_tokens=max_tokens)
+    out = adapter.synthesize(SYSTEM_PROMPT, user, max_tokens=out_tokens)
 
     # source_entities[i] and sources_comments[i] both describe global source i+1, in the
     # exact order the prompt numbered them (over the capped `norm` comments) — so a citation's
@@ -258,6 +274,15 @@ def selftest():
     check("generate restores normal spacing after stripping",
           ge["text"] == "Students say hard but fair and the course is tough [1].")
 
+    # The model sometimes cites with fullwidth/CJK brackets (【1】) instead of ASCII [1];
+    # generate() must normalize them so the validator and the frontend source filter resolve.
+    class FullwidthCiteAdapter:
+        def synthesize(self, system, user, max_tokens=250):
+            return {"text": "Dedicated and kind【1】, eager for DS4400【4】.", "tokens_used": 12}
+    gw = generate("q", {"facts": facts, "comments": comments}, FullwidthCiteAdapter())
+    check("generate normalizes fullwidth citation brackets to ASCII",
+          "[1]" in gw["text"] and "[4]" in gw["text"] and "【" not in gw["text"] and "】" not in gw["text"])
+
     # ── multi-entity: two blocks, global numbering, per-source entity tags ──
     facts_b = {"kind": "professor", "name": "John Rachlin", "department": "Khoury",
                "courses": ["DS3000"], "difficulty": 3.0, "avg_rating": 4.0,
@@ -275,11 +300,17 @@ def selftest():
     # global numbering continues across blocks: block 1 has [1][2], block 2 has [3]
     check("multi msg numbers globally", "[1]" in mm and "[2]" in mm and "[3]" in mm)
 
+    seen_tokens = {}
     class MultiAdapter:
         def synthesize(self, system, user, max_tokens=250):
+            seen_tokens["mt"] = max_tokens
             return {"text": "Guha is fair [1]; Rachlin is tough [3].", "tokens_used": 90}
     gm = generate("compare Guha and Rachlin", blocks, MultiAdapter())
     check("multi generate counts all sources", gm["num_sources"] == 3)
+    # a 2-entity comparison needs more room than the 250-token single-entity default, else it
+    # truncates mid-sentence; the budget must scale with entity count.
+    check("multi generate raises the token ceiling above the single-entity default",
+          seen_tokens["mt"] > 250)
     check("multi source_entities aligns to global index",
           gm["source_entities"][0]["professor_slug"] == "olin-guha"
           and gm["source_entities"][2]["professor_slug"] == "john-rachlin")
