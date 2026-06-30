@@ -60,6 +60,9 @@ def _course_overall_rating(code, query_fn):
 def fetch_courses_by_topic(topic, query_fn, limit=8, with_ratings=False):
     """Catalog courses whose search_text matches the topic. Reuses the /api/search course
     query. Per-course rating lookups happen ONLY when with_ratings is True."""
+    topic = re.sub(r"[%_]", " ", str(topic or "")).strip()
+    if len(topic) < 2:
+        return []
     like = f"%{topic}%"
     rows = query_fn("""
         SELECT code, name, department FROM course_catalog
@@ -303,7 +306,9 @@ def fetch_reddit_mentions(slug, query_fn):
     return out
 
 def retrieve(query, hint, query_fn, query_one_fn, prof_search_fn, limit=8):
-    topic = is_course_topic_query(query)
+    # Only treat as a topic-listing when the gate found NO specific entity hint — a named
+    # professor/course must win ("what database courses does Guha teach" → answer about Guha).
+    topic = is_course_topic_query(query) if not hint else None
     if topic:
         with_ratings = wants_ratings(query)
         courses = fetch_courses_by_topic(topic, query_fn, limit=limit, with_ratings=with_ratings)
@@ -572,6 +577,27 @@ def selftest():
     rb0 = retrieve("what zzzz courses are there", None,
                    lambda sql, params: [], lambda s, p=None: None, lambda q, limit=1: [], limit=8)
     check("zero-match topic falls through (no course_list)", rb0.get("kind") != "course_list")
+
+    # named entity wins over topic phrasing: retrieve with a hint must NOT return a course_list
+    rb_hint = retrieve("what database courses does Guha teach", "Guha",
+                       lambda sql, params: [{"code": "CS3200", "name": "Database Design", "department": "Khoury"}]
+                                            if "course_catalog" in sql else [],
+                       lambda s, p=None: None,
+                       lambda q, limit=1: [{"slug": "guha-prof", "name": "Olin Guha"}], limit=8)
+    check("named entity hint suppresses topic branch", rb_hint.get("kind") != "course_list")
+    check("named entity hint resolves the professor", rb_hint.get("professor_slug") == "guha-prof")
+
+    # degenerate topic guard: a 1-char or wildcard topic returns no courses and issues no query
+    def must_not_query(sql, params):
+        raise AssertionError("degenerate topic must not hit the DB")
+    check("single-char topic returns empty", fetch_courses_by_topic("x", must_not_query) == [])
+    check("wildcard-only topic returns empty", fetch_courses_by_topic("%", must_not_query) == [])
+    # a normal topic still works and wildcards inside are neutralized
+    def topic_q(sql, params):
+        check("neutralized topic has no % or _ wildcard", "%_" not in params[0] and params[0] == "%data science%")
+        return [{"code": "DS3000", "name": "Foundations of Data Science", "department": "Khoury"}]
+    got = fetch_courses_by_topic("data_science", topic_q)
+    check("underscore in topic neutralized to space", got[0]["code"] == "DS3000")
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0

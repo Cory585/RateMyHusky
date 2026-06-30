@@ -57,12 +57,10 @@ const SearchBar = () => {
     // single professor / course
     "Is Guha hard?",
     "How are Mislove's lectures?",
-    "Is Fundies 1 a lot of work?",
     "Does Abhi Shelat give hard exams?",
     "Is Rachlin an easy grader?",
     "Is CS 3000 worth taking?",
     "How tough is Discrete Structures?",
-    "Does Felushko curve grades?",
     "Is Schedlbauer a good teacher?",
     "Is Networks hard with Choffnes?",
     "Should I take Theory of Computation?",
@@ -350,7 +348,9 @@ const SearchBar = () => {
       {showSuggestions && isAsk && (askLoading || askResult) && (
         <div className="ask-result">
           {askLoading ? (
-            <p className="ask-thinking">Thinking…</p>
+            <p className="ask-thinking">
+              Thinking<span className="ask-thinking-dots"><span>.</span><span>.</span><span>.</span></span>
+            </p>
           ) : askResult ? (
             <AskResult result={askResult} />
           ) : null}
