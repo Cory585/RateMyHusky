@@ -24,8 +24,27 @@ from urllib.parse import urlencode, urlparse
 from datetime import datetime, timedelta, timezone
 from threading import Lock, Thread, Event
 import time
+from chat_search import keyword_search
+from chat_question import handle_question
+from llm_adapter import GroqAdapter
+from key_pool import KeyPool
+from chat_gate import gate
+from chat_retrieve import retrieve, fetch_reddit_mentions
+from chat_answer import generate
+from professor_full import build_full
+import usage_alert
 
 load_dotenv()
+
+import types as _types
+
+CHAT_ENABLED = os.getenv("CHAT_ENABLED", "true").lower() == "true"
+_IP_SALT = os.getenv("ASK_IP_SALT", "rmh-default-salt")
+_chat_pool = KeyPool()
+_chat_adapter = GroqAdapter(_chat_pool)
+
+def _hash_ip(ip):
+    return hashlib.sha256((_IP_SALT + (ip or "")).encode()).hexdigest()[:16]
 
 
 # ──────────────────────────────────────────────
@@ -279,6 +298,9 @@ _feedback_lock = Lock()
 _feedback_count = 0
 _feedback_date = None   # "YYYY-MM-DD" UTC, resets counter each day
 FEEDBACK_DAILY_LIMIT = 300
+# feedback types that require a reply email and carry the signed-in account's verified sub,
+# so support can act on the right ask_log rows (review an appeal, or erase the user's data)
+_ACCOUNT_FEEDBACK_TYPES = {"banappeal", "datadeletion"}
 
 
 
@@ -404,6 +426,24 @@ def query_one(sql, params=None):
     rows = query(sql, params)
     return rows[0] if rows else None
 
+def _chat_write(sql, params=None):
+    """Write helper for the question path (ask_log INSERTs): execute + commit, never fetch.
+    The read-only query()/query_one() call fetchall(), which raises on a non-RETURNING INSERT;
+    and the pool is not autocommit, so writes must commit explicitly."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(sql, params or ())
+    conn.commit()
+
+def _chat_write_rc(sql, params=None):
+    """Like _chat_write but returns the executed statement's rowcount."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(sql, params or ())
+    conn.commit()
+    return cur.rowcount
+
+
 
 # ──────────────────────────────────────────────
 #  Google OAuth config
@@ -423,6 +463,10 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 # ──────────────────────────────────────────────
 def _professor_search(q, limit=5):
     """Search professors with tiered relevance ranking."""
+    # Normalize first: name_key is stored lowercase/ASCII, and CockroachDB LIKE is
+    # case-sensitive. Callers like the chat/Ask path pass a raw gate hint ("Wu Chieh"),
+    # so without this the LIKE filter (and the lowercase ALIAS_MAP) never match.
+    q = normalize_name(q)
     # Resolve full-query alias first (e.g. "virgiliu pavlu" → "virgil pavlu")
     q_resolved = resolve_alias(q)
 
@@ -680,6 +724,56 @@ def search():
                 "dept": r["department"],
             })
         return jsonify(results)
+
+
+# ──────────────────────────────────────────────
+#  Reddit RAG chatbot
+# ──────────────────────────────────────────────
+@limiter.limit("30 per minute")
+@app.route("/api/chat")
+def chat():
+    q = (request.args.get("q") or "").strip()
+    mode = request.args.get("mode", "keyword")
+    if len(q) < 2:
+        return jsonify({"mode": mode, "results": []})
+    if mode == "keyword":
+        try:
+            limit = min(int(request.args.get("limit", "20")), 50)
+        except (TypeError, ValueError):
+            limit = 20
+        data = keyword_search(q, query, _professor_search, limit=limit)
+        return jsonify({"mode": "keyword", "results": data["comments"], "professors": data["professors"]})
+    # 'question' mode is account-gated: identity comes from the verified JWT (not a spoofable
+    # header), so the abuse ladder keys on a server-trusted user id that can't be forged or omitted.
+    token = _get_auth_token()
+    if not token:
+        return jsonify({"mode": "error", "message": "Sign in to use Ask mode."}), 401
+    try:
+        _claims = pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+    except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+        return jsonify({"mode": "error", "message": "Sign in to use Ask mode."}), 401
+    deps = _types.SimpleNamespace(
+        chat_enabled=CHAT_ENABLED,
+        num_keys=len(_chat_pool.entries) or 1,
+        query_fn=query,
+        query_one_fn=query_one,
+        prof_search_fn=_professor_search,
+        cache_get_fn=cache_get,
+        cache_set_fn=cache_set,
+        keyword_search_fn=lambda qq: keyword_search(qq, query, _professor_search),
+        gate_fn=lambda qq: gate(qq, _chat_adapter),
+        retrieve_fn=lambda qq, hint: retrieve(qq, hint, query, query_one, _professor_search),
+        generate_fn=lambda qq, blocks: generate(qq, blocks, _chat_adapter),
+        log_fn=_chat_write,
+        usage_alert_fn=lambda: usage_alert.maybe_alert(
+            query, query_one, _chat_write_rc, len(_chat_pool.entries) or 1),
+    )
+    session_token = _claims.get("sub")  # verified account id — unspoofable, never None
+    if not session_token:
+        return jsonify({"mode": "error", "message": "Sign in to use Ask mode."}), 401
+    ip_hash = _hash_ip(request.headers.get("CF-Connecting-IP", request.remote_addr))
+    payload, code = handle_question(q, session_token, ip_hash, deps)
+    return jsonify(payload), code
 
 
 # ──────────────────────────────────────────────
@@ -1232,7 +1326,11 @@ def professor_reviews(slug):
                         "courseId": item["courseId"],
                     })
 
-    result = {"reviews": reviews, "traceComments": comments}
+    reddit_mentions = fetch_reddit_mentions(slug, query)
+    for m in reddit_mentions:
+        m["body"] = sanitize(m["body"]) if m["body"] else ""
+
+    result = {"reviews": reviews, "traceComments": comments, "redditMentions": reddit_mentions}
     cache_set(cache_key, result)
     resp = jsonify(result)
     resp.headers["Cache-Control"] = "private, max-age=3600" if is_authed else "public, max-age=3600"
@@ -1242,21 +1340,13 @@ def professor_reviews(slug):
 
 @app.route("/api/professors/<slug>/full")
 def professor_full(slug):
-    """Combined profile + reviews in one request to halve round-trips."""
-    profile_resp = professor_profile(slug)
-    if isinstance(profile_resp, tuple):
-        return profile_resp  # propagate 404/errors
+    """Combined profile + reviews in one request.
 
-    reviews_resp = professor_reviews(slug)
-    if isinstance(reviews_resp, tuple):
-        reviews_data = {"reviews": [], "traceComments": []}
-    else:
-        reviews_data = reviews_resp.get_json()
-
-    profile_data = profile_resp.get_json()
-    profile_data["reviews"] = reviews_data.get("reviews", [])
-    profile_data["traceComments"] = reviews_data.get("traceComments", [])
-
+    Unauthenticated (the public cold path): build_full shares the catalog +
+    trace_courses lookups and runs a single trace_scores scan, cutting the
+    cold-cache round-trips from ~10 to ~6. Authenticated requests keep the
+    radar-bearing profile branch via the two sub-endpoints.
+    """
     is_authed = False
     token = _get_auth_token()
     if token:
@@ -1266,6 +1356,37 @@ def professor_full(slug):
         except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
             pass
 
+    cache_key = f"prof_full:{slug}:{'a' if is_authed else 'u'}"
+    cached = cache_get(cache_key)
+    if cached:
+        resp = jsonify(cached)
+        resp.headers["Cache-Control"] = "private, max-age=3600" if is_authed else "public, max-age=3600"
+        resp.headers["Vary"] = "Authorization"
+        return resp
+
+    if not is_authed:
+        profile_data = build_full(slug, query, query_one, sanitize,
+                                  fetch_reddit_mentions=fetch_reddit_mentions,
+                                  is_authed=False)
+        if profile_data is None:
+            return jsonify({"error": "Professor not found"}), 404
+    else:
+        profile_resp = professor_profile(slug)
+        if isinstance(profile_resp, tuple):
+            return profile_resp  # propagate 404/errors
+
+        reviews_resp = professor_reviews(slug)
+        if isinstance(reviews_resp, tuple):
+            reviews_data = {"reviews": [], "traceComments": [], "redditMentions": []}
+        else:
+            reviews_data = reviews_resp.get_json()
+
+        profile_data = profile_resp.get_json()
+        profile_data["reviews"] = reviews_data.get("reviews", [])
+        profile_data["traceComments"] = reviews_data.get("traceComments", [])
+        profile_data["redditMentions"] = reviews_data.get("redditMentions", [])
+
+    cache_set(cache_key, profile_data)
     resp = jsonify(profile_data)
     resp.headers["Cache-Control"] = "private, max-age=3600" if is_authed else "public, max-age=3600"
     resp.headers["Vary"] = "Authorization"
@@ -1548,7 +1669,7 @@ def courses_catalog():
             for rr in rating_rows:
                 tr = _safe_float(rr["total_responses"])
                 rating_map[rr["course_code"]] = (
-                    _safe_float(rr["weighted_sum"]) / tr if tr > 0 else None
+                    round(_safe_float(rr["weighted_sum"]) / tr, 2) if tr > 0 else None
                 )
 
         # Build course list with ratings
@@ -1625,7 +1746,7 @@ def courses_catalog():
             for rr in rating_rows:
                 tr = _safe_float(rr["total_responses"])
                 rating_map[rr["course_code"]] = (
-                    _safe_float(rr["weighted_sum"]) / tr if tr > 0 else None
+                    round(_safe_float(rr["weighted_sum"]) / tr, 2) if tr > 0 else None
                 )
 
         courses = []
@@ -2078,6 +2199,7 @@ def submit_feedback():
     description = data.get("description", "").strip()
     reply_email = data.get("email", "").strip()
     turnstile_token = data.get("turnstileToken", "").strip()
+    account_token = (data.get("accountSub") or "").strip()
 
     # Verify Cloudflare Turnstile CAPTCHA
     turnstile_secret = os.getenv("TURNSTILE_SECRET_KEY")
@@ -2098,8 +2220,22 @@ def submit_feedback():
     if not feedback_type or not description:
         return jsonify({"error": "feedbackType and description are required"}), 400
 
+    # Ask ban appeals and data-deletion requests are useless without a reply address — require
+    # it (other types stay optional).
+    if feedback_type in _ACCOUNT_FEEDBACK_TYPES and not reply_email:
+        return jsonify({"error": "Email is required for this request"}), 400
+
     if reply_email and not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', reply_email):
         return jsonify({"error": "Invalid email address"}), 400
+
+    # Resolve the account from its JWT (verified server-side, never trust a client-supplied id)
+    # so we can locate/clear its ask_log rows by session_token (appeal review or data erasure).
+    appeal_account = None
+    if feedback_type in _ACCOUNT_FEEDBACK_TYPES and account_token:
+        try:
+            appeal_account = pyjwt.decode(account_token, JWT_SECRET, algorithms=["HS256"]).get("sub")
+        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+            appeal_account = None
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     with _feedback_lock:
@@ -2120,6 +2256,8 @@ def submit_feedback():
         "feature": "Feature Request",
         "missing": "Missing Data",
         "incorrectdata": "Incorrect Data",
+        "banappeal": "Ask Ban Appeal",
+        "datadeletion": "Data Deletion Request",
         "general": "General Feedback",
     }
     type_label = type_labels.get(feedback_type, feedback_type)
@@ -2131,6 +2269,10 @@ def submit_feedback():
     ]
     if reply_email:
         lines.append(f"From:        {reply_email}")
+    if feedback_type in _ACCOUNT_FEEDBACK_TYPES:
+        # surface the session_token to act on via clear_ask_strikes.py
+        # (--account <sub> for appeals, --purge-account <sub> for data deletion)
+        lines.append(f"Account:     {appeal_account or 'not signed in / token invalid'}")
     lines += ["", "Description:", description]
     body = "\n".join(lines)
 

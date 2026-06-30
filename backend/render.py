@@ -12,6 +12,18 @@ from flask import Blueprint  # noqa: F401  (used by the route task)
 MAX_SNAPSHOT_REVIEWS = 15
 SITE = "https://ratemyhusky.com"
 
+# Search engines (incl. Bing Webmaster) flag meta descriptions outside the
+# ~120–160 char band. Dynamic summaries grow with names/courses, so clip at a
+# word boundary to stay safely under the ceiling.
+MAX_DESCRIPTION = 155
+
+
+def _clip_description(text: str) -> str:
+    if len(text) <= MAX_DESCRIPTION:
+        return text
+    cut = text[:MAX_DESCRIPTION].rsplit(" ", 1)[0].rstrip(" .,;:—-")
+    return cut + "…"
+
 
 def _esc(value) -> str:
     """HTML-escape a value; None -> ''. Quotes escaped for attribute safety."""
@@ -37,6 +49,7 @@ def _page(title: str, description: str, canonical: str, body: str,
     img = image or f"{SITE}/logo.jpg"
     alt = image_alt or title
     twitter_card = "summary_large_image" if has_real_image else "summary"
+    description = _clip_description(description)
     scripts = "\n".join(_jsonld_script(b) for b in jsonld)
     return f"""<!doctype html>
 <html lang="en">
@@ -76,6 +89,10 @@ def _stat_rows(pairs) -> str:
     return "<dl>" + "".join(rows) + "</dl>" if rows else ""
 
 
+def _rating_suffix(avg) -> str:
+    return f" ({_esc(avg)}/5)" if avg is not None else ""
+
+
 def professor_html(profile: dict, reviews: list, canonical: str,
                    trace_count: int = 0) -> str:
     name = profile.get("name") or ""
@@ -89,9 +106,9 @@ def professor_html(profile: dict, reviews: list, canonical: str,
     title = f"{name} — {dept} at Northeastern | RateMyHusky"
     wta_txt = f", {wta}% would take again" if wta is not None else ""
     summary = (
-        f"{name} teaches {dept} at Northeastern University. "
+        f"{name} teaches {dept} at Northeastern. "
         f"Average rating {avg}/5 across {total} ratings{wta_txt}. "
-        f"Data is aggregated from TRACE evaluations and RateMyProfessor reviews."
+        f"TRACE & RateMyProfessor reviews."
     )
 
     stats = _stat_rows([
@@ -137,14 +154,8 @@ def professor_html(profile: dict, reviews: list, canonical: str,
     }
     if profile.get("imageUrl"):
         jsonld["image"] = profile["imageUrl"]
-    if total and total > 0:
-        jsonld["aggregateRating"] = {
-            "@type": "AggregateRating",
-            "ratingValue": f"{avg:.2f}" if isinstance(avg, (int, float)) else str(avg),
-            "ratingCount": total,
-            "bestRating": "5",
-            "worstRating": "1",
-        }
+    # NB: schema.org Person does not support aggregateRating, and Google rejects
+    # it ("Invalid object type" in Rich Results), so we do not emit one here.
 
     return _page(title, summary, canonical, body, [jsonld],
                  image=profile.get("imageUrl"), og_type="profile",
@@ -163,9 +174,9 @@ def course_html(detail: dict, canonical: str) -> str:
     avg_txt = f"Average rating {avg}/5. " if avg is not None else ""
     last_txt = f"Last taught {last}. " if last else ""
     summary = (
-        f"{code} — {cname} ({dept}) at Northeastern University. "
+        f"{code} — {cname} ({dept}) at Northeastern. "
         f"{avg_txt}{last_txt}"
-        f"Compare instructors using TRACE evaluations and RateMyProfessor reviews."
+        f"Compare instructors with TRACE & RateMyProfessor reviews."
     )
 
     stats = _stat_rows([
@@ -194,6 +205,131 @@ def course_html(detail: dict, canonical: str) -> str:
         "name": f"{code} — {cname}",
         "courseCode": code,
         "provider": {"@type": "CollegeOrUniversity", "name": "Northeastern University"},
+    }
+    return _page(title, summary, canonical, body, [jsonld])
+
+
+def home_html(stats: list, top_professors: list, canonical: str) -> str:
+    title = "RateMyHusky — Northeastern University professor & course ratings"
+    summary = (
+        "RateMyHusky combines TRACE evaluations and RateMyProfessor reviews for "
+        "Northeastern professors and courses. Compare ratings, difficulty, and "
+        "reviews — free."
+    )
+
+    stat_rows = _stat_rows([(s.get("label"), s.get("value")) for s in (stats or [])])
+
+    prof_li = []
+    for p in (top_professors or []):
+        if not p.get("slug"):
+            continue
+        rating = p.get("avgRating")
+        suffix = _rating_suffix(rating)
+        prof_li.append(
+            f'<li><a href="{SITE}/professors/{_esc(p.get("slug"))}">{_esc(p.get("name"))}</a>'
+            f' — {_esc(p.get("department"))}{suffix}</li>'
+        )
+    prof_items = "".join(prof_li)
+    profs_block = (
+        f"<h2>Top-rated professors</h2><ul>{prof_items}</ul>" if prof_items else ""
+    )
+
+    body = (
+        f"<h1>{_esc(title)}</h1>"
+        f"<p>{_esc(summary)}</p>"
+        f"{stat_rows}{profs_block}"
+        f'<p>Browse all <a href="{SITE}/professors">professors</a> and '
+        f'<a href="{SITE}/courses">courses</a>.</p>'
+    )
+
+    jsonld = {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "RateMyHusky",
+        "url": SITE,
+        "potentialAction": {
+            "@type": "SearchAction",
+            "target": f"{SITE}/professors?q={{search_term_string}}",
+            "query-input": "required name=search_term_string",
+        },
+    }
+    return _page(title, summary, canonical, body, [jsonld])
+
+
+LISTING_CAP = 20
+
+
+def professors_listing_html(entries: list, total: int, canonical: str) -> str:
+    title = "Northeastern University professors | RateMyHusky"
+    total_txt = str(total) if total else "thousands of"
+    summary = (
+        f"Browse {total_txt} Northeastern University professors. Compare ratings, "
+        f"difficulty, and would-take-again from TRACE evaluations and "
+        f"RateMyProfessor reviews."
+    )
+
+    shown = [e for e in (entries or []) if e.get("slug")][:LISTING_CAP]
+    items = "".join(
+        f'<li><a href="{SITE}/professors/{_esc(e.get("slug"))}">{_esc(e.get("name"))}</a>'
+        f' — {_esc(e.get("department"))}'
+        f'{_rating_suffix(e.get("avgRating"))}</li>'
+        for e in shown
+    )
+    body = (
+        f"<h1>Northeastern University professors</h1>"
+        f"<p>{_esc(summary)}</p>"
+        f"<ul>{items}</ul>"
+    )
+
+    jsonld = {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": i + 1,
+                "name": e.get("name"),
+                "url": f"{SITE}/professors/{e.get('slug')}",
+            }
+            for i, e in enumerate(shown)
+        ],
+    }
+    return _page(title, summary, canonical, body, [jsonld])
+
+
+def courses_listing_html(entries: list, total: int, canonical: str) -> str:
+    title = "Northeastern University courses | RateMyHusky"
+    total_txt = str(total) if total else "thousands of"
+    summary = (
+        f"Browse {total_txt} Northeastern University courses. Compare instructors, "
+        f"average ratings, and enrollment from TRACE evaluations."
+    )
+
+    shown = [e for e in (entries or []) if e.get("code")][:LISTING_CAP]
+    items = "".join(
+        f'<li><a href="{SITE}/courses/{_esc(e.get("code"))}">'
+        f'{_esc(e.get("code"))} — {_esc(e.get("name"))}</a>'
+        f'{_rating_suffix(e.get("avgRating"))}</li>'
+        for e in shown
+    )
+    body = (
+        f"<h1>Northeastern University courses</h1>"
+        f"<p>{_esc(summary)}</p>"
+        f"<ul>{items}</ul>"
+    )
+
+    jsonld = {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": i + 1,
+                "name": f"{e.get('code')} — {e.get('name')}",
+                "url": f"{SITE}/courses/{e.get('code')}",
+            }
+            for i, e in enumerate(shown)
+        ],
     }
     return _page(title, summary, canonical, body, [jsonld])
 
@@ -265,3 +401,56 @@ def render_course(code):
     resp = Response(html, mimetype="text/html")
     resp.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
     return resp
+
+
+def _get_stats_view():
+    from server import stats
+    return stats
+
+
+def _get_professors_catalog_view():
+    from server import professors_catalog
+    return professors_catalog
+
+
+def _get_courses_catalog_view():
+    from server import courses_catalog
+    return courses_catalog
+
+
+def _cache_headers(resp):
+    resp.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
+    return resp
+
+
+@render_bp.route("/render/home")
+def render_home():
+    from flask import Response
+    stats_data, serr = _json_or_404(_get_stats_view()())
+    stats_list = stats_data if (not serr and isinstance(stats_data, list)) else []
+
+    cat_data, cerr = _json_or_404(_get_professors_catalog_view()())
+    top = (cat_data or {}).get("professors", [])[:10] if not cerr else []
+
+    html = home_html(stats_list, top, f"{SITE}/")
+    return _cache_headers(Response(html, mimetype="text/html"))
+
+
+@render_bp.route("/render/professors")
+def render_professors_listing():
+    from flask import Response
+    data, err = _json_or_404(_get_professors_catalog_view()())
+    entries = (data or {}).get("professors", []) if not err else []
+    total = (data or {}).get("total", 0) if not err else 0
+    html = professors_listing_html(entries, total, f"{SITE}/professors")
+    return _cache_headers(Response(html, mimetype="text/html"))
+
+
+@render_bp.route("/render/courses")
+def render_courses_listing():
+    from flask import Response
+    data, err = _json_or_404(_get_courses_catalog_view()())
+    entries = (data or {}).get("courses", []) if not err else []
+    total = (data or {}).get("total", 0) if not err else 0
+    html = courses_listing_html(entries, total, f"{SITE}/courses")
+    return _cache_headers(Response(html, mimetype="text/html"))

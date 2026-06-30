@@ -16,6 +16,7 @@
   align-items: center;
   justify-content: center;
   position: relative;
+  z-index: 20;
   padding: 120px 24px 60px;
   background-color: #f5f5f5;
   overflow: hidden;

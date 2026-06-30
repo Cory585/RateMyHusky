@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import Dropdown from './Dropdown';
-import { fetchSearchSuggestions } from '../api/api';
-import type { SearchSuggestion } from '../api/api';
+import { fetchSearchSuggestions, askChat } from '../api/api';
+import type { SearchSuggestion, ChatResponse } from '../api/api';
 import './SearchBar.css';
 
 const searchOptions = [
   { value: 'Professor', label: 'Professor' },
   { value: 'Course', label: 'Course' },
+  { value: 'Ask', label: 'Ask' },
 ];
 
 const SearchBar = () => {
@@ -20,7 +21,11 @@ const SearchBar = () => {
   const [activeIndex, setActiveIndex] = useState(-1);
   const [isFocused, setIsFocused] = useState(false);
   const [placeholder, setPlaceholder] = useState('');
-  
+  const [askLoading, setAskLoading] = useState(false);
+  const [askResult, setAskResult] = useState<ChatResponse | null>(null);
+
+  const isAsk = searchType === 'Ask';
+
   const wrapperRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -50,6 +55,10 @@ const SearchBar = () => {
 
   // Typing animation logic
   useEffect(() => {
+    if (isAsk) {
+      setPlaceholder('Ask about a professor… e.g. "is Guha hard?"');
+      return;
+    }
     if (isFocused || query) {
       setPlaceholder(searchType === 'Professor' ? 'Search by professor name...' : 'Search by course name or code...');
       return;
@@ -88,17 +97,20 @@ const SearchBar = () => {
 
     let timeoutId = setTimeout(type, typingSpeed);
     return () => clearTimeout(timeoutId);
-  }, [isFocused, query, searchType, professorExamples, courseExamples]);
+  }, [isFocused, query, searchType, isAsk, professorExamples, courseExamples]);
 
   const handleSearchTypeChange = (newType: string) => {
     setSearchType(newType);
     setQuery('');
     setSuggestions([]);
     setShowSuggestions(false);
+    setAskResult(null);
+    setAskLoading(false);
   };
 
-  // Debounced fetch
+  // Debounced fetch (search modes only — Ask costs LLM tokens, so it never fetches as-you-type)
   useEffect(() => {
+    if (isAsk) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
     const trimmedQuery = query.trim();
@@ -125,7 +137,7 @@ const SearchBar = () => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [query, searchType]);
+  }, [query, searchType, isAsk]);
 
   // Handle query change to sync suggestions state
   const handleQueryChange = (val: string) => {
@@ -133,6 +145,22 @@ const SearchBar = () => {
     if (val.trim().length < 2) {
       setSuggestions([]);
       setShowSuggestions(false);
+    }
+  };
+
+  // Ask submit: one self-contained question → one answer (single-shot, no history).
+  const submitAsk = async () => {
+    const q = query.trim();
+    if (!q || askLoading) return;
+    setAskResult(null);
+    setAskLoading(true);
+    setShowSuggestions(true);
+    const { status, body } = await askChat(q);
+    setAskLoading(false);
+    setAskResult(body);
+    if (status === 401) {
+      // No sign-in modal lives here; mirror the navbar's open-feedback event pattern.
+      window.dispatchEvent(new CustomEvent('open-signin'));
     }
   };
 
@@ -164,6 +192,15 @@ const SearchBar = () => {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (isAsk) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitAsk();
+      } else if (e.key === 'Escape') {
+        setShowSuggestions(false);
+      }
+      return;
+    }
     if (!showSuggestions || suggestions.length === 0) return;
 
     if (e.key === 'ArrowDown') {
@@ -225,14 +262,14 @@ const SearchBar = () => {
           onChange={(e) => handleQueryChange(e.target.value)}
           onFocus={() => {
             setIsFocused(true);
-            if (suggestions.length > 0) setShowSuggestions(true);
+            if (isAsk ? (askResult || askLoading) : suggestions.length > 0) setShowSuggestions(true);
           }}
           onBlur={() => setIsFocused(false)}
           onKeyDown={handleKeyDown}
         />
       </div>
 
-      {showSuggestions && (
+      {showSuggestions && !isAsk && (
         <ul className="search-suggestions">
           {suggestions.map((s, i) => (
             <li
@@ -264,8 +301,102 @@ const SearchBar = () => {
           ))}
         </ul>
       )}
+
+      {showSuggestions && isAsk && (askLoading || askResult) && (
+        <div className="ask-result">
+          {askLoading ? (
+            <p className="ask-thinking">Thinking…</p>
+          ) : askResult ? (
+            <AskResult result={askResult} />
+          ) : null}
+        </div>
+      )}
     </div>
   );
 };
+
+function AskResult({ result }: { result: ChatResponse }) {
+  if (result.mode === 'question') {
+    // Fallback entity (used when a source has no per-source tag, e.g. old cached answers).
+    const fallbackHref = result.course_code
+      ? `/courses/${result.course_code.toLowerCase()}`
+      : result.professor_slug
+      ? `/professors/${result.professor_slug}`
+      : null;
+    // Show a source only if the answer text actually cites it with [N].
+    const cited = result.sources.filter((s) => result.answer.includes(`[${s.source_id}]`));
+    return (
+      <>
+        <p className="ask-answer">{result.answer}</p>
+        {cited.length > 0 && (
+          <ol className="ask-sources">
+            {cited.map((s) => {
+              const href = s.course_code
+                ? `/courses/${s.course_code.toLowerCase()}`
+                : s.professor_slug
+                ? `/professors/${s.professor_slug}`
+                : fallbackHref;
+              return (
+                <li key={s.source_id}>
+                  {href ? (
+                    <Link className="ask-source-link" to={href}>[{s.source_id}]</Link>
+                  ) : (
+                    <span className="ask-source-link">[{s.source_id}]</span>
+                  )}
+                  <span className="ask-source-snippet">{s.snippet}</span>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+        <p className="ask-disclaimer">{result.disclaimer}</p>
+      </>
+    );
+  }
+
+  if (result.mode === 'disambiguation') {
+    return <p className="ask-answer">{result.message}</p>;
+  }
+
+  if (result.mode === 'error') {
+    return <p className="ask-answer">{result.message}</p>;
+  }
+
+  // out_of_scope | thin_data | keyword — banner/message + any keyword comments
+  return (
+    <>
+      {(result.banner || result.message) && (
+        <p className="ask-answer">{result.banner || result.message}</p>
+      )}
+      {result.comments.length > 0 && (
+        <ol className="ask-sources">
+          {result.comments.slice(0, 10).map((c, i) => {
+            const com = c as {
+              snippet?: string;
+              link?: { type: 'professor' | 'course'; value: string } | null;
+            };
+            // [N] citation links to the matched professor/course profile; plain when none.
+            const href = com.link
+              ? com.link.type === 'course'
+                ? `/courses/${com.link.value.toLowerCase()}`
+                : `/professors/${com.link.value}`
+              : null;
+            const marker = `[${i + 1}]`;
+            return (
+              <li key={i}>
+                {href ? (
+                  <Link className="ask-source-link" to={href}>{marker}</Link>
+                ) : (
+                  <span className="ask-source-link">{marker}</span>
+                )}
+                <span className="ask-source-snippet">{com.snippet}</span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </>
+  );
+}
 
 export default SearchBar;

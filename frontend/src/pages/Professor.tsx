@@ -13,7 +13,7 @@ import {
   ResponsiveContainer, Legend, Tooltip as RechartsTooltip,
 } from 'recharts';
 import { fetchProfessorFull } from '../api/api';
-import type { ProfessorProfile, ProfessorReview, TraceComment } from '../api/api';
+import type { ProfessorProfile, ProfessorReview, TraceComment, RedditMention } from '../api/api';
 import { termSortKey } from '../utils/termUtils';
 import { useAuth } from '../context/AuthContext';
 import SignInModal from '../components/SignInModal';
@@ -120,6 +120,13 @@ const traceSortOptions = [
   { value: 'newest', label: 'Most Recent' },
 ];
 
+const redditSentimentOptions = [
+  { value: 'all', label: 'All Sentiment' },
+  { value: 'positive', label: 'Positive' },
+  { value: 'neutral', label: 'Neutral' },
+  { value: 'negative', label: 'Negative' },
+];
+
 // Strictly extract "Season Year" from messy term titles
 const cleanTerm = (t: string): string => {
   // Match terms like "Fall 2025", "Fall A 2025", "Summer 2 2025"
@@ -208,11 +215,15 @@ const Professor = () => {
   const [profile, setProfile] = useState<ProfessorProfile | null>(null);
   const [reviews, setReviews] = useState<ProfessorReview[]>([]);
   const [traceComments, setTraceComments] = useState<TraceComment[]>([]);
+  const [redditMentions, setRedditMentions] = useState<RedditMention[]>([]);
+  const [redditSentiment, setRedditSentiment] = useState('all');
+  const [redditSearch, setRedditSearch] = useState('');
+  const [visibleRedditMentions, setVisibleRedditMentions] = useState(10);
   const [loading, setLoading] = useState(true);
   const [reviewsLoading, setReviewsLoading] = useState(true);
   const [error, setError] = useState('');
   const [reviewTabRestored] = useState(() => sessionStorage.getItem('prof_review_tab') === 'trace');
-  const [reviewTab, setReviewTab] = useState<'rmp' | 'trace'>(() => {
+  const [reviewTab, setReviewTab] = useState<'rmp' | 'trace' | 'reddit'>(() => {
     const saved = sessionStorage.getItem('prof_review_tab');
     if (saved === 'trace') {
       sessionStorage.removeItem('prof_review_tab');
@@ -298,6 +309,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
           setProfile(data);
           setReviews(data.reviews || []);
           setTraceComments(data.traceComments || []);
+          setRedditMentions(data.redditMentions || []);
         }
       } catch { if (!cancelled) setError('Failed to load professor data.'); }
       finally { if (!cancelled) { setLoading(false); setReviewsLoading(false); } }
@@ -321,6 +333,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
           setProfile(data);
           setReviews(data.reviews || []);
           setTraceComments(data.traceComments || []);
+          setRedditMentions(data.redditMentions || []);
         }
       } catch { /* non-critical */ }
       finally { if (!cancelled) setReviewsLoading(false); }
@@ -683,6 +696,32 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
     });
   }, [traceComments, traceSearch, traceSort, filteredTraceCourses, termIdMap]);
 
+  const redditQuery = redditSearch.trim().toLowerCase();
+  const filteredRedditMentions = redditMentions.filter(m =>
+    (redditSentiment === 'all' || m.sentiment === redditSentiment) &&
+    (redditQuery === '' || m.body.toLowerCase().includes(redditQuery))
+  );
+
+  const formatRedditDate = (utc: string | null): string => {
+    if (!utc) return '';
+    const d = new Date(utc);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  };
+
+  const sentimentBorderColor = (s: RedditMention['sentiment']): string =>
+    s === 'positive' ? '#27ae60' : s === 'negative' ? '#e74c3c' : s === 'neutral' ? '#f39c12' : '#95a5a6';
+
+  // Reddit permalinks are site-relative (e.g. "/r/NEU/comments/..."); allow those and
+  // absolute http(s) URLs only, blocking javascript:/data: and other schemes.
+  const safeRedditUrl = (url: string | null): string | null => {
+    if (!url) return null;
+    if (url.startsWith('/')) return `https://www.reddit.com${url}`;
+    try {
+      return ['http:', 'https:'].includes(new URL(url).protocol) ? url : null;
+    } catch { return null; }
+  };
+
   const toggleCourse = (code: string) => {
     setSelectedCourses(prev => {
       const next = new Set(prev);
@@ -736,10 +775,10 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
   if (error || !profile || !stats) return <NotFound />;
 
   const seoDescription =
-    `${profile.name} teaches ${profile.department} at Northeastern University. ` +
+    `${profile.name} teaches ${profile.department} at Northeastern. ` +
     `Average rating ${profile.avgRating.toFixed(1)}/5 across ${profile.totalRatings} ratings` +
     (profile.wouldTakeAgainPct != null ? `, ${profile.wouldTakeAgainPct}% would take again` : '') +
-    `. TRACE evaluations and RateMyProfessor reviews in one place.`;
+    `. TRACE & RateMyProfessor reviews.`;
 
   return (
     <div className="prof-page">
@@ -756,17 +795,8 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
           jobTitle: 'Professor',
           worksFor: { '@type': 'CollegeOrUniversity', name: 'Northeastern University' },
           ...(profile.imageUrl ? { image: profile.imageUrl } : {}),
-          ...(profile.totalRatings > 0
-            ? {
-                aggregateRating: {
-                  '@type': 'AggregateRating',
-                  ratingValue: profile.avgRating.toFixed(2),
-                  ratingCount: profile.totalRatings,
-                  bestRating: '5',
-                  worstRating: '1',
-                },
-              }
-            : {}),
+          // schema.org Person does not support aggregateRating (Google rejects it
+          // as an invalid object type in Rich Results), so it is intentionally omitted.
         }}
       />
       <header className="prof-hero">
@@ -1308,10 +1338,16 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
               }} 
             />
             <button className={`prof-review-tab ${reviewTab === 'rmp' ? 'active' : ''}`} onClick={() => setReviewTab('rmp')}>
-              RateMyProfessor ({filteredRmpReviews.length})
+              <span className="prof-review-tab-full">RateMyProfessor ({filteredRmpReviews.length})</span>
+              <span className="prof-review-tab-short">RMP ({filteredRmpReviews.length})</span>
             </button>
             <button className={`prof-review-tab ${reviewTab === 'trace' ? 'active' : ''}`} onClick={() => setReviewTab('trace')}>
-              TRACE ({groupedTrace.reduce((acc, g) => acc + g.count, 0)})
+              <span className="prof-review-tab-full">TRACE ({groupedTrace.reduce((acc, g) => acc + g.count, 0)})</span>
+              <span className="prof-review-tab-short">TRACE ({groupedTrace.reduce((acc, g) => acc + g.count, 0)})</span>
+            </button>
+            <button className={`prof-review-tab ${reviewTab === 'reddit' ? 'active' : ''}`} onClick={() => setReviewTab('reddit')}>
+              <span className="prof-review-tab-full">Reddit ({redditMentions.length})</span>
+              <span className="prof-review-tab-short">Reddit ({redditMentions.length})</span>
             </button>
           </div>
         </div>
@@ -1371,6 +1407,63 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
             </div>
             {visibleReviews < sortedReviews.length && (
               <button className="prof-load-more" onClick={() => setVisibleReviews(v => v + 10)}>
+                Load More
+              </button>
+            )}
+          </>
+        )}
+
+        {!reviewsLoading && reviewTab === 'reddit' && (
+          <>
+            <div className="prof-trace-controls">
+              <div className="trace-search-container">
+                <input
+                  type="text"
+                  className="trace-search-input"
+                  placeholder="Search Reddit mentions..."
+                  value={redditSearch}
+                  onChange={e => { setRedditSearch(e.target.value); setVisibleRedditMentions(10); }}
+                />
+              </div>
+              <Dropdown className="trace-sort-dropdown" options={redditSentimentOptions} value={redditSentiment} onChange={(v) => { setRedditSentiment(v); setVisibleRedditMentions(10); }} />
+            </div>
+            <div className="prof-trace-categories">
+              {filteredRedditMentions.length === 0 ? (
+                <p className="prof-no-reviews">No Reddit mentions found for this professor.</p>
+              ) : (
+                filteredRedditMentions.slice(0, visibleRedditMentions).map((m, i) => {
+                  const redditUrl = safeRedditUrl(m.permalink);
+                  const dateStr = formatRedditDate(m.created_utc);
+                  const sScore = m.sentiment_score ?? 0;
+                  // Clamp the pointer so the label/arrow never clip the card edge at extreme scores.
+                  const markerPct = Math.min(90, Math.max(10, (sScore + 1) / 2 * 100));
+                  const magnitudePct = Math.round(Math.abs(sScore) * 100);
+                  const word = m.sentiment ? m.sentiment.charAt(0).toUpperCase() + m.sentiment.slice(1) : 'Neutral';
+                  const label = `${word} (${magnitudePct}%)`;
+                  return (
+                  <div key={i} className="reddit-comment-bubble">
+                    <div className="reddit-comment-meta">
+                      {dateStr && <span className="reddit-comment-date">{dateStr}</span>}
+                      <div className="reddit-comment-actions">
+                        {m.score != null && <span className="reddit-comment-score">▲ {m.score}</span>}
+                        {redditUrl && <a className="reddit-comment-link" href={redditUrl} target="_blank" rel="noopener noreferrer">View on Reddit ↗</a>}
+                      </div>
+                    </div>
+                    <p className="reddit-comment-body">{m.body}</p>
+                    <div className="reddit-sentiment">
+                      <div className="reddit-sentiment-pointer" style={{ left: `${markerPct}%` }}>
+                        <span className="reddit-sentiment-label" style={{ color: sentimentBorderColor(m.sentiment) }}>{label}</span>
+                        <span className="reddit-sentiment-arrow" style={{ color: sentimentBorderColor(m.sentiment) }}>▼</span>
+                      </div>
+                      <div className="reddit-sentiment-track" />
+                    </div>
+                  </div>
+                  );
+                })
+              )}
+            </div>
+            {visibleRedditMentions < filteredRedditMentions.length && (
+              <button className="prof-load-more" onClick={() => setVisibleRedditMentions(v => v + 10)}>
                 Load More
               </button>
             )}

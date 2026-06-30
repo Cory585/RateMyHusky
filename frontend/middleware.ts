@@ -78,7 +78,7 @@ async function proxyToBackend(request: Request, url: URL): Promise<Response> {
 
 const CRAWLER_UAS = [
   // Search & AI crawlers
-  'googlebot', 'google-extended', 'bingbot', 'gptbot', 'oai-searchbot',
+  'googlebot', 'google-inspectiontool', 'google-extended', 'bingbot', 'gptbot', 'oai-searchbot',
   'chatgpt-user', 'claudebot', 'claude-searchbot', 'claude-user',
   'anthropic-ai', 'perplexitybot', 'perplexity-user', 'applebot',
   // Social link-preview scrapers (none run JS, so they need the snapshot
@@ -87,6 +87,8 @@ const CRAWLER_UAS = [
   'slack-imgproxy', 'discordbot', 'linkedinbot', 'whatsapp', 'telegrambot',
   'pinterest', 'redditbot', 'skypeuripreview', 'vkshare', 'embedly',
   'iframely', 'mastodon', 'bsky',
+  // Google AI fetcher + AdSense content crawlers (none run JS)
+  'googleother', 'google-cloudvertexbot', 'mediapartners-google', 'adsbot-google',
 ];
 
 function isCrawler(ua: string): boolean {
@@ -97,9 +99,37 @@ function isCrawler(ua: string): boolean {
 // Matches /professors/<slug> and /courses/<code> (single trailing segment).
 const DETAIL_RE = /^\/(professors|courses)\/([^/]+)\/?$/;
 
+// Exact non-detail paths that get a server-rendered snapshot for crawlers.
+const STATIC_RENDER: Record<string, string> = {
+  '/': '/render/home',
+  '/professors': '/render/professors',
+  '/courses': '/render/courses',
+};
+
 async function fetchSnapshot(pathname: string): Promise<Response | undefined> {
   const origin = process.env.RAILWAY_ORIGIN;
   if (!origin) return undefined;
+
+  // Exact-match home/listing routes (no slug → no SSRF decoding needed).
+  const staticTarget = STATIC_RENDER[pathname];
+  if (staticTarget) {
+    const headers = new Headers();
+    const proxyKey = process.env.PROXY_SECRET;
+    if (proxyKey) headers.set('x-proxy-key', proxyKey);
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(new URL(staticTarget, origin), {
+        headers, signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (!res.ok && res.status !== 404) return undefined;
+      return res;
+    } catch {
+      return undefined;
+    }
+  }
+
   const m = pathname.match(DETAIL_RE);
   if (!m) return undefined;
   const slug = m[2];
@@ -154,7 +184,7 @@ export default async function middleware(request: Request): Promise<Response | u
   if (
     process.env.PRERENDER_ENABLED === 'true' &&
     isCrawler(request.headers.get('user-agent') || '') &&
-    DETAIL_RE.test(url.pathname)
+    (DETAIL_RE.test(url.pathname) || url.pathname in STATIC_RENDER)
   ) {
     const snapshot = await fetchSnapshot(url.pathname);
     if (snapshot) {

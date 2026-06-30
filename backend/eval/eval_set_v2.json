@@ -1,0 +1,227 @@
+[
+  {
+    "question": "Is John Rachlin a good professor?",
+    "category": "A_named_single",
+    "expect": "slug:john-rachlin"
+  },
+  {
+    "question": "How hard is Virgil Pavlu?",
+    "category": "A_named_single",
+    "expect": "slug:virgil-pavlu"
+  },
+  {
+    "question": "Is Kevin Gold a harsh grader?",
+    "category": "A_named_single",
+    "expect": "slug:kevin-gold"
+  },
+  {
+    "question": "Does Amit Shesh require attendance?",
+    "category": "A_named_single",
+    "expect": "slug:amit-shesh"
+  },
+  {
+    "question": "How much homework does Walter Schnyder assign?",
+    "category": "A_named_single",
+    "expect": "slug:walter-schnyder"
+  },
+  {
+    "question": "What are students saying about Jude Mathews?",
+    "category": "A_named_single",
+    "expect": "slug:jude-mathews"
+  },
+  {
+    "question": "Summarize reviews for Peter Simon.",
+    "category": "A_named_single",
+    "expect": "slug:peter-simon"
+  },
+  {
+    "question": "What are the pros and cons of Prasanth George?",
+    "category": "A_named_single",
+    "expect": "slug:prasanth-george"
+  },
+  {
+    "question": "Is Marpaung a fair grader?",
+    "category": "A_named_single",
+    "expect": "slug:julius-marpaung"
+  },
+  {
+    "question": "Summarize only negative reviews of Hanai Sadaka.",
+    "category": "A_named_single",
+    "expect": "slug:hanai-sadaka"
+  },
+  {
+    "question": "Is Kathleen Durant still teaching?",
+    "category": "A_named_single",
+    "expect": "slug:kathleen-durant"
+  },
+  {
+    "question": "Does John Lindhe record lectures?",
+    "category": "A_named_single",
+    "expect": "slug:john-lindhe"
+  },
+  {
+    "question": "Should I take a class with John Rachlin as a beginner?",
+    "category": "B_named_course",
+    "expect": "slug:john-rachlin"
+  },
+  {
+    "question": "Are Virgil Pavlu's exams similar to homework?",
+    "category": "B_named_course",
+    "expect": "slug:virgil-pavlu"
+  },
+  {
+    "question": "Is Professor Lee good?",
+    "category": "C_ambiguous_name",
+    "expect": "ambiguous"
+  },
+  {
+    "question": "Is Professor Wang good?",
+    "category": "C_ambiguous_name",
+    "expect": "ambiguous"
+  },
+  {
+    "question": "Is Professor Smith good?",
+    "category": "C_ambiguous_name",
+    "expect": "ambiguous"
+  },
+  {
+    "question": "Tell me about Professor Sullivan.",
+    "category": "C_ambiguous_name",
+    "expect": "ambiguous"
+  },
+  {
+    "question": "Is Proffesor Gold good?",
+    "category": "D_misspelling",
+    "expect": "slug:kevin-gold"
+  },
+  {
+    "question": "How is Prof Schnydee?",
+    "category": "D_misspelling",
+    "expect": "slug:walter-schnyder"
+  },
+  {
+    "question": "How's Dr. Mathews?",
+    "category": "D_nickname_title",
+    "expect": "slug:jude-mathews"
+  },
+  {
+    "question": "Which professor gives the easiest A?",
+    "category": "E_superlative",
+    "expect": "out_of_scope_aggregate"
+  },
+  {
+    "question": "Who is the best professor for Calculus I?",
+    "category": "E_superlative",
+    "expect": "out_of_scope_aggregate"
+  },
+  {
+    "question": "Which professor has the lightest workload?",
+    "category": "E_superlative",
+    "expect": "out_of_scope_aggregate"
+  },
+  {
+    "question": "Which professors should I avoid?",
+    "category": "E_superlative",
+    "expect": "out_of_scope_aggregate"
+  },
+  {
+    "question": "Which professor has the highest average rating?",
+    "category": "E_superlative",
+    "expect": "out_of_scope_aggregate"
+  },
+  {
+    "question": "Which professor has the most reviews?",
+    "category": "E_superlative",
+    "expect": "out_of_scope_aggregate"
+  },
+  {
+    "question": "Compare John Rachlin and Virgil Pavlu.",
+    "category": "F_comparison",
+    "expect": "slug:john-rachlin|virgil-pavlu"
+  },
+  {
+    "question": "Are students happier with Kevin Gold than Amit Shesh?",
+    "category": "F_comparison",
+    "expect": "slug:kevin-gold|amit-shesh"
+  },
+  {
+    "question": "Who teaches Programming I?",
+    "category": "G_course_only",
+    "expect": "out_of_scope_aggregate"
+  },
+  {
+    "question": "Best database professor?",
+    "category": "G_course_only",
+    "expect": "out_of_scope_aggregate"
+  },
+  {
+    "question": "Best AI professor?",
+    "category": "G_course_only",
+    "expect": "out_of_scope_aggregate"
+  },
+  {
+    "question": "I forgot their name but they teach CS2500.",
+    "category": "G_course_only",
+    "expect": "out_of_scope_aggregate"
+  },
+  {
+    "question": "I hate group projects and morning classes. Which professor should I take?",
+    "category": "H_multihop",
+    "expect": "out_of_scope_aggregate"
+  },
+  {
+    "question": "I want an easy A but also want to learn.",
+    "category": "H_multihop",
+    "expect": "out_of_scope_aggregate"
+  },
+  {
+    "question": "Which professor is hardest but prepares students best?",
+    "category": "H_multihop",
+    "expect": "out_of_scope_aggregate"
+  },
+  {
+    "question": "Which professor would you recommend for someone struggling with programming?",
+    "category": "H_multihop",
+    "expect": "out_of_scope_aggregate"
+  },
+  {
+    "question": "Find professors similar to John Rachlin.",
+    "category": "H_multihop",
+    "expect": "out_of_scope_aggregate"
+  },
+  {
+    "question": "The professor with the glasses who teaches algorithms.",
+    "category": "I_descriptive",
+    "expect": "out_of_scope_semantic"
+  },
+  {
+    "question": "The woman who teaches discrete math.",
+    "category": "I_descriptive",
+    "expect": "out_of_scope_semantic"
+  },
+  {
+    "question": "What are the biggest complaints about CS professors?",
+    "category": "J_theme",
+    "expect": "out_of_scope_semantic"
+  },
+  {
+    "question": "Give me the most common themes across all reviews.",
+    "category": "J_theme",
+    "expect": "out_of_scope_semantic"
+  },
+  {
+    "question": "Which professor's reviews mention real-world examples?",
+    "category": "J_theme",
+    "expect": "out_of_scope_semantic"
+  },
+  {
+    "question": "Which professor has improved the most over the last three years?",
+    "category": "K_temporal",
+    "expect": "out_of_scope_temporal"
+  },
+  {
+    "question": "Which professors have gotten noticeably better recently?",
+    "category": "K_temporal",
+    "expect": "out_of_scope_temporal"
+  }
+]

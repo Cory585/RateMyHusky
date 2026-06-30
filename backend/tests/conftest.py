@@ -48,9 +48,32 @@ def render_client(monkeypatch):
             "sections": [], "questionScores": [],
         })
 
+    def fake_stats():
+        return FakeResp([
+            {"label": "Professors", "value": "9.3K"},
+            {"label": "Courses", "value": "5K"},
+            {"label": "Comments", "value": "120K"},
+            {"label": "Departments", "value": "180"},
+        ])
+
+    def fake_professors_catalog():
+        return FakeResp({"professors": [
+            {"name": "Francis Georges", "slug": "francis-georges",
+             "department": "Economics", "avgRating": 4.25},
+        ], "total": 9329, "page": 1, "totalPages": 466})
+
+    def fake_courses_catalog():
+        return FakeResp({"courses": [
+            {"code": "ECON1115", "name": "Macroeconomics",
+             "department": "Economics", "avgRating": 4.1},
+        ], "total": 5013, "page": 1, "totalPages": 251})
+
     monkeypatch.setattr(render, "_get_profile_view", lambda: fake_professor_profile, raising=False)
     monkeypatch.setattr(render, "_get_reviews_view", lambda: fake_professor_reviews, raising=False)
     monkeypatch.setattr(render, "_get_course_view", lambda: fake_course_detail, raising=False)
+    monkeypatch.setattr(render, "_get_stats_view", lambda: fake_stats, raising=False)
+    monkeypatch.setattr(render, "_get_professors_catalog_view", lambda: fake_professors_catalog, raising=False)
+    monkeypatch.setattr(render, "_get_courses_catalog_view", lambda: fake_courses_catalog, raising=False)
 
     from flask import Flask
     app = Flask(__name__)

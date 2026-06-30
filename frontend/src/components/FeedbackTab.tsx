@@ -24,8 +24,14 @@ const feedbackOptions = [
   { value: 'feature', label: 'Feature Request' },
   { value: 'missing', label: 'Missing Data' },
   { value: 'incorrectdata', label: 'Incorrect Data' },
+  { value: 'banappeal', label: 'Ask Ban Appeal' },
+  { value: 'datadeletion', label: 'Data Deletion Request' },
   { value: 'general', label: 'General Feedback' },
 ];
+
+// types where an email is required and (when signed in) the verified account id is sent,
+// so we can respond and act on the right account
+const ACCOUNT_TYPES = ['banappeal', 'datadeletion'];
 
 const FeedbackTab = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -84,6 +90,10 @@ const FeedbackTab = () => {
       setError('Please select a feedback type and enter a description.');
       return;
     }
+    if (ACCOUNT_TYPES.includes(feedbackType) && !email.trim()) {
+      setError('Email is required for this request so we can respond.');
+      return;
+    }
     if (!turnstileToken) {
       setError('Please complete the CAPTCHA verification.');
       return;
@@ -91,7 +101,12 @@ const FeedbackTab = () => {
     setError('');
     setLoading(true);
     try {
-      await submitFeedback({ feedbackType, description, email: email || undefined, turnstileToken });
+      // For ban-appeal / data-deletion, include the signed-in account id so we can locate
+      // the ask_log rows; null when not logged in (the email body notes that case).
+      const accountSub = ACCOUNT_TYPES.includes(feedbackType)
+        ? (localStorage.getItem('auth_token') ?? undefined)
+        : undefined;
+      await submitFeedback({ feedbackType, description, email: email || undefined, turnstileToken, accountSub });
       setSubmitted(true);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '';
@@ -136,6 +151,10 @@ const FeedbackTab = () => {
         return "What data is missing? Please include the professor name and any relevant links.";
       case 'incorrectdata':
         return "What data is incorrect? Please include the professor name and what the correct information should be.";
+      case 'banappeal':
+        return "Explain why your access to Ask should be restored. Include any context about the questions you asked.";
+      case 'datadeletion':
+        return "Request deletion of your Ask data. Sign in first so we can verify your account; we'll delete all Ask logs tied to it.";
       case 'general':
         return "Share your thoughts, suggestions, or anything else on your mind.";
       default:
@@ -211,7 +230,9 @@ const FeedbackTab = () => {
                 />
 
                 <label className="feedback-label">
-                  Email (Optional)
+                  Email {ACCOUNT_TYPES.includes(feedbackType)
+                    ? <span className="feedback-required">*</span>
+                    : '(Optional)'}
                 </label>
                 <input
                   className="feedback-input"
