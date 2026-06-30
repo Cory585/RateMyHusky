@@ -62,6 +62,45 @@ def _safe_fallback(deps, q, banner=None):
         payload["banner"] = banner
     return payload
 
+def _handle_course_list(q, block, deps, _log, session_token, ip_hash):
+    topic = block.get("topic")
+    courses = block.get("courses", [])
+
+    cached = get_cached(q, [f"topic:{topic}"], deps.cache_get_fn)
+    if cached:
+        _log("ok")
+        _fire_usage_alert(deps)
+        return cached, 200
+
+    if global_budget_hit(deps.query_one_fn, deps.num_keys):
+        _log("rate_limited")
+        return _safe_fallback(deps, q, banner="Daily question limit reached. Showing keyword results."), 200
+    allowed, _ = session_allowed(session_token, deps.query_one_fn, deps.num_keys)
+    if not allowed:
+        _log("rate_limited")
+        return _safe_fallback(deps, q, banner="You've hit today's question limit. Showing keyword results."), 200
+    if not minute_capacity_ok(deps.query_one_fn, deps.num_keys):
+        _log("rate_limited")
+        return _safe_fallback(deps, q, banner="High demand right now. Showing keyword results."), 200
+
+    try:
+        gen = deps.generate_course_list_fn(topic, courses)
+    except LLMUnavailable:
+        _log("llm_error")
+        return _safe_fallback(deps, q, banner="AI generation failed. Showing keyword results."), 200
+
+    payload = {
+        "mode": "course_list", "answer": gen.get("text", ""), "topic": topic,
+        "courses": [{"code": c.get("code"), "name": c.get("name"),
+                     "department": c.get("department"), "rating": c.get("rating")} for c in courses],
+        "disclaimer": "AI-generated list of matching Northeastern courses; may be incomplete.",
+    }
+    set_cached(q, [f"topic:{topic}"], payload, deps.cache_set_fn)
+    _log("ok", retrieved_count=len(courses), answer_text=payload["answer"], tokens_used=gen.get("tokens_used", 0))
+    _fire_usage_alert(deps)
+    return payload, 200
+
+
 def handle_question(q, session_token, ip_hash, deps):
     t0 = time.monotonic()
 
@@ -125,8 +164,12 @@ def handle_question(q, session_token, ip_hash, deps):
                     "matches": [{"name": m["name"], "department": m.get("department", "")} for m in matches],
                 }, 200
 
-    # 5. Out-of-scope (on_topic but no entity named)
+    # 5. No entity named — first try a topic-course listing ("what database courses are there"),
+    # then fall back to out-of-scope.
     if not hints:
+        topic_block = deps.retrieve_fn(q, None)
+        if topic_block.get("kind") == "course_list":
+            return _handle_course_list(q, topic_block, deps, _log, session_token, ip_hash)
         _log("out_of_scope")
         payload = _safe_fallback(deps, q, banner="Try searching for a specific professor or course.")
         payload["mode"] = "out_of_scope"
@@ -274,6 +317,7 @@ def selftest():
             "source_entities": [{"professor_slug": "guha-prof", "course_code": None}] * 5}
         def usage_alert_fn(self):
             self.usage_alert_calls.append(1)
+        def generate_course_list_fn(self, topic, courses): return {"text": f"Courses about {topic}.", "tokens_used": 20}
     Deps.log_fn = staticmethod(_outer_log_fn)
 
     # kill switch
@@ -500,6 +544,55 @@ def selftest():
     check("_strip_titles drops honorific", _strip_titles("Professor Lee") == "Lee")
     check("_strip_titles keeps full name", _strip_titles("Jung Lee") == "Jung Lee")
     check("title+bare name is bare after strip", _is_bare_name(_strip_titles("Dr. Lee")) is True)
+
+    # ── TOPIC course-list path: empty entity hint, retrieve yields a course_list block ──
+    d_cl = Deps(); d_cl.usage_alert_calls = []
+    d_cl.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": [], "professor_or_course": None, "message": None}, d_cl)
+    d_cl.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "kind": "course_list", "topic": "database",
+        "courses": [{"code": "CS3200", "name": "Database Design", "department": "Khoury"}],
+        "course_count": 1, "with_ratings": False, "entity_key": "topic:database",
+        "course_code": None, "professor_slug": None, "facts": {}, "comments": [], "comment_count": 0}, d_cl)
+    cl_calls = []
+    d_cl.generate_course_list_fn = types.MethodType(
+        lambda self, topic, courses: (cl_calls.append((topic, len(courses))) or
+            {"text": "NEU offers CS3200 Database Design.", "tokens_used": 25}), d_cl)
+    d_cl.generate_fn = types.MethodType(
+        lambda self, q, blocks: (_ for _ in ()).throw(AssertionError("Reddit generate must not run for course_list")), d_cl)
+    payload, code = handle_question("what database courses are there", "s", "iphash", d_cl)
+    check("course_list mode returned", code == 200 and payload.get("mode") == "course_list")
+    check("course_list carries the summary answer", payload.get("answer") == "NEU offers CS3200 Database Design.")
+    check("course_list carries the course list", payload["courses"][0]["code"] == "CS3200")
+    check("course_list carries a disclaimer", bool(payload.get("disclaimer")))
+    check("course_list calls the list generator once", cl_calls == [("database", 1)])
+    check("course_list logged ok", logged[-1][_status_idx()] == "ok")
+
+    # ── TOPIC regex fires but 0 catalog matches -> retrieve returns NO course_list -> out_of_scope ──
+    d_cl0 = Deps()
+    d_cl0.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": [], "professor_or_course": None, "message": None}, d_cl0)
+    d_cl0.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "professor_slug": None, "entity_key": None, "course_code": None,
+        "comment_count": 0, "comments": [], "facts": {}}, d_cl0)
+    d_cl0.generate_course_list_fn = types.MethodType(
+        lambda self, topic, courses: (_ for _ in ()).throw(AssertionError("no list gen when 0 matches")), d_cl0)
+    payload, code = handle_question("what zzzz courses are there", "s", "iphash", d_cl0)
+    check("zero-match topic -> out_of_scope", payload.get("mode") == "out_of_scope")
+
+    # ── LLMUnavailable during course-list generation -> keyword fallback ──
+    d_cle = Deps()
+    d_cle.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": [], "professor_or_course": None, "message": None}, d_cle)
+    d_cle.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "kind": "course_list", "topic": "database",
+        "courses": [{"code": "CS3200", "name": "Database Design", "department": "Khoury"}],
+        "course_count": 1, "with_ratings": False, "entity_key": "topic:database",
+        "course_code": None, "professor_slug": None, "facts": {}, "comments": [], "comment_count": 0}, d_cle)
+    d_cle.generate_course_list_fn = types.MethodType(
+        lambda self, topic, courses: (_ for _ in ()).throw(LLMUnavailable("down")), d_cle)
+    payload, code = handle_question("what database courses are there", "s", "iphash", d_cle)
+    check("course-list LLMUnavailable -> keyword fallback", code == 200 and "comments" in payload)
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0
