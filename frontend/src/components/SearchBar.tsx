@@ -3,7 +3,12 @@ import { useNavigate, useLocation, Link } from 'react-router-dom';
 import Dropdown from './Dropdown';
 import { fetchSearchSuggestions, askChat } from '../api/api';
 import type { SearchSuggestion, ChatResponse } from '../api/api';
+import { saveAskSession, loadAskSession, clearAskSession } from '../utils/askSession';
 import './SearchBar.css';
+
+// Navigation state a clicked citation carries so the destination breadcrumb reads "← Ask" and
+// clicking it lands back on the homepage with the Ask box re-hydrated from sessionStorage.
+const ASK_FROM_STATE = { fromPage: { label: 'Ask', url: '/' }, restoreAsk: true } as const;
 
 const SOURCE_LABEL: Record<string, string> = {
   reddit: "Reddit",
@@ -20,23 +25,48 @@ const searchOptions = [
 interface SearchBarProps {
   // Bump this (e.g. Date.now()) to force the bar into Ask mode and focus it.
   forceAsk?: number;
+  // True when the homepage was reached via the "← Ask" breadcrumb: re-hydrate the last Ask
+  // question/answer from sessionStorage instead of starting blank. Any other homepage load
+  // (logo click, refresh, direct visit) leaves this false and clears the stored session.
+  restoreAsk?: boolean;
 }
 
-const SearchBar = ({ forceAsk }: SearchBarProps) => {
+const SearchBar = ({ forceAsk, restoreAsk }: SearchBarProps) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchType, setSearchType] = useState('Professor');
-  const [query, setQuery] = useState('');
+  // On mount only: restore the saved Ask session when arriving via the "← Ask" breadcrumb,
+  // otherwise drop any stale session so a plain homepage load starts blank. Guarded to run once
+  // so it never re-clears a session that a later ask has just saved (this runs every render).
+  const restored = useRef(restoreAsk ? loadAskSession() : null);
+  const didInit = useRef(false);
+  if (!didInit.current) {
+    didInit.current = true;
+    if (!restoreAsk) clearAskSession();
+  }
+  const [searchType, setSearchType] = useState(restored.current ? 'Ask' : 'Professor');
+  const [query, setQuery] = useState(restored.current?.query ?? '');
   const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(!!restored.current);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [isFocused, setIsFocused] = useState(false);
   const [placeholder, setPlaceholder] = useState('');
   const [askLoading, setAskLoading] = useState(false);
-  const [askResult, setAskResult] = useState<ChatResponse | null>(null);
-  const [askedAt, setAskedAt] = useState<number>(0);
+  const [askResult, setAskResult] = useState<ChatResponse | null>(restored.current?.result ?? null);
+  const [askedAt, setAskedAt] = useState<number>(restored.current?.askedAt ?? 0);
 
   const isAsk = searchType === 'Ask';
+
+  // The restoreAsk flag lives in history state, which the browser replays on refresh. Scrub it
+  // once after restoring so a refresh sees a plain load (clears the session) — meeting "answer
+  // only persists across a breadcrumb-back, not a refresh". Runs after mount, restore already done.
+  useEffect(() => {
+    if (restoreAsk) {
+      const { restoreAsk: _drop, ...rest } = (location.state ?? {}) as Record<string, unknown>;
+      void _drop;
+      navigate('.', { replace: true, state: Object.keys(rest).length ? rest : undefined });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -214,9 +244,12 @@ const SearchBar = ({ forceAsk }: SearchBarProps) => {
     setAskLoading(true);
     setShowSuggestions(true);
     const { status, body } = await askChat(q);
+    const now = Date.now();
     setAskLoading(false);
     setAskResult(body);
-    setAskedAt(Date.now());
+    setAskedAt(now);
+    // Persist so a clicked citation can return here via the "← Ask" breadcrumb.
+    saveAskSession(q, body, now);
     if (status === 401) {
       // No sign-in modal lives here; mirror the navbar's open-feedback event pattern.
       window.dispatchEvent(new CustomEvent('open-signin'));
@@ -408,6 +441,7 @@ function AskResult({ result, askedAt }: { result: ChatResponse; askedAt: number 
               const linkProps = pinToProfessor
                 ? {
                     state: {
+                      ...ASK_FROM_STATE,
                       askPins: {
                         askedAt,
                         clicked: { source: s.source ?? null, snippet: s.snippet },
@@ -415,7 +449,7 @@ function AskResult({ result, askedAt }: { result: ChatResponse; askedAt: number 
                       },
                     },
                   }
-                : {};
+                : { state: ASK_FROM_STATE };
               return (
                 <li key={s.source_id}>
                   {href ? (
@@ -451,7 +485,7 @@ function AskResult({ result, askedAt }: { result: ChatResponse; askedAt: number 
           <ol className="ask-sources">
             {result.courses.map((c) => (
               <li key={c.code}>
-                <Link className="ask-source-link" to={`/courses/${c.code.toLowerCase()}`}>{c.code}</Link>
+                <Link className="ask-source-link" to={`/courses/${c.code.toLowerCase()}`} state={ASK_FROM_STATE}>{c.code}</Link>
                 <span className="ask-source-snippet">
                   {c.name}{c.rating != null ? ` · ${c.rating.toFixed(1)}★` : ''}
                 </span>
@@ -465,29 +499,49 @@ function AskResult({ result, askedAt }: { result: ChatResponse; askedAt: number 
   }
 
   // out_of_scope | thin_data | keyword — banner/message + any keyword comments
+  type KeywordComment = {
+    snippet?: string;
+    link?: { type: 'professor' | 'course'; value: string } | null;
+  };
+  const keywordComments = result.comments.slice(0, 10) as KeywordComment[];
   return (
     <>
       {(result.banner || result.message) && (
         <p className="ask-answer">{result.banner || result.message}</p>
       )}
-      {result.comments.length > 0 && (
+      {keywordComments.length > 0 && (
         <ol className="ask-sources">
-          {result.comments.slice(0, 10).map((c, i) => {
-            const com = c as {
-              snippet?: string;
-              link?: { type: 'professor' | 'course'; value: string } | null;
-            };
+          {keywordComments.map((com, i) => {
             // [N] citation links to the matched professor/course profile; plain when none.
             const href = com.link
               ? com.link.type === 'course'
                 ? `/courses/${com.link.value.toLowerCase()}`
                 : `/professors/${com.link.value}`
               : null;
+            // Keyword comments are Reddit-sourced. For a professor link, carry every visible
+            // comment pinned to the same professor so the Professor page can hoist + highlight
+            // them (same shape the LLM path sends); the clicked one drives the scroll.
+            const pinToProfessor = com.link?.type === 'professor';
+            const sourcesForEntity = pinToProfessor
+              ? keywordComments
+                  .filter((o) => o.link?.type === 'professor' && o.link.value === com.link!.value)
+                  .map((o) => ({ source: 'reddit' as const, snippet: o.snippet ?? '' }))
+              : [];
+            const linkState = pinToProfessor
+              ? {
+                  ...ASK_FROM_STATE,
+                  askPins: {
+                    askedAt,
+                    clicked: { source: 'reddit' as const, snippet: com.snippet ?? '' },
+                    sources: sourcesForEntity,
+                  },
+                }
+              : ASK_FROM_STATE;
             const marker = `[${i + 1}]`;
             return (
               <li key={i}>
                 {href ? (
-                  <Link className="ask-source-link" to={href}>{marker}</Link>
+                  <Link className="ask-source-link" to={href} state={linkState}>{marker}</Link>
                 ) : (
                   <span className="ask-source-link">{marker}</span>
                 )}

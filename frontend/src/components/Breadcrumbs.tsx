@@ -16,6 +16,9 @@ const Breadcrumbs = ({ items }: BreadcrumbsProps) => {
   // If we came from a specific page (e.g. Compare), prepend that as the first breadcrumb
   const fromPage = location.state?.fromPage as { label: string; url: string } | undefined;
   const goatedCollege = location.state?.goatedCollege as string | undefined;
+  // Set on citation clicks from the Ask box: the "← Ask" crumb must re-hydrate the homepage
+  // Ask box (a plain homepage nav clears it instead), so carry the flag on that first link.
+  const restoreAsk = location.state?.restoreAsk as boolean | undefined;
   // Preserve catalog filters when the first link points to /professors
   const catalogLink = location.state?.fromCatalog || '/professors';
 
@@ -29,12 +32,17 @@ const Breadcrumbs = ({ items }: BreadcrumbsProps) => {
         {resolvedItems.map((item, i) => {
           const isLast = i === resolvedItems.length - 1;
           const href = item.to === '/professors' ? catalogLink : item.to;
+          // The "← Ask" crumb (the prepended fromPage link, i===0) carries restoreAsk so the
+          // homepage rebuilds the Ask answer; other crumbs only carry goatedCollege.
+          const linkState = fromPage && i === 0 && restoreAsk
+            ? { restoreAsk: true }
+            : goatedCollege ? { goatedCollege } : undefined;
 
           return (
             <li key={i} className="breadcrumbs-item">
               {!isLast && href ? (
                 <>
-                  <Link to={href} state={goatedCollege ? { goatedCollege } : undefined} className="breadcrumbs-link">{item.label}</Link>
+                  <Link to={href} state={linkState} className="breadcrumbs-link">{item.label}</Link>
                   <span className="breadcrumbs-separator" aria-hidden="true">
                     <svg width="7" height="11" viewBox="0 0 7 11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M1 1l4.5 4.5L1 10" />

@@ -471,7 +471,7 @@ const Homepage = () => {
           TRACE evaluations and RateMyProfessor ratings, all in one place.
         </p>
 
-        <SearchBar forceAsk={askTrigger} />
+        <SearchBar forceAsk={askTrigger} restoreAsk={(location.state as { restoreAsk?: boolean } | null)?.restoreAsk} />
       </main>
 
       {/* ======== Stats Banner ======== */}
