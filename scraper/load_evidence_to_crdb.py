@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS evidence (
     source        TEXT NOT NULL,
     source_ref    TEXT NOT NULL,
     professor_slug TEXT,
-    course_code   TEXT,
+    -- empty-string sentinel, never NULL (see dedupe note below)
+    course_code   TEXT NOT NULL DEFAULT '',
     body          TEXT NOT NULL,
     body_tsv      TSVECTOR,
     body_sha      TEXT NOT NULL,
@@ -32,7 +33,11 @@ CREATE TABLE IF NOT EXISTS evidence (
     flagged       BOOLEAN DEFAULT false,
     subreddit     TEXT,
     created_utc   TIMESTAMPTZ,
-    UNIQUE (source, source_ref, professor_slug, (COALESCE(course_code, '')))
+    -- CockroachDB rejects an expression (COALESCE(...)) in an ON CONFLICT target, so the dedupe
+    -- key is a PLAIN 4-column unique index and course_code is an empty-string sentinel (never
+    -- NULL) — a professor-only row is course_code='' and still dedupes, and
+    -- ON CONFLICT (source, source_ref, professor_slug, course_code) parses on CRDB.
+    UNIQUE (source, source_ref, professor_slug, course_code)
 );
 CREATE INDEX IF NOT EXISTS ev_tsv    ON evidence USING GIN (body_tsv);
 CREATE INDEX IF NOT EXISTS ev_prof   ON evidence (professor_slug);
@@ -129,7 +134,9 @@ def _row(source, source_ref, slug, code, body, sentiment=None, score=None,
         "source": source,
         "source_ref": str(source_ref),
         "professor_slug": slug,
-        "course_code": code,
+        # empty-string sentinel, never NULL — the dedupe unique index is plain 4-column
+        # (CRDB rejects an expression conflict target), so a course-less row is '' not None.
+        "course_code": code or "",
         "body": clean,
         "body_sha": body_sha(clean),
         "sentiment": sentiment,
@@ -223,7 +230,7 @@ def build_trace_rows(query_fn) -> list:
 
 # ── Upsert ──
 
-def upsert_evidence(conn, rows, batch=5000):
+def upsert_evidence(conn, rows, batch=1000):
     """Insert evidence rows with ON CONFLICT DO UPDATE; computes body_tsv via SQL."""
     from psycopg2.extras import execute_values
     import json
@@ -236,7 +243,7 @@ def upsert_evidence(conn, rows, batch=5000):
           (source, source_ref, professor_slug, course_code, body, body_tsv, body_sha,
            sentiment, reddit_score, permalink, subreddit, created_utc, rmp_meta, flagged)
         VALUES %s
-        ON CONFLICT (source, source_ref, professor_slug, (COALESCE(course_code, '')))
+        ON CONFLICT (source, source_ref, professor_slug, course_code)
         DO UPDATE SET
           body      = excluded.body,
           body_tsv  = excluded.body_tsv,
@@ -266,9 +273,20 @@ def upsert_evidence(conn, rows, batch=5000):
                 "rmp_meta": _jsonb(r.get("rmp_meta")),
                 "flagged": bool(r.get("flagged")),
             })
-        with conn.cursor() as cur:
-            execute_values(cur, sql, values, template=template)
-        conn.commit()
+        # CockroachDB uses SERIALIZABLE isolation and asks clients to retry transient
+        # SerializationFailure (40001) with backoff. Each batch commits independently, so a
+        # retried batch is safe (the ON CONFLICT upsert is idempotent).
+        for attempt in range(6):
+            try:
+                with conn.cursor() as cur:
+                    execute_values(cur, sql, values, template=template)
+                conn.commit()
+                break
+            except psycopg2.errors.SerializationFailure:
+                conn.rollback()
+                if attempt == 5:
+                    raise
+                time.sleep(0.5 * (2 ** attempt))
         total += len(chunk)
     return total
 
@@ -288,7 +306,9 @@ def selftest():
     check("embeddings track body_sha (in embeddings table, not just evidence)", "body_sha" in ddl.split("evidence_embeddings")[1])
     check("evidence has rmp_meta JSONB", "rmp_meta" in ddl and "JSONB" in ddl)
     check("evidence has subreddit + created_utc", "subreddit" in ddl and "created_utc" in ddl)
-    check("evidence dedupe UNIQUE uses COALESCE(course_code)", "COALESCE(course_code" in ddl)
+    check("evidence dedupe UNIQUE is plain 4-col (CRDB rejects expr conflict target)",
+          "UNIQUE (source, source_ref, professor_slug, course_code)" in ddl and "COALESCE(course_code" not in ddl)
+    check("course_code is NOT NULL empty-string sentinel", "course_code   TEXT NOT NULL DEFAULT ''" in ddl)
     check("GIN index on body_tsv", "USING GIN" in ddl and "body_tsv" in ddl)
     check("btree index on professor_slug", "ev_prof" in ddl)
     check("btree index on course_code", "ev_course" in ddl)
@@ -322,7 +342,7 @@ def selftest():
     check("reddit row keyed to prof", rr[0]["professor_slug"] == "guha-prof")
     check("reddit row carries sentiment", rr[0]["sentiment"] == "positive")
     check("reddit row carries score", rr[0]["reddit_score"] == 12)
-    check("reddit row course_code is None", rr[0]["course_code"] is None)
+    check("reddit row course_code is '' sentinel (never None)", rr[0]["course_code"] == "")
     check("reddit row has body_sha", len(rr[0]["body_sha"]) == 32)
     check("reddit row carries subreddit", rr[0]["subreddit"] == "NEU")
 
@@ -344,7 +364,7 @@ def selftest():
     check("rmp row tagged rmp", all(r["source"] == "rmp" for r in mr))
     check("rmp keyed to prof slug", all(r["professor_slug"] == "guha-prof" for r in mr))
     check("rmp validated code keeps course_code", mr[0]["course_code"] == "CS3500")
-    check("rmp stale/name course -> course_code None (kept, prof-only)", mr[1]["course_code"] is None)
+    check("rmp stale/name course -> course_code '' (kept, prof-only)", mr[1]["course_code"] == "")
     check("rmp carries meta", mr[0]["rmp_meta"]["quality"] == 5 and mr[0]["rmp_meta"]["grade"] == "A")
 
     # ── TRACE rows: keyed to BOTH prof + course via join; filtered + deduped ──

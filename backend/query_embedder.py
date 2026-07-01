@@ -9,17 +9,46 @@ _POOL = ThreadPoolExecutor(max_workers=1)
 _RAW = None
 
 def _load():
+    # Pure onnxruntime — no torch, no optimum. The optimum wrapper (a) crashes on some
+    # torch/onnxruntime version combos (torch.int4) and (b) drags multi-GB torch that can't fit
+    # Railway's 0.5GB tier. onnxruntime + tokenizers loads the ~30MB quantized ONNX directly.
+    # MUST stay byte-identical (model, pooling, normalization) to scraper/embed_evidence.py so
+    # query and document vectors are comparable.
     global _RAW
     if _RAW is None:
-        from optimum.onnxruntime import ORTModelForFeatureExtraction
-        from transformers import AutoTokenizer
         import numpy as np
-        name = "BAAI/bge-small-en-v1.5"
-        tok = AutoTokenizer.from_pretrained(name)
-        model = ORTModelForFeatureExtraction.from_pretrained(name, file_name="model_quantized.onnx", export=True)
+        from huggingface_hub import hf_hub_download
+        from tokenizers import Tokenizer
+        import onnxruntime as ort
+        repo = "onnx-community/bge-small-en-v1.5-ONNX"
+        # Load from the local HF cache without touching the network (this host's DNS flakes on
+        # huggingface.co); fetch once only if not cached. Kept identical to embed_evidence.py.
+        def _get(fn):
+            try:
+                return hf_hub_download(repo, fn, local_files_only=True)
+            except Exception:
+                return hf_hub_download(repo, fn)
+        onnx_path = _get("onnx/model_quantized.onnx")  # weights in sibling .onnx_data
+        _get("onnx/model_quantized.onnx_data")
+        tok = Tokenizer.from_file(_get("tokenizer.json"))
+        tok.enable_truncation(max_length=256)
+        tok.enable_padding()
+        # Capped threads (kept identical to scraper/embed_evidence.py). The query path embeds ONE
+        # short string per request, so a few threads is plenty and won't hog a small Railway box.
+        import os
+        so = ort.SessionOptions()
+        so.intra_op_num_threads = int(os.environ.get("EMBED_THREADS", "3"))
+        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        sess = ort.InferenceSession(onnx_path, sess_options=so, providers=["CPUExecutionProvider"])
+        input_names = {i.name for i in sess.get_inputs()}
         def embed(text):
-            enc = tok([text], padding=True, truncation=True, max_length=256, return_tensors="np")
-            emb = model(**enc).last_hidden_state.mean(axis=1)
+            enc = tok.encode(text)
+            ids = np.array([enc.ids], dtype=np.int64)
+            mask = np.array([enc.attention_mask], dtype=np.int64)
+            feed = {"input_ids": ids, "attention_mask": mask}
+            if "token_type_ids" in input_names:
+                feed["token_type_ids"] = np.zeros_like(ids)
+            emb = sess.run(None, feed)[0].mean(axis=1)  # mean-pool last_hidden_state
             emb = emb / (np.linalg.norm(emb, axis=1, keepdims=True) + 1e-9)
             return emb[0].tolist()
         _RAW = embed
