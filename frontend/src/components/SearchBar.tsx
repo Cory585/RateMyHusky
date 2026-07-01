@@ -17,7 +17,12 @@ const searchOptions = [
   { value: 'Ask', label: 'Ask' },
 ];
 
-const SearchBar = () => {
+interface SearchBarProps {
+  // Bump this (e.g. Date.now()) to force the bar into Ask mode and focus it.
+  forceAsk?: number;
+}
+
+const SearchBar = ({ forceAsk }: SearchBarProps) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchType, setSearchType] = useState('Professor');
@@ -34,7 +39,15 @@ const SearchBar = () => {
   const isAsk = searchType === 'Ask';
 
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // "Try Now" (home ask bubble) switches the bar into Ask mode and focuses it.
+  useEffect(() => {
+    if (forceAsk === undefined) return;
+    setSearchType('Ask');
+    inputRef.current?.focus();
+  }, [forceAsk]);
 
   const professorExamples = useMemo(() => [
     "Alan Mislove", "Ravi Sundaram", "Dan Felushko", "Cristina Nita-Rotaru",
@@ -301,6 +314,7 @@ const SearchBar = () => {
         </span>
 
         <input
+          ref={inputRef}
           className="search-input"
           type="text"
           placeholder={placeholder}

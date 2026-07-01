@@ -181,6 +181,7 @@ const Homepage = () => {
   const [shuffling, setShuffling] = useState(false);
   const [openTooltip, setOpenTooltip] = useState<number | null>(null);
   const [showAskTip, setShowAskTip] = useState(() => localStorage.getItem('home_ask_tip_dismissed') !== '1');
+  const [askTrigger, setAskTrigger] = useState<number | undefined>(undefined);
   const tabsRef = useRef<HTMLDivElement>(null);
   const [tabsAtEnd, setTabsAtEnd] = useState(false);
   const [tabsAtStart, setTabsAtStart] = useState(true);
@@ -430,7 +431,18 @@ const Homepage = () => {
           <div className="home-ask-bubble-body">
             <div className="home-ask-bubble-label">New</div>
             <p className="home-ask-bubble-text">
-              Get AI-powered answers about professors and courses. Switch the search bar to <strong>Ask</strong>.
+              Get AI-powered answers about professors and courses.{' '}
+              <button
+                type="button"
+                className="home-ask-bubble-trynow"
+                onClick={() => {
+                  setAskTrigger(Date.now());
+                  localStorage.setItem('home_ask_tip_dismissed', '1');
+                  setShowAskTip(false);
+                }}
+              >
+                Click here to Try Now
+              </button>
             </p>
           </div>
           <button
@@ -459,7 +471,7 @@ const Homepage = () => {
           TRACE evaluations and RateMyProfessor ratings, all in one place.
         </p>
 
-        <SearchBar />
+        <SearchBar forceAsk={askTrigger} />
       </main>
 
       {/* ======== Stats Banner ======== */}

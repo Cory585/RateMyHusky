@@ -1621,145 +1621,59 @@ def courses_catalog():
     if cached:
         return jsonify(cached)
 
-    # Query course_catalog for listing, then bulk-fetch ratings
-    count_where = []
-    count_params = []
+    # avg_rating is precomputed on course_catalog (see precompute.py step 8),
+    # so this is a plain indexed SELECT/WHERE/ORDER/LIMIT like professors_catalog.
+    conditions = []
+    params = []
 
     if dept and dept != "All":
         dept_list = [d.strip() for d in dept.split(",") if d.strip()]
         if len(dept_list) == 1:
-            count_where.append("department = %s")
-            count_params.append(dept_list[0])
+            conditions.append("department = %s")
+            params.append(dept_list[0])
         elif dept_list:
-            count_where.append("department IN (" + ",".join(["%s"] * len(dept_list)) + ")")
-            count_params.extend(dept_list)
+            conditions.append("department IN (" + ",".join(["%s"] * len(dept_list)) + ")")
+            params.extend(dept_list)
     if q:
-        count_where.append("search_text LIKE %s")
-        count_params.append(f"%{q}%")
+        conditions.append("search_text LIKE %s")
+        params.append(f"%{q}%")
+    if min_rating > 0:
+        conditions.append("avg_rating >= %s")
+        params.append(min_rating)
+    if max_rating < 5:
+        conditions.append("avg_rating <= %s")
+        params.append(max_rating)
 
-    where_str = ("WHERE " + " AND ".join(count_where)) if count_where else ""
+    where_str = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
-    rating_filter_active = min_rating > 0 or max_rating < 5
-
-    # When rating filters or rating sort are active, we need all rows so we can
-    # compute ratings first, filter/sort, then paginate in Python.
-    if rating_filter_active or sort == "rating":
-        rows = query(f"""
-            SELECT code, name, department FROM course_catalog
-            {where_str}
-            ORDER BY lower(code) ASC
-        """, count_params)
-
-        # Bulk-fetch ratings for ALL matching courses
-        rating_map = {}
-        if rows:
-            codes = [r["code"] for r in rows]
-            placeholders = ",".join(["%s"] * len(codes))
-            rating_rows = query(f"""
-                SELECT
-                    tc.course_code,
-                    SUM(CAST(ts.mean AS FLOAT) * CAST(ts.total_responses AS FLOAT)) AS weighted_sum,
-                    SUM(CAST(ts.total_responses AS FLOAT)) AS total_responses
-                FROM trace_courses tc
-                JOIN trace_scores ts
-                    ON tc.course_id = ts.course_id
-                    AND tc.instructor_id = ts.instructor_id
-                    AND tc.term_id = ts.term_id
-                WHERE LOWER(ts.question) LIKE '%%overall%%'
-                    AND tc.course_code IN ({placeholders})
-                GROUP BY tc.course_code
-            """, codes)
-            for rr in rating_rows:
-                tr = _safe_float(rr["total_responses"])
-                rating_map[rr["course_code"]] = (
-                    round(_safe_float(rr["weighted_sum"]) / tr, 2) if tr > 0 else None
-                )
-
-        # Build course list with ratings
-        courses = []
-        for r in rows:
-            avg = rating_map.get(r["code"])
-            # Apply rating filter
-            if rating_filter_active:
-                if avg is None:
-                    continue
-                if min_rating > 0 and avg < min_rating:
-                    continue
-                if max_rating < 5 and avg > max_rating:
-                    continue
-            courses.append({
-                "code": r["code"],
-                "name": r["name"],
-                "department": r["department"],
-                "avgRating": avg,
-            })
-
-        # Sort by rating if requested
-        if sort == "rating":
-            courses.sort(key=lambda c: (c["avgRating"] is None, -(c["avgRating"] or 0)))
-
-        # Paginate in Python
-        total = len(courses)
-        total_pages = max(1, (total + limit - 1) // limit)
-        page = max(1, min(page, total_pages))
-        offset = (page - 1) * limit
-        courses = courses[offset:offset + limit]
+    if sort == "rating":
+        order = "avg_rating DESC NULLS LAST"
     else:
-        # No rating filter — use SQL pagination directly
-        count_row = query_one(f"SELECT COUNT(*) as cnt FROM course_catalog {where_str}", count_params)
-        total = count_row["cnt"] if count_row else 0
+        order = "lower(code) ASC"
 
-        total_pages = max(1, (total + limit - 1) // limit)
-        page = max(1, min(page, total_pages))
-        offset = (page - 1) * limit
+    count_row = query_one(f"SELECT COUNT(*) as cnt FROM course_catalog {where_str}", params)
+    total = count_row["cnt"] if count_row else 0
 
-        sort_map = {
-            "sections": "code ASC",
-            "recent": "code ASC",
-            "alpha": "lower(code) ASC",
+    total_pages = max(1, (total + limit - 1) // limit)
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * limit
+
+    rows = query(f"""
+        SELECT code, name, department, avg_rating FROM course_catalog
+        {where_str}
+        ORDER BY {order}
+        LIMIT %s OFFSET %s
+    """, params + [limit, offset])
+
+    courses = [
+        {
+            "code": r["code"],
+            "name": r["name"],
+            "department": r["department"],
+            "avgRating": round(r["avg_rating"], 2) if r["avg_rating"] is not None else None,
         }
-        order = sort_map.get(sort, "lower(code) ASC")
-
-        rows = query(f"""
-            SELECT code, name, department FROM course_catalog
-            {where_str}
-            ORDER BY {order}
-            LIMIT %s OFFSET %s
-        """, count_params + [limit, offset])
-
-        # Bulk-fetch ratings for this page of courses
-        rating_map = {}
-        if rows:
-            codes = [r["code"] for r in rows]
-            placeholders = ",".join(["%s"] * len(codes))
-            rating_rows = query(f"""
-                SELECT
-                    tc.course_code,
-                    SUM(CAST(ts.mean AS FLOAT) * CAST(ts.total_responses AS FLOAT)) AS weighted_sum,
-                    SUM(CAST(ts.total_responses AS FLOAT)) AS total_responses
-                FROM trace_courses tc
-                JOIN trace_scores ts
-                    ON tc.course_id = ts.course_id
-                    AND tc.instructor_id = ts.instructor_id
-                    AND tc.term_id = ts.term_id
-                WHERE LOWER(ts.question) LIKE '%%overall%%'
-                    AND tc.course_code IN ({placeholders})
-                GROUP BY tc.course_code
-            """, codes)
-            for rr in rating_rows:
-                tr = _safe_float(rr["total_responses"])
-                rating_map[rr["course_code"]] = (
-                    round(_safe_float(rr["weighted_sum"]) / tr, 2) if tr > 0 else None
-                )
-
-        courses = []
-        for r in rows:
-            courses.append({
-                "code": r["code"],
-                "name": r["name"],
-                "department": r["department"],
-                "avgRating": rating_map.get(r["code"]),
-            })
+        for r in rows
+    ]
 
     result = {
         "courses": courses,

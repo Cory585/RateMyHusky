@@ -71,6 +71,22 @@
   font-weight: 800;
 }
 
+.home-ask-bubble-trynow {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 800;
+  color: #d6394c;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.home-ask-bubble-trynow:hover {
+  color: #b82d3e;
+}
+
 .home-ask-bubble-close {
   flex-shrink: 0;
   background: none;
@@ -118,6 +134,14 @@
 
 .dark .home-ask-bubble-text strong {
   color: #e0e0e0;
+}
+
+.dark .home-ask-bubble-trynow {
+  color: #e06070;
+}
+
+.dark .home-ask-bubble-trynow:hover {
+  color: #ec8592;
 }
 
 .dark .home-ask-bubble-close {
