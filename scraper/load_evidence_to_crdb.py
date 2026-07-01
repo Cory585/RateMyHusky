@@ -1,0 +1,403 @@
+"""
+Build the unified `evidence` corpus (RMP + TRACE + Reddit) in CockroachDB for Ask retrieval.
+Idempotent. Reads existing source tables; writes only `evidence` + `evidence_embeddings` schema.
+
+Usage:
+    python load_evidence_to_crdb.py --selftest        # offline checks, exit
+    python load_evidence_to_crdb.py --build-evidence  # populate evidence (Task 2)
+"""
+import argparse, itertools, os, sys, time, re, hashlib, unicodedata
+from dotenv import load_dotenv
+import psycopg2
+
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), "backend", ".env"))
+URL = os.getenv("NEW_CRDB_DATABASE_URL") or os.getenv("CRDB_DATABASE_URL")
+
+_counter = itertools.count()
+
+EVIDENCE_DDL = """
+CREATE TABLE IF NOT EXISTS evidence (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source        TEXT NOT NULL,
+    source_ref    TEXT NOT NULL,
+    professor_slug TEXT,
+    course_code   TEXT,
+    body          TEXT NOT NULL,
+    body_tsv      TSVECTOR,
+    body_sha      TEXT NOT NULL,
+    sentiment     TEXT,
+    reddit_score  INT,
+    permalink     TEXT,
+    rmp_meta      JSONB,
+    flagged       BOOLEAN DEFAULT false,
+    subreddit     TEXT,
+    created_utc   TIMESTAMPTZ,
+    UNIQUE (source, source_ref, professor_slug, (COALESCE(course_code, '')))
+);
+CREATE INDEX IF NOT EXISTS ev_tsv    ON evidence USING GIN (body_tsv);
+CREATE INDEX IF NOT EXISTS ev_prof   ON evidence (professor_slug);
+CREATE INDEX IF NOT EXISTS ev_course ON evidence (course_code);
+
+CREATE TABLE IF NOT EXISTS evidence_embeddings (
+    evidence_id   UUID PRIMARY KEY REFERENCES evidence(id) ON DELETE CASCADE,
+    embedding     VECTOR(384) NOT NULL,
+    model_version TEXT NOT NULL,
+    body_sha      TEXT,
+    embedded_at   TIMESTAMPTZ DEFAULT now()
+);
+CREATE VECTOR INDEX IF NOT EXISTS ev_embed_idx ON evidence_embeddings (embedding);
+"""
+
+def all_ddl():
+    return EVIDENCE_DDL
+
+def connect(attempts=20):
+    last = None
+    for i in range(1, attempts + 1):
+        try:
+            return psycopg2.connect(URL, sslmode="require")
+        except psycopg2.OperationalError as e:
+            if "could not translate host name" not in str(e):
+                raise
+            last = str(e)
+            print(f"  DNS lookup flaked; retrying ({i}/{attempts})...")
+            time.sleep(1.5)
+    raise SystemExit(f"Could not connect after {attempts} attempts: {last}")
+
+def ensure_schema(conn):
+    with conn.cursor() as cur:
+        cur.execute(EVIDENCE_DDL)
+    conn.commit()
+
+# ── Sanitization + injection screening (mirrored from load_reddit_to_crdb.py) ──
+
+_ZERO_WIDTH = dict.fromkeys(map(ord, "​‌‍﻿"), None)
+
+_INJECTION_PATTERNS = [
+    (re.compile(r"ignore (all |the |any |previous )?(instructions|rules|prompts?)", re.I), "ignore_instructions"),
+    (re.compile(r"you are now", re.I), "persona_switch"),
+    (re.compile(r"</?(system|user|assistant|instructions?)\s*>", re.I), "role_tag"),
+    (re.compile(r"<\|.*?\|>"), "chatml_token"),
+    (re.compile(r"(disregard|override|bypass) (all|the|any|your|previous|the above)", re.I), "override"),
+]
+
+def sanitize_body(text: str) -> str:
+    """NFKC-normalize, strip zero-width/control chars, collapse whitespace."""
+    if not text:
+        return ""
+    text = unicodedata.normalize("NFKC", text)
+    text = text.translate(_ZERO_WIDTH)
+    text = "".join(ch for ch in text if ch == "\n" or ch == "\t" or ord(ch) >= 32)
+    return re.sub(r"\s+", " ", text).strip()
+
+def injection_flag(text: str) -> "tuple[bool, str | None]":
+    """Return (True, reason) if text matches an injection pattern, else (False, None)."""
+    for pat, reason in _INJECTION_PATTERNS:
+        if pat.search(text or ""):
+            return True, reason
+    return False, None
+
+# ── Pure helper functions ──
+
+_NA = {"", "n/a", "na", "none", "no", "-", ".", "nothing", "no comment", "no comments"}
+
+def norm_code(s: str) -> str:
+    """Uppercase and strip all whitespace from a course code string."""
+    return re.sub(r"\s+", "", str(s or "").upper())
+
+def body_sha(text: str) -> str:
+    """SHA-256 hex digest (first 32 chars) of text."""
+    return hashlib.sha256((text or "").encode()).hexdigest()[:32]
+
+def is_meaningful(text: str) -> bool:
+    """Return True if text passes TRACE filter: non-empty, not n/a, >=15 chars."""
+    t = sanitize_body(text)
+    if not t or t.lower() in _NA:
+        return False
+    return len(t.strip()) >= 15
+
+def dedup_key(text: str) -> str:
+    """Normalized 80-char prefix for deduplication (matches professor_full._dedup_group)."""
+    return re.sub(r"\s+", " ", (text or "").lower()).strip()[:80]
+
+def _row(source, source_ref, slug, code, body, sentiment=None, score=None,
+         permalink=None, subreddit=None, created_utc=None, rmp_meta=None):
+    """Build an evidence-row dict."""
+    clean = sanitize_body(body)
+    flagged, _reason = injection_flag(clean)
+    return {
+        "source": source,
+        "source_ref": str(source_ref),
+        "professor_slug": slug,
+        "course_code": code,
+        "body": clean,
+        "body_sha": body_sha(clean),
+        "sentiment": sentiment,
+        "reddit_score": score,
+        "permalink": permalink,
+        "subreddit": subreddit,
+        "created_utc": created_utc,
+        "rmp_meta": rmp_meta,
+        "flagged": flagged,
+    }
+
+# ── Build functions (pure — take injected query_fn, no live DB) ──
+
+def build_reddit_rows(query_fn) -> list:
+    """Yield evidence rows from reddit_mentions + reddit_text + reddit_sentiment."""
+    rows = query_fn("""
+        SELECT m.source_id, m.professor_slug, t.body, t.subreddit, t.created_utc, t.score, t.permalink,
+               s.sentiment, t.flagged
+        FROM reddit_mentions m
+        JOIN reddit_text t ON t.source_id = m.source_id
+        LEFT JOIN reddit_sentiment s
+          ON s.source_id = t.source_id AND s.professor_slug = m.professor_slug
+    """, ())
+    out = []
+    for r in rows:
+        if not is_meaningful(r.get("body")):
+            continue
+        ev = _row("reddit", r["source_id"], r.get("professor_slug"), None, r.get("body"),
+                  sentiment=r.get("sentiment"), score=r.get("score"), permalink=r.get("permalink"),
+                  subreddit=r.get("subreddit"), created_utc=r.get("created_utc"))
+        ev["flagged"] = bool(r.get("flagged")) or ev["flagged"]
+        out.append(ev)
+    return out
+
+def build_rmp_rows(query_fn) -> list:
+    """Yield evidence rows from rmp_reviews, resolving course_code via TRACE validation."""
+    slug_by_key = {r["name_key"]: r["slug"]
+                   for r in query_fn("SELECT name_key, slug FROM professors_catalog", ())}
+    taught = {}  # name_key -> set(course_code) from TRACE
+    for r in query_fn("SELECT DISTINCT name_key, course_code FROM trace_courses", ()):
+        nk = r.get("name_key")
+        code = norm_code(r.get("course_code", ""))
+        if nk:
+            taught.setdefault(nk, set()).add(code)
+    rows = query_fn("""SELECT id, name_key, course, comment, quality, difficulty, tags, grade
+                       FROM rmp_reviews WHERE comment IS NOT NULL AND comment <> ''""", ())
+    out = []
+    for r in rows:
+        if not is_meaningful(r.get("comment")):
+            continue
+        slug = slug_by_key.get(r.get("name_key"))
+        if not slug:
+            continue
+        code = norm_code(r.get("course"))
+        prof_codes = taught.get(r.get("name_key"), set())
+        course_code = code if code in prof_codes else None
+        meta = {
+            "course": r.get("course"),
+            "quality": r.get("quality"),
+            "difficulty": r.get("difficulty"),
+            "tags": r.get("tags"),
+            "grade": r.get("grade"),
+        }
+        out.append(_row("rmp", r["id"], slug, course_code, r.get("comment"), rmp_meta=meta))
+    return out
+
+def build_trace_rows(query_fn) -> list:
+    """Yield evidence rows from trace_comments joined to trace_courses + professors_catalog."""
+    rows = query_fn("""
+        SELECT tc.id, tc.comment, c.name_key, c.course_code,
+               p.slug AS professor_slug
+        FROM trace_comments tc
+        JOIN trace_courses c
+          ON tc.tc_course_id = c.course_id AND tc.tc_instructor_id = c.instructor_id
+         AND tc.tc_term_id = c.term_id
+        JOIN professors_catalog p ON p.name_key = c.name_key
+        WHERE tc.comment IS NOT NULL AND tc.comment <> ''
+    """, ())
+    seen, out = set(), []
+    for r in rows:
+        if not is_meaningful(r.get("comment")):
+            continue
+        slug = r.get("professor_slug")
+        code = norm_code(r.get("course_code"))
+        k = (slug, code, dedup_key(r.get("comment")))
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(_row("trace", r["id"], slug, code or None, r.get("comment")))
+    return out
+
+# ── Upsert ──
+
+def upsert_evidence(conn, rows, batch=5000):
+    """Insert evidence rows with ON CONFLICT DO UPDATE; computes body_tsv via SQL."""
+    from psycopg2.extras import execute_values
+    import json
+
+    def _jsonb(v):
+        return json.dumps(v) if v is not None else None
+
+    sql = """
+        INSERT INTO evidence
+          (source, source_ref, professor_slug, course_code, body, body_tsv, body_sha,
+           sentiment, reddit_score, permalink, subreddit, created_utc, rmp_meta, flagged)
+        VALUES %s
+        ON CONFLICT (source, source_ref, professor_slug, (COALESCE(course_code, '')))
+        DO UPDATE SET
+          body      = excluded.body,
+          body_tsv  = excluded.body_tsv,
+          body_sha  = excluded.body_sha,
+          flagged   = excluded.flagged
+    """
+    template = "(%(source)s, %(source_ref)s, %(professor_slug)s, %(course_code)s, %(body)s, to_tsvector('english', %(tsv_src)s), %(body_sha)s, %(sentiment)s, %(reddit_score)s, %(permalink)s, %(subreddit)s, %(created_utc)s, %(rmp_meta)s, %(flagged)s)"
+
+    total = 0
+    for start in range(0, len(rows), batch):
+        chunk = rows[start:start + batch]
+        values = []
+        for r in chunk:
+            values.append({
+                "source": r["source"],
+                "source_ref": r["source_ref"],
+                "professor_slug": r.get("professor_slug"),
+                "course_code": r.get("course_code"),
+                "body": r["body"],
+                "tsv_src": r["body"],
+                "body_sha": r["body_sha"],
+                "sentiment": r.get("sentiment"),
+                "reddit_score": r.get("reddit_score"),
+                "permalink": r.get("permalink"),
+                "subreddit": r.get("subreddit"),
+                "created_utc": r.get("created_utc"),
+                "rmp_meta": _jsonb(r.get("rmp_meta")),
+                "flagged": bool(r.get("flagged")),
+            })
+        with conn.cursor() as cur:
+            execute_values(cur, sql, values, template=template)
+        conn.commit()
+        total += len(chunk)
+    return total
+
+def selftest():
+    fails = []
+    def check(label, cond):
+        if not cond: fails.append(label)
+        print(("PASS" if cond else "FAIL") + ": " + label)
+
+    ddl = all_ddl()
+    check("evidence table in DDL", "CREATE TABLE IF NOT EXISTS evidence" in ddl)
+    check("evidence_embeddings table in DDL", "CREATE TABLE IF NOT EXISTS evidence_embeddings" in ddl)
+    check("evidence has source col", "source " in ddl and "source_ref" in ddl)
+    check("evidence has professor_slug + course_code", "professor_slug" in ddl and "course_code" in ddl)
+    check("evidence has body_tsv TSVECTOR", "body_tsv" in ddl and "TSVECTOR" in ddl)
+    check("evidence has body_sha", "body_sha" in ddl)
+    check("embeddings track body_sha (in embeddings table, not just evidence)", "body_sha" in ddl.split("evidence_embeddings")[1])
+    check("evidence has rmp_meta JSONB", "rmp_meta" in ddl and "JSONB" in ddl)
+    check("evidence has subreddit + created_utc", "subreddit" in ddl and "created_utc" in ddl)
+    check("evidence dedupe UNIQUE uses COALESCE(course_code)", "COALESCE(course_code" in ddl)
+    check("GIN index on body_tsv", "USING GIN" in ddl and "body_tsv" in ddl)
+    check("btree index on professor_slug", "ev_prof" in ddl)
+    check("btree index on course_code", "ev_course" in ddl)
+    check("embeddings VECTOR(384)", "VECTOR(384)" in ddl)
+    check("embeddings model_version", "model_version" in ddl)
+    check("vector index created", "ev_embed_idx" in ddl)
+
+    # ── norm_code ──
+    check("norm_code uppercases + strips space", norm_code("cs 3500") == "CS3500")
+    check("norm_code on clean code", norm_code("EECE2140") == "EECE2140")
+
+    # ── is_meaningful (TRACE filter) ──
+    check("meaningful keeps a real comment", is_meaningful("Great professor, very clear lectures") is True)
+    check("meaningful drops n/a", is_meaningful("N/A") is False)
+    check("meaningful drops blank", is_meaningful("   ") is False)
+    check("meaningful drops <15 chars", is_meaningful("good prof") is False)
+
+    # ── dedup_key ──
+    check("dedup_key collapses whitespace + case + caps at 80",
+          dedup_key("Great   Prof") == dedup_key("great prof"))
+
+    # ── Reddit rows: one per mention, sentiment + score carried ──
+    def reddit_q(sql, params=None):
+        if "reddit_mentions" in sql:
+            return [{"source_id": "c1", "professor_slug": "guha-prof", "body": "hard but fair, great office hours",
+                     "subreddit": "NEU", "score": 12, "permalink": "/r/x",
+                     "sentiment": "positive", "flagged": False}]
+        return []
+    rr = build_reddit_rows(reddit_q)
+    check("reddit row source tag", rr[0]["source"] == "reddit")
+    check("reddit row keyed to prof", rr[0]["professor_slug"] == "guha-prof")
+    check("reddit row carries sentiment", rr[0]["sentiment"] == "positive")
+    check("reddit row carries score", rr[0]["reddit_score"] == 12)
+    check("reddit row course_code is None", rr[0]["course_code"] is None)
+    check("reddit row has body_sha", len(rr[0]["body_sha"]) == 32)
+    check("reddit row carries subreddit", rr[0]["subreddit"] == "NEU")
+
+    # ── RMP rows: course_code only on exact match to the prof's TRACE set ──
+    def rmp_q(sql, params=None):
+        if "rmp_reviews" in sql:
+            return [
+                {"id": "r1", "name_key": "olin guha", "course": "CS3500", "comment": "Tough grader but I learned a ton in this class",
+                 "quality": 5, "difficulty": 4, "tags": "GIVES GOOD FEEDBACK", "grade": "A"},
+                {"id": "r2", "name_key": "olin guha", "course": "Algorithms", "comment": "Loved the material and the pacing of the course",
+                 "quality": 4, "difficulty": 3, "tags": "", "grade": "B"},
+            ]
+        if "professors_catalog" in sql:
+            return [{"name_key": "olin guha", "slug": "guha-prof"}]
+        if "trace_courses" in sql:  # courses this prof actually taught
+            return [{"name_key": "olin guha", "course_code": "CS3500"}]
+        return []
+    mr = build_rmp_rows(rmp_q)
+    check("rmp row tagged rmp", all(r["source"] == "rmp" for r in mr))
+    check("rmp keyed to prof slug", all(r["professor_slug"] == "guha-prof" for r in mr))
+    check("rmp validated code keeps course_code", mr[0]["course_code"] == "CS3500")
+    check("rmp stale/name course -> course_code None (kept, prof-only)", mr[1]["course_code"] is None)
+    check("rmp carries meta", mr[0]["rmp_meta"]["quality"] == 5 and mr[0]["rmp_meta"]["grade"] == "A")
+
+    # ── TRACE rows: keyed to BOTH prof + course via join; filtered + deduped ──
+    def trace_q(sql, params=None):
+        if "trace_comments" in sql:
+            return [
+                {"id": "t1", "comment": "The instructor explained recursion exceptionally well",
+                 "name_key": "olin guha", "course_code": "CS3500", "professor_slug": "guha-prof"},
+                {"id": "t2", "comment": "N/A", "name_key": "olin guha", "course_code": "CS3500", "professor_slug": "guha-prof"},
+                {"id": "t3", "comment": "The instructor explained recursion exceptionally well",
+                 "name_key": "olin guha", "course_code": "CS3500", "professor_slug": "guha-prof"},  # dup of t1
+            ]
+        return []
+    tr = build_trace_rows(trace_q)
+    check("trace row tagged trace", all(r["source"] == "trace" for r in tr))
+    check("trace keyed to prof AND course", tr[0]["professor_slug"] == "guha-prof" and tr[0]["course_code"] == "CS3500")
+    check("trace drops n/a + dedupes (3 in -> 1 out)", len(tr) == 1)
+    check("trace sentiment is None", tr[0]["sentiment"] is None)
+
+    print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
+    return 1 if fails else 0
+
+def main():
+    parser = argparse.ArgumentParser(description="Build evidence corpus in CockroachDB")
+    parser.add_argument("--selftest", action="store_true", help="Run offline DDL checks")
+    parser.add_argument("--build-evidence", action="store_true", help="Populate evidence from all sources")
+    args = parser.parse_args()
+
+    if args.selftest:
+        sys.exit(selftest())
+
+    if args.build_evidence:
+        import psycopg2.extras
+        conn = connect()
+        ensure_schema(conn)
+
+        def query_fn(sql, params=None):
+            with conn.cursor(name=f"ev_cur_{next(_counter)}", cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(sql, params or ())
+                return cur.fetchall()
+
+        all_rows = (
+            build_reddit_rows(query_fn) +
+            build_rmp_rows(query_fn) +
+            build_trace_rows(query_fn)
+        )
+        n = upsert_evidence(conn, all_rows)
+        print(f"Upserted {n} evidence rows")
+        conn.close()
+        sys.exit(0)
+
+    print("Use --selftest for offline checks or --build-evidence to populate")
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
