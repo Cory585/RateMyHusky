@@ -29,6 +29,7 @@ const SearchBar = () => {
   const [placeholder, setPlaceholder] = useState('');
   const [askLoading, setAskLoading] = useState(false);
   const [askResult, setAskResult] = useState<ChatResponse | null>(null);
+  const [askedAt, setAskedAt] = useState<number>(0);
 
   const isAsk = searchType === 'Ask';
 
@@ -202,6 +203,7 @@ const SearchBar = () => {
     const { status, body } = await askChat(q);
     setAskLoading(false);
     setAskResult(body);
+    setAskedAt(Date.now());
     if (status === 401) {
       // No sign-in modal lives here; mirror the navbar's open-feedback event pattern.
       window.dispatchEvent(new CustomEvent('open-signin'));
@@ -353,7 +355,7 @@ const SearchBar = () => {
               Thinking<span className="ask-thinking-dots"><span>.</span><span>.</span><span>.</span></span>
             </p>
           ) : askResult ? (
-            <AskResult result={askResult} />
+            <AskResult result={askResult} askedAt={askedAt} />
           ) : null}
         </div>
       )}
@@ -361,7 +363,7 @@ const SearchBar = () => {
   );
 };
 
-function AskResult({ result }: { result: ChatResponse }) {
+function AskResult({ result, askedAt }: { result: ChatResponse; askedAt: number }) {
   if (result.mode === 'question') {
     // Fallback entity (used when a source has no per-source tag, e.g. old cached answers).
     const fallbackHref = result.course_code
@@ -377,15 +379,33 @@ function AskResult({ result }: { result: ChatResponse }) {
         {cited.length > 0 && (
           <ol className="ask-sources">
             {cited.map((s) => {
-              const href = s.course_code
-                ? `/courses/${s.course_code.toLowerCase()}`
-                : s.professor_slug
-                ? `/professors/${s.professor_slug}`
-                : fallbackHref;
+              // Course citations win the course link (courses page has no pin behavior yet).
+              const courseHref = s.course_code ? `/courses/${s.course_code.toLowerCase()}` : null;
+              const profHref = s.professor_slug ? `/professors/${s.professor_slug}` : null;
+              const href = courseHref ?? profHref ?? fallbackHref;
+              // Pins only travel to professor pages, and only for citations whose destination
+              // is a professor (no course_code). Carry every cited source sharing this slug.
+              const pinToProfessor = !s.course_code && !!s.professor_slug;
+              const sourcesForEntity = pinToProfessor
+                ? cited
+                    .filter((o) => !o.course_code && o.professor_slug === s.professor_slug)
+                    .map((o) => ({ source: o.source ?? null, snippet: o.snippet }))
+                : [];
+              const linkProps = pinToProfessor
+                ? {
+                    state: {
+                      askPins: {
+                        askedAt,
+                        clicked: { source: s.source ?? null, snippet: s.snippet },
+                        sources: sourcesForEntity,
+                      },
+                    },
+                  }
+                : {};
               return (
                 <li key={s.source_id}>
                   {href ? (
-                    <Link className="ask-source-link" to={href}>[{s.source_id}]</Link>
+                    <Link className="ask-source-link" to={href} {...linkProps}>[{s.source_id}]</Link>
                   ) : (
                     <span className="ask-source-link">[{s.source_id}]</span>
                   )}
