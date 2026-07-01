@@ -219,6 +219,7 @@ export interface ChatSource {
   subreddit: string;
   professor_slug?: string | null;
   course_code?: string | null;
+  source?: string | null;
 }
 
 export interface ChatProfessorMatch {

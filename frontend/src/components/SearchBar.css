@@ -343,6 +343,18 @@ a.ask-source-link:hover {
   text-decoration: underline;
 }
 
+.ask-source-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #d6394c;
+  background: #fef0f0;
+  border-radius: 6px;
+  padding: 1px 6px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
 .ask-source-snippet {
   color: #555;
 }

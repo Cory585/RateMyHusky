@@ -5,6 +5,12 @@ import { fetchSearchSuggestions, askChat } from '../api/api';
 import type { SearchSuggestion, ChatResponse } from '../api/api';
 import './SearchBar.css';
 
+const SOURCE_LABEL: Record<string, string> = {
+  reddit: "Reddit",
+  rmp: "RateMyProfessor",
+  trace: "TRACE",
+};
+
 const searchOptions = [
   { value: 'Professor', label: 'Professor' },
   { value: 'Course', label: 'Course' },
@@ -62,7 +68,7 @@ const SearchBar = () => {
     "Is CS 3000 worth taking?",
     "How tough is Discrete Structures?",
     "Is Schedlbauer a good teacher?",
-    "Is Networks hard with Choffnes?",
+    "When should I take ENGW3302?",
     "Should I take Theory of Computation?",
     "Is Operating Systems brutal?",
     "Is Software Engineering project-heavy?",
@@ -75,23 +81,18 @@ const SearchBar = () => {
     "Is MATH 1341 or MATH 1342 more work?",
     "Nita-Rotaru vs Choffnes for Networks?",
     // multi-entity / both at once
-    "How do Rachlin and Felushko teach Fundies 1?",
     "Are CS 2500 and CS 2510 a big jump?",
-    "Tell me about Ullman and Ene for Algorithms",
+    "Compare the CS 2100's Professors",
     // stats-targeting
     "What's Mislove's average rating?",
     "What's the difficulty score for CS 3000?",
     "What percent would take Abhi Shelat again?",
-    "How does Rachlin's rating compare to the average?",
     "Which CS course has the highest rating?",
-    "Is CS 3500's workload above average?",
-    "What's Guha's would-take-again percentage?",
+    "Is CS 3200's workload above average?",
+    "What's Elena Strange's would-take-again percentage?",
     // comments-targeting
-    "What do students say about Felushko?",
+    "What do students say about Chieh Wu?",
     "What are the reviews like for CS 3650?",
-    "What's the common complaint about CS 4500?",
-    "Do reviews say Cooperman's exams are fair?",
-    "What do comments say about Mislove's grading?",
     "Are there reviews about CS 2510's workload?",
     "What do students think of Schedlbauer's lectures?"
   ], []);
@@ -388,6 +389,7 @@ function AskResult({ result }: { result: ChatResponse }) {
                   ) : (
                     <span className="ask-source-link">[{s.source_id}]</span>
                   )}
+                  <span className="ask-source-badge">{SOURCE_LABEL[s.source ?? ''] ?? 'Reddit'}</span>
                   <span className="ask-source-snippet">{s.snippet}</span>
                 </li>
               );
