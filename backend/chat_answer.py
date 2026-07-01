@@ -59,6 +59,14 @@ def _datamark(text):
     # injected sentence can't sit in an unmarked span the model reads as a command
     return DATAMARK + DATAMARK.join(text.split(" "))
 
+def _provenance(c):
+    src = c.get("source")
+    if src == "rmp":
+        return "(RateMyProfessor review)"
+    if src == "trace":
+        return "(TRACE course survey)"
+    return f"(r/{c.get('subreddit')}, {c.get('score')} upvotes)"
+
 def _fmt(v, suffix=""):
     return f"{v}{suffix}" if v is not None and v != "" else "unknown"
 
@@ -97,7 +105,7 @@ def _facts_lines(facts):
 def build_user_message(question, facts, comments):
     numbered = []
     for i, c in enumerate(comments, 1):
-        prov = f"(r/{c.get('subreddit')}, {c.get('score')} upvotes)"
+        prov = _provenance(c)
         numbered.append(f"[{i}] {prov}: {_datamark(_sanitize(c.get('body')))}")
     return (
         f"<question>{_sanitize(question)}</question>\n\n"
@@ -115,7 +123,7 @@ def build_multi_user_message(question, blocks):
         numbered = []
         for c in blk.get("comments", []):
             n += 1
-            prov = f"(r/{c.get('subreddit')}, {c.get('score')} upvotes)"
+            prov = _provenance(c)
             numbered.append(f"[{n}] {prov}: {_datamark(_sanitize(c.get('body')))}")
         sections.append(
             f"<entity_facts entity=\"{_sanitize(name)}\">\n"
@@ -291,6 +299,19 @@ def selftest():
     g = generate("Is Guha a hard grader?", {"facts": facts, "comments": comments}, FakeAdapter())
     check("generate returns text + tokens + count",
           g["text"].endswith("[1].") and g["tokens_used"] == 60 and g["num_sources"] == 2)
+
+    # provenance is source-aware
+    check("reddit provenance shows subreddit + upvotes",
+          _provenance({"source": "reddit", "subreddit": "NEU", "score": 12}) == "(r/NEU, 12 upvotes)")
+    check("rmp provenance labeled", _provenance({"source": "rmp"}) == "(RateMyProfessor review)")
+    check("trace provenance labeled", _provenance({"source": "trace"}) == "(TRACE course survey)")
+    # build_user_message uses source-aware provenance for a non-reddit source
+    um2 = build_user_message("q", facts, [{"source": "trace", "body": "clear lectures"}])
+    check("user msg labels TRACE source", "(TRACE course survey)" in um2)
+    # generate carries source through on sources_comments
+    g_src = generate("q", {"facts": facts, "comments": [{"source": "rmp", "body": "fair"}],
+                            "professor_slug": "guha-prof", "course_code": None}, FakeAdapter())
+    check("generate keeps source on sources_comments", g_src["sources_comments"][0]["source"] == "rmp")
 
     # The LLM sometimes echoes the datamarked Reddit text verbatim, leaking the ▁ marker
     # (which renders as thin/odd spaces) into the answer. generate() must strip it.

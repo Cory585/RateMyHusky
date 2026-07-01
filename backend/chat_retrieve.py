@@ -363,6 +363,80 @@ def fetch_course_comments(code, query_fn, limit=8):
                     "created_utc": r.get("created_utc")})
     return out
 
+def _rrf_fuse(lexical, vector, k=60):
+    # lexical/vector: lists of (id, rank_value) already in best-first order
+    score = {}
+    for rank, (i, _) in enumerate(lexical, 1):
+        score[i] = score.get(i, 0) + 1.0 / (k + rank)
+    for rank, (i, _) in enumerate(vector, 1):
+        score[i] = score.get(i, 0) + 1.0 / (k + rank)
+    return sorted(score.items(), key=lambda kv: kv[1], reverse=True)
+
+def _apply_source_floor(ranked_rows, limit=8, reddit_floor=2, rmp_floor=2):
+    # ranked_rows already in fused-rank order. Reserve up to floor per source (when present),
+    # then fill remaining by overall rank. Absent sources' reserves roll into the fill.
+    picked, used = [], set()
+    def take_floor(src, n):
+        c = 0
+        for r in ranked_rows:
+            if c >= n: break
+            if id(r) in used or r["source"] != src: continue
+            picked.append(r); used.add(id(r)); c += 1
+    take_floor("reddit", reddit_floor)
+    take_floor("rmp", rmp_floor)
+    for r in ranked_rows:
+        if len(picked) >= limit: break
+        if id(r) in used: continue
+        picked.append(r); used.add(id(r))
+    # restore overall fused order among the picked set
+    rank_of = {id(r): n for n, r in enumerate(ranked_rows)}
+    picked.sort(key=lambda r: rank_of[id(r)])
+    return picked[:limit]
+
+def fetch_evidence(slug, code, query, embed_query_fn, query_fn, limit=8):
+    where = "(professor_slug = %s OR course_code = %s) AND flagged = false"
+    params_entity = (slug, code)
+    # 1. lexical
+    lexical = []
+    if query and query.strip():
+        lex_rows = query_fn(
+            "SELECT id, ts_rank(body_tsv, plainto_tsquery('english', %s)) AS r "
+            "FROM evidence WHERE " + where +
+            " AND body_tsv @@ plainto_tsquery('english', %s) ORDER BY r DESC LIMIT 40",
+            (query, slug, code, query))
+        lexical = [(r["id"], r.get("r", 0)) for r in lex_rows]
+    # 2. vector (skip if embed fails → lexical-only)
+    vector = []
+    qv = embed_query_fn(query) if (embed_query_fn and query) else None
+    if qv is not None:
+        vec_rows = query_fn(
+            "SELECT e.id, 1 - (ee.embedding <=> %s::vector) AS sim "
+            "FROM evidence_embeddings ee JOIN evidence e ON e.id = ee.evidence_id "
+            "WHERE (e.professor_slug = %s OR e.course_code = %s) AND e.flagged = false"
+            " ORDER BY ee.embedding <=> %s::vector LIMIT 40",
+            (str(qv), slug, code, str(qv)))
+        vector = [(r["id"], r.get("sim", 0)) for r in vec_rows]
+    # 3. fuse (if only lexical, RRF over one list = lexical order)
+    fused = _rrf_fuse(lexical, vector)
+    if not fused:
+        return []
+    ids = [i for i, _ in fused]
+    # 4. hydrate, preserve fused order, apply floor
+    rows = query_fn(
+        "SELECT id, source, body, sentiment, reddit_score, permalink, created_utc, subreddit "
+        "FROM evidence WHERE id IN %s", (tuple(ids),))
+    by_id = {r["id"]: r for r in rows}
+    ranked = [by_id[i] for i in ids if i in by_id]
+    picked = _apply_source_floor(ranked, limit=limit)
+    out = []
+    for r in picked:
+        out.append({"source_id": r["id"], "body": r.get("body") or "",
+                    "sentiment": r.get("sentiment"), "sentiment_score": None,
+                    "score": r.get("reddit_score"), "subreddit": r.get("subreddit"),
+                    "permalink": r.get("permalink"), "created_utc": r.get("created_utc"),
+                    "source": r.get("source")})
+    return out
+
 def fetch_reddit_mentions(slug, query_fn):
     rows = query_fn("""
         SELECT t.body, t.subreddit, t.permalink, t.created_utc,
@@ -387,7 +461,7 @@ def fetch_reddit_mentions(slug, query_fn):
         })
     return out
 
-def retrieve(query, hint, query_fn, query_one_fn, prof_search_fn, limit=8):
+def retrieve(query, hint, query_fn, query_one_fn, prof_search_fn, limit=8, embed_query_fn=None):
     # Superlative / ranking question ("which CS course has the highest rating"). Keys on the
     # query text, so it wins even when the gate hands back a junk hint like "CS course" — but a
     # genuine professor hint must win (don't turn "which CS course did Guha call hardest" into a
@@ -424,7 +498,7 @@ def retrieve(query, hint, query_fn, query_one_fn, prof_search_fn, limit=8):
         cfacts = fetch_course_facts(course_term, query_one_fn, query_fn)
         if cfacts:
             code = cfacts["code"]
-            comments = fetch_course_comments(code, query_fn, limit=limit)
+            comments = fetch_evidence(None, code, query, embed_query_fn, query_fn, limit=limit)
             return {"professor_slug": None, "course_code": code, "entity_key": code,
                     "entity_name": cfacts.get("name"), "facts": cfacts,
                     "comments": comments, "comment_count": len(comments)}
@@ -438,7 +512,7 @@ def retrieve(query, hint, query_fn, query_one_fn, prof_search_fn, limit=8):
             cfacts = fetch_course_facts(named[0]["code"], query_one_fn, query_fn)
             if cfacts:
                 code = cfacts["code"]
-                comments = fetch_course_comments(code, query_fn, limit=limit)
+                comments = fetch_evidence(None, code, query, embed_query_fn, query_fn, limit=limit)
                 return {"professor_slug": None, "course_code": code, "entity_key": code,
                         "entity_name": cfacts.get("name"), "facts": cfacts,
                         "comments": comments, "comment_count": len(comments)}
@@ -453,7 +527,7 @@ def retrieve(query, hint, query_fn, query_one_fn, prof_search_fn, limit=8):
         return {"professor_slug": None, "course_code": None, "entity_key": None,
                 "entity_name": None, "facts": {}, "comments": [], "comment_count": 0}
     slug = ent["slug"]
-    comments = fetch_comments(slug, query_fn, limit=limit)
+    comments = fetch_evidence(slug, None, query, embed_query_fn, query_fn, limit=limit)
     return {"professor_slug": slug, "course_code": None, "entity_key": slug,
             "professor_name": ent.get("name"), "entity_name": ent.get("name"),
             "facts": fetch_facts(slug, query_one_fn, query_fn),
@@ -489,10 +563,18 @@ def selftest():
             return [{"display_name": "CS3500:01 (Object-Oriented Design) - Olin Guha"},
                     {"display_name": "CS3500:02 (Object-Oriented Design) - Olin Guha"}]
         if "reddit_mentions" in sql:
+            # fetch_reddit_mentions still uses this path (professor profile page)
             check("comments exclude flagged rows", "flagged = false" in sql or "NOT flagged" in sql)
             check("comments never select author/username", "author" not in sql.lower())
             return [{"source_id": "c1", "body": "hard but fair", "sentiment": "positive",
                      "sentiment_score": 0.8, "reddit_score": 12, "subreddit": "NEU",
+                     "permalink": "/r/x", "created_utc": None}]
+        if "plainto_tsquery" in sql:  # fetch_evidence lexical
+            check("evidence lexical uses entity filter", "flagged = false" in sql)
+            return [{"id": "c1", "r": 0.9}]
+        if "FROM evidence" in sql and "WHERE id IN" in sql:  # fetch_evidence hydrate
+            return [{"id": "c1", "source": "reddit", "body": "hard but fair",
+                     "sentiment": "positive", "reddit_score": 12, "subreddit": "NEU",
                      "permalink": "/r/x", "created_utc": None}]
         return []
 
@@ -510,7 +592,8 @@ def selftest():
     check("facts carry total_comments", r["facts"]["total_comments"] == 42)
     check("comments retrieved", r["comment_count"] == 1 and r["comments"][0]["sentiment"] == "positive")
     check("comment score is the reddit upvote score", r["comments"][0]["score"] == 12)
-    check("comment keeps numeric sentiment separately", r["comments"][0]["sentiment_score"] == 0.8)
+    # fetch_evidence normalizes sentiment_score to None (numeric score lives in the evidence table)
+    check("comment keeps numeric sentiment separately", r["comments"][0]["sentiment_score"] is None)
 
     none = retrieve("is guha hard", None, query_fn, lambda s, p=None: None, lambda q, limit=1: [], limit=8)
     check("no entity resolves to empty result", none["professor_slug"] is None and none["comment_count"] == 0)
@@ -543,16 +626,13 @@ def selftest():
                 {"instructor_first_name": "Jan", "instructor_last_name": "Vitek", "term_title": "Fall 2024"},
                 {"instructor_first_name": "Nick", "instructor_last_name": "Brown", "term_title": "Spring 2023"},
             ]
-        if "reddit_text" in sql:  # course comments full-text
-            # Must require the code as a contiguous PHRASE (CRDB phraseto_tsquery), not a
-            # plainto_tsquery AND of scattered tokens — otherwise an off-topic comment that
-            # merely contains "cs" and "3100" somewhere gets pulled in as a bogus source.
-            check("course comments use phraseto_tsquery (exact phrase, CRDB-safe)",
-                  "phraseto_tsquery" in sql and "plainto_tsquery" not in sql)
-            check("course comments avoid unsupported websearch_to_tsquery",
-                  "websearch_to_tsquery" not in sql)
-            return [{"source_id": "x1", "body": "DS3000 is a lot of work", "reddit_score": 5,
-                     "subreddit": "NEU", "permalink": "/r/z", "created_utc": None}]
+        if "plainto_tsquery" in sql:  # fetch_evidence lexical (replaces reddit_text for retrieve())
+            check("evidence avoids unsupported websearch_to_tsquery", "websearch_to_tsquery" not in sql)
+            return [{"id": "x1", "r": 0.8}]
+        if "FROM evidence" in sql and "WHERE id IN" in sql:  # fetch_evidence hydrate
+            return [{"id": "x1", "source": "reddit", "body": "DS3000 is a lot of work",
+                     "reddit_score": 5, "subreddit": "NEU", "permalink": "/r/z",
+                     "created_utc": None, "sentiment": None}]
         return []
     rc = retrieve("tell me about DS3000", "DS3000", course_query, course_query_one, prof_search_fn, limit=8)
     check("course path sets course_code", rc["course_code"] == "DS3000")
@@ -733,9 +813,11 @@ def selftest():
             return [{"o_w": 8.0, "o_r": 2, "c_w": 6.0, "c_r": 2, "h_w": 14.0, "h_r": 2}]
         if "instructor_first_name" in sql and "course_code = %s" in sql:
             return [{"instructor_first_name": "A", "instructor_last_name": "B", "term_title": "Fall 2024"}]
-        if "reddit_text" in sql:
-            return [{"source_id": "x", "body": "tough class", "reddit_score": 3,
-                     "subreddit": "NEU", "permalink": "/r/x", "created_utc": None}]
+        if "plainto_tsquery" in sql:  # fetch_evidence lexical
+            return [{"id": "x", "r": 0.7}]
+        if "FROM evidence" in sql and "WHERE id IN" in sql:  # fetch_evidence hydrate
+            return [{"id": "x", "source": "reddit", "body": "tough class", "reddit_score": 3,
+                     "subreddit": "NEU", "permalink": "/r/x", "created_utc": None, "sentiment": None}]
         return []
     def name_one_query_one(sql, params):
         if "course_catalog" in sql:
@@ -849,6 +931,58 @@ def selftest():
                    prof_hit_query, query_one_fn, prof_search_fn, limit=8)
     check("professor hint suppresses ranking branch", rrp.get("kind") != "course_ranking")
     check("professor hint resolves the professor", rrp.get("professor_slug") == "guha-prof")
+
+    # ── RRF fusion: same id in both lists ranks above id in one list ──
+    fused = _rrf_fuse([("a", 1), ("b", 2)], [("b", 1), ("c", 2)], k=60)
+    order = [i for i, _ in fused]
+    check("rrf: id in both lists ranks first", order[0] == "b")
+    check("rrf: includes all unique ids", set(order) == {"a", "b", "c"})
+
+    # ── per-source floor: TRACE-heavy candidate list still yields reddit+rmp slots ──
+    cand = (
+        [{"id": f"t{i}", "source": "trace"} for i in range(8)]
+        + [{"id": "r1", "source": "reddit"}, {"id": "r2", "source": "reddit"}, {"id": "r3", "source": "reddit"}]
+        + [{"id": "m1", "source": "rmp"}]
+    )  # already in fused-rank order
+    picked = _apply_source_floor(cand, limit=8, reddit_floor=2, rmp_floor=2)
+    srcs = [p["source"] for p in picked]
+    check("floor: <=8 picked", len(picked) == 8)
+    check("floor: at least 2 reddit when available", srcs.count("reddit") >= 2)
+    check("floor: rmp present (only 1 exists) ", "rmp" in srcs)
+    check("floor: rest filled by trace", srcs.count("trace") >= 4)
+
+    # ── floor with a missing source: its slots roll into fused fill, no filler ──
+    cand2 = [{"id": f"t{i}", "source": "trace"} for i in range(10)]  # only trace exists
+    picked2 = _apply_source_floor(cand2, limit=8, reddit_floor=2, rmp_floor=2)
+    check("floor: missing sources don't pad; 8 trace returned", len(picked2) == 8 and all(p["source"] == "trace" for p in picked2))
+
+    # ── fetch_evidence: issues lexical (plainto_tsquery) + vector, fuses, tags source ──
+    captured = {"sql": []}
+    def ev_query(sql, params=None):
+        captured["sql"].append(sql)
+        if "plainto_tsquery" in sql:  # lexical
+            return [{"id": "r1"}, {"id": "t1"}]
+        if "embedding" in sql:        # vector
+            return [{"id": "t1"}, {"id": "m1"}]
+        if "FROM evidence" in sql and "WHERE id IN" in sql:  # hydrate
+            return [{"id": "r1", "source": "reddit", "body": "office hours great", "subreddit": "NEU",
+                     "reddit_score": 5, "permalink": "/r/x", "created_utc": None, "sentiment": "positive"},
+                    {"id": "t1", "source": "trace", "body": "clear lectures", "subreddit": None,
+                     "reddit_score": None, "permalink": None, "created_utc": None, "sentiment": None},
+                    {"id": "m1", "source": "rmp", "body": "tough but fair", "subreddit": None,
+                     "reddit_score": None, "permalink": None, "created_utc": None, "sentiment": None}]
+        return []
+    def fake_embed(q): return [0.1] * 384
+    res = fetch_evidence("guha-prof", None, "office hours", fake_embed, ev_query, limit=8)
+    check("fetch_evidence lexical uses plainto_tsquery not websearch",
+          any("plainto_tsquery" in s for s in captured["sql"]) and not any("websearch_to_tsquery" in s for s in captured["sql"]))
+    check("fetch_evidence issued a vector query", any("embedding" in s for s in captured["sql"]))
+    check("fetch_evidence tags source on every row", all("source" in r for r in res))
+    check("fetch_evidence tolerates NULL sentiment", any(r["sentiment"] is None for r in res))
+
+    # ── embed-fn failure → lexical-only, no crash ──
+    res_lex = fetch_evidence("guha-prof", None, "office hours", lambda q: None, ev_query, limit=8)
+    check("embed None -> lexical-only still returns rows", len(res_lex) >= 1 and all("source" in r for r in res_lex))
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0

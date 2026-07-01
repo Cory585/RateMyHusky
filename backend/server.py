@@ -30,6 +30,7 @@ from llm_adapter import GroqAdapter
 from key_pool import KeyPool
 from chat_gate import gate
 from chat_retrieve import retrieve, fetch_reddit_mentions
+from query_embedder import embed_query
 from chat_answer import generate, generate_course_list, generate_course_ranking
 from professor_full import build_full
 import usage_alert
@@ -280,7 +281,7 @@ _pool = None
 def _get_pool():
     global _pool
     if _pool is None:
-        _pool = ThreadedConnectionPool(2, 10, CRDB_DATABASE_URL, sslmode="require",
+        _pool = ThreadedConnectionPool(5, 10, CRDB_DATABASE_URL, sslmode="require",
                                        connect_timeout=5,
                                        keepalives=1, keepalives_idle=30,
                                        keepalives_interval=10, keepalives_count=3)
@@ -762,7 +763,7 @@ def chat():
         cache_set_fn=cache_set,
         keyword_search_fn=lambda qq: keyword_search(qq, query, _professor_search),
         gate_fn=lambda qq: gate(qq, _chat_adapter),
-        retrieve_fn=lambda qq, hint: retrieve(qq, hint, query, query_one, _professor_search),
+        retrieve_fn=lambda qq, hint: retrieve(qq, hint, query, query_one, _professor_search, embed_query_fn=embed_query),
         generate_fn=lambda qq, blocks: generate(qq, blocks, _chat_adapter),
         generate_course_list_fn=lambda topic, courses: generate_course_list(topic, courses, _chat_adapter),
         generate_course_ranking_fn=lambda subject, metric, direction, courses: generate_course_ranking(subject, metric, direction, courses, _chat_adapter),

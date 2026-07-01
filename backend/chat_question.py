@@ -320,6 +320,7 @@ def handle_question(q, session_token, ip_hash, deps):
             "snippet": c.get("body", "")[:200],
             "permalink": c.get("permalink", ""),
             "subreddit": c.get("subreddit", ""),
+            "source": c.get("source"),
             "professor_slug": tag.get("professor_slug"),
             "course_code": tag.get("course_code"),
         })
@@ -536,8 +537,8 @@ def selftest():
         return {"text": "Guha fair [1]; Rachlin tough [6].", "tokens_used": 80, "num_sources": 8,
                 "source_entities": [{"professor_slug": "guha-prof", "course_code": None}] * 5
                                    + [{"professor_slug": "rachlin-prof", "course_code": None}] * 3,
-                "sources_comments": [{"body": f"g{i}", "permalink": f"/g/{i}", "subreddit": "NEU"} for i in range(5)]
-                                   + [{"body": f"r{i}", "permalink": f"/r/{i}", "subreddit": "NEU"} for i in range(3)]}
+                "sources_comments": [{"body": f"g{i}", "permalink": f"/g/{i}", "subreddit": "NEU", "source": "reddit"} for i in range(5)]
+                                   + [{"body": f"r{i}", "permalink": f"/r/{i}", "subreddit": "NEU", "source": "trace"} for i in range(3)]}
     d_multi.generate_fn = types.MethodType(_gen_multi, d_multi)
     payload, code = handle_question("compare Guha and Rachlin", "s", "iphash", d_multi)
     check("multi: retrieve called per entity", retrieved == ["Guha", "Rachlin"])
@@ -555,6 +556,11 @@ def selftest():
     check("multi: source[5] snippet is Rachlin's AND tagged rachlin-prof",
           payload["sources"][5]["snippet"].startswith("r")
           and payload["sources"][5]["professor_slug"] == "rachlin-prof")
+    # the per-source provenance tag must survive the pipeline->API hop so the frontend badge
+    # shows the real source (Reddit/RMP/TRACE), not always the "Reddit" fallback
+    check("multi: source field flows through to API sources",
+          payload["sources"][0]["source"] == "reddit"
+          and payload["sources"][5]["source"] == "trace")
     check("multi: primary slug is first resolved entity", payload["professor_slug"] == "guha-prof")
     check("multi: logged ok once", logged[-1][_status_idx()] == "ok")
 
