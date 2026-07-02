@@ -138,6 +138,10 @@ def professor_html(profile: dict, reviews: list, canonical: str,
         review_items.append(f"<blockquote>{_esc(comment)}<cite>{meta}</cite></blockquote>")
     reviews_block = ("<h2>Student reviews</h2>" + "".join(review_items)) if review_items else ""
 
+    # Thin content (no ratings, no RMP review text, no TRACE evaluations)
+    # is excluded from the sitemap; keep search engines from indexing it too.
+    is_zero_content = not total and not review_items and not trace_count
+
     body = (
         f"<h1>{_esc(name)} — {_esc(dept)} at Northeastern University</h1>"
         f"<p>{_esc(summary)}</p>"
@@ -159,7 +163,8 @@ def professor_html(profile: dict, reviews: list, canonical: str,
 
     return _page(title, summary, canonical, body, [jsonld],
                  image=profile.get("imageUrl"), og_type="profile",
-                 image_alt=f"{name}, professor of {dept} at Northeastern University")
+                 image_alt=f"{name}, professor of {dept} at Northeastern University",
+                 noindex=is_zero_content)
 
 
 def course_html(detail: dict, canonical: str) -> str:

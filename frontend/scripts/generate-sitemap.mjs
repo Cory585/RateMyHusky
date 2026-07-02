@@ -27,7 +27,9 @@ const STATIC_ROUTES = [
 async function fetchAll(endpoint, key) {
   // Catalog endpoints accept a large limit and return { [key]: [...] }.
   const url = `${API}/api/${endpoint}?limit=10000&page=1`;
-  const res = await fetch(url);
+  const proxyKey = process.env.SITEMAP_PROXY_KEY;
+  const headers = proxyKey ? { 'x-proxy-key': proxyKey } : undefined;
+  const res = await fetch(url, { headers });
   if (!res.ok) throw new Error(`${endpoint} -> HTTP ${res.status}`);
   const data = await res.json();
   return Array.isArray(data[key]) ? data[key] : [];
@@ -77,6 +79,11 @@ async function main() {
     }
   } catch (e) {
     console.warn(`[sitemap] could not fetch courses: ${e.message}`);
+  }
+
+  if (profCount === 0 && courseCount === 0) {
+    console.warn('[sitemap] both fetches returned nothing; keeping the committed sitemap.xml untouched');
+    return;
   }
 
   const xml =

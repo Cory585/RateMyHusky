@@ -185,6 +185,21 @@ def test_professor_html_shows_rmp_review_count():
     assert "<dt>RateMyProfessor reviews</dt><dd>1</dd>" in html
 
 
+# ── noindex for zero-content professor pages (thin-content SEO) ──
+
+def test_professor_html_is_noindex_when_no_ratings_no_reviews_no_trace():
+    profile = _base_profile(totalRatings=0)
+    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x",
+                          trace_count=0)
+    assert '<meta name="robots" content="noindex">' in html
+
+
+def test_professor_html_is_indexed_when_ratings_exist():
+    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x",
+                          trace_count=0)
+    assert '<meta name="robots" content="index, follow">' in html
+
+
 # ── Social link-preview meta tags ──
 
 def test_professor_html_has_twitter_card_large_image_when_photo():
