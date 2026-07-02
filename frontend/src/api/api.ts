@@ -228,7 +228,7 @@ export interface ChatProfessorMatch {
 }
 
 export type ChatResponse =
-  | { mode: 'question'; answer: string; sources: ChatSource[]; professor_slug: string; course_code: string | null; disclaimer: string; entities?: { name: string; professor_slug?: string | null; course_code?: string | null }[] }
+  | { mode: 'question'; answer: string; sources: ChatSource[]; cited?: number[]; professor_slug: string; course_code: string | null; disclaimer: string; entities?: { name: string; professor_slug?: string | null; course_code?: string | null }[] }
   | { mode: 'disambiguation'; message: string; matches: ChatProfessorMatch[] }
   | { mode: 'out_of_scope' | 'thin_data' | 'keyword'; banner?: string; message?: string; comments: unknown[]; professors: unknown[] }
   | { mode: 'course_list'; answer: string; topic?: string;

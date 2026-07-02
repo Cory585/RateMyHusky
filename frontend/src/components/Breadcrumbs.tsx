@@ -1,4 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
+import { loadAskSession } from '../utils/askSession';
 import './Breadcrumbs.css';
 
 interface BreadcrumbItem {
@@ -19,10 +20,14 @@ const Breadcrumbs = ({ items }: BreadcrumbsProps) => {
   // Set on citation clicks from the Ask box: the "← Ask" crumb must re-hydrate the homepage
   // Ask box (a plain homepage nav clears it instead), so carry the flag on that first link.
   const restoreAsk = location.state?.restoreAsk as boolean | undefined;
+  // Back/forward can replay this state after clearAskSession() already wiped storage (e.g.
+  // logo-click then Back). Only show the "← Ask" crumb when a session actually still exists;
+  // otherwise fall back to the normal breadcrumb items.
+  const showAskCrumb = fromPage && (!restoreAsk || loadAskSession() !== null);
   // Preserve catalog filters when the first link points to /professors
   const catalogLink = location.state?.fromCatalog || '/professors';
 
-  const resolvedItems = fromPage
+  const resolvedItems = showAskCrumb
     ? [{ label: fromPage.label, to: fromPage.url }, ...items.filter(item => item.to !== '/professors' && item.to !== '/courses')]
     : items;
 
@@ -34,7 +39,7 @@ const Breadcrumbs = ({ items }: BreadcrumbsProps) => {
           const href = item.to === '/professors' ? catalogLink : item.to;
           // The "← Ask" crumb (the prepended fromPage link, i===0) carries restoreAsk so the
           // homepage rebuilds the Ask answer; other crumbs only carry goatedCollege.
-          const linkState = fromPage && i === 0 && restoreAsk
+          const linkState = showAskCrumb && i === 0 && restoreAsk
             ? { restoreAsk: true }
             : goatedCollege ? { goatedCollege } : undefined;
 

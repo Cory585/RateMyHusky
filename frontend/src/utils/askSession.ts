@@ -23,7 +23,11 @@ export function loadAskSession(): AskSession | null {
     const raw = sessionStorage.getItem(ASK_SESSION_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as AskSession;
-    if (!parsed || typeof parsed.query !== 'string' || !parsed.result) return null;
+    if (!parsed || typeof parsed.query !== 'string' || !parsed.result || typeof parsed.result !== 'object') return null;
+    // A 'question' payload must carry a sources array — malformed/crash-inducing persisted
+    // payloads (e.g. from the short-query bug) must not be replayed on breadcrumb restore.
+    const result = parsed.result as { answer?: unknown; sources?: unknown };
+    if (result.answer !== undefined && !Array.isArray(result.sources)) return null;
     return parsed;
   } catch { return null; }
 }

@@ -771,10 +771,18 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
   /* ── Ask citation pins: auto-expand the matching TRACE category (TRACE is gated on `user`) ── */
   useEffect(() => {
     if (pinSnippets.trace.length === 0 || !user) return;
-    const hit = groupedTrace.find((g) => g.hasPin);
-    if (hit) {
-      setExpandedQuestions((p) => ({ ...p, [hit.question]: true }));
-      setVisibleCommentsPerQuestion((p) => ({ ...p, [hit.question]: p[hit.question] || 5 }));
+    const hits = groupedTrace.filter((g) => g.hasPin);
+    if (hits.length > 0) {
+      setExpandedQuestions((p) => {
+        const next = { ...p };
+        hits.forEach((h) => { next[h.question] = true; });
+        return next;
+      });
+      setVisibleCommentsPerQuestion((p) => {
+        const next = { ...p };
+        hits.forEach((h) => { next[h.question] = p[h.question] || 5; });
+        return next;
+      });
     }
   }, [pinSnippets.trace, groupedTrace, user]);
 

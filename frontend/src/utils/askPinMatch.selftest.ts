@@ -18,10 +18,30 @@ function selftest(): number {
   check('exact match', matchesPin('hard but fair', 'hard but fair'));
   check('prefix match (snippet is prefix of longer body)', matchesPin(longBody, snippet200));
   check('whitespace-difference match', matchesPin('hard   but\n fair', 'hard but fair'));
-  check('body shorter than snippet still matches when body is a prefix', matchesPin('hard but', 'hard but fair'));
+  check('body shorter than snippet still matches when body covers >=80% of snippet', matchesPin('hard but fai', 'hard but fair'));
   check('non-match', !matchesPin('totally unrelated comment', 'hard but fair'));
   check('empty snippet never matches', !matchesPin('hard but fair', ''));
   check('empty body never matches', !matchesPin('', 'hard but fair'));
+
+  // Issue 11: bidirectional-prefix false match — a short review whose full text is a tiny
+  // prefix of an unrelated longer snippet must NOT match; the true full review still matches;
+  // small length drift (195 vs 200 chars) still matches.
+  const realSnippet = 'Great professor. However the exams were brutal and the curve barely helped. Office hours were useful but hard to get into since everyone showed up right before the midterm and final.';
+  check('short review that is a tiny prefix of an unrelated snippet does not match (Issue 11)',
+    !matchesPin('Great professor.', realSnippet));
+  check('true full review (long, >=80% of snippet) matches (Issue 11)',
+    matchesPin(realSnippet, realSnippet));
+  const snippet200Chars = (realSnippet + ' Would take again for sure honestly.').slice(0, 200);
+  const body195 = snippet200Chars.slice(0, 195);
+  check('body 195 chars vs 200-char snippet still matches (Issue 11)', matchesPin(body195, snippet200Chars));
+
+  // Issue 29: decodeEntities must run unconditionally, not only when '&' is present, so a body
+  // with tag-like text and an '&' appearing only after char 200 still normalizes the same as the
+  // snippet (which is body[:200] and may not contain the '&' at all).
+  const bodyWithTagAndLateAmp = '<insane> ' + 'x'.repeat(200) + ' foo & bar';
+  const snippetNoAmp = bodyWithTagAndLateAmp.slice(0, 200);
+  check('snippet without "&" still matches body containing tag + late "&" (Issue 29)',
+    matchesPin(bodyWithTagAndLateAmp, snippetNoAmp));
 
   const items = [{ b: 'zeta review' }, { b: longBody }, { b: 'alpha review' }];
   const out = pinnedFirst(items, (x) => x.b, [snippet200]);

@@ -1,9 +1,10 @@
 // Decode HTML entities (&amp; &#39; &quot; …) so the evidence-table snippet (entities NOT
 // unescaped) and the professor page body (already html.unescape'd) converge. Browser-safe:
 // uses DOMParser when available, falls back to a small map (also lets the tsx self-check run
-// under Node, where DOMParser is absent).
+// under Node, where DOMParser is absent). Runs unconditionally (not gated on '&' presence) so
+// body and snippet always take the same normalization path, even when only one side has tag-like
+// text that DOMParser would otherwise strip differently.
 function decodeEntities(s: string): string {
-  if (!s.includes('&')) return s;
   if (typeof DOMParser !== 'undefined') {
     return new DOMParser().parseFromString(s, 'text/html').documentElement.textContent ?? s;
   }
@@ -25,8 +26,10 @@ export function matchesPin(body: string, snippet: string): boolean {
   const s = normalize(snippet);
   if (!b || !s) return false;
   // snippet is a prefix of the body (Ask sends body[:200]); tolerate the body being shorter
-  // than 200 chars (then snippet === body) and trailing-cutoff differences.
-  return b.startsWith(s) || s.startsWith(b);
+  // than 200 chars (then snippet is a prefix of nothing longer, so require the body to cover
+  // at least 80% of the snippet — kills tiny-prefix false matches like a short review whose
+  // full text happens to be a prefix of some other, longer cited review's snippet).
+  return b.startsWith(s) || (s.startsWith(b) && b.length >= 0.8 * s.length);
 }
 
 export function isPinned(body: string, snippets: string[]): boolean {
