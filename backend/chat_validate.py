@@ -57,7 +57,7 @@ def validate_output(answer, retrieval):
         return fail
     if any(p.search(answer or "") for p in DEFAMATION_MARKERS):
         return fail
-    return {"ok": True, "status": "ok", "message": None}
+    return {"ok": True, "status": "ok", "message": None, "cited": cited}
 
 def selftest():
     fails = []
@@ -119,6 +119,14 @@ def selftest():
 
     defame = validate_output("He was arrested in 2023 [1].", {"comment_count": 3})
     check("defamation marker fails", defame["ok"] is False and defame["status"] == "validation_failed")
+
+    # Issue 15: after chat_answer expands grouped citations ([1, 2] -> [1] [2]) before
+    # validation sees the text, validate_output must extract both ids into "cited".
+    grouped = validate_output("good prof [1] [2].", {"comment_count": 3})
+    check("validate_output extracts a multi-citation set", grouped["ok"] is True
+          and set(grouped["cited"]) == {1, 2})
+    single = validate_output("Some students say Guha is hard but fair [1].", {"comment_count": 3})
+    check("validate_output still extracts a single citation", set(single["cited"]) == {1})
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0

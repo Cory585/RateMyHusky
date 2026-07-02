@@ -143,8 +143,22 @@ def build_multi_user_message(question, blocks):
 _CITATION_OPEN = str.maketrans({"【": "[", "［": "[", "〔": "["})
 _CITATION_CLOSE = str.maketrans({"】": "]", "］": "]", "〕": "]"})
 
+# The model also sometimes groups citations ([1, 2] / [1,2] / [1 and 2]); the validator's
+# \[(\d+)\] regex and the frontend's answer.includes("[N]") probe both only recognize a single
+# number per bracket, so a grouped citation passes validation with an empty cited set and
+# renders with zero sources. Expand each group into separate ASCII brackets before anything
+# else inspects the text.
+_GROUPED_CITATION = re.compile(r"\[(\d+(?:\s*(?:,|and)\s*\d+)+)\]")
+
+def _expand_grouped_citations(text):
+    def _split(m):
+        nums = re.findall(r"\d+", m.group(1))
+        return " ".join(f"[{n}]" for n in nums)
+    return _GROUPED_CITATION.sub(_split, text or "")
+
 def _normalize_citations(text):
-    return (text or "").translate(_CITATION_OPEN).translate(_CITATION_CLOSE)
+    text = (text or "").translate(_CITATION_OPEN).translate(_CITATION_CLOSE)
+    return _expand_grouped_citations(text)
 
 def _strip_datamark(text):
     """Remove the spotlighting marker the model sometimes echoes from the datamarked
@@ -331,6 +345,21 @@ def selftest():
     gw = generate("q", {"facts": facts, "comments": comments}, FullwidthCiteAdapter())
     check("generate normalizes fullwidth citation brackets to ASCII",
           "[1]" in gw["text"] and "[4]" in gw["text"] and "【" not in gw["text"] and "】" not in gw["text"])
+
+    # The model sometimes groups citations ([1, 2] / [1,2] / [1 and 2]); the validator's
+    # \[(\d+)\] regex only ever sees ONE number per bracket, so a grouped citation slips
+    # through with an empty cited set and the frontend probe misses it too. generate() must
+    # expand each group into separate ASCII brackets before anything downstream inspects it.
+    class GroupedCiteAdapter:
+        def synthesize(self, system, user, max_tokens=250):
+            return {"text": "good prof [1, 2].", "tokens_used": 8}
+    gg = generate("q", {"facts": facts, "comments": comments}, GroupedCiteAdapter())
+    check("generate expands comma-grouped citations to separate brackets",
+          "[1] [2]" in gg["text"])
+    check("_normalize_citations expands [1,2] (no space)", "[1] [2]" in _normalize_citations("x[1,2]y"))
+    check("_normalize_citations expands [1 and 2]", "[1] [2]" in _normalize_citations("x[1 and 2]y"))
+    check("_normalize_citations expands a 3-way group", "[1] [2] [3]" in _normalize_citations("x[1, 2, 3]y"))
+    check("_normalize_citations leaves a single citation untouched", "[1]" in _normalize_citations("x[1]y") and "[1] [" not in _normalize_citations("x[1]y"))
 
     # ── multi-entity: two blocks, global numbering, per-source entity tags ──
     facts_b = {"kind": "professor", "name": "John Rachlin", "department": "Khoury",

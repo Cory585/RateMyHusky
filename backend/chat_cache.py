@@ -3,9 +3,11 @@ import sys, re, hashlib, argparse
 _STOP = {"is", "a", "an", "the", "of", "for", "to", "do", "does", "how", "what", "are"}
 
 def normalize_query(q):
+    # Order-preserving: word order carries meaning ("CS2500 before CS3500" != the reverse),
+    # so tokens are NOT sorted -- only lowercased/depunctuated/whitespace-collapsed.
     q = re.sub(r"[^\w\s]", " ", (q or "").lower())
     toks = [t for t in q.split() if t and t not in _STOP]
-    return " ".join(sorted(toks))
+    return " ".join(toks)
 
 def cache_key(q, entity_keys):
     # entity_keys: list of slugs/codes. Sort so order ("Wu and Rachlin" vs
@@ -34,10 +36,20 @@ def selftest():
     k2 = cache_key("Guha is hard?", ["guha-prof"])
     check("equivalent queries share a key", k1 == k2)
     check("different entity -> different key", cache_key("is guha hard", ["x"]) != k1)
-    # order-independent: "Wu and Rachlin" == "Rachlin and Wu"
-    check("entity order does not affect key",
+    # entity_keys list order does not affect the key (only the entity_keys param order, not
+    # the query text) -- same query text, entity_keys passed in each order.
+    check("entity_keys param order does not affect key",
           cache_key("compare wu and rachlin", ["wu-prof", "rachlin-prof"])
-          == cache_key("compare rachlin and wu", ["rachlin-prof", "wu-prof"]))
+          == cache_key("compare wu and rachlin", ["rachlin-prof", "wu-prof"]))
+    # Issue 14: word order in the QUERY TEXT is meaningful and must NOT be sorted away --
+    # opposite-direction questions get different keys so one user's answer never leaks to
+    # the reverse-order question.
+    check("directional queries produce different keys",
+          cache_key("take CS2500 before CS3500?", ["cs2500", "cs3500"])
+          != cache_key("take CS3500 before CS2500?", ["cs2500", "cs3500"]))
+    # unrelated word-order/case/whitespace variation still collapses to the same key
+    check("word-order-preserving normalize still collapses case/whitespace/punctuation",
+          cache_key("Is  Guha   hard?", ["guha-prof"]) == cache_key("is guha hard", ["guha-prof"]))
 
     store = {}
     set_cached("is guha hard", ["guha-prof"], {"answer": "fair"}, lambda k, v: store.__setitem__(k, v))
