@@ -498,6 +498,112 @@ def courses_listing_html(entries: list, total: int, canonical: str) -> str:
     return _page(title, summary, canonical, body, [jsonld])
 
 
+def department_html(detail: dict, canonical: str) -> str:
+    name = detail.get("name") or ""
+    n = detail.get("professorCount") or 0
+    avg = detail.get("avgRating")
+    professors = [p for p in (detail.get("professors") or []) if p.get("slug")]
+
+    title = f"{name} Professors at Northeastern — Ratings & Reviews | RateMyHusky"
+    month_year = _month_year(date.today())
+
+    top = professors[0] if professors else None
+    summary_sentences = [
+        f"The {name} department at Northeastern University has {n} rated "
+        f"professors averaging {avg}/5." if avg is not None else
+        f"The {name} department at Northeastern University has {n} rated professors."
+    ]
+    if top:
+        summary_sentences.append(
+            f"The highest-rated is {top.get('name')} ({top.get('avgRating')}/5 "
+            f"from {top.get('totalRatings')} reviews)."
+        )
+    wta_values = [p["wouldTakeAgainPct"] for p in professors if p.get("wouldTakeAgainPct") is not None]
+    if wta_values:
+        avg_wta = round(sum(wta_values) / len(wta_values), 1)
+        summary_sentences.append(
+            f"On average, {avg_wta}% of students would take these professors again."
+        )
+    summary = " ".join(summary_sentences)
+
+    rows = "".join(
+        f"<tr><td><a href=\"{SITE}/professors/{_esc(p.get('slug'))}\">{_esc(p.get('name'))}</a></td>"
+        f"<td>{_esc(p.get('avgRating'))}</td>"
+        f"<td>{_esc(p.get('difficulty'))}</td>"
+        f"<td>{_esc(p.get('wouldTakeAgainPct'))}{'%' if p.get('wouldTakeAgainPct') is not None else ''}</td>"
+        f"<td>{_esc(p.get('totalRatings'))}</td></tr>"
+        for p in professors
+    )
+    table = (
+        "<table><thead><tr><th>Name</th><th>Rating</th><th>Difficulty</th>"
+        "<th>Would take again</th><th>Reviews</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+    )
+
+    freshness = f"<p>Data updated {_esc(month_year)}.</p>"
+
+    body = (
+        f"<h1>Northeastern {_esc(name)} — Professor Ratings & Reviews</h1>"
+        f"<p>{_esc(summary)}</p>"
+        f"{table}{freshness}"
+        f'<p><a href="{_esc(canonical)}">View on RateMyHusky</a></p>'
+    )
+
+    itemlist = {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": i + 1,
+                "name": p.get("name"),
+                "url": f"{SITE}/professors/{p.get('slug')}",
+            }
+            for i, p in enumerate(professors)
+        ],
+    }
+    breadcrumb = _breadcrumb_list("Departments", f"{SITE}/departments", name, canonical)
+
+    return _page(title, summary, canonical, body, [itemlist, breadcrumb])
+
+
+def departments_listing_html(entries: list, total: int, canonical: str) -> str:
+    title = "Northeastern Departments — Professor Ratings & Reviews | RateMyHusky"
+    total_txt = str(total) if total else "dozens of"
+    summary = (
+        f"Browse {total_txt} Northeastern University (NEU) academic departments. "
+        f"Compare professor ratings, difficulty, and would-take-again by department."
+    )
+
+    shown = [e for e in (entries or []) if e.get("slug")]
+    items = "".join(
+        f'<li><a href="{SITE}/departments/{_esc(e.get("slug"))}">{_esc(e.get("name"))}</a>'
+        f' — {_esc(e.get("professorCount"))} professors'
+        f'{_rating_suffix(e.get("avgRating"))}</li>'
+        for e in shown
+    )
+    body = (
+        f"<h1>Northeastern University Departments — Professor Ratings by Department</h1>"
+        f"<p>{_esc(summary)}</p>"
+        f"<ul>{items}</ul>"
+    )
+
+    jsonld = {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": i + 1,
+                "name": e.get("name"),
+                "url": f"{SITE}/departments/{e.get('slug')}",
+            }
+            for i, e in enumerate(shown)
+        ],
+    }
+    return _page(title, summary, canonical, body, [jsonld])
+
+
 def not_found_html(kind: str) -> str:
     body = f"<h1>{_esc(kind.title())} not found</h1>"
     return _page("Not found | RateMyHusky", "Not found", f"{SITE}/", body, [],
@@ -617,4 +723,37 @@ def render_courses_listing():
     entries = (data or {}).get("courses", []) if not err else []
     total = (data or {}).get("total", 0) if not err else 0
     html = courses_listing_html(entries, total, f"{SITE}/courses")
+    return _cache_headers(Response(html, mimetype="text/html"))
+
+
+def _get_departments_hub_view():
+    from server import departments_hub
+    return departments_hub
+
+
+def _get_department_hub_detail_view():
+    from server import department_hub_detail
+    return department_hub_detail
+
+
+@render_bp.route("/render/departments")
+def render_departments_listing():
+    from flask import Response
+    data, err = _json_or_404(_get_departments_hub_view()())
+    entries = (data or {}).get("departments", []) if not err else []
+    total = (data or {}).get("total", 0) if not err else 0
+    html = departments_listing_html(entries, total, f"{SITE}/departments")
+    return _cache_headers(Response(html, mimetype="text/html"))
+
+
+@render_bp.route("/render/departments/<slug>")
+def render_department(slug):
+    from flask import Response
+    detail_resp = _get_department_hub_detail_view()(slug)
+    data, err = _json_or_404(detail_resp)
+    if err:
+        return Response(not_found_html("department"), status=404, mimetype="text/html")
+
+    canonical = f"{SITE}/departments/{slug}"
+    html = department_html(data, canonical)
     return _cache_headers(Response(html, mimetype="text/html"))

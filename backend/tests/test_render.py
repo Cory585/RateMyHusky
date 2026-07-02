@@ -5,6 +5,7 @@ from render import (
     professor_html, course_html, not_found_html, home_html, _esc,
     _clip_description, MAX_DESCRIPTION,
     MAX_SNAPSHOT_REVIEWS, professors_listing_html, courses_listing_html,
+    department_html, departments_listing_html,
 )
 
 
@@ -780,3 +781,206 @@ def test_professor_html_review_selection_still_caps_at_max_snapshot_reviews():
                for i in range(50)]
     html = professor_html(_base_profile(), reviews, "https://ratemyhusky.com/professors/x")
     assert html.count("<blockquote>") == MAX_SNAPSHOT_REVIEWS
+
+
+# ── Department hub pages (P2-1a) ──
+
+def _dept_detail(**over):
+    d = {
+        "name": "Computer Science", "slug": "computer-science",
+        "professorCount": 3, "avgRating": 3.87,
+        "professors": [
+            {"name": "Alice Smith", "slug": "alice-smith", "avgRating": 4.5,
+             "difficulty": 2.1, "wouldTakeAgainPct": 90, "totalRatings": 120},
+            {"name": "Bob Jones", "slug": "bob-jones", "avgRating": 3.8,
+             "difficulty": 3.0, "wouldTakeAgainPct": 70, "totalRatings": 45},
+            {"name": "Carol Lee", "slug": "carol-lee", "avgRating": 3.3,
+             "difficulty": 4.2, "wouldTakeAgainPct": None, "totalRatings": 10},
+        ],
+    }
+    d.update(over)
+    return d
+
+
+def test_department_html_title_h1_and_canonical():
+    canonical = "https://ratemyhusky.com/departments/computer-science"
+    html = department_html(_dept_detail(), canonical)
+    assert "<!doctype html>" in html.lower()
+    assert "<title>Computer Science Professors at Northeastern — Ratings &amp; Reviews | RateMyHusky</title>" in html
+    assert '<link rel="canonical" href="https://ratemyhusky.com/departments/computer-science"' in html
+    assert "<h1>Northeastern Computer Science — Professor Ratings & Reviews</h1>" in html
+
+
+def test_department_html_summary_mentions_count_avg_and_top_professor():
+    # The full generated summary (chatbot-quotable text) lives in the body;
+    # the <meta name="description"> is separately clipped for Bing's ~155
+    # char limit (same pattern as professor_html's verdict vs. summary).
+    html = department_html(_dept_detail(), "https://ratemyhusky.com/departments/computer-science")
+    body = html.split("<body>")[1]
+    assert (
+        "The Computer Science department at Northeastern University has 3 rated "
+        "professors averaging 3.87/5. The highest-rated is Alice Smith (4.5/5 from 120 reviews)."
+    ) in body
+
+
+def test_department_html_summary_omits_would_take_again_when_no_data():
+    # The table's "Would take again" column header is unrelated; only the
+    # generated summary sentence must skip the would-take-again clause.
+    detail = _dept_detail(professors=[
+        {"name": "Alice Smith", "slug": "alice-smith", "avgRating": 4.5,
+         "difficulty": 2.1, "wouldTakeAgainPct": None, "totalRatings": 120},
+    ])
+    html = department_html(detail, "https://ratemyhusky.com/departments/computer-science")
+    summary_para = html.split("</h1>")[1].split("</p>")[0]
+    assert "would take" not in summary_para.lower()
+
+
+def test_department_html_summary_includes_would_take_again_when_data_present():
+    html = department_html(_dept_detail(), "https://ratemyhusky.com/departments/computer-science")
+    body = html.split("<body>")[1]
+    assert "would take these professors again" in body
+
+
+def test_department_html_table_has_all_professors_with_correct_columns():
+    html = department_html(_dept_detail(), "https://ratemyhusky.com/departments/computer-science")
+    assert html.count("<tr>") == 4  # header + 3 professor rows
+    assert "<th>Name</th>" in html and "<th>Rating</th>" in html
+    assert "<th>Difficulty</th>" in html and "<th>Would take again</th>" in html
+    assert "<th>Reviews</th>" in html
+    assert '<a href="https://ratemyhusky.com/professors/alice-smith">Alice Smith</a>' in html
+    assert '<a href="https://ratemyhusky.com/professors/bob-jones">Bob Jones</a>' in html
+    assert '<a href="https://ratemyhusky.com/professors/carol-lee">Carol Lee</a>' in html
+    assert "<td>90%</td>" in html
+    assert "<td>4.5</td>" in html
+    assert "<td>2.1</td>" in html
+    assert "<td>120</td>" in html
+
+
+def test_department_html_table_no_truncation_with_many_professors():
+    profs = [{"name": f"Prof {i}", "slug": f"prof-{i}", "avgRating": 3.0,
+              "difficulty": 3.0, "wouldTakeAgainPct": 50, "totalRatings": 5}
+             for i in range(60)]
+    detail = _dept_detail(professors=profs, professorCount=60)
+    html = department_html(detail, "https://ratemyhusky.com/departments/computer-science")
+    assert html.count("<tr>") == 61  # header + all 60, no cap
+    assert '<a href="https://ratemyhusky.com/professors/prof-59">Prof 59</a>' in html
+
+
+def test_department_html_jsonld_itemlist_of_professors():
+    html = department_html(_dept_detail(), "https://ratemyhusky.com/departments/computer-science")
+    blocks = _extract_jsonld(html)
+    itemlist = next(b for b in blocks if b.get("@type") == "ItemList")
+    items = itemlist["itemListElement"]
+    assert len(items) == 3
+    assert items[0] == {"@type": "ListItem", "position": 1, "name": "Alice Smith",
+                        "url": "https://ratemyhusky.com/professors/alice-smith"}
+
+
+def test_department_html_jsonld_breadcrumb_list():
+    canonical = "https://ratemyhusky.com/departments/computer-science"
+    html = department_html(_dept_detail(), canonical)
+    blocks = _extract_jsonld(html)
+    breadcrumb = next(b for b in blocks if b.get("@type") == "BreadcrumbList")
+    items = breadcrumb["itemListElement"]
+    assert items[0] == {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://ratemyhusky.com/"}
+    assert items[1] == {"@type": "ListItem", "position": 2, "name": "Departments", "item": "https://ratemyhusky.com/departments"}
+    assert items[2] == {"@type": "ListItem", "position": 3, "name": "Computer Science", "item": canonical}
+
+
+def test_department_html_has_freshness_line():
+    html = department_html(_dept_detail(), "https://ratemyhusky.com/departments/computer-science")
+    month_year = date.today().strftime("%B %Y")
+    assert f"<p>Data updated {month_year}.</p>" in html
+
+
+def test_department_html_escapes_professor_names():
+    detail = _dept_detail(professors=[
+        {"name": "<b>Evil</b>", "slug": "evil", "avgRating": 3.0,
+         "difficulty": 3.0, "wouldTakeAgainPct": 50, "totalRatings": 5},
+    ])
+    html = department_html(detail, "https://ratemyhusky.com/departments/computer-science")
+    assert "<b>Evil</b>" not in html
+    assert "&lt;b&gt;Evil&lt;/b&gt;" in html
+
+
+def test_department_html_skips_professors_without_slug():
+    detail = _dept_detail(professors=[
+        {"name": "No Slug", "slug": None, "avgRating": 3.0,
+         "difficulty": 3.0, "wouldTakeAgainPct": 50, "totalRatings": 5},
+        {"name": "Alice Smith", "slug": "alice-smith", "avgRating": 4.5,
+         "difficulty": 2.1, "wouldTakeAgainPct": 90, "totalRatings": 120},
+    ])
+    html = department_html(detail, "https://ratemyhusky.com/departments/computer-science")
+    assert "No Slug" not in html
+    assert html.count("<tr>") == 2  # header + the one professor with a slug
+
+
+def test_departments_listing_title_h1_and_entries():
+    entries = [
+        {"slug": "computer-science", "name": "Computer Science", "professorCount": 214, "avgRating": 3.9},
+        {"slug": "economics", "name": "Economics", "professorCount": 40, "avgRating": 4.1},
+    ]
+    html = departments_listing_html(entries, 80, "https://ratemyhusky.com/departments")
+    assert "<title>Northeastern Departments — Professor Ratings &amp; Reviews | RateMyHusky</title>" in html
+    assert "<h1>Northeastern University Departments — Professor Ratings by Department</h1>" in html
+    assert "80" in html
+    assert '<a href="https://ratemyhusky.com/departments/computer-science">Computer Science</a>' in html
+    assert "214 professors" in html
+
+
+def test_departments_listing_lists_every_department_no_cap():
+    entries = [{"slug": f"dept-{i}", "name": f"Dept {i}", "professorCount": 5, "avgRating": 3.5}
+               for i in range(80)]
+    html = departments_listing_html(entries, 80, "https://ratemyhusky.com/departments")
+    assert html.count("<li>") == 80
+
+
+def test_departments_listing_jsonld_itemlist():
+    entries = [{"slug": "computer-science", "name": "Computer Science", "professorCount": 214, "avgRating": 3.9}]
+    block = _extract_jsonld(
+        departments_listing_html(entries, 1, "https://ratemyhusky.com/departments"))[0]
+    assert block["@type"] == "ItemList"
+    assert block["itemListElement"][0] == {
+        "@type": "ListItem", "position": 1, "name": "Computer Science",
+        "url": "https://ratemyhusky.com/departments/computer-science",
+    }
+
+
+def test_render_departments_listing_route(render_client):
+    resp = render_client.get("/render/departments")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "<h1>Northeastern University Departments — Professor Ratings by Department</h1>" in body
+    assert resp.headers["Cache-Control"] == "public, max-age=3600, s-maxage=86400"
+
+
+def test_render_department_route_returns_html(render_client):
+    resp = render_client.get("/render/departments/computer-science")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "<h1>Northeastern Computer Science — Professor Ratings & Reviews</h1>" in body
+    assert resp.headers["Cache-Control"] == "public, max-age=3600, s-maxage=86400"
+
+
+def test_render_department_missing_is_404_noindex(render_client):
+    resp = render_client.get("/render/departments/missing")
+    assert resp.status_code == 404
+    assert '<meta name="robots" content="noindex">' in resp.get_data(as_text=True)
+
+
+def test_department_html_meta_description_within_limit_even_with_long_name():
+    detail = _dept_detail(
+        name="Interdisciplinary Engineering and Public Policy Studies and Advanced Robotics",
+    )
+    html = department_html(detail, "https://ratemyhusky.com/departments/x")
+    desc = _meta_description(html)
+    assert len(desc) <= MAX_DESCRIPTION + 1
+
+
+def test_department_html_handles_zero_professors_without_crashing():
+    detail = _dept_detail(professors=[], professorCount=0, avgRating=None)
+    html = department_html(detail, "https://ratemyhusky.com/departments/computer-science")
+    assert "<h1>" in html
+    assert html.count("<tr>") == 1  # header row only, no professor rows
+    body = html.split("</h1>")[1].split("</p>")[0]
+    assert "highest-rated" not in body

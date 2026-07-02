@@ -22,6 +22,7 @@ const STATIC_ROUTES = [
   { path: '/professors', priority: '0.9', changefreq: 'daily' },
   { path: '/courses', priority: '0.9', changefreq: 'daily' },
   { path: '/compare', priority: '0.5', changefreq: 'weekly' },
+  { path: '/departments', priority: '0.7', changefreq: 'weekly' },
 ];
 
 async function fetchAll(endpoint, key) {
@@ -79,6 +80,16 @@ async function main() {
     }
   } catch (e) {
     console.warn(`[sitemap] could not fetch courses: ${e.message}`);
+  }
+
+  try {
+    const departments = await fetchAll('departments/hub', 'departments');
+    for (const d of departments) {
+      if (!d.slug) continue;
+      urls.push(xmlUrl({ loc: `${SITE}/departments/${esc(d.slug)}`, changefreq: 'weekly', priority: '0.6', lastmod: today }));
+    }
+  } catch (e) {
+    console.warn(`[sitemap] could not fetch departments: ${e.message}`);
   }
 
   if (profCount === 0 && courseCount === 0) {

@@ -1475,6 +1475,98 @@ def departments():
     return jsonify(result)
 
 
+def department_slug(name):
+    """Deterministic, reversible department slug: lowercase, '&' -> 'and',
+    any run of non-alphanumerics -> single '-', trim leading/trailing '-'."""
+    s = name.lower().replace("&", "and")
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+    return s
+
+
+def _department_hub_map():
+    """slug -> {name, professorCount, avgRating} for every department with
+    >=1 rated professor (same inclusion rule as professors_catalog), built
+    from a single grouped query. Cached like the other catalog lookups.
+    Collisions (two department names slugging to the same value) keep the
+    first-seen entry and drop the rest."""
+    cached = cache_get("dept_hub_map")
+    if cached is not None:
+        return cached
+    rows = query("""
+        SELECT department, COUNT(*) as cnt, AVG(avg_rating) as avg
+        FROM professors_catalog
+        WHERE avg_rating IS NOT NULL AND department IS NOT NULL AND department != ''
+        GROUP BY department
+    """)
+    BAD_DEPTS = {"Computer amp Informational Tech.", "Computer  Informational Tech.", "Counseling amp Educational Psych", "Counseling  Educational Psych"}
+    by_slug = {}
+    for r in rows:
+        name = r["department"]
+        if not name or name in BAD_DEPTS:
+            continue
+        slug = department_slug(name)
+        if slug in by_slug:
+            continue  # collision: keep the first-seen department for this slug
+        by_slug[slug] = {
+            "slug": slug,
+            "name": name,
+            "professorCount": r["cnt"],
+            "avgRating": round(r["avg"], 2) if r["avg"] is not None else None,
+        }
+    cache_set("dept_hub_map", by_slug)
+    return by_slug
+
+
+@app.route("/api/departments/hub")
+def departments_hub():
+    cache_key = "depts_hub_list"
+    cached = cache_get(cache_key)
+    if cached:
+        return jsonify(cached)
+    by_slug = _department_hub_map()
+    entries = sorted(by_slug.values(), key=lambda d: d["professorCount"], reverse=True)
+    result = {"departments": entries, "total": len(entries)}
+    cache_set(cache_key, result)
+    return jsonify(result)
+
+
+@app.route("/api/departments/<slug>")
+def department_hub_detail(slug):
+    cache_key = f"dept_hub:{slug}"
+    cached = cache_get(cache_key)
+    if cached:
+        return jsonify(cached)
+    by_slug = _department_hub_map()
+    entry = by_slug.get(slug)
+    if not entry:
+        return jsonify({"error": "Department not found"}), 404
+
+    rows = query("""
+        SELECT name, slug, avg_rating, difficulty, would_take_again_pct, total_reviews
+        FROM professors_catalog
+        WHERE department = %s AND avg_rating IS NOT NULL
+        ORDER BY avg_rating DESC
+    """, (entry["name"],))
+    professors = [{
+        "name": r["name"],
+        "slug": r["slug"],
+        "avgRating": round(r["avg_rating"], 2) if r["avg_rating"] is not None else None,
+        "difficulty": round(r["difficulty"], 2) if r["difficulty"] is not None else None,
+        "wouldTakeAgainPct": round(r["would_take_again_pct"], 1) if r["would_take_again_pct"] is not None else None,
+        "totalRatings": r["total_reviews"],
+    } for r in rows]
+
+    result = {
+        "name": entry["name"],
+        "slug": entry["slug"],
+        "professorCount": entry["professorCount"],
+        "avgRating": entry["avgRating"],
+        "professors": professors,
+    }
+    cache_set(cache_key, result)
+    return jsonify(result)
+
+
 @app.route("/api/professors-catalog")
 def professors_catalog():
     q = normalize_name(request.args.get("q", ""))
