@@ -50,8 +50,13 @@ CREATE TABLE IF NOT EXISTS evidence_embeddings (
     body_sha      TEXT,
     embedded_at   TIMESTAMPTZ DEFAULT now()
 );
-CREATE VECTOR INDEX IF NOT EXISTS ev_embed_idx ON evidence_embeddings (embedding);
 """
+# NO vector index on evidence_embeddings — deliberate. Retrieval is entity-scoped (filter by
+# ev_prof/ev_course, then brute-force cosine over that entity's rows; EXPLAIN-verified lookup
+# join), so a global C-SPANN index buys nothing AND is a write-contention hotspot: its backfill
+# serialization-killed both the embedding backfill (2026-06-30) and a --build-evidence run
+# (2026-07-02, index accidentally re-created by this DDL after being dropped live). Recreate
+# only if a future EXPLAIN shows a query that actually needs it.
 
 def all_ddl():
     return EVIDENCE_DDL
@@ -214,6 +219,7 @@ def build_trace_rows(query_fn) -> list:
          AND tc.tc_term_id = c.term_id
         JOIN professors_catalog p ON p.name_key = c.name_key
         WHERE tc.comment IS NOT NULL AND tc.comment <> ''
+        ORDER BY tc.id
     """, ())
     seen, out = set(), []
     for r in rows:
@@ -245,10 +251,16 @@ def upsert_evidence(conn, rows, batch=1000):
         VALUES %s
         ON CONFLICT (source, source_ref, professor_slug, course_code)
         DO UPDATE SET
-          body      = excluded.body,
-          body_tsv  = excluded.body_tsv,
-          body_sha  = excluded.body_sha,
-          flagged   = excluded.flagged
+          body         = excluded.body,
+          body_tsv     = excluded.body_tsv,
+          body_sha     = excluded.body_sha,
+          flagged      = excluded.flagged,
+          sentiment    = excluded.sentiment,
+          reddit_score = excluded.reddit_score,
+          permalink    = excluded.permalink,
+          created_utc  = excluded.created_utc,
+          rmp_meta     = excluded.rmp_meta,
+          subreddit    = excluded.subreddit
     """
     template = "(%(source)s, %(source_ref)s, %(professor_slug)s, %(course_code)s, %(body)s, to_tsvector('english', %(tsv_src)s), %(body_sha)s, %(sentiment)s, %(reddit_score)s, %(permalink)s, %(subreddit)s, %(created_utc)s, %(rmp_meta)s, %(flagged)s)"
 
@@ -290,6 +302,43 @@ def upsert_evidence(conn, rows, batch=1000):
         total += len(chunk)
     return total
 
+def prune_evidence(conn, source, fresh_refs, batch=1000):
+    """Delete evidence rows (and their embeddings) for `source` whose source_ref is not in
+    fresh_refs — cleans up rows orphaned by a Reddit re-score or FP-mention purge. Computes the
+    stale refs (in DB, not in fresh_refs) up front, then batches the DELETEs over just those stale
+    refs so a later batch's rows are never wiped by an earlier batch's NOT-IN scope; deletes
+    embeddings first so no orphan vectors remain."""
+    fresh_set = set(fresh_refs)
+    with conn.cursor() as cur:
+        cur.execute("SELECT source_ref FROM evidence WHERE source = %s", (source,))
+        db_refs = [r[0] for r in cur.fetchall()]
+    stale = [ref for ref in db_refs if ref not in fresh_set]
+
+    deleted = 0
+    for start in range(0, len(stale), batch):
+        chunk = stale[start:start + batch]
+        for attempt in range(6):
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "DELETE FROM evidence_embeddings WHERE evidence_id IN "
+                        "(SELECT id FROM evidence WHERE source = %s AND source_ref = ANY(%s))",
+                        (source, chunk),
+                    )
+                    cur.execute(
+                        "DELETE FROM evidence WHERE source = %s AND source_ref = ANY(%s)",
+                        (source, chunk),
+                    )
+                    deleted += cur.rowcount
+                conn.commit()
+                break
+            except psycopg2.errors.SerializationFailure:
+                conn.rollback()
+                if attempt == 5:
+                    raise
+                time.sleep(0.5 * (2 ** attempt))
+    return deleted
+
 def selftest():
     fails = []
     def check(label, cond):
@@ -314,7 +363,8 @@ def selftest():
     check("btree index on course_code", "ev_course" in ddl)
     check("embeddings VECTOR(384)", "VECTOR(384)" in ddl)
     check("embeddings model_version", "model_version" in ddl)
-    check("vector index created", "ev_embed_idx" in ddl)
+    check("NO global vector index (entity-scoped brute-force by design; backfill contention)",
+          "ev_embed_idx" not in ddl and "VECTOR INDEX" not in ddl)
 
     # ── norm_code ──
     check("norm_code uppercases + strips space", norm_code("cs 3500") == "CS3500")
@@ -384,6 +434,122 @@ def selftest():
     check("trace drops n/a + dedupes (3 in -> 1 out)", len(tr) == 1)
     check("trace sentiment is None", tr[0]["sentiment"] is None)
 
+    # ── Issue 23: dedupe representative is deterministic regardless of SELECT order ──
+    def trace_q_order_a(sql, params=None):
+        if "trace_comments" in sql:
+            return [
+                {"id": "t1", "comment": "The instructor explained recursion exceptionally well",
+                 "name_key": "olin guha", "course_code": "CS3500", "professor_slug": "guha-prof"},
+                {"id": "t3", "comment": "The instructor explained recursion exceptionally well",
+                 "name_key": "olin guha", "course_code": "CS3500", "professor_slug": "guha-prof"},
+            ]
+        return []
+    def trace_q_order_b(sql, params=None):
+        if "trace_comments" in sql:
+            return sorted(trace_q_order_a(sql, params), key=lambda r: r["id"])
+        return []
+    trace_sql_holder = []
+    def trace_q_capture_sql(sql, params=None):
+        trace_sql_holder.append(sql)
+        return []
+    build_trace_rows(trace_q_capture_sql)
+    check("trace SELECT orders by tc.id (deterministic dedupe representative)",
+          "ORDER BY tc.id" in trace_sql_holder[0])
+    # Because the SQL orders by tc.id, the rows dedupe sees are always in id order regardless of
+    # any unordered re-run of the same query — simulate that guarantee by feeding both an
+    # already-sorted list (as the real ORDER BY would produce) from two independently-run mocks.
+    tr_a = build_trace_rows(trace_q_order_a)
+    tr_b = build_trace_rows(trace_q_order_b)
+    check("dedupe keeps first-seen (lowest id) row consistently once query is ordered by tc.id",
+          tr_a[0]["source_ref"] == tr_b[0]["source_ref"] == "t1")
+
+    # ── Issue 24: upsert refreshes mutable metadata columns, not just body/flagged ──
+    upsert_sql_holder = []
+    class _FakeCursor:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, sql, params=None): upsert_sql_holder.append(sql); self.rowcount = 0
+    class _FakeConn:
+        def cursor(self, *a, **k): return _FakeCursor()
+        def commit(self): pass
+        def rollback(self): pass
+    def _fake_execute_values(cur, sql, values, template=None):
+        upsert_sql_holder.append(sql)
+    import psycopg2.extras as _pge
+    _saved = _pge.execute_values
+    _pge.execute_values = _fake_execute_values
+    try:
+        upsert_evidence(_FakeConn(), [_row("reddit", "r1", "guha-prof", None, "great professor and clear lectures")])
+    finally:
+        _pge.execute_values = _saved
+    upsert_sql = re.sub(r"\s+", " ", upsert_sql_holder[-1])
+    for col in ("sentiment", "reddit_score", "permalink", "created_utc", "rmp_meta", "subreddit"):
+        check(f"upsert SET-list refreshes {col}", f"{col} = excluded.{col}" in upsert_sql)
+
+    # ── Issue 24: prune_evidence deletes embeddings then evidence, scoped to source + stale refs ──
+    prune_sql_holder = []
+    class _FakePruneCursor:
+        def __init__(self): self.rowcount = 0
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, sql, params=None):
+            if "SELECT source_ref FROM evidence" in sql:
+                return
+            prune_sql_holder.append((sql, params))
+            self.rowcount = 2
+        def fetchall(self):
+            return [("keep1",), ("keep2",), ("stale1",)]
+    class _FakePruneConn:
+        def cursor(self, *a, **k): return _FakePruneCursor()
+        def commit(self): pass
+        def rollback(self): pass
+    deleted = prune_evidence(_FakePruneConn(), "reddit", ["keep1", "keep2"])
+    check("prune deletes embeddings before evidence", "evidence_embeddings" in prune_sql_holder[0][0])
+    check("prune scopes DELETE to source + stale refs only",
+          prune_sql_holder[1][1][0] == "reddit" and prune_sql_holder[1][1][1] == ["stale1"]
+          and "source_ref = ANY" in prune_sql_holder[1][0] and "NOT" not in prune_sql_holder[1][0])
+    check("prune returns deleted count from cursor.rowcount", deleted == 2)
+
+    # ── Critical: prune must batch over STALE refs (DB minus fresh), not fresh refs — batching
+    # over fresh refs means the first chunk's NOT-IN DELETE wipes every fresh row whose ref is in
+    # a LATER chunk, destroying nearly the whole corpus once there's more than one batch. ──
+    prune_multi_sql_holder = []
+    class _FakeMultiBatchCursor:
+        def __init__(self): self.rowcount = 0
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, sql, params=None):
+            if "SELECT source_ref FROM evidence" in sql:
+                self._select = True
+            else:
+                self._select = False
+                prune_multi_sql_holder.append((sql, params))
+            self.rowcount = 1
+        def fetchall(self):
+            # DB holds refs spanning MORE than one batch (batch=2): a,b,c,d are fresh; stale1/
+            # stale2/stale3 are stale and span 2 batches of stale refs (2 + 1).
+            return [("a",), ("b",), ("c",), ("d",), ("stale1",), ("stale2",), ("stale3",)]
+    class _FakeMultiBatchConn:
+        def cursor(self, *a, **k): return _FakeMultiBatchCursor()
+        def commit(self): pass
+        def rollback(self): pass
+    fresh_refs_multi = ["a", "b", "c", "d"]
+    deleted_multi = prune_evidence(_FakeMultiBatchConn(), "trace", fresh_refs_multi, batch=2)
+    all_delete_params = [p for _, p in prune_multi_sql_holder]
+    all_chunk_refs = [ref for _source, chunk in all_delete_params for ref in chunk]
+    check("prune (multi-batch) never puts a fresh ref in any DELETE param",
+          not any(ref in fresh_refs_multi for ref in all_chunk_refs))
+    check("prune (multi-batch) DELETE params only ever contain stale refs",
+          set(all_chunk_refs) == {"stale1", "stale2", "stale3"})
+    check("prune (multi-batch) issues 2 DELETEs per stale chunk, 2 stale chunks (4 total)",
+          len(prune_multi_sql_holder) == 4)
+    check("prune (multi-batch) deletes embeddings before evidence within each stale chunk",
+          "evidence_embeddings" in prune_multi_sql_holder[0][0]
+          and "evidence_embeddings" not in prune_multi_sql_holder[1][0]
+          and "evidence_embeddings" in prune_multi_sql_holder[2][0]
+          and "evidence_embeddings" not in prune_multi_sql_holder[3][0])
+    check("prune (multi-batch) returns deleted count summed across stale chunks", deleted_multi == 2)
+
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0
 
@@ -391,6 +557,9 @@ def main():
     parser = argparse.ArgumentParser(description="Build evidence corpus in CockroachDB")
     parser.add_argument("--selftest", action="store_true", help="Run offline DDL checks")
     parser.add_argument("--build-evidence", action="store_true", help="Populate evidence from all sources")
+    parser.add_argument("--prune", action="store_true",
+                         help="After building, delete evidence rows (+ their embeddings) whose "
+                              "source_ref is no longer produced by the build (requires --build-evidence)")
     args = parser.parse_args()
 
     if args.selftest:
@@ -406,13 +575,19 @@ def main():
                 cur.execute(sql, params or ())
                 return cur.fetchall()
 
-        all_rows = (
-            build_reddit_rows(query_fn) +
-            build_rmp_rows(query_fn) +
-            build_trace_rows(query_fn)
-        )
+        reddit_rows = build_reddit_rows(query_fn)
+        rmp_rows = build_rmp_rows(query_fn)
+        trace_rows = build_trace_rows(query_fn)
+        all_rows = reddit_rows + rmp_rows + trace_rows
         n = upsert_evidence(conn, all_rows)
         print(f"Upserted {n} evidence rows")
+
+        if args.prune:
+            for source, rows in (("reddit", reddit_rows), ("rmp", rmp_rows), ("trace", trace_rows)):
+                fresh_refs = [r["source_ref"] for r in rows]
+                deleted = prune_evidence(conn, source, fresh_refs)
+                print(f"Pruned {deleted} stale {source} evidence rows")
+
         conn.close()
         sys.exit(0)
 

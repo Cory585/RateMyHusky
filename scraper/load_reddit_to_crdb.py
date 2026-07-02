@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS ask_log (
 );
 CREATE INDEX IF NOT EXISTS al_session ON ask_log (session_token, created_at DESC);
 CREATE INDEX IF NOT EXISTS al_status ON ask_log (result_status, created_at DESC);
+CREATE INDEX IF NOT EXISTS al_created ON ask_log (created_at DESC);
 
 CREATE TABLE IF NOT EXISTS usage_alerts (
     alert_date  DATE NOT NULL,
