@@ -1416,6 +1416,9 @@ def professor_full(slug):
                                   is_authed=False)
         if profile_data is None:
             return jsonify({"error": "Professor not found"}), 404
+        # Same colleagues field the authed branch gets via professor_profile —
+        # served from the per-department cache, no per-request DB cost.
+        profile_data["colleagues"] = _department_colleagues(profile_data["department"], slug)
     else:
         profile_resp = professor_profile(slug)
         if isinstance(profile_resp, tuple):
