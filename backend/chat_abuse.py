@@ -20,10 +20,12 @@ def strike_count(session_token, query_one_fn):
     return (row or {}).get("c", 0) or 0
 
 def daily_question_count(session_token, query_one_fn):
+    # Issue 26: sargable predicate (created_at >= date_trunc(...)) instead of wrapping
+    # the column, so this can use an index instead of scanning the whole history.
     row = query_one_fn(
         "SELECT count(*) AS c FROM ask_log "
         "WHERE session_token = %s AND mode = 'question' "
-        "AND date_trunc('day', created_at) = current_date",
+        "AND created_at >= date_trunc('day', now())",
         (session_token,))
     return (row or {}).get("c", 0) or 0
 
@@ -82,6 +84,17 @@ def selftest():
 
     r6 = abuse_check("s", make_q(6, 0))
     check("6th strike banned with appeal", r6["banned"] is True and "feedback" in r6["message"].lower())
+
+    # Issue 26: daily_question_count predicate must be sargable (no date_trunc(created_at))
+    seen_daily = {}
+    def q_daily(sql, params=None):
+        seen_daily["sql"] = sql
+        return {"c": 1}
+    daily_question_count("s", q_daily)
+    check("daily_question_count has no date_trunc(created_at)",
+          "date_trunc('day', created_at)" not in seen_daily["sql"])
+    check("daily_question_count uses sargable created_at >= date_trunc",
+          "created_at >= date_trunc('day', now())" in seen_daily["sql"])
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0

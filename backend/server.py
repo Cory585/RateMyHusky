@@ -430,11 +430,25 @@ def query_one(sql, params=None):
 def _chat_write(sql, params=None):
     """Write helper for the question path (ask_log INSERTs): execute + commit, never fetch.
     The read-only query()/query_one() call fetchall(), which raises on a non-RETURNING INSERT;
-    and the pool is not autocommit, so writes must commit explicitly."""
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(sql, params or ())
-    conn.commit()
+    and the pool is not autocommit, so writes must commit explicitly.
+    A logging write must never fail the request that already generated a successful answer:
+    retry once on a stale connection (mirrors query()), then swallow and log any further error."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(sql, params or ())
+        conn.commit()
+    except (psycopg2.InterfaceError, psycopg2.OperationalError):
+        try:
+            _discard_db_conn()
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute(sql, params or ())
+            conn.commit()
+        except Exception as e:
+            print(f"_chat_write: log write failed after retry, dropping: {e}")
+    except Exception as e:
+        print(f"_chat_write: log write failed, dropping: {e}")
 
 def _chat_write_rc(sql, params=None):
     """Like _chat_write but returns the executed statement's rowcount."""
