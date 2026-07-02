@@ -30,6 +30,20 @@ SYSTEM_PROMPT = (
     " When several entities are provided, briefly address EACH one."
 )
 
+COURSE_LIST_SYSTEM_PROMPT = (
+    "You list Northeastern University courses matching a topic. Given the topic and the "
+    "matched courses, write 1-2 plain sentences naming the most relevant ones. Use ONLY the "
+    "provided courses. Mention a course's rating ONLY if a rating is given for it. "
+    "No opinions, no citations, no course you were not given."
+)
+
+COURSE_RANKING_SYSTEM_PROMPT = (
+    "You report a ranking of Northeastern University courses. The courses are given already "
+    "sorted best-first for the asked metric, each with its value. Write 1-2 plain sentences "
+    "naming the top course (and a couple of runners-up) with their values. Use ONLY the "
+    "provided courses and values; do not invent any. No opinions, no citations."
+)
+
 _ZERO_WIDTH = dict.fromkeys(map(ord, "​‌‍﻿"), None)
 
 def _sanitize(text):
@@ -44,6 +58,14 @@ def _datamark(text):
     # interleave the marker at every word boundary (Microsoft spotlighting) so an
     # injected sentence can't sit in an unmarked span the model reads as a command
     return DATAMARK + DATAMARK.join(text.split(" "))
+
+def _provenance(c):
+    src = c.get("source")
+    if src == "rmp":
+        return "(RateMyProfessor review)"
+    if src == "trace":
+        return "(TRACE course survey)"
+    return f"(r/{c.get('subreddit')}, {c.get('score')} upvotes)"
 
 def _fmt(v, suffix=""):
     return f"{v}{suffix}" if v is not None and v != "" else "unknown"
@@ -83,7 +105,7 @@ def _facts_lines(facts):
 def build_user_message(question, facts, comments):
     numbered = []
     for i, c in enumerate(comments, 1):
-        prov = f"(r/{c.get('subreddit')}, {c.get('score')} upvotes)"
+        prov = _provenance(c)
         numbered.append(f"[{i}] {prov}: {_datamark(_sanitize(c.get('body')))}")
     return (
         f"<question>{_sanitize(question)}</question>\n\n"
@@ -101,7 +123,7 @@ def build_multi_user_message(question, blocks):
         numbered = []
         for c in blk.get("comments", []):
             n += 1
-            prov = f"(r/{c.get('subreddit')}, {c.get('score')} upvotes)"
+            prov = _provenance(c)
             numbered.append(f"[{n}] {prov}: {_datamark(_sanitize(c.get('body')))}")
         sections.append(
             f"<entity_facts entity=\"{_sanitize(name)}\">\n"
@@ -114,15 +136,31 @@ def build_multi_user_message(question, blocks):
         + "\n\nAnswer the question using ONLY the provided evidence. "
         "Briefly cover EACH named entity; cite [N] for any qualitative claim.")
 
+# The model sometimes emits citations with fullwidth/CJK brackets (【1】, ［1］) instead of
+# ASCII [1]. Both the output validator (regex \[(\d+)\]) and the frontend source filter
+# (answer.includes("[N]")) only recognize ASCII brackets, so an un-normalized 【1】 leaves the
+# citation visible in the text but renders NO source. Normalize bracket variants to ASCII.
+_CITATION_OPEN = str.maketrans({"【": "[", "［": "[", "〔": "["})
+_CITATION_CLOSE = str.maketrans({"】": "]", "］": "]", "〕": "]"})
+
+def _normalize_citations(text):
+    return (text or "").translate(_CITATION_OPEN).translate(_CITATION_CLOSE)
+
 def _strip_datamark(text):
     """Remove the spotlighting marker the model sometimes echoes from the datamarked
-    Reddit text. ▁ renders as a thin/odd space, so drop it and collapse the spacing."""
-    return re.sub(r"\s+", " ", (text or "").replace(DATAMARK, " ")).strip()
+    Reddit text. ▁ renders as a thin/odd space, so drop it and collapse the spacing. Also
+    normalize fullwidth citation brackets (【1】) to ASCII ([1]) so sources resolve."""
+    cleaned = _normalize_citations((text or "").replace(DATAMARK, " "))
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 def generate(question, retrieval, adapter, max_tokens=250):
     # Accept the old single-dict shape OR a list of per-entity blocks.
     blocks = retrieval if isinstance(retrieval, list) else [retrieval]
     multi = len(blocks) > 1
+    # A multi-entity comparison must cover BOTH entities' facts + Reddit, so 250 tokens
+    # truncates it mid-sentence (worse on the reasoning synth model, whose trace also eats the
+    # budget). Scale the ceiling per entity so the answer can finish.
+    out_tokens = max(max_tokens, 220 * len(blocks)) if multi else max_tokens
     # cap comments per entity when answering about several, to bound prompt size
     norm = []
     for blk in blocks:
@@ -137,7 +175,7 @@ def generate(question, retrieval, adapter, max_tokens=250):
         b = norm[0]
         user = build_user_message(question, b.get("facts", {}), b.get("comments", []))
 
-    out = adapter.synthesize(SYSTEM_PROMPT, user, max_tokens=max_tokens)
+    out = adapter.synthesize(SYSTEM_PROMPT, user, max_tokens=out_tokens)
 
     # source_entities[i] and sources_comments[i] both describe global source i+1, in the
     # exact order the prompt numbered them (over the capped `norm` comments) — so a citation's
@@ -153,6 +191,46 @@ def generate(question, retrieval, adapter, max_tokens=250):
     return {"text": _strip_datamark(out["text"]), "tokens_used": out["tokens_used"],
             "num_sources": len(source_entities), "source_entities": source_entities,
             "sources_comments": sources_comments}
+
+def generate_course_list(topic, courses, adapter, max_tokens=160):
+    lines = []
+    for c in courses:
+        line = f"{c.get('code')} {_sanitize(c.get('name') or '')}"
+        dept = c.get("department")
+        if dept:
+            line += f" ({_sanitize(dept)})"
+        if c.get("rating") is not None:
+            line += f" · {c['rating']}/5"
+        lines.append("- " + line)
+    user = (
+        f"<topic>{_sanitize(topic)}</topic>\n\n"
+        f"<matched_courses>\n" + "\n".join(lines) + "\n</matched_courses>\n\n"
+        "Write 1-2 sentences naming the most relevant matches."
+    )
+    out = adapter.synthesize(COURSE_LIST_SYSTEM_PROMPT, user, max_tokens=max_tokens)
+    return {"text": _strip_datamark(out["text"]), "tokens_used": out["tokens_used"]}
+
+_METRIC_LABEL = {"rating": "overall rating", "difficulty": "difficulty", "hours": "hours/week"}
+
+def generate_course_ranking(subject, metric, direction, courses, adapter, max_tokens=180):
+    label = _METRIC_LABEL.get(metric, metric)
+    superlative = {"rating": "highest-rated", "difficulty": "hardest" if direction == "desc" else "easiest",
+                   "hours": "most work" if direction == "desc" else "least work"}.get(metric, "top")
+    lines = []
+    for c in courses:
+        nm = _sanitize(c.get("name") or "")
+        lines.append(f"- {c.get('code')} {nm}: {label} {c.get('value')}"
+                     + (f"/5" if metric in ("rating", "difficulty") else "")
+                     + f" (n={c.get('responses')})")
+    user = (
+        f"<query_subject>{_sanitize(subject)}</query_subject>\n"
+        f"<asking_for>the {superlative} {subject} course by {label}</asking_for>\n\n"
+        f"<ranked_courses>\n" + "\n".join(lines) + "\n</ranked_courses>\n\n"
+        "Write 1-2 sentences naming the top course and a couple of runners-up with their values."
+    )
+    out = adapter.synthesize(COURSE_RANKING_SYSTEM_PROMPT, user, max_tokens=max_tokens)
+    return {"text": _strip_datamark(out["text"]), "tokens_used": out["tokens_used"]}
+
 
 def selftest():
     fails = []
@@ -222,6 +300,19 @@ def selftest():
     check("generate returns text + tokens + count",
           g["text"].endswith("[1].") and g["tokens_used"] == 60 and g["num_sources"] == 2)
 
+    # provenance is source-aware
+    check("reddit provenance shows subreddit + upvotes",
+          _provenance({"source": "reddit", "subreddit": "NEU", "score": 12}) == "(r/NEU, 12 upvotes)")
+    check("rmp provenance labeled", _provenance({"source": "rmp"}) == "(RateMyProfessor review)")
+    check("trace provenance labeled", _provenance({"source": "trace"}) == "(TRACE course survey)")
+    # build_user_message uses source-aware provenance for a non-reddit source
+    um2 = build_user_message("q", facts, [{"source": "trace", "body": "clear lectures"}])
+    check("user msg labels TRACE source", "(TRACE course survey)" in um2)
+    # generate carries source through on sources_comments
+    g_src = generate("q", {"facts": facts, "comments": [{"source": "rmp", "body": "fair"}],
+                            "professor_slug": "guha-prof", "course_code": None}, FakeAdapter())
+    check("generate keeps source on sources_comments", g_src["sources_comments"][0]["source"] == "rmp")
+
     # The LLM sometimes echoes the datamarked Reddit text verbatim, leaking the ▁ marker
     # (which renders as thin/odd spaces) into the answer. generate() must strip it.
     class EchoAdapter:
@@ -231,6 +322,15 @@ def selftest():
     check("generate strips datamark from answer", DATAMARK not in ge["text"])
     check("generate restores normal spacing after stripping",
           ge["text"] == "Students say hard but fair and the course is tough [1].")
+
+    # The model sometimes cites with fullwidth/CJK brackets (【1】) instead of ASCII [1];
+    # generate() must normalize them so the validator and the frontend source filter resolve.
+    class FullwidthCiteAdapter:
+        def synthesize(self, system, user, max_tokens=250):
+            return {"text": "Dedicated and kind【1】, eager for DS4400【4】.", "tokens_used": 12}
+    gw = generate("q", {"facts": facts, "comments": comments}, FullwidthCiteAdapter())
+    check("generate normalizes fullwidth citation brackets to ASCII",
+          "[1]" in gw["text"] and "[4]" in gw["text"] and "【" not in gw["text"] and "】" not in gw["text"])
 
     # ── multi-entity: two blocks, global numbering, per-source entity tags ──
     facts_b = {"kind": "professor", "name": "John Rachlin", "department": "Khoury",
@@ -249,11 +349,17 @@ def selftest():
     # global numbering continues across blocks: block 1 has [1][2], block 2 has [3]
     check("multi msg numbers globally", "[1]" in mm and "[2]" in mm and "[3]" in mm)
 
+    seen_tokens = {}
     class MultiAdapter:
         def synthesize(self, system, user, max_tokens=250):
+            seen_tokens["mt"] = max_tokens
             return {"text": "Guha is fair [1]; Rachlin is tough [3].", "tokens_used": 90}
     gm = generate("compare Guha and Rachlin", blocks, MultiAdapter())
     check("multi generate counts all sources", gm["num_sources"] == 3)
+    # a 2-entity comparison needs more room than the 250-token single-entity default, else it
+    # truncates mid-sentence; the budget must scale with entity count.
+    check("multi generate raises the token ceiling above the single-entity default",
+          seen_tokens["mt"] > 250)
     check("multi source_entities aligns to global index",
           gm["source_entities"][0]["professor_slug"] == "olin-guha"
           and gm["source_entities"][2]["professor_slug"] == "john-rachlin")
@@ -289,6 +395,50 @@ def selftest():
           all(se["professor_slug"] == "olin-guha" for se in gs["source_entities"]))
     check("single-block sources_comments == that block's comments, 1:1 with source_entities",
           gs["sources_comments"] == comments and len(gs["sources_comments"]) == gs["num_sources"])
+
+    # ── course-list summary ──
+    class CourseListAdapter:
+        def synthesize(self, system, user, max_tokens=250):
+            check("course-list uses its own system prompt", system == COURSE_LIST_SYSTEM_PROMPT)
+            check("course-list prompt names the topic", "database" in user.lower())
+            check("course-list prompt lists course codes", "CS3200" in user and "DS3000" in user)
+            return {"text": "NEU offers CS3200 Database Design and DS3000 Foundations of Data Science.", "tokens_used": 40}
+    cl = generate_course_list("database",
+            [{"code": "CS3200", "name": "Database Design", "department": "Khoury"},
+             {"code": "DS3000", "name": "Foundations of Data Science", "department": "Khoury"}],
+            CourseListAdapter())
+    check("course-list returns text + tokens", cl["text"].startswith("NEU offers") and cl["tokens_used"] == 40)
+    check("course-list answer has no [N] citations", "[1]" not in cl["text"])
+
+    # ratings appear in the prompt ONLY when a course carries a rating
+    captured_user = {}
+    class CapAdapter:
+        def synthesize(self, system, user, max_tokens=250):
+            captured_user["u"] = user
+            return {"text": "CS3200 (4.5/5) is the top database course.", "tokens_used": 30}
+    generate_course_list("database",
+        [{"code": "CS3200", "name": "Database Design", "department": "Khoury", "rating": 4.5}], CapAdapter())
+    check("rating shown in prompt when present", "4.5" in captured_user["u"])
+    captured_user.clear()
+    generate_course_list("database",
+        [{"code": "CS3200", "name": "Database Design", "department": "Khoury"}], CapAdapter())
+    check("no rating text in prompt when absent", "/5" not in captured_user["u"])
+
+    # ── course ranking summary ──
+    rank_user = {}
+    class RankAdapter:
+        def synthesize(self, system, user, max_tokens=250):
+            rank_user["u"] = user
+            check("ranking uses its own system prompt", system == COURSE_RANKING_SYSTEM_PROMPT)
+            return {"text": "CS3100 (4.45/5) is the highest-rated CS course, then CS2000 (4.40).", "tokens_used": 35}
+    cr = generate_course_ranking("CS", "rating", "desc",
+            [{"code": "CS3100", "name": "PDI 2", "department": "CS", "value": 4.45, "responses": 100},
+             {"code": "CS2000", "name": "Intro", "department": "CS", "value": 4.40, "responses": 200}],
+            RankAdapter())
+    check("ranking returns text + tokens", cr["text"].startswith("CS3100") and cr["tokens_used"] == 35)
+    check("ranking answer has no [N] citations", "[1]" not in cr["text"])
+    check("ranking prompt lists ranked courses with values", "CS3100" in rank_user["u"] and "4.45" in rank_user["u"])
+    check("ranking prompt states the superlative", "highest-rated" in rank_user["u"])
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0

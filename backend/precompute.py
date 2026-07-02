@@ -5,7 +5,7 @@ This runs on your local machine (needs pandas/numpy) so the deployed server does
 Usage: python precompute.py
 """
 
-import os, re, unicodedata
+import os, re, time, unicodedata
 from html import unescape
 import numpy as np
 import pandas as pd
@@ -15,9 +15,24 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-CRDB_URL = os.getenv("CRDB_DATABASE_URL")
+CRDB_URL = os.getenv("NEW_CRDB_DATABASE_URL") or os.getenv("CRDB_DATABASE_URL")
 if not CRDB_URL:
-    raise RuntimeError("CRDB_DATABASE_URL required in .env")
+    raise RuntimeError("NEW_CRDB_DATABASE_URL required in .env")
+
+
+def _connect(attempts=20):
+    """The local resolver flakes on *.cockroachlabs.cloud; retry on DNS failure."""
+    last = None
+    for i in range(1, attempts + 1):
+        try:
+            return psycopg2.connect(CRDB_URL, sslmode="require")
+        except psycopg2.OperationalError as e:
+            if "could not translate host name" not in str(e):
+                raise
+            last = str(e)
+            print(f"  DNS lookup flaked; retrying ({i}/{attempts})...")
+            time.sleep(3)
+    raise RuntimeError(f"Could not resolve CRDB host after {attempts} attempts.\n{last}")
 
 
 def normalize_name(name):
@@ -231,7 +246,7 @@ def chunk_insert(cur, sql, rows, page_size=5000):
 
 
 def main():
-    conn = psycopg2.connect(CRDB_URL, sslmode="require")
+    conn = _connect()
 
     # Read from local CSVs (much faster than downloading from CRDB)
     csv_dir = os.path.join(os.path.dirname(__file__), "Better_Scraper", "output_data")
@@ -629,7 +644,9 @@ def main():
             code TEXT PRIMARY KEY,
             name TEXT,
             department TEXT,
-            search_text TEXT
+            search_text TEXT,
+            avg_rating FLOAT,
+            num_responses INT
         )
     """)
     chunk_insert(cur, "INSERT INTO course_catalog (code, name, department, search_text) VALUES %s", course_rows)
@@ -649,7 +666,7 @@ def main():
 
     # Reconnect with fresh connection for the update phase
     conn.close()
-    conn = psycopg2.connect(CRDB_URL, sslmode="require")
+    conn = _connect()
     cur = conn.cursor()
     cur.execute("SET experimental_enable_temp_tables = 'on'")
 
@@ -716,7 +733,7 @@ def main():
     # 5. Add name_key to rmp_reviews (batch via temp table)
     print("Adding name_key to rmp_reviews...")
     conn.close()
-    conn = psycopg2.connect(CRDB_URL, sslmode="require")
+    conn = _connect()
     cur = conn.cursor()
     cur.execute("SET experimental_enable_temp_tables = 'on'")
 
@@ -757,7 +774,7 @@ def main():
     # 6. Fix trace_scores mean and add total_responses (single SQL statements)
     print("Fixing trace_scores mean and adding total_responses...")
     conn.close()
-    conn = psycopg2.connect(CRDB_URL, sslmode="require")
+    conn = _connect()
     cur = conn.cursor()
 
     try:
@@ -816,7 +833,7 @@ def main():
     # 7. Add parsed course_id, instructor_id, term_id columns to trace_comments
     print("Adding parsed ID columns to trace_comments...")
     conn.close()
-    conn = psycopg2.connect(CRDB_URL, sslmode="require")
+    conn = _connect()
     cur = conn.cursor()
     for col in ["tc_course_id", "tc_instructor_id", "tc_term_id"]:
         try:
@@ -872,6 +889,42 @@ def main():
 
     try:
         cur.execute("CREATE INDEX idx_tc_comment_ids ON trace_comments (tc_course_id, tc_instructor_id, tc_term_id)")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        cur = conn.cursor()
+    print("  Done")
+
+    # 8. Precompute course_catalog avg_rating (overall-question weighted mean).
+    # Depends on trace_courses.course_code (step 4b) and trace_scores.total_responses (step 6).
+    print("Precomputing course_catalog avg_rating...")
+    conn.close()
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE course_catalog cc SET
+            avg_rating = agg.avg_rating,
+            num_responses = agg.total_responses
+        FROM (
+            SELECT
+                tc.course_code,
+                SUM(CAST(ts.mean AS FLOAT) * CAST(ts.total_responses AS FLOAT))
+                    / NULLIF(SUM(CAST(ts.total_responses AS FLOAT)), 0) AS avg_rating,
+                SUM(ts.total_responses) AS total_responses
+            FROM trace_courses tc
+            JOIN trace_scores ts
+                ON tc.course_id = ts.course_id
+                AND tc.instructor_id = ts.instructor_id
+                AND tc.term_id = ts.term_id
+            WHERE LOWER(ts.question) LIKE '%%overall%%'
+              AND tc.course_code IS NOT NULL
+            GROUP BY tc.course_code
+        ) agg
+        WHERE cc.code = agg.course_code
+    """)
+    conn.commit()
+    try:
+        cur.execute("CREATE INDEX idx_cc_rating ON course_catalog (avg_rating)")
         conn.commit()
     except Exception:
         conn.rollback()

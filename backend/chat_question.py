@@ -62,6 +62,89 @@ def _safe_fallback(deps, q, banner=None):
         payload["banner"] = banner
     return payload
 
+def _handle_course_list(q, block, deps, _log, session_token, ip_hash):
+    topic = block.get("topic")
+    courses = block.get("courses", [])
+
+    cached = get_cached(q, [f"topic:{topic}"], deps.cache_get_fn)
+    if cached:
+        _log("ok")
+        _fire_usage_alert(deps)
+        return cached, 200
+
+    if global_budget_hit(deps.query_one_fn, deps.num_keys):
+        _log("rate_limited")
+        return _safe_fallback(deps, q, banner="Daily question limit reached. Showing keyword results."), 200
+    allowed, _ = session_allowed(session_token, deps.query_one_fn, deps.num_keys)
+    if not allowed:
+        _log("rate_limited")
+        return _safe_fallback(deps, q, banner="You've hit today's question limit. Showing keyword results."), 200
+    if not minute_capacity_ok(deps.query_one_fn, deps.num_keys):
+        _log("rate_limited")
+        return _safe_fallback(deps, q, banner="High demand right now. Showing keyword results."), 200
+
+    try:
+        gen = deps.generate_course_list_fn(topic, courses)
+    except LLMUnavailable:
+        _log("llm_error")
+        return _safe_fallback(deps, q, banner="AI generation failed. Showing keyword results."), 200
+
+    payload = {
+        "mode": "course_list", "answer": gen.get("text", ""), "topic": topic,
+        "courses": [{"code": c.get("code"), "name": c.get("name"),
+                     "department": c.get("department"), "rating": c.get("rating")} for c in courses],
+        "disclaimer": "AI-generated list of matching Northeastern courses; may be incomplete.",
+    }
+    set_cached(q, [f"topic:{topic}"], payload, deps.cache_set_fn)
+    _log("ok", retrieved_count=len(courses), answer_text=payload["answer"], tokens_used=gen.get("tokens_used", 0))
+    _fire_usage_alert(deps)
+    return payload, 200
+
+
+def _handle_course_ranking(q, block, deps, _log, session_token, ip_hash):
+    subject = block.get("subject"); metric = block.get("metric"); direction = block.get("direction")
+    courses = block.get("courses", [])
+    cache_key = block.get("entity_key") or f"rank:{subject}:{metric}"
+
+    cached = get_cached(q, [cache_key], deps.cache_get_fn)
+    if cached:
+        _log("ok")
+        _fire_usage_alert(deps)
+        return cached, 200
+
+    if global_budget_hit(deps.query_one_fn, deps.num_keys):
+        _log("rate_limited")
+        return _safe_fallback(deps, q, banner="Daily question limit reached. Showing keyword results."), 200
+    allowed, _ = session_allowed(session_token, deps.query_one_fn, deps.num_keys)
+    if not allowed:
+        _log("rate_limited")
+        return _safe_fallback(deps, q, banner="You've hit today's question limit. Showing keyword results."), 200
+    if not minute_capacity_ok(deps.query_one_fn, deps.num_keys):
+        _log("rate_limited")
+        return _safe_fallback(deps, q, banner="High demand right now. Showing keyword results."), 200
+
+    try:
+        gen = deps.generate_course_ranking_fn(subject, metric, direction, courses)
+    except LLMUnavailable:
+        _log("llm_error")
+        return _safe_fallback(deps, q, banner="AI generation failed. Showing keyword results."), 200
+
+    # Reuse the course_list frontend mode. Carry the metric value as `rating` ONLY when the
+    # metric is rating, so the frontend's ★ badge stays meaningful; for difficulty/hours the
+    # value lives in the summary prose.
+    payload = {
+        "mode": "course_list", "answer": gen.get("text", ""),
+        "topic": f"{subject} courses by {metric}",
+        "courses": [{"code": c.get("code"), "name": c.get("name"), "department": c.get("department"),
+                     "rating": c.get("value") if metric == "rating" else None} for c in courses],
+        "disclaimer": "AI-generated ranking of Northeastern courses by TRACE data; may be incomplete.",
+    }
+    set_cached(q, [cache_key], payload, deps.cache_set_fn)
+    _log("ok", retrieved_count=len(courses), answer_text=payload["answer"], tokens_used=gen.get("tokens_used", 0))
+    _fire_usage_alert(deps)
+    return payload, 200
+
+
 def handle_question(q, session_token, ip_hash, deps):
     t0 = time.monotonic()
 
@@ -125,8 +208,12 @@ def handle_question(q, session_token, ip_hash, deps):
                     "matches": [{"name": m["name"], "department": m.get("department", "")} for m in matches],
                 }, 200
 
-    # 5. Out-of-scope (on_topic but no entity named)
+    # 5. No entity named — first try a topic-course listing ("what database courses are there"),
+    # then fall back to out-of-scope.
     if not hints:
+        topic_block = deps.retrieve_fn(q, None)
+        if topic_block.get("kind") == "course_list":
+            return _handle_course_list(q, topic_block, deps, _log, session_token, ip_hash)
         _log("out_of_scope")
         payload = _safe_fallback(deps, q, banner="Try searching for a specific professor or course.")
         payload["mode"] = "out_of_scope"
@@ -152,6 +239,23 @@ def handle_question(q, session_token, ip_hash, deps):
     blocks = []
     for hint in hints:
         r = deps.retrieve_fn(q, hint)
+        # A superlative/ranking question ("which CS course has the highest rating") resolves to
+        # a ranked-course block regardless of the (often junk) hint; answer it directly.
+        if r.get("kind") == "course_ranking":
+            return _handle_course_ranking(q, r, deps, _log, session_token, ip_hash)
+        # A course named by title that matches several distinct courses → disambiguate
+        # (mirrors the professor name-collision flow); stop the whole question, no LLM.
+        if r.get("kind") == "course_disambiguation":
+            _log("ambiguous")
+            matches = r.get("matches", [])
+            listed = ", ".join(f"{m['code']} {m['name']}" for m in matches)
+            return {
+                "mode": "disambiguation",
+                "message": (f"Several courses match \"{hint}\": {listed}. "
+                            "Ask again using the course code."),
+                "matches": [{"name": f"{m['code']} {m['name']}", "department": m.get("department", "")}
+                            for m in matches],
+            }, 200
         if r.get("entity_key") or r.get("professor_slug"):
             blocks.append(r)
     if not blocks:
@@ -216,6 +320,7 @@ def handle_question(q, session_token, ip_hash, deps):
             "snippet": c.get("body", "")[:200],
             "permalink": c.get("permalink", ""),
             "subreddit": c.get("subreddit", ""),
+            "source": c.get("source"),
             "professor_slug": tag.get("professor_slug"),
             "course_code": tag.get("course_code"),
         })
@@ -230,9 +335,9 @@ def handle_question(q, session_token, ip_hash, deps):
         "entities": entities,
         "professor_slug": primary_slug,
         "course_code": blocks[0].get("course_code"),
-        "disclaimer": ("AI-generated summary of RateMyHusky ratings and Reddit discussion; "
-                       "may be inaccurate." if any_course else
-                       "AI-generated summary of Reddit discussion; may be inaccurate."),
+        "disclaimer": ("Responses are generated by AI and are based on the most relevant retrieved content "
+                       "available in our database at the time of your query. Data may become outdated. "
+                       "Always refer to the original sources for the most current information."),
     }
     set_cached(q, hints, answer_payload, deps.cache_set_fn)
     _log("ok", professor_slug=primary_slug, retrieved_count=total_comments,
@@ -274,6 +379,8 @@ def selftest():
             "source_entities": [{"professor_slug": "guha-prof", "course_code": None}] * 5}
         def usage_alert_fn(self):
             self.usage_alert_calls.append(1)
+        def generate_course_list_fn(self, topic, courses): return {"text": f"Courses about {topic}.", "tokens_used": 20}
+        def generate_course_ranking_fn(self, subject, metric, direction, courses): return {"text": f"Top {subject} by {metric}.", "tokens_used": 22}
     Deps.log_fn = staticmethod(_outer_log_fn)
 
     # kill switch
@@ -430,8 +537,8 @@ def selftest():
         return {"text": "Guha fair [1]; Rachlin tough [6].", "tokens_used": 80, "num_sources": 8,
                 "source_entities": [{"professor_slug": "guha-prof", "course_code": None}] * 5
                                    + [{"professor_slug": "rachlin-prof", "course_code": None}] * 3,
-                "sources_comments": [{"body": f"g{i}", "permalink": f"/g/{i}", "subreddit": "NEU"} for i in range(5)]
-                                   + [{"body": f"r{i}", "permalink": f"/r/{i}", "subreddit": "NEU"} for i in range(3)]}
+                "sources_comments": [{"body": f"g{i}", "permalink": f"/g/{i}", "subreddit": "NEU", "source": "reddit"} for i in range(5)]
+                                   + [{"body": f"r{i}", "permalink": f"/r/{i}", "subreddit": "NEU", "source": "trace"} for i in range(3)]}
     d_multi.generate_fn = types.MethodType(_gen_multi, d_multi)
     payload, code = handle_question("compare Guha and Rachlin", "s", "iphash", d_multi)
     check("multi: retrieve called per entity", retrieved == ["Guha", "Rachlin"])
@@ -449,6 +556,11 @@ def selftest():
     check("multi: source[5] snippet is Rachlin's AND tagged rachlin-prof",
           payload["sources"][5]["snippet"].startswith("r")
           and payload["sources"][5]["professor_slug"] == "rachlin-prof")
+    # the per-source provenance tag must survive the pipeline->API hop so the frontend badge
+    # shows the real source (Reddit/RMP/TRACE), not always the "Reddit" fallback
+    check("multi: source field flows through to API sources",
+          payload["sources"][0]["source"] == "reddit"
+          and payload["sources"][5]["source"] == "trace")
     check("multi: primary slug is first resolved entity", payload["professor_slug"] == "guha-prof")
     check("multi: logged ok once", logged[-1][_status_idx()] == "ok")
 
@@ -500,6 +612,136 @@ def selftest():
     check("_strip_titles drops honorific", _strip_titles("Professor Lee") == "Lee")
     check("_strip_titles keeps full name", _strip_titles("Jung Lee") == "Jung Lee")
     check("title+bare name is bare after strip", _is_bare_name(_strip_titles("Dr. Lee")) is True)
+
+    # ── TOPIC course-list path: empty entity hint, retrieve yields a course_list block ──
+    d_cl = Deps(); d_cl.usage_alert_calls = []
+    d_cl.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": [], "professor_or_course": None, "message": None}, d_cl)
+    d_cl.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "kind": "course_list", "topic": "database",
+        "courses": [{"code": "CS3200", "name": "Database Design", "department": "Khoury"}],
+        "course_count": 1, "with_ratings": False, "entity_key": "topic:database",
+        "course_code": None, "professor_slug": None, "facts": {}, "comments": [], "comment_count": 0}, d_cl)
+    cl_calls = []
+    d_cl.generate_course_list_fn = types.MethodType(
+        lambda self, topic, courses: (cl_calls.append((topic, len(courses))) or
+            {"text": "NEU offers CS3200 Database Design.", "tokens_used": 25}), d_cl)
+    d_cl.generate_fn = types.MethodType(
+        lambda self, q, blocks: (_ for _ in ()).throw(AssertionError("Reddit generate must not run for course_list")), d_cl)
+    payload, code = handle_question("what database courses are there", "s", "iphash", d_cl)
+    check("course_list mode returned", code == 200 and payload.get("mode") == "course_list")
+    check("course_list carries the summary answer", payload.get("answer") == "NEU offers CS3200 Database Design.")
+    check("course_list carries the course list", payload["courses"][0]["code"] == "CS3200")
+    check("course_list carries a disclaimer", bool(payload.get("disclaimer")))
+    check("course_list calls the list generator once", cl_calls == [("database", 1)])
+    check("course_list logged ok", logged[-1][_status_idx()] == "ok")
+
+    # ── TOPIC regex fires but 0 catalog matches -> retrieve returns NO course_list -> out_of_scope ──
+    d_cl0 = Deps()
+    d_cl0.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": [], "professor_or_course": None, "message": None}, d_cl0)
+    d_cl0.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "professor_slug": None, "entity_key": None, "course_code": None,
+        "comment_count": 0, "comments": [], "facts": {}}, d_cl0)
+    d_cl0.generate_course_list_fn = types.MethodType(
+        lambda self, topic, courses: (_ for _ in ()).throw(AssertionError("no list gen when 0 matches")), d_cl0)
+    payload, code = handle_question("what zzzz courses are there", "s", "iphash", d_cl0)
+    check("zero-match topic -> out_of_scope", payload.get("mode") == "out_of_scope")
+
+    # ── LLMUnavailable during course-list generation -> keyword fallback ──
+    d_cle = Deps()
+    d_cle.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": [], "professor_or_course": None, "message": None}, d_cle)
+    d_cle.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "kind": "course_list", "topic": "database",
+        "courses": [{"code": "CS3200", "name": "Database Design", "department": "Khoury"}],
+        "course_count": 1, "with_ratings": False, "entity_key": "topic:database",
+        "course_code": None, "professor_slug": None, "facts": {}, "comments": [], "comment_count": 0}, d_cle)
+    d_cle.generate_course_list_fn = types.MethodType(
+        lambda self, topic, courses: (_ for _ in ()).throw(LLMUnavailable("down")), d_cle)
+    payload, code = handle_question("what database courses are there", "s", "iphash", d_cle)
+    check("course-list LLMUnavailable -> keyword fallback", code == 200 and "comments" in payload)
+
+    # ── course-by-NAME: several matches -> disambiguation, no LLM ──
+    d_cd = Deps()
+    d_cd.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": ["Data Science"], "professor_or_course": "Data Science", "message": None}, d_cd)
+    d_cd.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "kind": "course_disambiguation",
+        "matches": [{"code": "DS2000", "name": "Intro to Data Science", "department": "Khoury"},
+                    {"code": "DS3000", "name": "Foundations of Data Science", "department": "Khoury"}],
+        "entity_key": None, "course_code": None, "professor_slug": None,
+        "facts": {}, "comments": [], "comment_count": 0}, d_cd)
+    d_cd.generate_fn = types.MethodType(
+        lambda self, q, blocks: (_ for _ in ()).throw(AssertionError("no LLM for course disambiguation")), d_cd)
+    payload, code = handle_question("is data science hard", "s", "iphash", d_cd)
+    check("course disambiguation -> disambiguation mode", payload.get("mode") == "disambiguation")
+    check("course disambiguation lists both courses",
+          "DS2000 Intro to Data Science" in payload["message"] and "DS3000 Foundations of Data Science" in payload["message"])
+    check("course disambiguation logged ambiguous", logged[-1][_status_idx()] == "ambiguous")
+
+    # ── course-by-NAME: single match -> normal question answer (regression through generate) ──
+    d_cn = Deps(); d_cn.usage_alert_calls = []
+    d_cn.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": ["Discrete Structures"], "professor_or_course": "Discrete Structures", "message": None}, d_cn)
+    d_cn.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "professor_slug": None, "course_code": "CS1800", "entity_key": "CS1800",
+        "entity_name": "Discrete Structures", "comment_count": 3,
+        "comments": [{"body": "word " * 60} for _ in range(3)],
+        "facts": {"kind": "course", "code": "CS1800", "name": "Discrete Structures", "avg_rating": 3.5}}, d_cn)
+    payload, code = handle_question("How tough is Discrete Structures?", "s", "iphash", d_cn)
+    check("single course-name -> question answer", code == 200 and payload.get("mode") == "question" and payload.get("answer"))
+    check("single course-name carries course_code", payload.get("course_code") == "CS1800")
+
+    # ── superlative/ranking: a course_ranking block from the loop -> course_list payload, one LLM call ──
+    d_rk = Deps(); d_rk.usage_alert_calls = []
+    d_rk.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": ["CS course"], "professor_or_course": "CS course", "message": None}, d_rk)
+    d_rk.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "kind": "course_ranking", "subject": "CS", "metric": "rating", "direction": "desc",
+        "courses": [{"code": "CS3100", "name": "PDI 2", "department": "CS", "value": 4.45, "responses": 100},
+                    {"code": "CS2000", "name": "Intro", "department": "CS", "value": 4.40, "responses": 200}],
+        "course_count": 2, "entity_key": "rank:CS:rating", "course_code": None,
+        "professor_slug": None, "facts": {}, "comments": [], "comment_count": 0}, d_rk)
+    rk_calls = []
+    d_rk.generate_course_ranking_fn = types.MethodType(
+        lambda self, subject, metric, direction, courses: (rk_calls.append((subject, metric, len(courses))) or
+            {"text": "CS3100 (4.45/5) is the highest-rated CS course.", "tokens_used": 30}), d_rk)
+    d_rk.generate_fn = types.MethodType(
+        lambda self, q, blocks: (_ for _ in ()).throw(AssertionError("Reddit generate must not run for ranking")), d_rk)
+    payload, code = handle_question("Which CS course has the highest rating?", "s", "iphash", d_rk)
+    check("ranking -> course_list mode", code == 200 and payload.get("mode") == "course_list")
+    check("ranking carries the summary answer", payload.get("answer").startswith("CS3100"))
+    check("ranking lists the ranked courses", [c["code"] for c in payload["courses"]] == ["CS3100", "CS2000"])
+    check("ranking carries rating value (metric is rating)", payload["courses"][0]["rating"] == 4.45)
+    check("ranking calls the ranking generator once", rk_calls == [("CS", "rating", 2)])
+    check("ranking logged ok", logged[-1][_status_idx()] == "ok")
+
+    # difficulty ranking: rating field left None (value lives in prose, not the ★ badge)
+    d_rkd = Deps()
+    d_rkd.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": ["CS course"], "professor_or_course": "CS course", "message": None}, d_rkd)
+    d_rkd.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "kind": "course_ranking", "subject": "CS", "metric": "difficulty", "direction": "asc",
+        "courses": [{"code": "CS1200", "name": "FY Seminar", "department": "CS", "value": 1.8, "responses": 60}],
+        "course_count": 1, "entity_key": "rank:CS:difficulty", "course_code": None,
+        "professor_slug": None, "facts": {}, "comments": [], "comment_count": 0}, d_rkd)
+    payload, code = handle_question("easiest CS course?", "s", "iphash", d_rkd)
+    check("difficulty ranking leaves rating field None", payload["courses"][0]["rating"] is None)
+
+    # LLMUnavailable during ranking generation -> keyword fallback
+    d_rke = Deps()
+    d_rke.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": ["CS course"], "professor_or_course": "CS course", "message": None}, d_rke)
+    d_rke.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "kind": "course_ranking", "subject": "CS", "metric": "rating", "direction": "desc",
+        "courses": [{"code": "CS3100", "name": "PDI 2", "department": "CS", "value": 4.45, "responses": 100}],
+        "course_count": 1, "entity_key": "rank:CS:rating", "course_code": None,
+        "professor_slug": None, "facts": {}, "comments": [], "comment_count": 0}, d_rke)
+    d_rke.generate_course_ranking_fn = types.MethodType(
+        lambda self, subject, metric, direction, courses: (_ for _ in ()).throw(LLMUnavailable("down")), d_rke)
+    payload, code = handle_question("Which CS course has the highest rating?", "s", "iphash", d_rke)
+    check("ranking LLMUnavailable -> keyword fallback", code == 200 and "comments" in payload)
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0

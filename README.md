@@ -1,148 +1,166 @@
+<div align="center">
+
+<img src="frontend/public/neu-husky-icon.png" alt="RateMyHusky" width="90" />
+
 # RateMyHusky
 
-**https://ratemyhusky.com/**
+**Find the right professor, every semester.**
 
-RateMyHusky is a full-stack web app for discovering, searching, and comparing Northeastern University professors.
+TRACE evaluations, RateMyProfessors ratings, and Reddit chatter for 9,300+ Northeastern professors — searchable, comparable, and answerable in one place.
 
-It combines:
-- RateMyProfessors (RMP) data
-- TRACE course evaluation data
-- Internal profile metadata such as course history and professor photos
+[![Live Site](https://img.shields.io/badge/Live-ratemyhusky.com-e63946?style=for-the-badge)](https://ratemyhusky.com)
+[![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](frontend)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](frontend)
+[![Flask](https://img.shields.io/badge/Flask-000000?style=for-the-badge&logo=flask&logoColor=white)](backend)
+[![CockroachDB](https://img.shields.io/badge/CockroachDB-6933FF?style=for-the-badge&logo=cockroachlabs&logoColor=white)](#-architecture)
+
+[**Visit the site**](https://ratemyhusky.com) · [Features](#-features) · [Architecture](#-architecture) · [Getting Started](#-getting-started)
+
+<img src="frontend/public/ratemyhusky.png" alt="RateMyHusky" width="850" />
+
+</div>
+
+---
+
+## Why RateMyHusky?
+
+Choosing classes at Northeastern means juggling TRACE PDFs, RateMyProfessors tabs, and Reddit threads — each with a fragment of the picture. RateMyHusky unifies all three sources into a single profile per professor, then layers search, comparison, and an AI question-answering mode on top.
+
+| Source | Scale |
+|---|---|
+| TRACE course evaluations | 1.7M+ student comments |
+| RateMyProfessors | 43K+ ratings & reviews |
+| Reddit (r/NEU and beyond) | ~9K verified professor mentions, sentiment-scored |
+| Professor profiles | 9,300+ professors, 3,700+ photos, full course history |
 
 ## Features
 
-- Professor catalog with filters for college, department, ratings, and review volume
-- Professor profile pages with RMP ratings, TRACE scores, rating history, comments, and related courses
-- Course catalog with filters and course detail pages showing sections, ratings, and linked professors
-- Side-by-side professor comparison view
-- GOATED professors leaderboard by college on the homepage
-- Search with autocomplete for professors and courses
-- Shuffle wheel for random professor discovery
-- Breadcrumb navigation across pages
-- Google OAuth sign-in flow for gated functionality
-- Dark mode toggle and responsive UI
+### Explore
+- **Professor catalog** — filter by college, department, rating, and review volume
+- **Rich profile pages** — RMP ratings, TRACE in-depth scores, rating history, grade distributions, review feeds from all three sources, and related courses
+- **Course catalog** — course detail pages with sections, ratings, and linked professors
+- **Side-by-side compare** — stack any professors against each other
+- **GOATED leaderboard** — top-rated professors by college
+- **Search that keeps up** — instant autocomplete across professors and courses, plus a shuffle wheel for serendipity
+
+### Ask (AI)
+- **Ask a real question** — *"Is Rachlin a fair grader?"* — and get a cited, single-shot answer grounded in actual student reviews
+- **Hybrid retrieval** — full-text search + 384-dim [BGE-small](https://huggingface.co/BAAI/bge-small-en-v1.5) embeddings fused with Reciprocal Rank Fusion over 1.5M+ review excerpts from RMP, TRACE, and Reddit
+- **Citations that jump** — every cited snippet pins, scrolls to, and highlights its source on the professor page
+- **Guardrailed** — prompt-injection gate, topic classifier, output validation, per-user abuse strikes, adaptive rate limiting, and answer caching
+
+### Polished throughout
+- Dark mode, responsive layout, breadcrumb navigation
+- Google OAuth sign-in for gated functionality
+- Precomputed catalog aggregates and prerendered pages for fast loads and SEO
+
+## Architecture
+
+```
+                        ┌────────────────────────────────────────┐
+                        │              Vercel (CDN)              │
+                        │   React 19 · TypeScript · Vite · SPA   │
+                        └───────────────────┬────────────────────┘
+                                            │ REST
+                        ┌───────────────────▼────────────────────┐
+                        │            Railway (Flask)             │
+                        │  catalog / profiles / compare / auth   │
+                        │  ┌──────────────────────────────────┐  │
+                        │  │           Ask pipeline           │  │
+                        │  │ gate → retrieve (FTS + vector    │  │
+                        │  │ RRF) → LLM synth → validate →    │  │
+                        │  │ cache · throttle · abuse strikes │  │
+                        │  └──────────────────────────────────┘  │
+                        └───────────────────┬────────────────────┘
+                                            │ psycopg2
+                        ┌───────────────────▼────────────────────┐
+                        │         CockroachDB Serverless         │
+                        │  professors · courses · reviews ·      │
+                        │  evidence + VECTOR(384) embeddings     │
+                        └────────────────────────────────────────┘
+
+     Offline pipeline:  scrapers (TRACE · RMP · Reddit) → professor matching →
+     sentiment scoring → evidence build & dedupe → ONNX embedding backfill
+```
+
+**AI stack:** Groq-hosted Llama 3.1 8B as the input gate/classifier, GPT-OSS-120B for answer synthesis, and BGE-small-en-v1.5 (INT8 ONNX, pure `onnxruntime` — no torch) for query/document embeddings.
 
 ## Tech Stack
 
 | Layer | Technology |
-| --- | --- |
+|---|---|
 | Frontend | React 19, TypeScript, Vite, React Router |
 | Backend | Python, Flask, Flask-CORS, Flask-Limiter |
-| Auth | Google OAuth 2.0, JWT (PyJWT) |
-| Database | CockroachDB (via psycopg2) |
-| Data ingestion | CSV-based scraper outputs + migration scripts |
-| Frontend hosting | Vercel |
-| Backend hosting | Railway |
+| Database | CockroachDB Serverless (psycopg2), native `VECTOR` search |
+| AI / Retrieval | Groq (Llama 3.1 8B, GPT-OSS-120B), ONNX Runtime, BGE-small-en-v1.5, RRF hybrid retrieval |
+| Auth | Google OAuth 2.0, JWT |
+| Data pipeline | Python scrapers, professor-mention matching, sentiment scoring, embedding backfill |
+| Hosting | Vercel (frontend) · Railway (backend) |
 
-## Prerequisites
+## Getting Started
 
-- Python 3.8+
-- Node.js 18+
-- npm
-- A reachable CockroachDB instance
+### Prerequisites
 
-## Quick Start
+- Python 3.8+ · Node.js 18+ · a reachable CockroachDB instance
 
-1. Unzip `trace_comments.zip` into `backend/Better_Scraper/output_data/`.
-2. Install backend dependencies.
-3. Configure backend environment variables.
-4. Start backend API server.
-5. Install frontend dependencies.
-6. Start frontend dev server.
-
-Detailed commands are below.
-
-## Backend Setup
-
-From the repository root:
+### Backend
 
 ```bash
 pip install -r backend/requirements.txt
 ```
 
-Create backend/.env with at least:
+Create `backend/.env`:
 
 ```env
 CRDB_DATABASE_URL=<your-cockroachdb-connection-string>
 JWT_SECRET=<generate-with-openssl-rand-hex-32>
-```
 
-Optional (required for Google OAuth login flow):
-
-```env
+# Optional — Google OAuth login flow
 GOOGLE_CLIENT_ID=<your-google-oauth-client-id>
 GOOGLE_CLIENT_SECRET=<your-google-oauth-client-secret>
 FRONTEND_URL=http://localhost:5173
-```
 
-Run the backend:
+# Optional — AI Ask mode
+GROQ_API_KEYS=<key1>,<key2>
+```
 
 ```bash
-python backend/server.py
+python backend/server.py     # → http://localhost:5001
 ```
 
-Backend default: http://localhost:5001
-
-## Frontend Setup
+### Frontend
 
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev                  # → http://localhost:5173
 ```
 
-Frontend default: http://localhost:5173
-
-The frontend calls the backend API on port 5001 in local development.
-
-## Data Setup
-
-**Required:** Unzip `trace_comments.zip` before running any scraper or migration workflows:
-
-```bash
-unzip trace_comments.zip -d backend/Better_Scraper/output_data/
-```
-
-Additional notes:
-- Scraper files are in backend/Better_Scraper.
-- CSV outputs are stored in backend/Better_Scraper/output_data.
-- The backend runtime serves data from CockroachDB, so CSV files are for ingestion/migration workflows.
+The dev frontend talks to the backend on port 5001 automatically.
 
 ## Project Structure
 
 ```text
 .
-├── backend/
-│   ├── server.py
-│   ├── requirements.txt
-│   ├── migrate_to_crdb.py
-│   ├── precompute.py
-│   └── Better_Scraper/
-│       └── output_data/
-├── frontend/
-│   ├── package.json
+├── frontend/                  # React 19 + TypeScript SPA (Vercel)
 │   └── src/
-│       ├── api/
-│       ├── components/
-│       ├── context/
-│       └── pages/
-│                             
-└── README.md
+│       ├── pages/             #   Homepage, catalogs, profiles, compare
+│       ├── components/        #   SearchBar (+ Ask mode), breadcrumbs, ...
+│       ├── api/               #   Typed backend client
+│       └── utils/             #   Ask session persistence, citation pinning
+├── backend/                   # Flask API (Railway)
+│   ├── server.py              #   Routes, auth, connection pool
+│   ├── chat_*.py              #   Ask pipeline: gate, retrieve, answer,
+│   │                          #   validate, cache, throttle, abuse
+│   ├── query_embedder.py      #   ONNX BGE-small query embeddings
+│   └── Better_Scraper/        #   TRACE/RMP scrapers + CSV outputs
+└── scraper/                   # Reddit corpus + evidence/embedding pipeline
 ```
 
-## Useful Commands
+---
 
-Backend:
+<div align="center">
 
-```bash
-python backend/server.py
-```
+If RateMyHusky helped you dodge a 2.1-difficulty-but-somehow-brutal professor, star the repo.
 
-Frontend:
-
-```bash
-cd frontend
-npm run dev
-npm run build
-npm run preview
-```
+</div>

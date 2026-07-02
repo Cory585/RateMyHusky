@@ -12,10 +12,16 @@ import os, sys, gzip, io, time, datetime
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 import psycopg2
+from psycopg2.extensions import register_adapter
+from psycopg2.extras import Json
+
+# JSONB columns come back as dict; render them as JSON SQL literals
+# (mogrify has no adapter for a raw dict, which crashes the dump).
+register_adapter(dict, Json)
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
-DB_URL = os.getenv("CRDB_DATABASE_URL")
+DB_URL = os.getenv("NEW_CRDB_DATABASE_URL")
 if not DB_URL:
     sys.exit("Missing CRDB_DATABASE_URL in backend/.env")
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import Footer from '../components/Footer';
 import NotFound from './NotFound';
 
@@ -15,6 +15,7 @@ import {
 import { fetchProfessorFull } from '../api/api';
 import type { ProfessorProfile, ProfessorReview, TraceComment, RedditMention } from '../api/api';
 import { termSortKey } from '../utils/termUtils';
+import { isPinned, pinnedFirst } from '../utils/askPinMatch';
 import { useAuth } from '../context/AuthContext';
 import SignInModal from '../components/SignInModal';
 import neuIcon from '../assets/neu-circle-icon.png';
@@ -250,6 +251,23 @@ const Professor = () => {
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
 const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('prof_course_tip_dismissed') !== '1');
 
+  const location = useLocation();
+  // Ask pins arrive via navigation state from a clicked citation. Keyed by askedAt so a new
+  // question replaces old pins; normal navigation (no askPins) leaves this null.
+  const [pinnedSources, setPinnedSources] = useState<{ source: string | null; snippet: string }[]>(
+    () => {
+      const st = location.state as { askPins?: { sources: { source: string | null; snippet: string }[] } } | null;
+      return st?.askPins?.sources ?? [];
+    }
+  );
+  // Sentinel 0 (never a real Date.now() askedAt) so the apply-pins effect's "already applied"
+  // guard is false on first mount and actually performs the tab-switch + scroll. The effect
+  // sets this ref to the real askedAt once it applies.
+  const pinnedAskedAt = useRef<number>(0);
+  // Tracks the askedAt we have already scrolled for, so the scroll fires exactly once per new
+  // pin set — even though the apply-guard above trips on the effect's second run.
+  const scrolledAskedAt = useRef<number>(0);
+
   /* ── review pill ── */
   const updateReviewPill = useCallback(() => {
     if (!reviewTabsRef.current) return;
@@ -341,6 +359,46 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
     loadOnAuthChange();
     return () => { cancelled = true; };
   }, [slug, user]);
+
+  /* ── Ask citation pins: switch to the cited source's tab and scroll to reviews ── */
+  useEffect(() => {
+    const st = location.state as {
+      askPins?: {
+        askedAt: number;
+        clicked: { source: string | null; snippet: string };
+        sources: { source: string | null; snippet: string }[];
+      };
+    } | null;
+    const pins = st?.askPins;
+    if (!pins) {
+      // Arrived without pins (normal nav / breadcrumb / slug change) — clear any stale pins so
+      // a previous question's sources don't ride along and mis-pin rows on this page.
+      if (pinnedSources.length > 0) {
+        setPinnedSources([]);
+        pinnedAskedAt.current = 0;
+        scrolledAskedAt.current = 0;
+      }
+      return;
+    }
+
+    // Apply the pins + tab switch once per new askedAt.
+    if (pins.askedAt !== pinnedAskedAt.current) {
+      pinnedAskedAt.current = pins.askedAt;
+      setPinnedSources(pins.sources);
+      const src = pins.clicked.source;
+      const tab: 'rmp' | 'trace' | 'reddit' =
+        src === 'rmp' ? 'rmp' : src === 'trace' ? 'trace' : 'reddit';
+      setReviewTab(tab);
+    }
+
+    // Scroll once per askedAt, but only after reviews have rendered (reviewsLoading false).
+    // On first mount reviewsLoading starts true; this effect re-runs when it flips false
+    // (it's in the deps) and the scroll fires then.
+    if (!reviewsLoading && scrolledAskedAt.current !== pins.askedAt) {
+      scrolledAskedAt.current = pins.askedAt;
+      setTimeout(() => reviewsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+    }
+  }, [location.state, reviewsLoading]);
 
   /* ── scroll to reviews after sign-in redirect (mobile: page reload) ── */
   useEffect(() => {
@@ -618,14 +676,22 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
     return () => obs.disconnect();
   }, [profile, gradeDistribution.length]);
 
+  const pinSnippets = useMemo(() => ({
+    rmp: pinnedSources.filter((p) => p.source === 'rmp').map((p) => p.snippet),
+    trace: pinnedSources.filter((p) => p.source === 'trace').map((p) => p.snippet),
+    // sources with null/unknown source came from Reddit historically (see SOURCE_LABEL default)
+    reddit: pinnedSources.filter((p) => p.source === 'reddit' || p.source == null).map((p) => p.snippet),
+  }), [pinnedSources]);
+
   const sortedReviews = useMemo(() => {
-    return [...filteredRmpReviews].sort((a, b) => {
+    const sorted = [...filteredRmpReviews].sort((a, b) => {
       if (sortBy === 'oldest') return new Date(a.date).getTime() - new Date(b.date).getTime();
       if (sortBy === 'highest') return b.quality - a.quality;
       if (sortBy === 'lowest') return a.quality - b.quality;
       return new Date(b.date).getTime() - new Date(a.date).getTime();
     });
-  }, [filteredRmpReviews, sortBy]);
+    return pinnedFirst(sorted, (r) => r.comment || '', pinSnippets.rmp);
+  }, [filteredRmpReviews, sortBy, pinSnippets.rmp]);
 
   const termIdMap = useMemo(() => {
     const map = new Map<number, string>();
@@ -664,12 +730,8 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
     }
     const termKey = (termId: number) => termSortKey(termIdMap.get(termId) || '');
     const searchLower = traceSearch.toLowerCase();
-    return Object.entries(groups).map(([q, cs]) => ({
-      question: q,
-      maxTermSortKey: Math.max(...cs.map(c => termKey(c.termId || 0))),
-      count: cs.length,
-      comments: [...cs].sort((a, b) => {
-        // If searching, boost comments containing the search term
+    return Object.entries(groups).map(([q, cs]) => {
+      const sortedComments = [...cs].sort((a, b) => {
         if (searchLower) {
           const aMatch = a.comment.toLowerCase().includes(searchLower);
           const bMatch = b.comment.toLowerCase().includes(searchLower);
@@ -678,12 +740,22 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
         }
         if (traceSort === 'newest') return termKey(b.termId || 0) - termKey(a.termId || 0);
         return b.comment.length - a.comment.length;
-      }),
-    })).filter(g =>
+      });
+      const withPins = pinnedFirst(sortedComments, (c) => c.comment || '', pinSnippets.trace);
+      const hasPin = pinSnippets.trace.length > 0 && withPins.some((c) => isPinned(c.comment || '', pinSnippets.trace));
+      return {
+        question: q,
+        maxTermSortKey: Math.max(...cs.map(c => termKey(c.termId || 0))),
+        count: cs.length,
+        hasPin,
+        comments: withPins,
+      };
+    }).filter(g =>
       !traceSearch ||
       g.question.toLowerCase().includes(searchLower) ||
       g.comments.some(c => c.comment.toLowerCase().includes(searchLower))
     ).sort((a, b) => {
+      if (a.hasPin !== b.hasPin) return a.hasPin ? -1 : 1;
       if (traceSearch) {
         const aM = a.question.toLowerCase().includes(searchLower);
         const bM = b.question.toLowerCase().includes(searchLower);
@@ -694,13 +766,26 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
       if (traceSort === 'popular') return b.count - a.count;
       return a.question.localeCompare(b.question);
     });
-  }, [traceComments, traceSearch, traceSort, filteredTraceCourses, termIdMap]);
+  }, [traceComments, traceSearch, traceSort, filteredTraceCourses, termIdMap, pinSnippets.trace]);
+
+  /* ── Ask citation pins: auto-expand the matching TRACE category (TRACE is gated on `user`) ── */
+  useEffect(() => {
+    if (pinSnippets.trace.length === 0 || !user) return;
+    const hit = groupedTrace.find((g) => g.hasPin);
+    if (hit) {
+      setExpandedQuestions((p) => ({ ...p, [hit.question]: true }));
+      setVisibleCommentsPerQuestion((p) => ({ ...p, [hit.question]: p[hit.question] || 5 }));
+    }
+  }, [pinSnippets.trace, groupedTrace, user]);
 
   const redditQuery = redditSearch.trim().toLowerCase();
-  const filteredRedditMentions = redditMentions.filter(m =>
-    (redditSentiment === 'all' || m.sentiment === redditSentiment) &&
-    (redditQuery === '' || m.body.toLowerCase().includes(redditQuery))
-  );
+  const filteredRedditMentions = useMemo(() => {
+    const filtered = redditMentions.filter(m =>
+      (redditSentiment === 'all' || m.sentiment === redditSentiment) &&
+      (redditQuery === '' || m.body.toLowerCase().includes(redditQuery))
+    );
+    return pinnedFirst(filtered, (m) => m.body || '', pinSnippets.reddit);
+  }, [redditMentions, redditSentiment, redditQuery, pinSnippets.reddit]);
 
   const formatRedditDate = (utc: string | null): string => {
     if (!utc) return '';
@@ -1368,7 +1453,8 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
                 <p className="prof-no-reviews">No reviews match current filters.</p>
               ) : (
                 sortedReviews.slice(0, visibleReviews).map((r, i) => (
-                  <div key={i} className="prof-review-card" style={{ borderLeftColor: r.quality >= 4 ? '#27ae60' : r.quality >= 3 ? '#f39c12' : '#e74c3c' }}>
+                  <div key={i} className={`prof-review-card ${isPinned(r.comment || '', pinSnippets.rmp) ? 'is-ask-pinned' : ''}`} style={{ borderLeftColor: r.quality >= 4 ? '#27ae60' : r.quality >= 3 ? '#f39c12' : '#e74c3c' }}>
+                    {isPinned(r.comment || '', pinSnippets.rmp) && <span className="ask-pinned-label">From your question</span>}
                     <div className="prof-review-top">
                       <div className="prof-review-ratings">
                         <div className="prof-review-rating-item">
@@ -1441,7 +1527,8 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
                   const word = m.sentiment ? m.sentiment.charAt(0).toUpperCase() + m.sentiment.slice(1) : 'Neutral';
                   const label = `${word} (${magnitudePct}%)`;
                   return (
-                  <div key={i} className="reddit-comment-bubble">
+                  <div key={i} className={`reddit-comment-bubble ${isPinned(m.body || '', pinSnippets.reddit) ? 'is-ask-pinned' : ''}`}>
+                    {isPinned(m.body || '', pinSnippets.reddit) && <span className="ask-pinned-label">From your question</span>}
                     <div className="reddit-comment-meta">
                       {dateStr && <span className="reddit-comment-date">{dateStr}</span>}
                       <div className="reddit-comment-actions">
@@ -1520,8 +1607,9 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
                           return (
                           <div
                             key={ci}
-                            className="trace-comment-bubble"
+                            className={`trace-comment-bubble ${isPinned(c.comment || '', pinSnippets.trace) ? 'is-ask-pinned' : ''}`}
                           >
+                            {isPinned(c.comment || '', pinSnippets.trace) && <span className="ask-pinned-label">From your question</span>}
                             <div className="trace-comment-meta">
                               {hasYear && <span className="trace-comment-term">{term}</span>}
                               {(() => {
