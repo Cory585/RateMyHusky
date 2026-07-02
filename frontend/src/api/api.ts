@@ -410,6 +410,46 @@ export async function submitFeedback(payload: {
   }
 }
 
+/* ---- Department hub pages ---- */
+export interface HubDepartment {
+  slug: string;
+  name: string;
+  professorCount: number;
+  avgRating: number | null;
+}
+
+export interface DepartmentsHubResponse {
+  departments: HubDepartment[];
+  total: number;
+}
+
+export const fetchDepartmentsHub = () => get<DepartmentsHubResponse>('/api/departments/hub');
+
+export interface DepartmentProfessor {
+  name: string;
+  slug: string;
+  avgRating: number | null;
+  difficulty: number | null;
+  wouldTakeAgainPct: number | null;
+  totalRatings: number;
+}
+
+export interface DepartmentDetail {
+  name: string;
+  slug: string;
+  professorCount: number;
+  avgRating: number | null;
+  professors: DepartmentProfessor[];
+}
+
+export async function fetchDepartmentDetail(slug: string): Promise<DepartmentDetail | null> {
+  try {
+    return await get<DepartmentDetail>(`/api/departments/${encodeURIComponent(slug)}`);
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchCourseData(code: string): Promise<CourseDetail | null> {
   const token = localStorage.getItem('auth_token');
   const key = `${code}:${token ?? 'u'}`;

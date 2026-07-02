@@ -96,14 +96,15 @@ function isCrawler(ua: string): boolean {
   return CRAWLER_UAS.some((bot) => lc.includes(bot));
 }
 
-// Matches /professors/<slug> and /courses/<code> (single trailing segment).
-const DETAIL_RE = /^\/(professors|courses)\/([^/]+)\/?$/;
+// Matches /professors/<slug>, /courses/<code>, and /departments/<slug> (single trailing segment).
+const DETAIL_RE = /^\/(professors|courses|departments)\/([^/]+)\/?$/;
 
 // Exact non-detail paths that get a server-rendered snapshot for crawlers.
 const STATIC_RENDER: Record<string, string> = {
   '/': '/render/home',
   '/professors': '/render/professors',
   '/courses': '/render/courses',
+  '/departments': '/render/departments',
 };
 
 async function fetchSnapshot(pathname: string): Promise<Response | undefined> {
@@ -146,7 +147,7 @@ async function fetchSnapshot(pathname: string): Promise<Response | undefined> {
   if (/[/\\]/.test(decoded) || decoded.includes('..')) {
     return undefined;
   }
-  const kind = m[1] === 'professors' ? 'professors' : 'courses';
+  const kind = m[1] === 'professors' ? 'professors' : m[1] === 'courses' ? 'courses' : 'departments';
   const target = new URL(`/render/${kind}/${slug}`, origin);
   const headers = new Headers();
   const proxyKey = process.env.PROXY_SECRET;

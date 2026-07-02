@@ -401,8 +401,9 @@ def home_html(stats: list, top_professors: list, canonical: str) -> str:
         f"<h1>{_esc(title)}</h1>"
         f"<p>{_esc(summary)}</p>"
         f"{stat_rows}{profs_block}"
-        f'<p>Browse all <a href="{SITE}/professors">professors</a> and '
-        f'<a href="{SITE}/courses">courses</a>.</p>'
+        f'<p>Browse all <a href="{SITE}/professors">professors</a>, '
+        f'<a href="{SITE}/courses">courses</a>, and '
+        f'<a href="{SITE}/departments">departments</a>.</p>'
     )
 
     jsonld = {
@@ -442,6 +443,7 @@ def professors_listing_html(entries: list, total: int, canonical: str) -> str:
         f"<h1>Northeastern University Professor Ratings & Reviews</h1>"
         f"<p>{_esc(summary)}</p>"
         f"<ul>{items}</ul>"
+        f'<p>Browse professors by <a href="{SITE}/departments">department</a>.</p>'
     )
 
     jsonld = {

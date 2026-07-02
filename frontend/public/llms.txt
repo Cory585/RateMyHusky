@@ -12,6 +12,7 @@ static HTML, and data is refreshed regularly.
 
 - [All professor ratings](https://ratemyhusky.com/professors)
 - [All course reviews](https://ratemyhusky.com/courses)
+- [Departments by professor ratings](https://ratemyhusky.com/departments)
 - [Full URL list](https://ratemyhusky.com/sitemap.xml)
 
 ## Page formats

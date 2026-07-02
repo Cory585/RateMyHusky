@@ -1,0 +1,59 @@
+.dept-hub-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 18px;
+  border-bottom: 1px solid #f0f0f0;
+  text-decoration: none;
+  transition: background 0.12s;
+}
+
+.dept-hub-item:last-child {
+  border-bottom: none;
+}
+
+.dept-hub-item:hover {
+  background: #fef8f8;
+}
+
+.dept-hub-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dept-hub-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.dept-hub-count {
+  font-size: 0.78rem;
+  color: #888;
+}
+
+.dept-hub-rating {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #d6394c;
+  flex-shrink: 0;
+}
+
+.dark .dept-hub-item {
+  border-bottom-color: #333;
+}
+
+.dark .dept-hub-item:hover {
+  background: #2a1e1e;
+}
+
+.dark .dept-hub-name {
+  color: #f0f0f0;
+}
+
+.dark .dept-hub-count {
+  color: #999;
+}
