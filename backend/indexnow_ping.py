@@ -22,6 +22,7 @@ import os
 import re
 import sys
 import glob
+import html
 import argparse
 import requests
 
@@ -46,15 +47,19 @@ def find_key():
 
 def load_sitemap(path_or_url):
     if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
-        resp = requests.get(path_or_url, timeout=30)
-        resp.raise_for_status()
+        try:
+            resp = requests.get(path_or_url, timeout=30)
+            resp.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            sys.exit(f"Failed to fetch sitemap {path_or_url}: {e}")
         return resp.text
     with open(path_or_url, "r", encoding="utf-8") as f:
         return f.read()
 
 
 def parse_urls(xml_text):
-    return re.findall(r"<loc>(.*?)</loc>", xml_text)
+    # the sitemap generator XML-escapes & < > ' " in slugs; decode them back
+    return [html.unescape(loc) for loc in re.findall(r"<loc>(.*?)</loc>", xml_text)]
 
 
 def batches(urls, size=BATCH_SIZE):
@@ -64,15 +69,18 @@ def batches(urls, size=BATCH_SIZE):
 
 def ping(key, urls):
     key_location = f"https://{HOST}/{key}.txt"
-    for batch in batches(urls):
+    for n, batch in enumerate(batches(urls), 1):
         payload = {
             "host": HOST,
             "key": key,
             "keyLocation": key_location,
             "urlList": batch,
         }
-        resp = requests.post(INDEXNOW_URL, json=payload, timeout=30)
-        print(f"batch of {len(batch)} URLs -> {resp.status_code}")
+        try:
+            resp = requests.post(INDEXNOW_URL, json=payload, timeout=30)
+            print(f"batch {n} ({len(batch)} URLs) -> {resp.status_code}")
+        except requests.exceptions.RequestException as e:
+            print(f"batch {n} ({len(batch)} URLs) -> FAILED: {e}")
 
 
 def main():
