@@ -589,3 +589,194 @@ def test_home_meta_description_within_limit():
     html = home_html([], [], "https://ratemyhusky.com/")
     desc = _meta_description(html)
     assert len(desc) <= MAX_DESCRIPTION + 1
+
+
+# ── Courses-taught links, deduped by base course code (P1-4) ──
+
+def test_professor_html_courses_taught_deduped_and_linked():
+    profile = _base_profile(traceCourses=[
+        {"displayName": "EECE2150:02 (Circuits) - X"},
+        {"displayName": "EECE2150:03 (Circuits) - X"},
+        {"displayName": "EECE2150:04 (Circuits) - X"},
+        {"displayName": "CS3500:01 (OOD) - X"},
+    ])
+    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
+    assert html.count('href="https://ratemyhusky.com/courses/EECE2150"') == 1
+    assert 'href="https://ratemyhusky.com/courses/CS3500"' in html
+
+
+def test_professor_html_courses_taught_skips_entries_with_no_extractable_code():
+    profile = _base_profile(traceCourses=[{"displayName": "(Special Topics) - X"}])
+    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
+    assert "/courses/" not in html.split("<h2>Courses taught</h2>")[1].split("</ul>")[0] \
+        if "<h2>Courses taught</h2>" in html else True
+
+
+def test_professor_html_omits_courses_block_when_no_courses():
+    html = professor_html(_base_profile(traceCourses=[]), [], "https://ratemyhusky.com/professors/x")
+    assert "<h2>Courses taught</h2>" not in html
+
+
+# ── "More professors in <department>" block (P1-4) ──
+
+def test_professor_html_colleagues_block_rendered():
+    profile = _base_profile(colleagues=[
+        {"name": "Alice Smith", "slug": "alice-smith", "avgRating": 4.5, "totalRatings": 30},
+        {"name": "Bob Jones", "slug": "bob-jones", "avgRating": None, "totalRatings": 2},
+    ])
+    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
+    assert "<h2>More Economics professors at Northeastern</h2>" in html
+    assert '<a href="https://ratemyhusky.com/professors/alice-smith">Alice Smith</a> (4.5/5)' in html
+    assert '<a href="https://ratemyhusky.com/professors/bob-jones">Bob Jones</a></li>' in html
+
+
+def test_professor_html_omits_colleagues_block_when_empty():
+    html = professor_html(_base_profile(colleagues=[]), [], "https://ratemyhusky.com/professors/x")
+    assert "More Economics professors" not in html
+
+
+def test_professor_html_omits_colleagues_block_when_absent():
+    # Older callers/tests that don't pass colleagues at all must still work.
+    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x")
+    assert "More Economics professors" not in html
+
+
+# ── One-line verdict under the H1 (P1-5) ──
+
+def test_professor_html_verdict_sentence_all_clauses():
+    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x")
+    month_year = date.today().strftime("%B %Y")
+    expected = (
+        "Francis Georges is a Economics professor at Northeastern University "
+        "rated 4.25/5 by 2686 students, with 2.9/5 difficulty and 83% who would "
+        f"take them again (TRACE + RateMyProfessors + Reddit, updated {month_year})."
+    )
+    assert expected in html
+
+
+def test_professor_html_verdict_sentence_omits_missing_clauses():
+    profile = _base_profile(wouldTakeAgainPct=None, difficulty=None)
+    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
+    month_year = date.today().strftime("%B %Y")
+    expected = (
+        "Francis Georges is a Economics professor at Northeastern University "
+        f"rated 4.25/5 by 2686 students (TRACE + RateMyProfessors + Reddit, updated {month_year})."
+    )
+    assert expected in html
+
+
+def test_professor_html_verdict_appears_before_summary_paragraph():
+    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x")
+    body = html.split("<body>")[1]
+    h1_pos = body.index("<h1>")
+    verdict_pos = body.index("is a Economics professor at Northeastern University")
+    summary_pos = body.index("professor reviews and ratings:")
+    assert h1_pos < verdict_pos < summary_pos
+
+
+# ── Freshness line (P1-4) ──
+
+def test_professor_html_has_freshness_line():
+    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x")
+    month_year = date.today().strftime("%B %Y")
+    assert f"<p>Data updated {month_year}.</p>" in html
+
+
+def test_course_html_has_freshness_line():
+    detail = {
+        "summary": {"code": "ECON1115", "name": "Macroeconomics",
+                    "department": "Economics", "avgRating": 4.1,
+                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025"},
+        "instructors": [],
+    }
+    html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
+    month_year = date.today().strftime("%B %Y")
+    assert f"<p>Data updated {month_year}.</p>" in html
+
+
+# ── FAQ block on professor pages, plain HTML, no FAQPage schema (P1-4) ──
+
+def test_professor_html_faq_present_with_all_stats():
+    profile = _base_profile(traceCourses=[{"displayName": "CS3500:01 (OOD) - X"}])
+    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
+    assert "<h2>Frequently asked questions</h2>" in html
+    assert "<h3>Is Francis Georges a good professor?</h3>" in html
+    assert "<h3>How hard are Francis Georges&#x27;s classes?</h3>" in html
+    assert "<h3>What courses does Francis Georges teach at Northeastern?</h3>" in html
+    assert "CS3500" in html.split("What courses does Francis Georges teach")[1]
+
+
+def test_professor_html_faq_has_no_faqpage_jsonld():
+    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x")
+    blocks = _extract_jsonld(html)
+    assert all(b.get("@type") != "FAQPage" for b in blocks)
+
+
+def test_professor_html_faq_omits_difficulty_qa_when_absent():
+    profile = _base_profile(difficulty=None)
+    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
+    assert "<h3>How hard are Francis Georges&#x27;s classes?</h3>" not in html
+
+
+def test_professor_html_faq_omits_courses_qa_when_no_courses():
+    html = professor_html(_base_profile(traceCourses=[]), [], "https://ratemyhusky.com/professors/x")
+    assert "<h3>What courses does Francis Georges teach at Northeastern?</h3>" not in html
+
+
+def test_professor_html_faq_omits_entirely_when_no_ratings():
+    profile = _base_profile(totalRatings=0, avgRating=0.0, wouldTakeAgainPct=None,
+                            difficulty=None, traceCourses=[])
+    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
+    assert "<h2>Frequently asked questions</h2>" not in html
+
+
+# ── Review selection: recent + longest + spread across courses (P1-5) ──
+
+def test_professor_html_review_selection_round_robins_across_courses_by_recency():
+    # Course A's most recent review is newer than course B's -> A goes first
+    # in the round-robin order, then alternates.
+    reviews = [
+        {"course": "A", "date": "2024-01-01", "comment": "a-old " * 3},
+        {"course": "A", "date": "2024-06-01", "comment": "a-new " * 3},
+        {"course": "B", "date": "2023-01-01", "comment": "b-old " * 3},
+        {"course": "B", "date": "2023-06-01", "comment": "b-new " * 3},
+    ]
+    profile = _base_profile()
+    html = professor_html(profile, reviews, "https://ratemyhusky.com/professors/x")
+    body = html.split("<h2>Student reviews</h2>")[1]
+    # Order: A's newest, B's newest, A's oldest, B's oldest (round robin,
+    # each course internally sorted by date desc).
+    a_new = body.index("a-new")
+    b_new = body.index("b-new")
+    a_old = body.index("a-old")
+    b_old = body.index("b-old")
+    assert a_new < b_new < a_old < b_old
+
+
+def test_professor_html_review_selection_sorts_by_length_within_same_date():
+    reviews = [
+        {"course": "A", "date": "2024-01-01", "comment": "short"},
+        {"course": "A", "date": "2024-01-01", "comment": "a much longer comment here"},
+    ]
+    html = professor_html(_base_profile(), reviews, "https://ratemyhusky.com/professors/x")
+    body = html.split("<h2>Student reviews</h2>")[1]
+    assert body.index("a much longer comment here") < body.index(">short<")
+
+
+def test_professor_html_review_selection_puts_no_course_group_last():
+    reviews = [
+        {"course": "", "date": "2024-12-01", "comment": "no-course-newest " * 3},
+        {"course": "A", "date": "2020-01-01", "comment": "a-oldest " * 3},
+    ]
+    html = professor_html(_base_profile(), reviews, "https://ratemyhusky.com/professors/x")
+    body = html.split("<h2>Student reviews</h2>")[1]
+    # Even though the no-course review is more recent, its course-group is
+    # ordered last, so course A's review is selected/rendered first.
+    assert body.index("a-oldest") < body.index("no-course-newest")
+
+
+def test_professor_html_review_selection_still_caps_at_max_snapshot_reviews():
+    reviews = [{"course": f"C{i}", "date": "2024-01-01", "comment": f"comment {i}"}
+               for i in range(50)]
+    html = professor_html(_base_profile(), reviews, "https://ratemyhusky.com/professors/x")
+    assert html.count("<blockquote>") == MAX_SNAPSHOT_REVIEWS

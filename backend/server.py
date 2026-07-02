@@ -830,6 +830,34 @@ def _get_radar_metric_value(scores, pattern_groups):
     return round(sum(values) / len(values), 2) if values else None
 
 
+def _department_colleagues(department, exclude_slug):
+    """Up to 8 other professors_catalog rows in the same department, highest
+    review-count first. Cached per department (shared across every professor
+    in it) since professors_catalog is indexed on department already."""
+    if not department:
+        return []
+    cache_key = f"colleagues:{department}"
+    rows = cache_get(cache_key)
+    if rows is None:
+        rows = query("""
+            SELECT name, slug, avg_rating, total_reviews FROM professors_catalog
+            WHERE department = %s AND slug IS NOT NULL AND total_reviews >= 1
+            ORDER BY total_reviews DESC LIMIT 9
+        """, (department,))
+        cache_set(cache_key, rows)
+    colleagues = []
+    for r in rows:
+        if r["slug"] == exclude_slug:
+            continue
+        colleagues.append({
+            "name": r["name"],
+            "slug": r["slug"],
+            "avgRating": round(r["avg_rating"], 2) if r["avg_rating"] else None,
+            "totalRatings": r["total_reviews"],
+        })
+    return colleagues[:8]
+
+
 # ──────────────────────────────────────────────
 #  Professor profile page
 # ──────────────────────────────────────────────
@@ -1228,6 +1256,7 @@ def professor_profile(slug):
     # else: profile["difficulty"] already set to rmp_diff (or None) above
 
     profile["traceCourses"] = trace_course_list
+    profile["colleagues"] = _department_colleagues(prof["department"], prof["slug"])
 
     cache_set(cache_key, profile)
     resp = jsonify(profile)

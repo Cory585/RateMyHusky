@@ -68,6 +68,7 @@ export interface ProfessorProfile {
   traceRatingCounts?: Record<string, TraceRatingCounts>;
   radarData?: RadarDataPoint[] | null;
   radarTermTitle?: string | null;
+  colleagues?: { name: string; slug: string; avgRating: number | null; totalRatings: number }[];
 }
 
 export interface ProfessorReviews {

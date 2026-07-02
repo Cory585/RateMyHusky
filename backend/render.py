@@ -6,6 +6,7 @@ the existing API data functions.
 """
 
 import json
+import re
 from datetime import date
 from html import escape as _html_escape
 from flask import Blueprint  # noqa: F401  (used by the route task)
@@ -106,6 +107,78 @@ def _breadcrumb_list(section_name: str, section_url: str, page_name: str, page_u
     }
 
 
+def _month_year(today: date) -> str:
+    return today.strftime("%B %Y")
+
+
+def _course_code(display_name: str) -> str:
+    """Extract the base course code (e.g. 'EECE2150') from a trace_courses
+    display_name like 'EECE2150:02 (Circuits) - X'. Same rule as the
+    professors_catalog / React course-code extraction elsewhere."""
+    dn = (display_name or "").strip()
+    if not dn:
+        return ""
+    m = re.match(r"^([A-Za-z]+\d+)", dn)
+    return m.group(1).upper() if m else ""
+
+
+def _dedupe_courses(courses: list) -> list:
+    """Unique base course codes from traceCourses entries, first-seen order.
+    Entries with no extractable code are skipped."""
+    seen = set()
+    out = []
+    for c in courses or []:
+        code = _course_code(c.get("displayName"))
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        out.append(code)
+    return out
+
+
+def _select_reviews(reviews: list, limit: int) -> list:
+    """Prefer recent + longest + spread across courses: group by course (no-
+    course group last), order courses by their most recent review date desc,
+    sort within a course by (date desc, comment length desc), then
+    round-robin across courses until `limit` reviews are chosen."""
+    groups = {}
+    order = []
+    for r in reviews:
+        course = (r.get("course") or "").strip()
+        if course not in groups:
+            groups[course] = []
+            order.append(course)
+        groups[course].append(r)
+
+    for course in order:
+        groups[course].sort(
+            key=lambda r: (r.get("date") or "", len((r.get("comment") or "").strip())),
+            reverse=True,
+        )
+
+    def _most_recent_date(course):
+        return max((r.get("date") or "" for r in groups[course]), default="")
+
+    named = sorted((c for c in order if c), key=_most_recent_date, reverse=True)
+    courses_in_order = named + ([""] if "" in groups else [])
+
+    selected = []
+    indices = {c: 0 for c in courses_in_order}
+    while len(selected) < limit:
+        progressed = False
+        for course in courses_in_order:
+            i = indices[course]
+            if i < len(groups[course]):
+                selected.append(groups[course][i])
+                indices[course] = i + 1
+                progressed = True
+                if len(selected) >= limit:
+                    break
+        if not progressed:
+            break
+    return selected
+
+
 def professor_html(profile: dict, reviews: list, canonical: str,
                    trace_count: int = 0) -> str:
     name = profile.get("name") or ""
@@ -122,6 +195,15 @@ def professor_html(profile: dict, reviews: list, canonical: str,
         f"{name} professor reviews and ratings: {avg}/5 from {total} student "
         f"reviews at Northeastern{wta_txt}. TRACE + RateMyProfessor + Reddit."
     )
+    month_year = _month_year(date.today())
+
+    diff_clause = f", with {diff}/5 difficulty" if diff is not None else ""
+    wta_clause = f" and {wta}% who would take them again" if wta is not None else ""
+    verdict = (
+        f"{name} is a {dept} professor at Northeastern University rated "
+        f"{avg}/5 by {total} students{diff_clause}{wta_clause} "
+        f"(TRACE + RateMyProfessors + Reddit, updated {month_year})."
+    )
 
     stats = _stat_rows([
         ("Average rating", f"{avg}/5"),
@@ -136,13 +218,26 @@ def professor_html(profile: dict, reviews: list, canonical: str,
     ])
 
     courses = profile.get("traceCourses") or []
+    course_codes = _dedupe_courses(courses)
     course_items = "".join(
-        f"<li>{_esc(c.get('displayName'))}</li>" for c in courses if c.get("displayName")
+        f'<li><a href="{SITE}/courses/{_esc(code)}">{_esc(code)}</a></li>' for code in course_codes
     )
     courses_block = f"<h2>Courses taught</h2><ul>{course_items}</ul>" if course_items else ""
 
+    colleagues = profile.get("colleagues") or []
+    colleague_items = "".join(
+        f'<li><a href="{SITE}/professors/{_esc(c.get("slug"))}">{_esc(c.get("name"))}</a>'
+        f'{_rating_suffix(c.get("avgRating"))}</li>'
+        for c in colleagues if c.get("slug")
+    )
+    colleagues_block = (
+        f"<h2>More {_esc(dept)} professors at Northeastern</h2><ul>{colleague_items}</ul>"
+        if colleague_items else ""
+    )
+
+    selected_reviews = _select_reviews(reviews, MAX_SNAPSHOT_REVIEWS)
     review_items = []
-    for r in reviews[:MAX_SNAPSHOT_REVIEWS]:
+    for r in selected_reviews:
         comment = (r.get("comment") or "").strip()
         if not comment:
             continue
@@ -150,14 +245,42 @@ def professor_html(profile: dict, reviews: list, canonical: str,
         review_items.append(f"<blockquote>{_esc(comment)}<cite>{meta}</cite></blockquote>")
     reviews_block = ("<h2>Student reviews</h2>" + "".join(review_items)) if review_items else ""
 
+    # ── FAQ: plain HTML only, no FAQPage JSON-LD (Google restricted that rich
+    # result; the extractable text is the value for LLM answer engines). ──
+    faq_items = []
+    if total:
+        wta_faq = f" {wta}% of students said they would take them again." if wta is not None else ""
+        faq_items.append((
+            f"Is {name} a good professor?",
+            f"{name} has an average rating of {avg}/5 from {total} student reviews.{wta_faq}",
+        ))
+    if diff is not None:
+        faq_items.append((
+            f"How hard are {name}'s classes?",
+            f"{name}'s classes have a difficulty rating of {diff}/5 based on student reviews.",
+        ))
+    if course_codes:
+        faq_items.append((
+            f"What courses does {name} teach at Northeastern?",
+            f"{name} has taught {', '.join(course_codes)} at Northeastern.",
+        ))
+    faq_html = "".join(
+        f"<h3>{_esc(q)}</h3><p>{_esc(a)}</p>" for q, a in faq_items
+    )
+    faq_block = f"<h2>Frequently asked questions</h2>{faq_html}" if faq_html else ""
+
+    freshness = f"<p>Data updated {_esc(month_year)}.</p>"
+
     # Thin content (no ratings, no RMP review text, no TRACE evaluations)
     # is excluded from the sitemap; keep search engines from indexing it too.
     is_zero_content = not total and not review_items and not trace_count
 
     body = (
         f"<h1>{_esc(name)} — Ratings & Reviews (Northeastern University)</h1>"
+        f"<p>{_esc(verdict)}</p>"
         f"<p>{_esc(summary)}</p>"
-        f"{stats}{courses_block}{reviews_block}"
+        f"{stats}{courses_block}{colleagues_block}{reviews_block}{faq_block}"
+        f"{freshness}"
         f'<p><a href="{_esc(canonical)}">View on RateMyHusky</a></p>'
     )
 
@@ -221,11 +344,12 @@ def course_html(detail: dict, canonical: str) -> str:
         for i in instructors if i.get("slug")
     )
     inst_block = f"<h2>Instructors</h2><ul>{inst_items}</ul>" if inst_items else ""
+    freshness = f"<p>Data updated {_esc(_month_year(date.today()))}.</p>"
 
     body = (
         f"<h1>{_esc(code)} — {_esc(cname)}: Reviews & Ratings</h1>"
         f"<p>{_esc(summary)}</p>"
-        f"{stats}{inst_block}"
+        f"{stats}{inst_block}{freshness}"
         f'<p><a href="{_esc(canonical)}">View on RateMyHusky</a></p>'
     )
 
