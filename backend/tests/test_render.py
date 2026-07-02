@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import date
 from render import (
     professor_html, course_html, not_found_html, home_html, _esc,
     _clip_description, MAX_DESCRIPTION,
@@ -75,11 +76,10 @@ def test_professor_html_jsonld_person_never_has_aggregate_rating():
     }
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/francis-georges")
     blocks = _extract_jsonld(html)
-    assert len(blocks) == 1
-    block = blocks[0]
-    assert block["@type"] == "Person"
-    assert block["name"] == "Francis Georges"
-    assert "aggregateRating" not in block
+    person = blocks[0]["mainEntity"]
+    assert person["@type"] == "Person"
+    assert person["name"] == "Francis Georges"
+    assert "aggregateRating" not in person
 
 
 def test_professor_html_omits_aggregate_rating_when_no_ratings():
@@ -90,8 +90,143 @@ def test_professor_html_omits_aggregate_rating_when_no_ratings():
         "imageUrl": None, "professorUrl": None, "traceCourses": [],
     }
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/new-prof")
+    person = _extract_jsonld(html)[0]["mainEntity"]
+    assert "aggregateRating" not in person
+
+
+# ── ProfilePage wrapper (P1-1) ──
+
+def test_professor_html_jsonld_wrapped_in_profilepage():
+    profile = _base_profile(imageUrl="https://img/x.jpg", professorUrl="https://www.ratemyprofessors.com/professor/12345")
+    canonical = "https://ratemyhusky.com/professors/francis-georges"
+    html = professor_html(profile, [], canonical)
     block = _extract_jsonld(html)[0]
-    assert "aggregateRating" not in block
+    assert block["@context"] == "https://schema.org"
+    assert block["@type"] == "ProfilePage"
+    assert block["dateModified"] == date.today().isoformat()
+    person = block["mainEntity"]
+    assert person["@type"] == "Person"
+    assert person["name"] == "Francis Georges"
+    assert person["jobTitle"] == "Professor"
+    assert person["knowsAbout"] == "Economics"
+    assert person["image"] == "https://img/x.jpg"
+    assert person["url"] == canonical
+    assert person["sameAs"] == ["https://www.ratemyprofessors.com/professor/12345"]
+    worksfor = person["worksFor"]
+    assert worksfor == {
+        "@type": "CollegeOrUniversity",
+        "name": "Northeastern University",
+        "sameAs": "https://www.northeastern.edu",
+    }
+
+
+def test_professor_html_jsonld_omits_person_sameas_when_no_rmp_url():
+    profile = _base_profile(professorUrl=None)
+    html = professor_html(profile, [], "https://ratemyhusky.com/professors/francis-georges")
+    person = _extract_jsonld(html)[0]["mainEntity"]
+    assert "sameAs" not in person
+    # worksFor still carries the university sameAs
+    assert person["worksFor"]["sameAs"] == "https://www.northeastern.edu"
+
+
+def test_professor_html_jsonld_omits_image_when_absent():
+    profile = _base_profile(imageUrl=None)
+    html = professor_html(profile, [], "https://ratemyhusky.com/professors/francis-georges")
+    person = _extract_jsonld(html)[0]["mainEntity"]
+    assert "image" not in person
+
+
+# ── BreadcrumbList (P1-3) ──
+
+def test_professor_html_has_breadcrumb_list():
+    canonical = "https://ratemyhusky.com/professors/francis-georges"
+    html = professor_html(_base_profile(), [], canonical)
+    blocks = _extract_jsonld(html)
+    breadcrumb = next(b for b in blocks if b.get("@type") == "BreadcrumbList")
+    items = breadcrumb["itemListElement"]
+    assert items[0] == {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://ratemyhusky.com/"}
+    assert items[1] == {"@type": "ListItem", "position": 2, "name": "Professors", "item": "https://ratemyhusky.com/professors"}
+    assert items[2]["position"] == 3
+    assert items[2]["name"] == "Francis Georges"
+    assert items[2]["item"] == canonical
+
+
+def test_course_html_has_breadcrumb_list():
+    detail = {
+        "summary": {"code": "ECON1115", "name": "Macroeconomics",
+                    "department": "Economics", "avgRating": 4.1,
+                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025"},
+        "instructors": [],
+    }
+    canonical = "https://ratemyhusky.com/courses/econ1115"
+    html = course_html(detail, canonical)
+    blocks = _extract_jsonld(html)
+    breadcrumb = next(b for b in blocks if b.get("@type") == "BreadcrumbList")
+    items = breadcrumb["itemListElement"]
+    assert items[0] == {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://ratemyhusky.com/"}
+    assert items[1] == {"@type": "ListItem", "position": 2, "name": "Courses", "item": "https://ratemyhusky.com/courses"}
+    assert items[2]["position"] == 3
+    assert items[2]["name"] == "ECON1115"
+    assert items[2]["item"] == canonical
+
+
+# ── Course AggregateRating (P1-2) ──
+
+def test_course_html_includes_aggregate_rating_when_avg_and_count_present():
+    detail = {
+        "summary": {"code": "ECON1115", "name": "Macroeconomics",
+                    "department": "Economics", "avgRating": 4.1,
+                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025",
+                    "ratingCount": 342},
+        "instructors": [],
+    }
+    html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
+    course_block = next(b for b in _extract_jsonld(html) if b.get("@type") == "Course")
+    assert course_block["aggregateRating"] == {
+        "@type": "AggregateRating",
+        "ratingValue": 4.1,
+        "ratingCount": 342,
+        "bestRating": 5,
+    }
+
+
+def test_course_html_omits_aggregate_rating_when_no_rating_count():
+    detail = {
+        "summary": {"code": "ECON1115", "name": "Macroeconomics",
+                    "department": "Economics", "avgRating": 4.1,
+                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025",
+                    "ratingCount": None},
+        "instructors": [],
+    }
+    html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
+    course_block = next(b for b in _extract_jsonld(html) if b.get("@type") == "Course")
+    assert "aggregateRating" not in course_block
+
+
+def test_course_html_omits_aggregate_rating_when_no_avg_rating():
+    detail = {
+        "summary": {"code": "NEW1000", "name": "Brand New Course",
+                    "department": "TBD", "avgRating": None,
+                    "avgEnrollment": None, "latestTermTitle": "",
+                    "ratingCount": 5},
+        "instructors": [],
+    }
+    html = course_html(detail, "https://ratemyhusky.com/courses/new1000")
+    course_block = next(b for b in _extract_jsonld(html) if b.get("@type") == "Course")
+    assert "aggregateRating" not in course_block
+
+
+def test_course_html_omits_aggregate_rating_when_count_missing_key():
+    # No "ratingCount" key at all in summary (older payload shape) — must not fabricate.
+    detail = {
+        "summary": {"code": "ECON1115", "name": "Macroeconomics",
+                    "department": "Economics", "avgRating": 4.1,
+                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025"},
+        "instructors": [],
+    }
+    html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
+    course_block = next(b for b in _extract_jsonld(html) if b.get("@type") == "Course")
+    assert "aggregateRating" not in course_block
 
 
 def test_professor_html_escapes_review_comment():

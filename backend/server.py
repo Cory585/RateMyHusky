@@ -1816,6 +1816,9 @@ def course_profile(code):
         "avgRating": round(avg_rating, 2) if avg_rating is not None else None,
         "avgEnrollment": round(total_enrollment / total_sections_with_enrollment) if total_sections_with_enrollment > 0 else None,
         "latestTermTitle": latest_term_title,
+        # Count of TRACE "overall" question responses backing avgRating, for
+        # AggregateRating JSON-LD (schema.org requires ratingCount alongside ratingValue).
+        "ratingCount": total_responses if total_responses > 0 else None,
     }
 
     # Build instructor aggregates

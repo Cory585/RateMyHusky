@@ -162,19 +162,39 @@ const Course = () => {
 		(summary.latestTermTitle ? `Last taught ${summary.latestTermTitle}. ` : '') +
 		`Compare instructors with TRACE + RateMyProfessor reviews.`;
 
+	const courseCanonical = `https://ratemyhusky.com/courses/${code}`;
+	const courseJsonLd: Record<string, unknown> = {
+		'@context': 'https://schema.org',
+		'@type': 'Course',
+		name: `${summary.code} — ${summary.name}`,
+		courseCode: summary.code,
+		provider: { '@type': 'CollegeOrUniversity', name: 'Northeastern University' },
+	};
+	if (summary.avgRating != null && summary.ratingCount) {
+		courseJsonLd.aggregateRating = {
+			'@type': 'AggregateRating',
+			ratingValue: summary.avgRating,
+			ratingCount: summary.ratingCount,
+			bestRating: 5,
+		};
+	}
+	const courseBreadcrumbJsonLd = {
+		'@context': 'https://schema.org',
+		'@type': 'BreadcrumbList',
+		itemListElement: [
+			{ '@type': 'ListItem', position: 1, name: 'Home', item: 'https://ratemyhusky.com/' },
+			{ '@type': 'ListItem', position: 2, name: 'Courses', item: 'https://ratemyhusky.com/courses' },
+			{ '@type': 'ListItem', position: 3, name: summary.code, item: courseCanonical },
+		],
+	};
+
 	return (
 		<div className="course-page">
 			<Seo
 				title={`${summary.code} Reviews — ${summary.name} at Northeastern | RateMyHusky`}
 				description={courseSeoDescription}
-				canonical={`https://ratemyhusky.com/courses/${code}`}
-				jsonLd={{
-					'@context': 'https://schema.org',
-					'@type': 'Course',
-					name: `${summary.code} — ${summary.name}`,
-					courseCode: summary.code,
-					provider: { '@type': 'CollegeOrUniversity', name: 'Northeastern University' },
-				}}
+				canonical={courseCanonical}
+				jsonLd={[courseJsonLd, courseBreadcrumbJsonLd]}
 			/>
 			<div className="course-shell">
 				<Breadcrumbs items={[

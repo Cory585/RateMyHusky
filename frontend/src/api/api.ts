@@ -299,6 +299,7 @@ export interface CourseSummary {
   avgRating: number | null;
   avgEnrollment: number | null;
   latestTermTitle: string;
+  ratingCount: number | null;
 }
 
 export interface CourseInstructorBreakdown {

@@ -6,6 +6,7 @@ the existing API data functions.
 """
 
 import json
+from datetime import date
 from html import escape as _html_escape
 from flask import Blueprint  # noqa: F401  (used by the route task)
 
@@ -93,6 +94,18 @@ def _rating_suffix(avg) -> str:
     return f" ({_esc(avg)}/5)" if avg is not None else ""
 
 
+def _breadcrumb_list(section_name: str, section_url: str, page_name: str, page_url: str) -> dict:
+    return {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {"@type": "ListItem", "position": 1, "name": "Home", "item": f"{SITE}/"},
+            {"@type": "ListItem", "position": 2, "name": section_name, "item": section_url},
+            {"@type": "ListItem", "position": 3, "name": page_name, "item": page_url},
+        ],
+    }
+
+
 def professor_html(profile: dict, reviews: list, canonical: str,
                    trace_count: int = 0) -> str:
     name = profile.get("name") or ""
@@ -148,19 +161,33 @@ def professor_html(profile: dict, reviews: list, canonical: str,
         f'<p><a href="{_esc(canonical)}">View on RateMyHusky</a></p>'
     )
 
-    jsonld = {
-        "@context": "https://schema.org",
+    person = {
         "@type": "Person",
         "name": name,
         "jobTitle": "Professor",
-        "worksFor": {"@type": "CollegeOrUniversity", "name": "Northeastern University"},
+        "worksFor": {
+            "@type": "CollegeOrUniversity",
+            "name": "Northeastern University",
+            "sameAs": "https://www.northeastern.edu",
+        },
+        "knowsAbout": dept,
+        "url": canonical,
     }
     if profile.get("imageUrl"):
-        jsonld["image"] = profile["imageUrl"]
+        person["image"] = profile["imageUrl"]
+    if profile.get("professorUrl"):
+        person["sameAs"] = [profile["professorUrl"]]
     # NB: schema.org Person does not support aggregateRating, and Google rejects
     # it ("Invalid object type" in Rich Results), so we do not emit one here.
+    profilepage = {
+        "@context": "https://schema.org",
+        "@type": "ProfilePage",
+        "dateModified": date.today().isoformat(),
+        "mainEntity": person,
+    }
+    breadcrumb = _breadcrumb_list("Professors", f"{SITE}/professors", name, canonical)
 
-    return _page(title, summary, canonical, body, [jsonld],
+    return _page(title, summary, canonical, body, [profilepage, breadcrumb],
                  image=profile.get("imageUrl"), og_type="profile",
                  image_alt=f"{name}, professor of {dept} at Northeastern University",
                  noindex=is_zero_content)
@@ -209,7 +236,16 @@ def course_html(detail: dict, canonical: str) -> str:
         "courseCode": code,
         "provider": {"@type": "CollegeOrUniversity", "name": "Northeastern University"},
     }
-    return _page(title, summary, canonical, body, [jsonld])
+    rating_count = s.get("ratingCount")
+    if avg is not None and rating_count:
+        jsonld["aggregateRating"] = {
+            "@type": "AggregateRating",
+            "ratingValue": avg,
+            "ratingCount": rating_count,
+            "bestRating": 5,
+        }
+    breadcrumb = _breadcrumb_list("Courses", f"{SITE}/courses", code, canonical)
+    return _page(title, summary, canonical, body, [jsonld, breadcrumb])
 
 
 def home_html(stats: list, top_professors: list, canonical: str) -> str:

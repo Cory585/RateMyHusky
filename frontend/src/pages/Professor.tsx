@@ -871,25 +871,47 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
     `${profile.name} professor reviews and ratings: ${profile.avgRating.toFixed(1)}/5 from ${profile.totalRatings} student reviews at Northeastern` +
     (profile.wouldTakeAgainPct != null ? ` (${profile.wouldTakeAgainPct}% would take again)` : '') +
     `. TRACE + RateMyProfessor + Reddit.`;
+  const profCanonical = `https://ratemyhusky.com/professors/${slug}`;
+  const profJsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'ProfilePage',
+    dateModified: new Date().toISOString().slice(0, 10),
+    mainEntity: {
+      '@type': 'Person',
+      name: profile.name,
+      jobTitle: 'Professor',
+      worksFor: {
+        '@type': 'CollegeOrUniversity',
+        name: 'Northeastern University',
+        sameAs: 'https://www.northeastern.edu',
+      },
+      knowsAbout: profile.department,
+      url: profCanonical,
+      ...(profile.imageUrl ? { image: profile.imageUrl } : {}),
+      ...(profile.professorUrl ? { sameAs: [profile.professorUrl] } : {}),
+      // schema.org Person does not support aggregateRating (Google rejects it
+      // as an invalid object type in Rich Results), so it is intentionally omitted.
+    },
+  };
+  const profBreadcrumbJsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Home', item: 'https://ratemyhusky.com/' },
+      { '@type': 'ListItem', position: 2, name: 'Professors', item: 'https://ratemyhusky.com/professors' },
+      { '@type': 'ListItem', position: 3, name: profile.name, item: profCanonical },
+    ],
+  };
 
   return (
     <div className="prof-page">
       <Seo
         title={`${profile.name} Reviews & Ratings — Northeastern ${profile.department} | RateMyHusky`}
         description={seoDescription}
-        canonical={`https://ratemyhusky.com/professors/${slug}`}
+        canonical={profCanonical}
         image={profile.imageUrl}
         ogType="profile"
-        jsonLd={{
-          '@context': 'https://schema.org',
-          '@type': 'Person',
-          name: profile.name,
-          jobTitle: 'Professor',
-          worksFor: { '@type': 'CollegeOrUniversity', name: 'Northeastern University' },
-          ...(profile.imageUrl ? { image: profile.imageUrl } : {}),
-          // schema.org Person does not support aggregateRating (Google rejects it
-          // as an invalid object type in Rich Results), so it is intentionally omitted.
-        }}
+        jsonLd={[profJsonLd, profBreadcrumbJsonLd]}
       />
       <header className="prof-hero">
         <div className="prof-hero-bg" style={{ backgroundImage: `url(${neuIcon})` }} />
