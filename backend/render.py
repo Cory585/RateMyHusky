@@ -103,12 +103,11 @@ def professor_html(profile: dict, reviews: list, canonical: str,
     diff = profile.get("difficulty")
     rmp_count = len(reviews)
 
-    title = f"{name} — {dept} at Northeastern | RateMyHusky"
-    wta_txt = f", {wta}% would take again" if wta is not None else ""
+    title = f"{name} Reviews & Ratings — Northeastern {dept} | RateMyHusky"
+    wta_txt = f" ({wta}% would take again)" if wta is not None else ""
     summary = (
-        f"{name} teaches {dept} at Northeastern. "
-        f"Average rating {avg}/5 across {total} ratings{wta_txt}. "
-        f"TRACE & RateMyProfessor reviews."
+        f"{name} professor reviews and ratings: {avg}/5 from {total} student "
+        f"reviews at Northeastern{wta_txt}. TRACE + RateMyProfessor + Reddit."
     )
 
     stats = _stat_rows([
@@ -143,7 +142,7 @@ def professor_html(profile: dict, reviews: list, canonical: str,
     is_zero_content = not total and not review_items and not trace_count
 
     body = (
-        f"<h1>{_esc(name)} — {_esc(dept)} at Northeastern University</h1>"
+        f"<h1>{_esc(name)} — Ratings & Reviews (Northeastern University)</h1>"
         f"<p>{_esc(summary)}</p>"
         f"{stats}{courses_block}{reviews_block}"
         f'<p><a href="{_esc(canonical)}">View on RateMyHusky</a></p>'
@@ -171,17 +170,16 @@ def course_html(detail: dict, canonical: str) -> str:
     s = detail.get("summary") or {}
     code = s.get("code") or ""
     cname = s.get("name") or ""
-    dept = s.get("department") or ""
     avg = s.get("avgRating")
     last = s.get("latestTermTitle") or ""
 
-    title = f"{code} — {cname} at Northeastern | RateMyHusky"
+    title = f"{code} Reviews — {cname} at Northeastern | RateMyHusky"
     avg_txt = f"Average rating {avg}/5. " if avg is not None else ""
     last_txt = f"Last taught {last}. " if last else ""
     summary = (
-        f"{code} — {cname} ({dept}) at Northeastern. "
+        f"{code} ({cname}) course reviews and ratings at Northeastern (NEU). "
         f"{avg_txt}{last_txt}"
-        f"Compare instructors with TRACE & RateMyProfessor reviews."
+        f"Compare instructors with TRACE + RateMyProfessor reviews."
     )
 
     stats = _stat_rows([
@@ -198,7 +196,7 @@ def course_html(detail: dict, canonical: str) -> str:
     inst_block = f"<h2>Instructors</h2><ul>{inst_items}</ul>" if inst_items else ""
 
     body = (
-        f"<h1>{_esc(code)} — {_esc(cname)}</h1>"
+        f"<h1>{_esc(code)} — {_esc(cname)}: Reviews & Ratings</h1>"
         f"<p>{_esc(summary)}</p>"
         f"{stats}{inst_block}"
         f'<p><a href="{_esc(canonical)}">View on RateMyHusky</a></p>'
@@ -215,7 +213,7 @@ def course_html(detail: dict, canonical: str) -> str:
 
 
 def home_html(stats: list, top_professors: list, canonical: str) -> str:
-    title = "RateMyHusky — Northeastern University professor & course ratings"
+    title = "RateMyHusky — Northeastern University Professor Reviews & Ratings"
     summary = (
         "RateMyHusky combines TRACE evaluations and RateMyProfessor reviews for "
         "Northeastern professors and courses. Compare ratings, difficulty, and "
@@ -265,12 +263,12 @@ LISTING_CAP = 20
 
 
 def professors_listing_html(entries: list, total: int, canonical: str) -> str:
-    title = "Northeastern University professors | RateMyHusky"
+    title = "Northeastern Professor Ratings & Reviews | RateMyHusky"
     total_txt = str(total) if total else "thousands of"
     summary = (
-        f"Browse {total_txt} Northeastern University professors. Compare ratings, "
-        f"difficulty, and would-take-again from TRACE evaluations and "
-        f"RateMyProfessor reviews."
+        f"Browse {total_txt} Northeastern University (NEU) professor ratings and "
+        f"reviews. Compare ratings, difficulty, and would-take-again from TRACE "
+        f"evaluations and RateMyProfessor reviews."
     )
 
     shown = [e for e in (entries or []) if e.get("slug")][:LISTING_CAP]
@@ -281,7 +279,7 @@ def professors_listing_html(entries: list, total: int, canonical: str) -> str:
         for e in shown
     )
     body = (
-        f"<h1>Northeastern University professors</h1>"
+        f"<h1>Northeastern University Professor Ratings & Reviews</h1>"
         f"<p>{_esc(summary)}</p>"
         f"<ul>{items}</ul>"
     )
@@ -303,11 +301,12 @@ def professors_listing_html(entries: list, total: int, canonical: str) -> str:
 
 
 def courses_listing_html(entries: list, total: int, canonical: str) -> str:
-    title = "Northeastern University courses | RateMyHusky"
+    title = "Northeastern Course Reviews & Ratings | RateMyHusky"
     total_txt = str(total) if total else "thousands of"
     summary = (
-        f"Browse {total_txt} Northeastern University courses. Compare instructors, "
-        f"average ratings, and enrollment from TRACE evaluations."
+        f"Browse {total_txt} Northeastern University (NEU) course reviews and "
+        f"ratings. Compare instructors, average ratings, and enrollment from "
+        f"TRACE evaluations."
     )
 
     shown = [e for e in (entries or []) if e.get("code")][:LISTING_CAP]
@@ -318,7 +317,7 @@ def courses_listing_html(entries: list, total: int, canonical: str) -> str:
         for e in shown
     )
     body = (
-        f"<h1>Northeastern University courses</h1>"
+        f"<h1>Northeastern University Course Reviews & Ratings</h1>"
         f"<p>{_esc(summary)}</p>"
         f"<ul>{items}</ul>"
     )

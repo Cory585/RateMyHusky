@@ -35,11 +35,32 @@ def test_professor_html_has_title_canonical_and_h1():
     }
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/francis-georges")
     assert "<!doctype html>" in html.lower()
-    assert "<title>Francis Georges — Economics at Northeastern | RateMyHusky</title>" in html
+    assert "<title>Francis Georges Reviews &amp; Ratings — Northeastern Economics | RateMyHusky</title>" in html
     assert '<link rel="canonical" href="https://ratemyhusky.com/professors/francis-georges"' in html
-    assert "<h1>Francis Georges — Economics at Northeastern University</h1>" in html
+    assert "<h1>Francis Georges — Ratings & Reviews (Northeastern University)</h1>" in html
     # summary paragraph mentions the key numbers
     assert "4.25" in html and "2686" in html and "83%" in html
+
+
+def test_professor_meta_description_leads_with_reviews_and_ratings_phrase():
+    profile = _base_profile()
+    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
+    desc = _meta_description(html)
+    assert desc.startswith(
+        "Francis Georges professor reviews and ratings: 4.25/5 from 2686 student "
+        "reviews at Northeastern (83% would take again). TRACE + RateMyProfessor + Reddit."
+    )
+
+
+def test_professor_meta_description_omits_would_take_again_clause_when_absent():
+    profile = _base_profile(wouldTakeAgainPct=None)
+    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
+    desc = _meta_description(html)
+    assert "would take again" not in desc
+    assert desc.startswith(
+        "Francis Georges professor reviews and ratings: 4.25/5 from 2686 student "
+        "reviews at Northeastern. TRACE + RateMyProfessor + Reddit."
+    )
 
 
 def test_professor_html_jsonld_person_never_has_aggregate_rating():
@@ -106,11 +127,27 @@ def test_course_html_has_title_h1_and_jsonld():
         "instructors": [{"name": "Francis Georges", "slug": "francis-georges"}],
     }
     html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
-    assert "<title>ECON1115 — Macroeconomics at Northeastern | RateMyHusky</title>" in html
-    assert "<h1>ECON1115 — Macroeconomics</h1>" in html
+    assert "<title>ECON1115 Reviews — Macroeconomics at Northeastern | RateMyHusky</title>" in html
+    assert "<h1>ECON1115 — Macroeconomics: Reviews & Ratings</h1>" in html
     block = _extract_jsonld(html)[0]
     assert block["@type"] == "Course"
     assert block["courseCode"] == "ECON1115"
+
+
+def test_course_meta_description_leads_with_reviews_and_ratings_phrase():
+    detail = {
+        "summary": {"code": "ECON1115", "name": "Macroeconomics",
+                    "department": "Economics", "avgRating": 4.1,
+                    "avgEnrollment": 120, "latestTermTitle": None},
+        "instructors": [],
+    }
+    html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
+    desc = _meta_description(html)
+    assert desc == (
+        "ECON1115 (Macroeconomics) course reviews and ratings at Northeastern (NEU). "
+        "Average rating 4.1/5. "
+        "Compare instructors with TRACE + RateMyProfessor reviews."
+    )
 
 
 def test_not_found_html_is_noindex():
@@ -123,7 +160,7 @@ def test_render_professor_route_returns_html(render_client):
     assert resp.status_code == 200
     assert resp.mimetype == "text/html"
     body = resp.get_data(as_text=True)
-    assert "<h1>Francis Georges — Economics at Northeastern University</h1>" in body
+    assert "<h1>Francis Georges — Ratings & Reviews (Northeastern University)</h1>" in body
     assert "Excellent lecturer." in body
     assert resp.headers["Cache-Control"] == "public, max-age=3600, s-maxage=86400"
 
@@ -138,7 +175,7 @@ def test_render_course_route_returns_html(render_client):
     resp = render_client.get("/render/courses/econ1115")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert "<h1>ECON1115 — Macroeconomics</h1>" in body
+    assert "<h1>ECON1115 — Macroeconomics: Reviews & Ratings</h1>" in body
     assert resp.headers["Cache-Control"] == "public, max-age=3600, s-maxage=86400"
 
 
@@ -206,7 +243,7 @@ def test_professor_html_has_twitter_card_large_image_when_photo():
     html = professor_html(_base_profile(imageUrl="https://img/x.jpg"), [],
                           "https://ratemyhusky.com/professors/x")
     assert '<meta name="twitter:card" content="summary_large_image">' in html
-    assert '<meta name="twitter:title" content="Francis Georges — Economics at Northeastern | RateMyHusky">' in html
+    assert '<meta name="twitter:title" content="Francis Georges Reviews &amp; Ratings — Northeastern Economics | RateMyHusky">' in html
     assert '<meta name="twitter:image" content="https://img/x.jpg">' in html
     assert '<meta property="og:image:alt"' in html
 
@@ -227,7 +264,7 @@ def test_course_html_has_twitter_tags():
     }
     html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
     assert '<meta name="twitter:card"' in html
-    assert '<meta name="twitter:title" content="ECON1115 — Macroeconomics at Northeastern | RateMyHusky">' in html
+    assert '<meta name="twitter:title" content="ECON1115 Reviews — Macroeconomics at Northeastern | RateMyHusky">' in html
 
 
 def test_render_professor_route_exposes_trace_count(render_client):
@@ -249,13 +286,16 @@ def test_home_html_title_canonical_h1_and_summary():
             "department": "Economics", "avgRating": 4.25}]
     html = home_html(stats, top, "https://ratemyhusky.com/")
     assert "<!doctype html>" in html.lower()
-    assert "<title>RateMyHusky — Northeastern University professor &amp; course ratings</title>" in html
+    assert "<title>RateMyHusky — Northeastern University Professor Reviews &amp; Ratings</title>" in html
     assert '<link rel="canonical" href="https://ratemyhusky.com/"' in html
-    assert "<h1>RateMyHusky — Northeastern University professor &amp; course ratings</h1>" in html
+    assert "<h1>RateMyHusky — Northeastern University Professor Reviews &amp; Ratings</h1>" in html
     # stat values rendered as-is
     assert "9.3K" in html and "Professors" in html
     # top professor linked into its detail page
     assert '<a href="https://ratemyhusky.com/professors/francis-georges">' in html
+    # description must carry both target keywords
+    desc = _meta_description(html)
+    assert "ratings" in desc and "reviews" in desc
 
 
 def test_home_html_jsonld_website_with_searchaction():
@@ -280,10 +320,12 @@ def test_professors_listing_title_total_and_entry_links():
     entries = [{"name": "Francis Georges", "slug": "francis-georges",
                 "department": "Economics", "avgRating": 4.25}]
     html = professors_listing_html(entries, 9329, "https://ratemyhusky.com/professors")
-    assert "<title>Northeastern University professors | RateMyHusky</title>" in html
-    assert "<h1>Northeastern University professors</h1>" in html
+    assert "<title>Northeastern Professor Ratings &amp; Reviews | RateMyHusky</title>" in html
+    assert "<h1>Northeastern University Professor Ratings & Reviews</h1>" in html
     assert "9329" in html  # total mentioned in summary
     assert '<a href="https://ratemyhusky.com/professors/francis-georges">Francis Georges</a>' in html
+    desc = _meta_description(html)
+    assert desc.startswith("Browse 9329 Northeastern University (NEU) professor ratings and reviews.")
 
 
 def test_professors_listing_jsonld_itemlist():
@@ -312,10 +354,12 @@ def test_courses_listing_title_total_and_entry_links():
     entries = [{"code": "ECON1115", "name": "Macroeconomics",
                 "department": "Economics", "avgRating": 4.1}]
     html = courses_listing_html(entries, 5013, "https://ratemyhusky.com/courses")
-    assert "<title>Northeastern University courses | RateMyHusky</title>" in html
-    assert "<h1>Northeastern University courses</h1>" in html
+    assert "<title>Northeastern Course Reviews &amp; Ratings | RateMyHusky</title>" in html
+    assert "<h1>Northeastern University Course Reviews & Ratings</h1>" in html
     assert "5013" in html
     assert '<a href="https://ratemyhusky.com/courses/ECON1115">ECON1115 — Macroeconomics</a>' in html
+    desc = _meta_description(html)
+    assert desc.startswith("Browse 5013 Northeastern University (NEU) course reviews and ratings.")
 
 
 def test_courses_listing_jsonld_itemlist():
@@ -331,7 +375,7 @@ def test_render_home_route(render_client):
     assert resp.status_code == 200
     assert resp.mimetype == "text/html"
     body = resp.get_data(as_text=True)
-    assert "<h1>RateMyHusky — Northeastern University professor &amp; course ratings</h1>" in body
+    assert "<h1>RateMyHusky — Northeastern University Professor Reviews &amp; Ratings</h1>" in body
     assert "francis-georges" in body  # top professor linked
     assert "Professors" in body and "9.3K" in body  # stats rendered
     assert resp.headers["Cache-Control"] == "public, max-age=3600, s-maxage=86400"
@@ -341,7 +385,7 @@ def test_render_professors_listing_route(render_client):
     resp = render_client.get("/render/professors")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert "<h1>Northeastern University professors</h1>" in body
+    assert "<h1>Northeastern University Professor Ratings & Reviews</h1>" in body
     assert "9329" in body
     assert resp.headers["Cache-Control"] == "public, max-age=3600, s-maxage=86400"
 
@@ -350,7 +394,7 @@ def test_render_courses_listing_route(render_client):
     resp = render_client.get("/render/courses")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert "<h1>Northeastern University courses</h1>" in body
+    assert "<h1>Northeastern University Course Reviews & Ratings</h1>" in body
     assert "ECON1115" in body
     assert resp.headers["Cache-Control"] == "public, max-age=3600, s-maxage=86400"
 

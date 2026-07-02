@@ -868,15 +868,14 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
   if (error || !profile || !stats) return <NotFound />;
 
   const seoDescription =
-    `${profile.name} teaches ${profile.department} at Northeastern. ` +
-    `Average rating ${profile.avgRating.toFixed(1)}/5 across ${profile.totalRatings} ratings` +
-    (profile.wouldTakeAgainPct != null ? `, ${profile.wouldTakeAgainPct}% would take again` : '') +
-    `. TRACE & RateMyProfessor reviews.`;
+    `${profile.name} professor reviews and ratings: ${profile.avgRating.toFixed(1)}/5 from ${profile.totalRatings} student reviews at Northeastern` +
+    (profile.wouldTakeAgainPct != null ? ` (${profile.wouldTakeAgainPct}% would take again)` : '') +
+    `. TRACE + RateMyProfessor + Reddit.`;
 
   return (
     <div className="prof-page">
       <Seo
-        title={`${profile.name} — ${profile.department} at Northeastern | RateMyHusky`}
+        title={`${profile.name} Reviews & Ratings — Northeastern ${profile.department} | RateMyHusky`}
         description={seoDescription}
         canonical={`https://ratemyhusky.com/professors/${slug}`}
         image={profile.imageUrl}

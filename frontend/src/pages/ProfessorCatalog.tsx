@@ -414,8 +414,8 @@ export default function ProfessorCatalog() {
   return (
     <div className="catalog-page">
       <Seo
-        title="Browse Northeastern Professors | RateMyHusky"
-        description="Browse and filter thousands of Northeastern University professors by department, college, and rating. Compare TRACE evaluations and RateMyProfessor reviews."
+        title="Northeastern Professor Ratings & Reviews | RateMyHusky"
+        description={`Browse ${total ? total.toLocaleString() : 'thousands of'} Northeastern University (NEU) professor ratings and reviews. Compare TRACE evaluations and RateMyProfessor reviews.`}
         canonical="https://ratemyhusky.com/professors"
       />
 

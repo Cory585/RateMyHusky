@@ -313,8 +313,8 @@ export default function Courses() {
 	return (
 		<div className="catalog-page">
 			<Seo
-				title="Browse Northeastern Courses | RateMyHusky"
-				description="Browse and filter Northeastern University courses by department and rating. See TRACE evaluation data and compare instructors for every course."
+				title="Northeastern Course Reviews & Ratings | RateMyHusky"
+				description={`Browse ${total ? total.toLocaleString() : 'thousands of'} Northeastern University (NEU) course reviews and ratings. See TRACE evaluation data and compare instructors for every course.`}
 				canonical="https://ratemyhusky.com/courses"
 			/>
 			{sidebarOpen && <div className="catalog-overlay" onClick={() => setSidebarOpen(false)} />}
