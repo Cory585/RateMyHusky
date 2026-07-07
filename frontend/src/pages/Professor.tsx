@@ -906,7 +906,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
   return (
     <div className="prof-page">
       <Seo
-        title={`${profile.name} Reviews & Ratings — Northeastern ${profile.department} | RateMyHusky`}
+        title={`${profile.name} Reviews & Ratings — Northeastern ${profile.department}`}
         description={seoDescription}
         canonical={profCanonical}
         image={profile.imageUrl}

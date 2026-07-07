@@ -44,9 +44,17 @@ export default function Department() {
     return () => { cancelled = true; };
   }, [slug]);
 
+  // Match the prerender (render.py department_html): professors without a slug are
+  // excluded from the table, summary sentences, and JSON-LD alike.
+  const linkedProfessors = useMemo(
+    () => (department ? department.professors.filter(
+      (p): p is DepartmentProfessor & { slug: string } => !!p.slug,
+    ) : []),
+    [department],
+  );
+
   const sortedProfessors = useMemo(() => {
-    if (!department) return [];
-    const rows = [...department.professors];
+    const rows = [...linkedProfessors];
     rows.sort((a, b) => {
       if (sortKey === 'name') {
         return sortDir === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
@@ -54,7 +62,7 @@ export default function Department() {
       return compareNullable(a[sortKey], b[sortKey], sortDir);
     });
     return rows;
-  }, [department, sortKey, sortDir]);
+  }, [linkedProfessors, sortKey, sortDir]);
 
   const toggleSort = (key: SortKey) => {
     if (key === sortKey) {
@@ -80,7 +88,7 @@ export default function Department() {
   }
 
   const { name, professorCount, avgRating } = department;
-  const top = sortedProfessors.length ? [...department.professors].sort((a, b) => (b.avgRating ?? -1) - (a.avgRating ?? -1))[0] : null;
+  const top = linkedProfessors.length ? [...linkedProfessors].sort((a, b) => (b.avgRating ?? -1) - (a.avgRating ?? -1))[0] : null;
 
   const summarySentences = [
     avgRating != null
@@ -92,7 +100,7 @@ export default function Department() {
       `The highest-rated is ${top.name} (${top.avgRating}/5 from ${top.totalRatings} reviews).`
     );
   }
-  const wtaValues = department.professors
+  const wtaValues = linkedProfessors
     .map(p => p.wouldTakeAgainPct)
     .filter((v): v is number => v != null);
   if (wtaValues.length) {
@@ -105,7 +113,7 @@ export default function Department() {
   const itemListJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'ItemList',
-    itemListElement: department.professors.map((p, i) => ({
+    itemListElement: linkedProfessors.map((p, i) => ({
       '@type': 'ListItem',
       position: i + 1,
       name: p.name,
@@ -127,7 +135,7 @@ export default function Department() {
   return (
     <div className="course-page">
       <Seo
-        title={`${name} Professors at Northeastern — Ratings & Reviews | RateMyHusky`}
+        title={`${name} Professors at Northeastern — Ratings & Reviews`}
         description={summary}
         canonical={canonical}
         jsonLd={[itemListJsonLd, breadcrumbJsonLd]}
@@ -161,7 +169,7 @@ export default function Department() {
                 </tr>
               </thead>
               <tbody>
-                {sortedProfessors.map((p: DepartmentProfessor) => (
+                {sortedProfessors.map(p => (
                   <tr key={p.slug}>
                     <td><Link to={`/professors/${p.slug}`}>{p.name}</Link></td>
                     <td>{p.avgRating != null ? p.avgRating.toFixed(2) : '—'}</td>

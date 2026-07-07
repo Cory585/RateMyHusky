@@ -427,7 +427,7 @@ export const fetchDepartmentsHub = () => get<DepartmentsHubResponse>('/api/depar
 
 export interface DepartmentProfessor {
   name: string;
-  slug: string;
+  slug: string | null;
   avgRating: number | null;
   difficulty: number | null;
   wouldTakeAgainPct: number | null;

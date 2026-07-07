@@ -37,7 +37,7 @@ def test_professor_html_has_title_canonical_and_h1():
     }
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/francis-georges")
     assert "<!doctype html>" in html.lower()
-    assert "<title>Francis Georges Reviews &amp; Ratings — Northeastern Economics | RateMyHusky</title>" in html
+    assert "<title>Francis Georges Reviews &amp; Ratings — Northeastern Economics</title>" in html
     assert '<link rel="canonical" href="https://ratemyhusky.com/professors/francis-georges"' in html
     assert "<h1>Francis Georges — Ratings & Reviews (Northeastern University)</h1>" in html
     # summary paragraph mentions the key numbers
@@ -263,7 +263,7 @@ def test_course_html_has_title_h1_and_jsonld():
         "instructors": [{"name": "Francis Georges", "slug": "francis-georges"}],
     }
     html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
-    assert "<title>ECON1115 Reviews — Macroeconomics at Northeastern | RateMyHusky</title>" in html
+    assert "<title>ECON1115 Reviews — Macroeconomics at Northeastern</title>" in html
     assert "<h1>ECON1115 — Macroeconomics: Reviews & Ratings</h1>" in html
     block = _extract_jsonld(html)[0]
     assert block["@type"] == "Course"
@@ -379,7 +379,7 @@ def test_professor_html_has_twitter_card_large_image_when_photo():
     html = professor_html(_base_profile(imageUrl="https://img/x.jpg"), [],
                           "https://ratemyhusky.com/professors/x")
     assert '<meta name="twitter:card" content="summary_large_image">' in html
-    assert '<meta name="twitter:title" content="Francis Georges Reviews &amp; Ratings — Northeastern Economics | RateMyHusky">' in html
+    assert '<meta name="twitter:title" content="Francis Georges Reviews &amp; Ratings — Northeastern Economics">' in html
     assert '<meta name="twitter:image" content="https://img/x.jpg">' in html
     assert '<meta property="og:image:alt"' in html
 
@@ -400,7 +400,7 @@ def test_course_html_has_twitter_tags():
     }
     html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
     assert '<meta name="twitter:card"' in html
-    assert '<meta name="twitter:title" content="ECON1115 Reviews — Macroeconomics at Northeastern | RateMyHusky">' in html
+    assert '<meta name="twitter:title" content="ECON1115 Reviews — Macroeconomics at Northeastern">' in html
 
 
 def test_render_professor_route_exposes_trace_count(render_client):
@@ -648,7 +648,7 @@ def test_professor_html_verdict_sentence_all_clauses():
     html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x")
     month_year = date.today().strftime("%B %Y")
     expected = (
-        "Francis Georges is a Economics professor at Northeastern University "
+        "Francis Georges is an Economics professor at Northeastern University "
         "rated 4.25/5 by 2686 students, with 2.9/5 difficulty and 83% who would "
         f"take them again (TRACE + RateMyProfessors + Reddit, updated {month_year})."
     )
@@ -660,7 +660,7 @@ def test_professor_html_verdict_sentence_omits_missing_clauses():
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
     month_year = date.today().strftime("%B %Y")
     expected = (
-        "Francis Georges is a Economics professor at Northeastern University "
+        "Francis Georges is an Economics professor at Northeastern University "
         f"rated 4.25/5 by 2686 students (TRACE + RateMyProfessors + Reddit, updated {month_year})."
     )
     assert expected in html
@@ -670,9 +670,21 @@ def test_professor_html_verdict_appears_before_summary_paragraph():
     html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x")
     body = html.split("<body>")[1]
     h1_pos = body.index("<h1>")
-    verdict_pos = body.index("is a Economics professor at Northeastern University")
+    verdict_pos = body.index("is an Economics professor at Northeastern University")
     summary_pos = body.index("professor reviews and ratings:")
     assert h1_pos < verdict_pos < summary_pos
+
+
+def test_professor_html_verdict_uses_an_for_vowel_department():
+    profile = _base_profile(department="Electrical Engineering")
+    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
+    assert "is an Electrical Engineering professor" in html
+
+
+def test_professor_html_verdict_uses_a_for_consonant_department():
+    profile = _base_profile(department="Computer Science")
+    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
+    assert "is a Computer Science professor" in html
 
 
 # ── Freshness line (P1-4) ──
@@ -806,7 +818,7 @@ def test_department_html_title_h1_and_canonical():
     canonical = "https://ratemyhusky.com/departments/computer-science"
     html = department_html(_dept_detail(), canonical)
     assert "<!doctype html>" in html.lower()
-    assert "<title>Computer Science Professors at Northeastern — Ratings &amp; Reviews | RateMyHusky</title>" in html
+    assert "<title>Computer Science Professors at Northeastern — Ratings &amp; Reviews</title>" in html
     assert '<link rel="canonical" href="https://ratemyhusky.com/departments/computer-science"' in html
     assert "<h1>Northeastern Computer Science — Professor Ratings & Reviews</h1>" in html
 

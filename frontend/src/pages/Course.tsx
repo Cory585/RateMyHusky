@@ -191,7 +191,7 @@ const Course = () => {
 	return (
 		<div className="course-page">
 			<Seo
-				title={`${summary.code} Reviews — ${summary.name} at Northeastern | RateMyHusky`}
+				title={`${summary.code} Reviews — ${summary.name} at Northeastern`}
 				description={courseSeoDescription}
 				canonical={courseCanonical}
 				jsonLd={[courseJsonLd, courseBreadcrumbJsonLd]}

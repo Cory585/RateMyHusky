@@ -95,6 +95,10 @@ def _rating_suffix(avg) -> str:
     return f" ({_esc(avg)}/5)" if avg is not None else ""
 
 
+def _article(noun: str) -> str:
+    return "an" if noun[:1].lower() in "aeiou" else "a"
+
+
 def _breadcrumb_list(section_name: str, section_url: str, page_name: str, page_url: str) -> dict:
     return {
         "@context": "https://schema.org",
@@ -189,7 +193,7 @@ def professor_html(profile: dict, reviews: list, canonical: str,
     diff = profile.get("difficulty")
     rmp_count = len(reviews)
 
-    title = f"{name} Reviews & Ratings — Northeastern {dept} | RateMyHusky"
+    title = f"{name} Reviews & Ratings — Northeastern {dept}"
     wta_txt = f" ({wta}% would take again)" if wta is not None else ""
     summary = (
         f"{name} professor reviews and ratings: {avg}/5 from {total} student "
@@ -200,7 +204,7 @@ def professor_html(profile: dict, reviews: list, canonical: str,
     diff_clause = f", with {diff}/5 difficulty" if diff is not None else ""
     wta_clause = f" and {wta}% who would take them again" if wta is not None else ""
     verdict = (
-        f"{name} is a {dept} professor at Northeastern University rated "
+        f"{name} is {_article(dept)} {dept} professor at Northeastern University rated "
         f"{avg}/5 by {total} students{diff_clause}{wta_clause} "
         f"(TRACE + RateMyProfessors + Reddit, updated {month_year})."
     )
@@ -323,7 +327,7 @@ def course_html(detail: dict, canonical: str) -> str:
     avg = s.get("avgRating")
     last = s.get("latestTermTitle") or ""
 
-    title = f"{code} Reviews — {cname} at Northeastern | RateMyHusky"
+    title = f"{code} Reviews — {cname} at Northeastern"
     avg_txt = f"Average rating {avg}/5. " if avg is not None else ""
     last_txt = f"Last taught {last}. " if last else ""
     summary = (
@@ -506,7 +510,7 @@ def department_html(detail: dict, canonical: str) -> str:
     avg = detail.get("avgRating")
     professors = [p for p in (detail.get("professors") or []) if p.get("slug")]
 
-    title = f"{name} Professors at Northeastern — Ratings & Reviews | RateMyHusky"
+    title = f"{name} Professors at Northeastern — Ratings & Reviews"
     month_year = _month_year(date.today())
 
     top = professors[0] if professors else None
