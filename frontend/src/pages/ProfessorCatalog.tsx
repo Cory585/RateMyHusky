@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   fetchProfessorsCatalog,
   fetchDepartments,
@@ -414,8 +414,8 @@ export default function ProfessorCatalog() {
   return (
     <div className="catalog-page">
       <Seo
-        title="Browse Northeastern Professors | RateMyHusky"
-        description="Browse and filter thousands of Northeastern University professors by department, college, and rating. Compare TRACE evaluations and RateMyProfessor reviews."
+        title="Northeastern Professor Ratings & Reviews | RateMyHusky"
+        description={`Browse ${total ? total.toLocaleString() : 'thousands of'} Northeastern University (NEU) professor ratings and reviews. Compare TRACE evaluations and RateMyProfessor reviews.`}
         canonical="https://ratemyhusky.com/professors"
       />
 
@@ -681,7 +681,8 @@ export default function ProfessorCatalog() {
           </div>
           <p className="catalog-disclaimer">
             Professors without any rating data are not shown.{' '}
-            <span>They may still have a profile if found via search.</span>
+            <span>They may still have a profile if found via search.</span>{' '}
+            <Link to="/departments" className="catalog-disclaimer-link">Browse by department</Link>
           </p>
 
           {loading ? (

@@ -71,6 +71,12 @@ const SearchBar = ({ forceAsk, restoreAsk }: SearchBarProps) => {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Guards for submitAsk's post-await effects: reqId invalidates a stale response when the
+  // search type changes mid-request (Issue 8); mounted prevents state/dispatch after unmount
+  // (Issue 21). Both are checked on the same line right after the await.
+  const askReqSeq = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
 
   // "Try Now" (home ask bubble) switches the bar into Ask mode and focuses it.
   useEffect(() => {
@@ -188,6 +194,7 @@ const SearchBar = ({ forceAsk, restoreAsk }: SearchBarProps) => {
   }, [isFocused, query, searchType, isAsk, professorExamples, courseExamples, askExamples]);
 
   const handleSearchTypeChange = (newType: string) => {
+    askReqSeq.current++; // invalidate any in-flight Ask request
     setSearchType(newType);
     setQuery('');
     setSuggestions([]);
@@ -239,12 +246,14 @@ const SearchBar = ({ forceAsk, restoreAsk }: SearchBarProps) => {
   // Ask submit: one self-contained question → one answer (single-shot, no history).
   const submitAsk = async () => {
     const q = query.trim();
-    if (!q || askLoading) return;
+    if (q.length < 2 || askLoading) return;
+    const reqId = ++askReqSeq.current;
     setAskResult(null);
     setAskLoading(true);
     setShowSuggestions(true);
     const { status, body } = await askChat(q);
     const now = Date.now();
+    if (reqId !== askReqSeq.current || !mounted.current) return;
     setAskLoading(false);
     setAskResult(body);
     setAskedAt(now);
@@ -418,8 +427,13 @@ function AskResult({ result, askedAt }: { result: ChatResponse; askedAt: number 
       : result.professor_slug
       ? `/professors/${result.professor_slug}`
       : null;
-    // Show a source only if the answer text actually cites it with [N].
-    const cited = result.sources.filter((s) => result.answer.includes(`[${s.source_id}]`));
+    // Show a source only if it's actually cited. Prefer the backend's validated `cited` list
+    // (handles grouped citations like [1, 2]); fall back to the substring probe for older
+    // cached payloads that predate the field.
+    const sources = result.sources ?? [];
+    const cited = Array.isArray(result.cited)
+      ? sources.filter((s) => result.cited!.includes(s.source_id))
+      : sources.filter((s) => result.answer.includes(`[${s.source_id}]`));
     return (
       <>
         <p className="ask-answer">{result.answer}</p>
@@ -503,7 +517,7 @@ function AskResult({ result, askedAt }: { result: ChatResponse; askedAt: number 
     snippet?: string;
     link?: { type: 'professor' | 'course'; value: string } | null;
   };
-  const keywordComments = result.comments.slice(0, 10) as KeywordComment[];
+  const keywordComments = (result.comments ?? []).slice(0, 10) as KeywordComment[];
   return (
     <>
       {(result.banner || result.message) && (

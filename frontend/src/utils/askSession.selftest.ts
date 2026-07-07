@@ -51,6 +51,15 @@ function selftest(): number {
   store[ASK_SESSION_KEY] = '{not valid json';
   check('loadAskSession returns null on corrupt data (no throw)', loadAskSession() === null);
 
+  // Malformed 'question' payload missing `sources` (e.g. the short-query bug) must not be
+  // replayed on breadcrumb restore — it would crash AskResult's result.sources.filter(...).
+  store[ASK_SESSION_KEY] = JSON.stringify({
+    query: 'a',
+    result: { mode: 'question', answer: 'hi', professor_slug: 'ada', course_code: null, disclaimer: 'AI-generated.' },
+    askedAt: 456,
+  });
+  check('loadAskSession returns null when result has no sources array', loadAskSession() === null);
+
   console.log(fails.length ? `${fails.length} FAIL(s): ` + fails.join(', ') : 'ALL PASS');
   return fails.length ? 1 : 0;
 }

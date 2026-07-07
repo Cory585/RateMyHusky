@@ -1,4 +1,5 @@
-import sys, json, argparse
+import sys, json, argparse, time
+from datetime import datetime, timedelta, timezone
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 LLM_TIMEOUT = 20  # seconds, per call
@@ -12,6 +13,15 @@ def _default_client_factory(api_key):
 
 def _is_rate_limit(exc):
     return getattr(exc, "status_code", None) == 429 or "429" in str(exc) or "rate" in str(exc).lower()
+
+def _is_daily_limit(exc):
+    s = str(exc).lower()
+    return "day" in s or "daily" in s or "tpd" in s or "rpd" in s
+
+def _seconds_until_utc_midnight():
+    now = datetime.now(timezone.utc)
+    tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return (tomorrow - now).total_seconds()
 
 class GroqAdapter:
     CLASSIFY_MODEL = "llama-3.1-8b-instant"
@@ -53,7 +63,7 @@ class GroqAdapter:
                 "on_topic": bool(data.get("on_topic", False)),
                 "professors_or_courses": entities,
                 "professor_or_course": entities[0] if entities else None,
-                "looks_like_injection": bool(data.get("looks_like_injection", True)),
+                "looks_like_injection": bool(data.get("looks_like_injection", False)),
                 "error": False,
             }
         except Exception:
@@ -77,7 +87,8 @@ class GroqAdapter:
                         "tokens_used": getattr(resp.usage, "total_tokens", 0)}
             except Exception as e:
                 if _is_rate_limit(e) and attempt == 0:
-                    self.provider.retire(entry["key"])
+                    cooldown = _seconds_until_utc_midnight() if _is_daily_limit(e) else 60
+                    self.provider.retire(entry["key"], cooldown_seconds=cooldown)
                     continue
                 raise LLMUnavailable(str(e))
         raise LLMUnavailable("retry limit reached")
@@ -130,7 +141,7 @@ def selftest():
                     def create(**kw): return FakeResp(outer._c)
             return C()
 
-    provider = KeyPool([{"key": "k1", "provider": "groq", "rpd_limit": 1000, "tpd_limit": 500000}])
+    provider = KeyPool([{"key": "k1", "rpd_limit": 1000, "tpd_limit": 500000}])
 
     a = GroqAdapter(provider, client_factory=lambda k: FakeClient('{"on_topic": true, "professor_or_course": "Guha", "looks_like_injection": false}'))
     cls = a.classify("is professor guha hard")
@@ -173,8 +184,8 @@ def selftest():
                         return FakeResp("retry worked")
             return C()
     provider2 = KeyPool([
-        {"key": "k1", "provider": "groq", "rpd_limit": 1000, "tpd_limit": 500000},
-        {"key": "k2", "provider": "groq", "rpd_limit": 1000, "tpd_limit": 500000},
+        {"key": "k1", "rpd_limit": 1000, "tpd_limit": 500000},
+        {"key": "k2", "rpd_limit": 1000, "tpd_limit": 500000},
     ])
     fc = Fake429Client()
     a3 = GroqAdapter(provider2, client_factory=lambda k: fc)
@@ -197,6 +208,48 @@ def selftest():
 
     # prompt regression: must ask for the list field
     check("classify prompt requests entity list", "professors_or_courses" in _CLASSIFY_PROMPT)
+
+    # Issue 5: valid JSON that OMITS looks_like_injection must default to False, not True —
+    # a missing field is not a positive detection, and this path has error=False (not the
+    # fail-closed path), so a wrong default here would charge an innocent user an abuse strike.
+    a_missing = GroqAdapter(provider, client_factory=lambda k: FakeClient(
+        '{"on_topic": true, "professors_or_courses": ["Guha"], "professor_or_course": "Guha"}'))
+    cls_missing = a_missing.classify("is guha hard")
+    check("missing looks_like_injection defaults to False",
+          cls_missing["looks_like_injection"] is False)
+    check("missing looks_like_injection still has error=False", cls_missing["error"] is False)
+
+    # Issue 2: synthesize retires with a short cooldown for a per-minute 429, and with a
+    # cooldown lasting until UTC midnight when the error text signals a daily-limit block —
+    # so transient per-minute blips don't get the same treatment as an actual daily cutoff.
+    retire_calls = []
+    class FakeProviderCooldown:
+        def __init__(self): self.idx = 0
+        def acquire(self, est_tokens): return {"key": "k1"}
+        def retire(self, key, cooldown_seconds=60): retire_calls.append(cooldown_seconds)
+    class Fake429ThenOKClient:
+        calls = 0
+        @property
+        def chat(self):
+            outer = self
+            class C:
+                class completions:
+                    @staticmethod
+                    def create(**kw):
+                        outer.calls += 1
+                        if outer.calls == 1:
+                            e = Exception(outer.msg); e.status_code = 429; raise e
+                        return FakeResp("ok")
+            return C()
+    fp_minute = Fake429ThenOKClient(); fp_minute.msg = "rate limit 429"
+    a_minute = GroqAdapter(FakeProviderCooldown(), client_factory=lambda k: fp_minute)
+    a_minute.synthesize("SYS", "U", max_tokens=50)
+    check("per-minute 429 retires with a 60s cooldown", retire_calls[-1] == 60)
+
+    fp_daily = Fake429ThenOKClient(); fp_daily.msg = "daily token quota exceeded (429)"
+    a_daily = GroqAdapter(FakeProviderCooldown(), client_factory=lambda k: fp_daily)
+    a_daily.synthesize("SYS", "U", max_tokens=50)
+    check("daily-limit 429 retires with a cooldown until UTC midnight", retire_calls[-1] > 60)
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0

@@ -92,14 +92,17 @@ def _distinct_courses(matches):
 
 def resolve_course_by_name(name, query_fn, limit=6):
     """A course named by TITLE ('Discrete Structures') rather than code. Search the catalog,
-    then keep only matches whose course NAME actually contains the hint as a phrase — so a
-    row that matched solely via the code portion of search_text isn't treated as a name hit.
+    then keep only matches whose course NAME actually contains the hint as a word-anchored
+    phrase (matches at a word boundary, not a bare substring) — so a row that matched solely
+    via the code portion of search_text, or a professor surname that happens to be a substring
+    of some course name (e.g. "lee" inside "Sleep and Cognition"), isn't treated as a name hit.
     Returns the list of distinct matching courses."""
     term = str(name or "").strip().lower()
     if len(term) < 2:
         return []
     matches = fetch_courses_by_topic(name, query_fn, limit=limit)
-    named = [m for m in matches if term in (m.get("name") or "").lower()]
+    pat = re.compile(r"\b" + re.escape(term))
+    named = [m for m in matches if pat.search((m.get("name") or "").lower())]
     return _distinct_courses(named)
 
 # Superlative / ranking questions: "which CS course has the highest rating", "easiest math
@@ -145,9 +148,9 @@ def rank_courses_by_metric(subject, metric, direction, query_fn, limit=5, min_re
         JOIN trace_courses tc ON ts.course_id = tc.course_id
           AND ts.instructor_id = tc.instructor_id AND ts.term_id = tc.term_id
         LEFT JOIN course_catalog cc ON cc.code = tc.course_code
-        WHERE regexp_replace(tc.course_code, '[0-9].*', '') = %s
+        WHERE tc.course_code LIKE %s AND tc.course_code ~ %s
         GROUP BY tc.course_code, cc.name, cc.department
-    """, (like, like, subject))
+    """, (like, like, f"{subject}%", f"^{subject}[0-9]"))
     ranked = []
     for r in rows:
         resp = float(r.get("m_r") or 0)
@@ -393,17 +396,31 @@ def _apply_source_floor(ranked_rows, limit=8, reddit_floor=2, rmp_floor=2):
     picked.sort(key=lambda r: rank_of[id(r)])
     return picked[:limit]
 
+def _entity_filter(slug, code):
+    """Build the evidence entity-filter clause + its params, split by which of slug/code is set
+    (never both — callers pass one). Slug-only and code-only are separate predicates (no
+    OR-with-a-NULL-param) so the planner can drive a lookup join off ev_prof/ev_course instead of
+    post-filtering the global vector index or brute-forcing. The code-only variant additionally
+    admits Reddit rows via body ILIKE, since Reddit evidence is stored with course_code='' and so
+    never matches the equality leg (course questions would otherwise see zero Reddit evidence)."""
+    if slug is not None:
+        return "e.professor_slug = %s", (slug,)
+    norm = re.sub(r"\s+", "", str(code or "").upper())
+    m = re.match(r"^([A-Za-z]+)(\d+)$", norm)
+    spaced = f"{m.group(1)} {m.group(2)}" if m else norm
+    return ("(e.course_code = %s OR (e.source = 'reddit' AND (e.body ILIKE %s OR e.body ILIKE %s)))",
+            (code, f"%{norm}%", f"%{spaced}%"))
+
 def fetch_evidence(slug, code, query, embed_query_fn, query_fn, limit=8):
-    where = "(professor_slug = %s OR course_code = %s) AND flagged = false"
-    params_entity = (slug, code)
+    where, entity_params = _entity_filter(slug, code)
     # 1. lexical
     lexical = []
     if query and query.strip():
         lex_rows = query_fn(
-            "SELECT id, ts_rank(body_tsv, plainto_tsquery('english', %s)) AS r "
-            "FROM evidence WHERE " + where +
-            " AND body_tsv @@ plainto_tsquery('english', %s) ORDER BY r DESC LIMIT 40",
-            (query, slug, code, query))
+            "SELECT e.id, ts_rank(e.body_tsv, plainto_tsquery('english', %s)) AS r "
+            "FROM evidence e WHERE " + where +
+            " AND e.flagged = false AND e.body_tsv @@ plainto_tsquery('english', %s) ORDER BY r DESC LIMIT 40",
+            (query,) + entity_params + (query,))
         lexical = [(r["id"], r.get("r", 0)) for r in lex_rows]
     # 2. vector (skip if embed fails → lexical-only)
     vector = []
@@ -412,9 +429,9 @@ def fetch_evidence(slug, code, query, embed_query_fn, query_fn, limit=8):
         vec_rows = query_fn(
             "SELECT e.id, 1 - (ee.embedding <=> %s::vector) AS sim "
             "FROM evidence_embeddings ee JOIN evidence e ON e.id = ee.evidence_id "
-            "WHERE (e.professor_slug = %s OR e.course_code = %s) AND e.flagged = false"
+            "WHERE " + where + " AND e.flagged = false"
             " ORDER BY ee.embedding <=> %s::vector LIMIT 40",
-            (str(qv), slug, code, str(qv)))
+            (str(qv),) + entity_params + (str(qv),))
         vector = [(r["id"], r.get("sim", 0)) for r in vec_rows]
     # 3. fuse (if only lexical, RRF over one list = lexical order)
     fused = _rrf_fuse(lexical, vector)
@@ -505,8 +522,10 @@ def retrieve(query, hint, query_fn, query_one_fn, prof_search_fn, limit=8, embed
         # unknown course code → fall through to professor resolution
 
     # Course-by-NAME path: a hint that is a course TITLE ("Discrete Structures") rather than a
-    # code. One clear match → answer that course; several distinct → disambiguate.
-    if hint and not is_course_code(hint):
+    # code. One clear match → answer that course; several distinct → disambiguate. A genuine
+    # professor hint must win first (same guard pattern as the superlative branch above) — e.g.
+    # "is professor Lee good" must not fall into "lee" substring-matching "Sleep and Cognition".
+    if hint and not is_course_code(hint) and not prof_search_fn(hint, limit=1):
         named = resolve_course_by_name(hint, query_fn, limit=6)
         if len(named) == 1:
             cfacts = fetch_course_facts(named[0]["code"], query_one_fn, query_fn)
@@ -868,6 +887,44 @@ def selftest():
     check("non-course name hint falls through to professor", rp.get("professor_slug") == "guha-prof")
     check("professor fallthrough not a disambiguation", rp.get("kind") != "course_disambiguation")
 
+    # ── Issue 10: a unique professor surname must win over a course-by-name substring hit ──
+    # "is professor Lee good" — a course named "Sleep and Cognition" would otherwise substring-
+    # match "lee" inside "sleep"; professor resolution must run first and win.
+    def lee_query(sql, params):
+        if "course_catalog" in sql:
+            return [{"code": "PSYC2500", "name": "Sleep and Cognition", "department": "Psychology"}]
+        return []
+    def lee_query_one(sql, params):
+        if "professors_catalog" in sql:
+            return {"slug": "lee-prof", "name_key": "j lee", "name": "J. Lee", "department": "Khoury",
+                    "rmp_rating": 4.0, "trace_rating": 4.0, "avg_rating": 4.0, "difficulty": 3.0,
+                    "would_take_again_pct": 90.0, "total_reviews": 10, "avg_hours": 5.0}
+        if "rmp_reviews" in sql or "trace_comments" in sql:
+            return {"cnt": 3}
+        return None
+    def lee_prof_search(term, limit=1):
+        return [{"slug": "lee-prof", "name": "J. Lee", "name_key": "j lee"}]
+    r_lee = retrieve("is professor Lee good", "Lee", lee_query, lee_query_one, lee_prof_search, limit=8)
+    check("unique professor surname wins over course-by-name substring hit",
+          r_lee.get("professor_slug") == "lee-prof")
+    check("professor-wins path is not a course disambiguation", r_lee.get("kind") != "course_disambiguation")
+
+    # resolve_course_by_name itself: "lee" must NOT match "Sleep and Cognition" (word-anchored,
+    # not a bare substring) — the professor guard above is belt-and-suspenders with this fix.
+    def sleep_query(sql, params):
+        if "course_catalog" in sql:
+            return [{"code": "PSYC2500", "name": "Sleep and Cognition", "department": "Psychology"}]
+        return []
+    check("resolve_course_by_name anchors to word boundaries (no 'lee' inside 'sleep')",
+          resolve_course_by_name("lee", sleep_query) == [])
+    # a genuine word-anchored hit still matches
+    def law_query(sql, params):
+        if "course_catalog" in sql:
+            return [{"code": "LAW1000", "name": "Law and Society", "department": "Law"}]
+        return []
+    check("resolve_course_by_name still matches a real word-anchored hint",
+          [m["code"] for m in resolve_course_by_name("law", law_query)] == ["LAW1000"])
+
     # ── superlative / ranking detection ──
     s1 = parse_course_superlative("Which CS course has the highest rating?")
     check("superlative: highest rating -> CS/rating/desc",
@@ -896,9 +953,12 @@ def selftest():
             {"code": "CS2000", "name": "Intro", "department": "CS", "m_w": 880.0, "m_r": 200.0},  # 4.40
         ]
     ranked = rank_courses_by_metric("CS", "rating", "desc", rank_query, limit=5, min_responses=30)
-    check("ranking uses subject exact-prefix match", "regexp_replace(tc.course_code" in rank_calls["sql"])
+    check("ranking uses sargable LIKE prefix", "tc.course_code LIKE %s" in rank_calls["sql"])
+    check("ranking anchors with a regex to drop false prefixes", "tc.course_code ~ %s" in rank_calls["sql"])
+    check("regexp_replace no longer in the WHERE clause", "regexp_replace" not in rank_calls["sql"])
     check("ranking passes the metric LIKE term", "%overall%" in rank_calls["params"])
-    check("ranking passes the subject", "CS" in rank_calls["params"])
+    check("ranking passes the subject LIKE param", "CS%" in rank_calls["params"])
+    check("ranking passes the subject regex param", "^CS[0-9]" in rank_calls["params"])
     check("ranking drops below-threshold courses (CS7870 n=2)", all(c["code"] != "CS7870" for c in ranked))
     check("ranking sorts desc by value", [c["code"] for c in ranked] == ["CS3100", "CS2000"])
     check("ranking carries computed value", ranked[0]["value"] == 4.45 and ranked[0]["responses"] == 100)
@@ -908,7 +968,7 @@ def selftest():
 
     # retrieve() returns a course_ranking block on a superlative query (even with a junk hint)
     def sup_retrieve_query(sql, params):
-        if "trace_scores" in sql and "regexp_replace" in sql:
+        if "trace_scores" in sql and "tc.course_code LIKE" in sql:
             return [{"code": "CS3100", "name": "PDI 2", "department": "CS", "m_w": 445.0, "m_r": 100.0}]
         return []
     rr = retrieve("Which CS course has the highest rating?", "CS course",
@@ -924,7 +984,7 @@ def selftest():
 
     # a REAL professor hint must win over the ranking branch (don't drop the named professor)
     def prof_hit_query(sql, params):
-        if "trace_scores" in sql and "regexp_replace" in sql:
+        if "trace_scores" in sql and "tc.course_code LIKE" in sql:
             return [{"code": "CS3100", "name": "PDI 2", "department": "CS", "m_w": 445.0, "m_r": 100.0}]
         return query_fn(sql, params)  # reuse the prof-facts fakes defined earlier in selftest
     rrp = retrieve("which CS course did Guha call hardest", "Guha",
@@ -983,6 +1043,45 @@ def selftest():
     # ── embed-fn failure → lexical-only, no crash ──
     res_lex = fetch_evidence("guha-prof", None, "office hours", lambda q: None, ev_query, limit=8)
     check("embed None -> lexical-only still returns rows", len(res_lex) >= 1 and all("source" in r for r in res_lex))
+
+    # ── Issue 27: entity filter is split slug-only / code-only, no OR-with-NULL-param ──
+    slug_where, slug_params = _entity_filter("guha-prof", None)
+    check("slug-only filter has no OR", "OR" not in slug_where)
+    check("slug-only filter params carry only the slug", slug_params == ("guha-prof",))
+    code_where, code_params = _entity_filter(None, "CS3500")
+    check("code-only filter keeps the Issue-1 reddit OR-leg", "OR e." in code_where)
+    check("code-only filter carries code + two ILIKE patterns", code_params == ("CS3500", "%CS3500%", "%CS 3500%"))
+
+    # ── Issue 1: course questions admit Reddit evidence via the code-only ILIKE leg ──
+    captured_code = {"sql": []}
+    def code_ev_query(sql, params=None):
+        captured_code["sql"].append(sql)
+        if "plainto_tsquery" in sql:
+            return [{"id": "r1"}]
+        if "FROM evidence" in sql and "WHERE id IN" in sql:
+            return [{"id": "r1", "source": "reddit", "body": "CS3500 is rough", "subreddit": "NEU",
+                     "reddit_score": 5, "permalink": "/r/x", "created_utc": None, "sentiment": None}]
+        return []
+    res_code = fetch_evidence(None, "CS3500", "is it hard", None, code_ev_query, limit=8)
+    check("code-only lexical SQL carries the reddit ILIKE leg",
+          any("e.source = 'reddit'" in s and "ILIKE" in s for s in captured_code["sql"]))
+    check("code-only lexical SQL has no OR on the entity equality (Issue-1 leg excepted)",
+          all(s.split("AND e.flagged")[0].count("e.course_code = %s OR") == 1 for s in captured_code["sql"] if "plainto_tsquery" in s))
+    check("code path still returns the reddit row", len(res_code) == 1 and res_code[0]["source"] == "reddit")
+
+    # professor path (slug set) must NOT gain the reddit ILIKE leg
+    captured_slug = {"sql": []}
+    def slug_ev_query(sql, params=None):
+        captured_slug["sql"].append(sql)
+        if "plainto_tsquery" in sql:
+            return [{"id": "r1"}]
+        if "FROM evidence" in sql and "WHERE id IN" in sql:
+            return [{"id": "r1", "source": "reddit", "body": "great office hours", "subreddit": "NEU",
+                     "reddit_score": 5, "permalink": "/r/x", "created_utc": None, "sentiment": None}]
+        return []
+    fetch_evidence("guha-prof", None, "office hours", None, slug_ev_query, limit=8)
+    check("professor path SQL is unchanged (no reddit ILIKE leg)",
+          all("ILIKE" not in s for s in captured_slug["sql"]))
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0

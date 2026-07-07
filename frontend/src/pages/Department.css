@@ -1,0 +1,27 @@
+.dept-table-wrap {
+  overflow-x: auto;
+}
+
+.dept-hub-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.dept-sort-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.dept-sort-btn:hover {
+  color: #d6394c;
+}
+
+.dark .dept-sort-btn:hover {
+  color: #f06d7d;
+}

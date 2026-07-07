@@ -1,6 +1,7 @@
 import sys, argparse, time
 
-from chat_throttle import global_budget_hit, session_allowed, minute_capacity_ok
+from chat_throttle import (global_budget_hit, session_allowed, minute_capacity_ok,
+                            today_ok_count, release_reservation, EST_TOKENS_PER_Q)
 from chat_abuse import abuse_check
 from chat_cache import get_cached, set_cached
 from chat_validate import thin_data_check, validate_output
@@ -68,37 +69,49 @@ def _handle_course_list(q, block, deps, _log, session_token, ip_hash):
 
     cached = get_cached(q, [f"topic:{topic}"], deps.cache_get_fn)
     if cached:
-        _log("ok")
+        _log("ok_cached")
         _fire_usage_alert(deps)
         return cached, 200
 
-    if global_budget_hit(deps.query_one_fn, deps.num_keys):
-        _log("rate_limited")
-        return _safe_fallback(deps, q, banner="Daily question limit reached. Showing keyword results."), 200
-    allowed, _ = session_allowed(session_token, deps.query_one_fn, deps.num_keys)
-    if not allowed:
-        _log("rate_limited")
-        return _safe_fallback(deps, q, banner="You've hit today's question limit. Showing keyword results."), 200
-    if not minute_capacity_ok(deps.query_one_fn, deps.num_keys):
-        _log("rate_limited")
-        return _safe_fallback(deps, q, banner="High demand right now. Showing keyword results."), 200
-
+    # Issue 26: fetch today's 'ok' count once, thread it into both checks below.
+    today_count = today_ok_count(deps.query_one_fn)
+    daily_reserved = False
+    minute_reserved = False
     try:
-        gen = deps.generate_course_list_fn(topic, courses)
-    except LLMUnavailable:
-        _log("llm_error")
-        return _safe_fallback(deps, q, banner="AI generation failed. Showing keyword results."), 200
+        if global_budget_hit(deps.query_one_fn, deps.num_keys, today_count_memo=today_count):
+            _log("rate_limited")
+            return _safe_fallback(deps, q, banner="Daily question limit reached. Showing keyword results."), 200
+        daily_reserved = True
+        allowed, _ = session_allowed(session_token, deps.query_one_fn, deps.num_keys, today_count_memo=today_count)
+        if not allowed:
+            _log("rate_limited")
+            return _safe_fallback(deps, q, banner="You've hit today's question limit. Showing keyword results."), 200
+        if not minute_capacity_ok(deps.query_one_fn, deps.num_keys):
+            _log("rate_limited")
+            return _safe_fallback(deps, q, banner="High demand right now. Showing keyword results."), 200
+        minute_reserved = True
 
-    payload = {
-        "mode": "course_list", "answer": gen.get("text", ""), "topic": topic,
-        "courses": [{"code": c.get("code"), "name": c.get("name"),
-                     "department": c.get("department"), "rating": c.get("rating")} for c in courses],
-        "disclaimer": "AI-generated list of matching Northeastern courses; may be incomplete.",
-    }
-    set_cached(q, [f"topic:{topic}"], payload, deps.cache_set_fn)
-    _log("ok", retrieved_count=len(courses), answer_text=payload["answer"], tokens_used=gen.get("tokens_used", 0))
-    _fire_usage_alert(deps)
-    return payload, 200
+        try:
+            gen = deps.generate_course_list_fn(topic, courses)
+        except LLMUnavailable:
+            _log("llm_error")
+            return _safe_fallback(deps, q, banner="AI generation failed. Showing keyword results."), 200
+
+        payload = {
+            "mode": "course_list", "answer": gen.get("text", ""), "topic": topic,
+            "courses": [{"code": c.get("code"), "name": c.get("name"),
+                         "department": c.get("department"), "rating": c.get("rating")} for c in courses],
+            "disclaimer": "AI-generated list of matching Northeastern courses; may be incomplete.",
+        }
+        set_cached(q, [f"topic:{topic}"], payload, deps.cache_set_fn)
+        _log("ok", retrieved_count=len(courses), answer_text=payload["answer"], tokens_used=gen.get("tokens_used", 0))
+        _fire_usage_alert(deps)
+        return payload, 200
+    finally:
+        if daily_reserved:
+            release_reservation("daily", 1)
+        if minute_reserved:
+            release_reservation("minute_tokens", EST_TOKENS_PER_Q)
 
 
 def _handle_course_ranking(q, block, deps, _log, session_token, ip_hash):
@@ -108,41 +121,53 @@ def _handle_course_ranking(q, block, deps, _log, session_token, ip_hash):
 
     cached = get_cached(q, [cache_key], deps.cache_get_fn)
     if cached:
-        _log("ok")
+        _log("ok_cached")
         _fire_usage_alert(deps)
         return cached, 200
 
-    if global_budget_hit(deps.query_one_fn, deps.num_keys):
-        _log("rate_limited")
-        return _safe_fallback(deps, q, banner="Daily question limit reached. Showing keyword results."), 200
-    allowed, _ = session_allowed(session_token, deps.query_one_fn, deps.num_keys)
-    if not allowed:
-        _log("rate_limited")
-        return _safe_fallback(deps, q, banner="You've hit today's question limit. Showing keyword results."), 200
-    if not minute_capacity_ok(deps.query_one_fn, deps.num_keys):
-        _log("rate_limited")
-        return _safe_fallback(deps, q, banner="High demand right now. Showing keyword results."), 200
-
+    # Issue 26: fetch today's 'ok' count once, thread it into both checks below.
+    today_count = today_ok_count(deps.query_one_fn)
+    daily_reserved = False
+    minute_reserved = False
     try:
-        gen = deps.generate_course_ranking_fn(subject, metric, direction, courses)
-    except LLMUnavailable:
-        _log("llm_error")
-        return _safe_fallback(deps, q, banner="AI generation failed. Showing keyword results."), 200
+        if global_budget_hit(deps.query_one_fn, deps.num_keys, today_count_memo=today_count):
+            _log("rate_limited")
+            return _safe_fallback(deps, q, banner="Daily question limit reached. Showing keyword results."), 200
+        daily_reserved = True
+        allowed, _ = session_allowed(session_token, deps.query_one_fn, deps.num_keys, today_count_memo=today_count)
+        if not allowed:
+            _log("rate_limited")
+            return _safe_fallback(deps, q, banner="You've hit today's question limit. Showing keyword results."), 200
+        if not minute_capacity_ok(deps.query_one_fn, deps.num_keys):
+            _log("rate_limited")
+            return _safe_fallback(deps, q, banner="High demand right now. Showing keyword results."), 200
+        minute_reserved = True
 
-    # Reuse the course_list frontend mode. Carry the metric value as `rating` ONLY when the
-    # metric is rating, so the frontend's ★ badge stays meaningful; for difficulty/hours the
-    # value lives in the summary prose.
-    payload = {
-        "mode": "course_list", "answer": gen.get("text", ""),
-        "topic": f"{subject} courses by {metric}",
-        "courses": [{"code": c.get("code"), "name": c.get("name"), "department": c.get("department"),
-                     "rating": c.get("value") if metric == "rating" else None} for c in courses],
-        "disclaimer": "AI-generated ranking of Northeastern courses by TRACE data; may be incomplete.",
-    }
-    set_cached(q, [cache_key], payload, deps.cache_set_fn)
-    _log("ok", retrieved_count=len(courses), answer_text=payload["answer"], tokens_used=gen.get("tokens_used", 0))
-    _fire_usage_alert(deps)
-    return payload, 200
+        try:
+            gen = deps.generate_course_ranking_fn(subject, metric, direction, courses)
+        except LLMUnavailable:
+            _log("llm_error")
+            return _safe_fallback(deps, q, banner="AI generation failed. Showing keyword results."), 200
+
+        # Reuse the course_list frontend mode. Carry the metric value as `rating` ONLY when the
+        # metric is rating, so the frontend's ★ badge stays meaningful; for difficulty/hours the
+        # value lives in the summary prose.
+        payload = {
+            "mode": "course_list", "answer": gen.get("text", ""),
+            "topic": f"{subject} courses by {metric}",
+            "courses": [{"code": c.get("code"), "name": c.get("name"), "department": c.get("department"),
+                         "rating": c.get("value") if metric == "rating" else None} for c in courses],
+            "disclaimer": "AI-generated ranking of Northeastern courses by TRACE data; may be incomplete.",
+        }
+        set_cached(q, [cache_key], payload, deps.cache_set_fn)
+        _log("ok", retrieved_count=len(courses), answer_text=payload["answer"], tokens_used=gen.get("tokens_used", 0))
+        _fire_usage_alert(deps)
+        return payload, 200
+    finally:
+        if daily_reserved:
+            release_reservation("daily", 1)
+        if minute_reserved:
+            release_reservation("minute_tokens", EST_TOKENS_PER_Q)
 
 
 def handle_question(q, session_token, ip_hash, deps):
@@ -175,6 +200,11 @@ def handle_question(q, session_token, ip_hash, deps):
         if status == "gate_error":
             _log(status)
             return _safe_fallback(deps, q, banner=gate.get("message")), 200
+        # Issue 6: an over-length question is not abuse either — same non-strike treatment
+        # as gate_error (friendly banner + keyword fallback, no strike).
+        if status == "too_long":
+            _log(status)
+            return _safe_fallback(deps, q, banner=gate.get("message")), 200
         _log(status, flagged=True)
         return {"mode": "error", "message": gate.get("message") or "Question not allowed."}, 200
 
@@ -182,10 +212,12 @@ def handle_question(q, session_token, ip_hash, deps):
     raw_entities = gate.get("professors_or_courses") or (
         [gate.get("professor_or_course")] if gate.get("professor_or_course") else [])
     hints = []
+    seen_hints = set()
     for e in raw_entities:
         h = _strip_titles(e)
-        if h and h not in hints:
+        if h and h.lower() not in seen_hints:
             hints.append(h)
+            seen_hints.add(h.lower())
         if len(hints) == 2:
             break
 
@@ -214,6 +246,8 @@ def handle_question(q, session_token, ip_hash, deps):
         topic_block = deps.retrieve_fn(q, None)
         if topic_block.get("kind") == "course_list":
             return _handle_course_list(q, topic_block, deps, _log, session_token, ip_hash)
+        if topic_block.get("kind") == "course_ranking":
+            return _handle_course_ranking(q, topic_block, deps, _log, session_token, ip_hash)
         _log("out_of_scope")
         payload = _safe_fallback(deps, q, banner="Try searching for a specific professor or course.")
         payload["mode"] = "out_of_scope"
@@ -222,128 +256,152 @@ def handle_question(q, session_token, ip_hash, deps):
     # 6. Cache hit (BEFORE throttle) — keyed on the full entity list.
     cached = get_cached(q, hints, deps.cache_get_fn)
     if cached:
-        _log("ok", professor_slug=cached.get("professor_slug") or hints[0])
+        _log("ok_cached", professor_slug=cached.get("professor_slug") or hints[0])
         _fire_usage_alert(deps)
         return cached, 200
 
     # 7. Global budget + throttle (one check for the whole question)
-    if global_budget_hit(deps.query_one_fn, deps.num_keys):
-        _log("rate_limited")
-        return _safe_fallback(deps, q, banner="Daily question limit reached. Showing keyword results."), 200
-    allowed, _ = session_allowed(session_token, deps.query_one_fn, deps.num_keys)
-    if not allowed:
-        _log("rate_limited")
-        return _safe_fallback(deps, q, banner="You've hit today's question limit. Showing keyword results."), 200
-
-    # 8. Retrieve per entity; keep blocks that resolve to a real entity (slug or course code).
-    blocks = []
-    for hint in hints:
-        r = deps.retrieve_fn(q, hint)
-        # A superlative/ranking question ("which CS course has the highest rating") resolves to
-        # a ranked-course block regardless of the (often junk) hint; answer it directly.
-        if r.get("kind") == "course_ranking":
-            return _handle_course_ranking(q, r, deps, _log, session_token, ip_hash)
-        # A course named by title that matches several distinct courses → disambiguate
-        # (mirrors the professor name-collision flow); stop the whole question, no LLM.
-        if r.get("kind") == "course_disambiguation":
-            _log("ambiguous")
-            matches = r.get("matches", [])
-            listed = ", ".join(f"{m['code']} {m['name']}" for m in matches)
-            return {
-                "mode": "disambiguation",
-                "message": (f"Several courses match \"{hint}\": {listed}. "
-                            "Ask again using the course code."),
-                "matches": [{"name": f"{m['code']} {m['name']}", "department": m.get("department", "")}
-                            for m in matches],
-            }, 200
-        if r.get("entity_key") or r.get("professor_slug"):
-            blocks.append(r)
-    if not blocks:
-        _log("out_of_scope")
-        payload = _safe_fallback(deps, q, banner="Couldn't find that professor or course. Showing keyword results.")
-        payload["mode"] = "out_of_scope"
-        return payload, 200
-
-    primary_slug = blocks[0].get("professor_slug") or blocks[0].get("entity_key")
-    total_comments = sum(b.get("comment_count", 0) for b in blocks)
-
-    # 9. Thin-data check over the COMBINED evidence (RMP/TRACE facts + Reddit across all
-    # resolved entities): only fall back when neither structured ratings nor Reddit can answer.
-    combined_evidence = {
-        "comment_count": total_comments,
-        "comments": [c for b in blocks for c in b.get("comments", [])],
-        "facts": blocks[0].get("facts", {}),
-    }
-    ok, thin_msg = thin_data_check(combined_evidence)
-    if not ok:
-        _log("thin_data", professor_slug=primary_slug, retrieved_count=total_comments)
-        payload = _safe_fallback(deps, q, banner=thin_msg)
-        payload["mode"] = "thin_data"
-        return payload, 200
-
-    # 9b. Per-minute TPM guard (one check)
-    if not minute_capacity_ok(deps.query_one_fn, deps.num_keys):
-        _log("rate_limited", professor_slug=primary_slug, retrieved_count=total_comments)
-        return _safe_fallback(
-            deps, q,
-            banner="High demand right now — showing matching Reddit comments. Try Ask again in a moment."), 200
-
-    # 10. Generate (one call over all blocks)
+    # Issue 26: fetch today's 'ok' count once, thread it into both checks below.
+    today_count = today_ok_count(deps.query_one_fn)
+    daily_reserved = False
+    minute_reserved = False
     try:
-        gen = deps.generate_fn(q, blocks)
-    except LLMUnavailable:
-        _log("llm_error", professor_slug=primary_slug, retrieved_count=total_comments)
-        return _safe_fallback(deps, q, banner="AI generation failed. Showing keyword results."), 200
+        if global_budget_hit(deps.query_one_fn, deps.num_keys, today_count_memo=today_count):
+            _log("rate_limited")
+            return _safe_fallback(deps, q, banner="Daily question limit reached. Showing keyword results."), 200
+        daily_reserved = True
+        allowed, _ = session_allowed(session_token, deps.query_one_fn, deps.num_keys, today_count_memo=today_count)
+        if not allowed:
+            _log("rate_limited")
+            return _safe_fallback(deps, q, banner="You've hit today's question limit. Showing keyword results."), 200
 
-    answer_text = gen.get("text", "")
-    tokens_used = gen.get("tokens_used", 0)
-    num_sources = gen.get("num_sources", 0)
-    source_entities = gen.get("source_entities", [])
+        # 8. Retrieve per entity; keep blocks that resolve to a real entity (slug or course code).
+        blocks = []
+        for hint in hints:
+            r = deps.retrieve_fn(q, hint)
+            # A superlative/ranking question ("which CS course has the highest rating") resolves to
+            # a ranked-course block regardless of the (often junk) hint; answer it directly.
+            if r.get("kind") == "course_ranking":
+                return _handle_course_ranking(q, r, deps, _log, session_token, ip_hash)
+            # A course named by title that matches several distinct courses → disambiguate
+            # (mirrors the professor name-collision flow); stop the whole question, no LLM.
+            if r.get("kind") == "course_disambiguation":
+                _log("ambiguous")
+                matches = r.get("matches", [])
+                listed = ", ".join(f"{m['code']} {m['name']}" for m in matches)
+                return {
+                    "mode": "disambiguation",
+                    "message": (f"Several courses match \"{hint}\": {listed}. "
+                                "Ask again using the course code."),
+                    "matches": [{"name": f"{m['code']} {m['name']}", "department": m.get("department", "")}
+                                for m in matches],
+                }, 200
+            if r.get("entity_key") or r.get("professor_slug"):
+                blocks.append(r)
+        # Dedupe resolved blocks by entity key — duplicate hints ('Guha','guha') resolving to the
+        # same professor/course must not duplicate facts/comments/sources in the prompt and UI.
+        seen_keys = set()
+        deduped_blocks = []
+        for b in blocks:
+            key = b.get("entity_key") or b.get("professor_slug")
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped_blocks.append(b)
+        blocks = deduped_blocks
+        if not blocks:
+            _log("out_of_scope")
+            payload = _safe_fallback(deps, q, banner="Couldn't find that professor or course. Showing keyword results.")
+            payload["mode"] = "out_of_scope"
+            return payload, 200
 
-    # 11. Output gate. Bound cited [N] by num_sources (the capped count the model actually
-    # saw), not the uncapped pooled total — otherwise a hallucinated [N] in
-    # (num_sources, total_comments] would slip through the range gate.
-    validation = validate_output(answer_text, {"comment_count": num_sources})
-    if not validation["ok"]:
-        _log("validation_failed", professor_slug=primary_slug, retrieved_count=total_comments,
-             tokens_used=tokens_used)
-        return _safe_fallback(deps, q, banner=validation.get("message")), 200
+        primary_slug = blocks[0].get("professor_slug") or blocks[0].get("entity_key")
+        total_comments = sum(b.get("comment_count", 0) for b in blocks)
 
-    # 12. Success — sources come from the EXACT capped, in-prompt comment list the model
-    # numbered (gen["sources_comments"]), so snippet [N] and its entity tag always agree.
-    sources_comments = gen.get("sources_comments", [])
-    sources = []
-    for i, c in enumerate(sources_comments[:num_sources]):
-        tag = source_entities[i] if i < len(source_entities) else {}
-        sources.append({
-            "source_id": i + 1,
-            "snippet": c.get("body", "")[:200],
-            "permalink": c.get("permalink", ""),
-            "subreddit": c.get("subreddit", ""),
-            "source": c.get("source"),
-            "professor_slug": tag.get("professor_slug"),
-            "course_code": tag.get("course_code"),
-        })
-    any_course = any(b.get("course_code") for b in blocks)
-    entities = [{"name": b.get("facts", {}).get("name") or b.get("facts", {}).get("code") or b.get("entity_key"),
-                 "professor_slug": b.get("professor_slug"),
-                 "course_code": b.get("course_code")} for b in blocks]
-    answer_payload = {
-        "mode": "question",
-        "answer": answer_text,
-        "sources": sources,
-        "entities": entities,
-        "professor_slug": primary_slug,
-        "course_code": blocks[0].get("course_code"),
-        "disclaimer": ("Responses are generated by AI and are based on the most relevant retrieved content "
-                       "available in our database at the time of your query. Data may become outdated. "
-                       "Always refer to the original sources for the most current information."),
-    }
-    set_cached(q, hints, answer_payload, deps.cache_set_fn)
-    _log("ok", professor_slug=primary_slug, retrieved_count=total_comments,
-         answer_text=answer_text, tokens_used=tokens_used)
-    _fire_usage_alert(deps)
-    return answer_payload, 200
+        # 9. Thin-data check over the COMBINED evidence (RMP/TRACE facts + Reddit across all
+        # resolved entities): only fall back when neither structured ratings nor Reddit can answer.
+        combined_evidence = {
+            "comment_count": total_comments,
+            "comments": [c for b in blocks for c in b.get("comments", [])],
+            "facts": blocks[0].get("facts", {}),
+        }
+        ok, thin_msg = thin_data_check(combined_evidence)
+        if not ok:
+            _log("thin_data", professor_slug=primary_slug, retrieved_count=total_comments)
+            payload = _safe_fallback(deps, q, banner=thin_msg)
+            payload["mode"] = "thin_data"
+            return payload, 200
+
+        # 9b. Per-minute TPM guard (one check)
+        if not minute_capacity_ok(deps.query_one_fn, deps.num_keys):
+            _log("rate_limited", professor_slug=primary_slug, retrieved_count=total_comments)
+            return _safe_fallback(
+                deps, q,
+                banner="High demand right now — showing matching Reddit comments. Try Ask again in a moment."), 200
+        minute_reserved = True
+
+        # 10. Generate (one call over all blocks)
+        try:
+            gen = deps.generate_fn(q, blocks)
+        except LLMUnavailable:
+            _log("llm_error", professor_slug=primary_slug, retrieved_count=total_comments)
+            return _safe_fallback(deps, q, banner="AI generation failed. Showing keyword results."), 200
+
+        answer_text = gen.get("text", "")
+        tokens_used = gen.get("tokens_used", 0)
+        num_sources = gen.get("num_sources", 0)
+        source_entities = gen.get("source_entities", [])
+
+        # 11. Output gate. Bound cited [N] by num_sources (the capped count the model actually
+        # saw), not the uncapped pooled total — otherwise a hallucinated [N] in
+        # (num_sources, total_comments] would slip through the range gate.
+        validation = validate_output(answer_text, {"comment_count": num_sources})
+        if not validation["ok"]:
+            _log("validation_failed", professor_slug=primary_slug, retrieved_count=total_comments,
+                 tokens_used=tokens_used)
+            return _safe_fallback(deps, q, banner=validation.get("message")), 200
+
+        # 12. Success — sources come from the EXACT capped, in-prompt comment list the model
+        # numbered (gen["sources_comments"]), so snippet [N] and its entity tag always agree.
+        sources_comments = gen.get("sources_comments", [])
+        sources = []
+        for i, c in enumerate(sources_comments[:num_sources]):
+            tag = source_entities[i] if i < len(source_entities) else {}
+            sources.append({
+                "source_id": i + 1,
+                "snippet": c.get("body", "")[:200],
+                "permalink": c.get("permalink", ""),
+                "subreddit": c.get("subreddit", ""),
+                "source": c.get("source"),
+                "professor_slug": tag.get("professor_slug"),
+                "course_code": tag.get("course_code"),
+            })
+        any_course = any(b.get("course_code") for b in blocks)
+        entities = [{"name": b.get("facts", {}).get("name") or b.get("facts", {}).get("code") or b.get("entity_key"),
+                     "professor_slug": b.get("professor_slug"),
+                     "course_code": b.get("course_code")} for b in blocks]
+        answer_payload = {
+            "mode": "question",
+            "answer": answer_text,
+            "sources": sources,
+            "cited": sorted(set(validation.get("cited", []))),
+            "entities": entities,
+            "professor_slug": primary_slug,
+            "course_code": blocks[0].get("course_code"),
+            "disclaimer": ("Responses are generated by AI and are based on the most relevant retrieved content "
+                           "available in our database at the time of your query. Data may become outdated. "
+                           "Always refer to the original sources for the most current information."),
+        }
+        set_cached(q, hints, answer_payload, deps.cache_set_fn)
+        _log("ok", professor_slug=primary_slug, retrieved_count=total_comments,
+             answer_text=answer_text, tokens_used=tokens_used)
+        _fire_usage_alert(deps)
+        return answer_payload, 200
+    finally:
+        if daily_reserved:
+            release_reservation("daily", 1)
+        if minute_reserved:
+            release_reservation("minute_tokens", EST_TOKENS_PER_Q)
 
 
 def selftest():
@@ -351,6 +409,15 @@ def selftest():
     def check(label, cond):
         if not cond: fails.append(label)
         print(("PASS" if cond else "FAIL") + ": " + label)
+
+    # Test isolation: chat_throttle's minute_capacity_ok reserves in-flight tokens in
+    # module-level state (Issue 18) that this orchestrator never releases (no generate()
+    # call happens in most of these fakes), so many selftest cases in a row can exhaust
+    # the reservation budget and fail unrelated later cases. Reset it here so this file's
+    # selftest run is self-contained regardless of run order.
+    import chat_throttle
+    chat_throttle._reservations["daily"].clear()
+    chat_throttle._reservations["minute_tokens"].clear()
 
     logged = []
     def log_fn(sql, params): logged.append(params)
@@ -414,6 +481,17 @@ def selftest():
     # the gate_error row must NOT be flagged (flagged is the last param in the tuple)
     check("gate_error row not flagged", logged[-1][-1] is False)
 
+    # Issue 6: too_long (over-500-char question) is likewise NON-strike — friendly banner,
+    # degraded to keyword fallback, not flagged. Must not accrue a strike like injection_blocked.
+    d_tl = Deps()
+    d_tl.gate_fn = types.MethodType(lambda self, q: {"ok": False, "status": "too_long", "professors_or_courses": [], "professor_or_course": None, "message": "That question is too long — keep it under 500 characters."}, d_tl)
+    payload, code = handle_question("x" * 601, "s", "iphash", d_tl)
+    check("too_long logged as non-strike status", logged[-1][_status_idx()] == "too_long"
+          and "too_long" not in _STRIKES)
+    check("too_long degrades to keyword fallback, not refusal",
+          code == 200 and "comments" in payload and payload.get("mode") == "keyword")
+    check("too_long row not flagged", logged[-1][-1] is False)
+
     # AMBIGUOUS bare surname -> list matches inline, status 'ambiguous' (NOT a strike), no LLM.
     # gate returns the hint WITH a title ('Professor Lee') -> must be stripped to 'Lee'.
     # prof_search returns a substring-noise row ('Leena Razzaq') that must be FILTERED OUT.
@@ -445,6 +523,32 @@ def selftest():
     check("happy path ok", code == 200 and payload.get("answer") and payload.get("disclaimer"))
     check("happy path logged ok", logged[-1][_status_idx()] == "ok")
     check("usage_alert fired on happy path", len(d3.usage_alert_calls) == 1)
+    # Issue 15: the success payload carries the validated citation ids as a sorted list.
+    check("happy path payload carries cited as a sorted list", payload.get("cited") == [1])
+
+    # Issue 15: a grouped citation ("[1, 2]") answer must surface BOTH ids in "cited",
+    # sorted and deduplicated.
+    d_cited = Deps(); d_cited.usage_alert_calls = []
+    d_cited.generate_fn = types.MethodType(lambda self, q, blocks: {
+        "text": "Students say fair [2] [1] [1].", "tokens_used": 50, "num_sources": 5,
+        "source_entities": [{"professor_slug": "guha-prof", "course_code": None}] * 5}, d_cited)
+    payload, code = handle_question("is guha hard", "s", "iphash", d_cited)
+    check("multi-citation payload carries cited as sorted, deduped ids", payload.get("cited") == [1, 2])
+
+    # Issue 26: today's 'ok' count must be fetched ONCE per question and threaded into both
+    # global_budget_hit and session_allowed, not queried twice (date_trunc('day', ...) count).
+    d_memo = Deps(); d_memo.usage_alert_calls = []
+    today_count_calls = []
+    def _q_memo(self, sql, params=None):
+        if "date_trunc('day', now())" in sql and "session_token" not in sql:
+            today_count_calls.append(1)
+            return {"c": 0}
+        if "session_token" in sql:
+            return {"c": 0}
+        return {"c": 0, "t": 0}
+    d_memo.query_one_fn = types.MethodType(_q_memo, d_memo)
+    payload, code = handle_question("is guha hard", "s", "iphash", d_memo)
+    check("today's ok-count query runs exactly once per question", len(today_count_calls) == 1)
 
     # COURSE answer: entity_key is a course code, professor_slug is None -> still answers,
     # payload carries course_code and a non-null professor_slug (falls back to entity_key).
@@ -500,7 +604,8 @@ def selftest():
           logged[-1][_status_idx()] == "rate_limited" and code == 200 and "comments" in payload)
 
     # CACHE HIT is served BEFORE throttle: even with the budget/minute saturated, a cached
-    # answer returns ok (never rate_limited) and never calls the LLM.
+    # answer returns ok_cached (never rate_limited, and NOT plain 'ok' -- Issue 7: cache hits
+    # must not consume the daily LLM budget / trip usage alerts) and never calls the LLM.
     d_cache = Deps()
     # saturate the daily/minute budget + session counts, but NOT the abuse strike count
     # (result_status = ANY(...)) -> not banned, but throttle would block if reached.
@@ -510,8 +615,8 @@ def selftest():
     d_cache.generate_fn = types.MethodType(lambda self, q, r: (_ for _ in ()).throw(AssertionError("LLM must NOT be called on a cache hit")), d_cache)
     d_cache.usage_alert_calls = []
     payload, code = handle_question("is guha hard", "s", "iphash", d_cache)
-    check("cache hit served before throttle, status ok, no LLM",
-          logged[-1][_status_idx()] == "ok" and payload.get("answer") == "cached fair [1]." and code == 200)
+    check("cache hit served before throttle, status ok_cached (not ok), no LLM",
+          logged[-1][_status_idx()] == "ok_cached" and payload.get("answer") == "cached fair [1]." and code == 200)
     check("usage_alert fired on cache hit", len(d_cache.usage_alert_calls) == 1)
 
     # MULTI-ENTITY happy path: two named profs -> two retrieve calls, one generate, one budget unit
@@ -606,12 +711,48 @@ def selftest():
     check("one-of-two ambiguous -> disambiguation stop",
           logged[-1][_status_idx()] == "ambiguous" and payload["mode"] == "disambiguation")
 
+    # DUPLICATE HINTS (Issue 20): gate returns ['Guha','guha'] -> case-insensitive hint dedupe
+    # collapses to one hint pre-retrieve; also verify the post-resolution block dedupe by
+    # entity key (two hints resolving to the same slug must not double the prompt/sources).
+    d_dup = Deps(); d_dup.usage_alert_calls = []
+    d_dup.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": ["Guha", "guha"], "professor_or_course": "Guha", "message": None}, d_dup)
+    retrieved_dup = []
+    def _retrieve_dup(self, q, hint):
+        retrieved_dup.append(hint)
+        return {"professor_slug": "guha-prof", "entity_key": "guha-prof", "course_code": None,
+                "comment_count": 5, "comments": [{"body": "word " * 60} for _ in range(5)],
+                "facts": {"kind": "professor", "name": "Olin Guha"}}
+    d_dup.retrieve_fn = types.MethodType(_retrieve_dup, d_dup)
+    payload, code = handle_question("compare Guha and guha", "s", "iphash", d_dup)
+    check("duplicate-case hints collapse to one hint pre-retrieve", retrieved_dup == ["Guha"])
+    check("duplicate hints -> exactly one entity block in payload", len(payload["entities"]) == 1)
+
+    # Post-resolution dedupe: TWO distinct hints that both resolve to the SAME entity_key
+    # (e.g. 'Wu' and 'Wu Chieh') must still collapse to a single block.
+    d_dup2 = Deps(); d_dup2.usage_alert_calls = []
+    d_dup2.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": ["Wu", "Wu Chieh"], "professor_or_course": "Wu", "message": None}, d_dup2)
+    d_dup2.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "professor_slug": "wu-prof", "entity_key": "wu-prof", "course_code": None,
+        "comment_count": 5, "comments": [{"body": "word " * 60} for _ in range(5)],
+        "facts": {"kind": "professor", "name": "Chieh Wu"}}, d_dup2)
+    payload, code = handle_question("compare Wu and Wu Chieh", "s", "iphash", d_dup2)
+    check("post-resolution dedupe -> exactly one entity block", len(payload["entities"]) == 1)
+
     # direct _is_bare_name assertions
     check("_is_bare_name single token", _is_bare_name("Lee") is True)
     check("_is_bare_name multi-word", _is_bare_name("Jung Lee") is False)
     check("_strip_titles drops honorific", _strip_titles("Professor Lee") == "Lee")
     check("_strip_titles keeps full name", _strip_titles("Jung Lee") == "Jung Lee")
     check("title+bare name is bare after strip", _is_bare_name(_strip_titles("Dr. Lee")) is True)
+
+    # Reset again: minute_capacity_ok reserves in-flight tokens per successful check and this
+    # orchestrator never releases them (no real generate() runs in these fakes), so the ~40
+    # cases above accumulate enough reservations to saturate the per-minute budget and make
+    # the remaining cache-hit/course-list/ranking cases below spuriously degrade to fallback.
+    chat_throttle._reservations["daily"].clear()
+    chat_throttle._reservations["minute_tokens"].clear()
 
     # ── TOPIC course-list path: empty entity hint, retrieve yields a course_list block ──
     d_cl = Deps(); d_cl.usage_alert_calls = []
@@ -635,6 +776,43 @@ def selftest():
     check("course_list carries a disclaimer", bool(payload.get("disclaimer")))
     check("course_list calls the list generator once", cl_calls == [("database", 1)])
     check("course_list logged ok", logged[-1][_status_idx()] == "ok")
+
+    # course_list CACHE HIT -> logged ok_cached (Issue 7), not ok, no list-generator call
+    d_cl_cache = Deps()
+    d_cl_cache.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": [], "professor_or_course": None, "message": None}, d_cl_cache)
+    d_cl_cache.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "kind": "course_list", "topic": "database",
+        "courses": [{"code": "CS3200", "name": "Database Design", "department": "Khoury"}],
+        "course_count": 1, "with_ratings": False, "entity_key": "topic:database",
+        "course_code": None, "professor_slug": None, "facts": {}, "comments": [], "comment_count": 0}, d_cl_cache)
+    d_cl_cache.cache_get_fn = types.MethodType(
+        lambda self, k: {"mode": "course_list", "answer": "cached list."}, d_cl_cache)
+    d_cl_cache.generate_course_list_fn = types.MethodType(
+        lambda self, topic, courses: (_ for _ in ()).throw(AssertionError("no list-gen call on cache hit")), d_cl_cache)
+    payload, code = handle_question("what database courses are there", "s", "iphash", d_cl_cache)
+    check("course_list cache hit logged ok_cached", logged[-1][_status_idx()] == "ok_cached")
+
+    # ── NO-HINT SUPERLATIVE (Issue 9): no gate entity, retrieve resolves a course_ranking block
+    # anyway (e.g. "which cs course is the hardest?") -> must route to the ranking generator,
+    # NOT be dropped into out_of_scope. ──
+    d_rk_nohint = Deps(); d_rk_nohint.usage_alert_calls = []
+    d_rk_nohint.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": [], "professor_or_course": None, "message": None}, d_rk_nohint)
+    d_rk_nohint.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "kind": "course_ranking", "subject": "CS", "metric": "difficulty", "direction": "desc",
+        "courses": [{"code": "CS3100", "name": "PDI 2", "department": "CS", "value": 4.2, "responses": 100}],
+        "course_count": 1, "entity_key": "rank:CS:difficulty", "course_code": None,
+        "professor_slug": None, "facts": {}, "comments": [], "comment_count": 0}, d_rk_nohint)
+    rk_nohint_calls = []
+    d_rk_nohint.generate_course_ranking_fn = types.MethodType(
+        lambda self, subject, metric, direction, courses: (rk_nohint_calls.append((subject, metric)) or
+            {"text": "CS3100 is the hardest CS course.", "tokens_used": 20}), d_rk_nohint)
+    payload, code = handle_question("which cs course is the hardest?", "s", "iphash", d_rk_nohint)
+    check("no-hint superlative -> ranking answer, not out_of_scope",
+          code == 200 and payload.get("mode") == "course_list" and payload.get("answer") == "CS3100 is the hardest CS course.")
+    check("no-hint superlative calls the ranking generator", rk_nohint_calls == [("CS", "difficulty")])
+    check("no-hint superlative logged ok", logged[-1][_status_idx()] == "ok")
 
     # ── TOPIC regex fires but 0 catalog matches -> retrieve returns NO course_list -> out_of_scope ──
     d_cl0 = Deps()
@@ -716,6 +894,22 @@ def selftest():
     check("ranking carries rating value (metric is rating)", payload["courses"][0]["rating"] == 4.45)
     check("ranking calls the ranking generator once", rk_calls == [("CS", "rating", 2)])
     check("ranking logged ok", logged[-1][_status_idx()] == "ok")
+
+    # course_ranking CACHE HIT -> logged ok_cached (Issue 7), not ok, no ranking-generator call
+    d_rk_cache = Deps()
+    d_rk_cache.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": ["CS course"], "professor_or_course": "CS course", "message": None}, d_rk_cache)
+    d_rk_cache.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "kind": "course_ranking", "subject": "CS", "metric": "rating", "direction": "desc",
+        "courses": [{"code": "CS3100", "name": "PDI 2", "department": "CS", "value": 4.45, "responses": 100}],
+        "course_count": 1, "entity_key": "rank:CS:rating", "course_code": None,
+        "professor_slug": None, "facts": {}, "comments": [], "comment_count": 0}, d_rk_cache)
+    d_rk_cache.cache_get_fn = types.MethodType(
+        lambda self, k: {"mode": "course_list", "answer": "cached ranking."}, d_rk_cache)
+    d_rk_cache.generate_course_ranking_fn = types.MethodType(
+        lambda self, subject, metric, direction, courses: (_ for _ in ()).throw(AssertionError("no ranking-gen call on cache hit")), d_rk_cache)
+    payload, code = handle_question("Which CS course has the highest rating?", "s", "iphash", d_rk_cache)
+    check("ranking cache hit logged ok_cached", logged[-1][_status_idx()] == "ok_cached")
 
     # difficulty ranking: rating field left None (value lives in prose, not the ★ badge)
     d_rkd = Deps()

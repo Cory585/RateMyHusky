@@ -22,12 +22,15 @@ const STATIC_ROUTES = [
   { path: '/professors', priority: '0.9', changefreq: 'daily' },
   { path: '/courses', priority: '0.9', changefreq: 'daily' },
   { path: '/compare', priority: '0.5', changefreq: 'weekly' },
+  { path: '/departments', priority: '0.7', changefreq: 'weekly' },
 ];
 
 async function fetchAll(endpoint, key) {
   // Catalog endpoints accept a large limit and return { [key]: [...] }.
   const url = `${API}/api/${endpoint}?limit=10000&page=1`;
-  const res = await fetch(url);
+  const proxyKey = process.env.SITEMAP_PROXY_KEY;
+  const headers = proxyKey ? { 'x-proxy-key': proxyKey } : undefined;
+  const res = await fetch(url, { headers });
   if (!res.ok) throw new Error(`${endpoint} -> HTTP ${res.status}`);
   const data = await res.json();
   return Array.isArray(data[key]) ? data[key] : [];
@@ -77,6 +80,21 @@ async function main() {
     }
   } catch (e) {
     console.warn(`[sitemap] could not fetch courses: ${e.message}`);
+  }
+
+  try {
+    const departments = await fetchAll('departments/hub', 'departments');
+    for (const d of departments) {
+      if (!d.slug) continue;
+      urls.push(xmlUrl({ loc: `${SITE}/departments/${esc(d.slug)}`, changefreq: 'weekly', priority: '0.6', lastmod: today }));
+    }
+  } catch (e) {
+    console.warn(`[sitemap] could not fetch departments: ${e.message}`);
+  }
+
+  if (profCount === 0 && courseCount === 0) {
+    console.warn('[sitemap] both fetches returned nothing; keeping the committed sitemap.xml untouched');
+    return;
   }
 
   const xml =

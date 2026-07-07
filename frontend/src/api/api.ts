@@ -68,6 +68,7 @@ export interface ProfessorProfile {
   traceRatingCounts?: Record<string, TraceRatingCounts>;
   radarData?: RadarDataPoint[] | null;
   radarTermTitle?: string | null;
+  colleagues?: { name: string; slug: string; avgRating: number | null; totalRatings: number }[];
 }
 
 export interface ProfessorReviews {
@@ -228,7 +229,7 @@ export interface ChatProfessorMatch {
 }
 
 export type ChatResponse =
-  | { mode: 'question'; answer: string; sources: ChatSource[]; professor_slug: string; course_code: string | null; disclaimer: string; entities?: { name: string; professor_slug?: string | null; course_code?: string | null }[] }
+  | { mode: 'question'; answer: string; sources: ChatSource[]; cited?: number[]; professor_slug: string; course_code: string | null; disclaimer: string; entities?: { name: string; professor_slug?: string | null; course_code?: string | null }[] }
   | { mode: 'disambiguation'; message: string; matches: ChatProfessorMatch[] }
   | { mode: 'out_of_scope' | 'thin_data' | 'keyword'; banner?: string; message?: string; comments: unknown[]; professors: unknown[] }
   | { mode: 'course_list'; answer: string; topic?: string;
@@ -299,6 +300,7 @@ export interface CourseSummary {
   avgRating: number | null;
   avgEnrollment: number | null;
   latestTermTitle: string;
+  ratingCount: number | null;
 }
 
 export interface CourseInstructorBreakdown {
@@ -405,6 +407,46 @@ export async function submitFeedback(payload: {
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error ?? `API ${res.status}`);
+  }
+}
+
+/* ---- Department hub pages ---- */
+export interface HubDepartment {
+  slug: string;
+  name: string;
+  professorCount: number;
+  avgRating: number | null;
+}
+
+export interface DepartmentsHubResponse {
+  departments: HubDepartment[];
+  total: number;
+}
+
+export const fetchDepartmentsHub = () => get<DepartmentsHubResponse>('/api/departments/hub');
+
+export interface DepartmentProfessor {
+  name: string;
+  slug: string | null;
+  avgRating: number | null;
+  difficulty: number | null;
+  wouldTakeAgainPct: number | null;
+  totalRatings: number;
+}
+
+export interface DepartmentDetail {
+  name: string;
+  slug: string;
+  professorCount: number;
+  avgRating: number | null;
+  professors: DepartmentProfessor[];
+}
+
+export async function fetchDepartmentDetail(slug: string): Promise<DepartmentDetail | null> {
+  try {
+    return await get<DepartmentDetail>(`/api/departments/${encodeURIComponent(slug)}`);
+  } catch {
+    return null;
   }
 }
 

@@ -68,12 +68,33 @@ def render_client(monkeypatch):
              "department": "Economics", "avgRating": 4.1},
         ], "total": 5013, "page": 1, "totalPages": 251})
 
+    def fake_departments_hub():
+        return FakeResp({"departments": [
+            {"slug": "computer-science", "name": "Computer Science",
+             "professorCount": 214, "avgRating": 3.9},
+        ], "total": 80})
+
+    def fake_department_hub_detail(slug):
+        if slug == "missing":
+            return ({"error": "not found"}, 404)
+        return FakeResp({
+            "name": "Computer Science", "slug": "computer-science",
+            "professorCount": 1, "avgRating": 4.25,
+            "professors": [
+                {"name": "Francis Georges", "slug": "francis-georges",
+                 "avgRating": 4.25, "difficulty": 2.9,
+                 "wouldTakeAgainPct": 83, "totalRatings": 2686},
+            ],
+        })
+
     monkeypatch.setattr(render, "_get_profile_view", lambda: fake_professor_profile, raising=False)
     monkeypatch.setattr(render, "_get_reviews_view", lambda: fake_professor_reviews, raising=False)
     monkeypatch.setattr(render, "_get_course_view", lambda: fake_course_detail, raising=False)
     monkeypatch.setattr(render, "_get_stats_view", lambda: fake_stats, raising=False)
     monkeypatch.setattr(render, "_get_professors_catalog_view", lambda: fake_professors_catalog, raising=False)
     monkeypatch.setattr(render, "_get_courses_catalog_view", lambda: fake_courses_catalog, raising=False)
+    monkeypatch.setattr(render, "_get_departments_hub_view", lambda: fake_departments_hub, raising=False)
+    monkeypatch.setattr(render, "_get_department_hub_detail_view", lambda: fake_department_hub_detail, raising=False)
 
     from flask import Flask
     app = Flask(__name__)

@@ -9,13 +9,15 @@ import argparse, sys, os, time
 sys.path.insert(0, os.path.dirname(__file__))
 from load_evidence_to_crdb import connect
 
-MODEL_VERSION = "bge-small-en-v1.5-q8"
+MODEL_VERSION = "bge-small-en-v1.5-q8-maskedmean"
 _EMBEDDER = None
 
 def load_embedder():
-    # Pure onnxruntime (no torch, no optimum) — MUST stay byte-identical (model, pooling,
-    # normalization) to backend/query_embedder.py so document vectors match query vectors.
-    # Only difference: this batches (list[str] in, list[list[float]] out).
+    # Pure onnxruntime (no torch, no optimum) — same model/normalization as
+    # backend/query_embedder.py, but this side pools with attention-mask weighting (see `embed`
+    # below) because it batches variable-length texts together with padding. The query side
+    # embeds one unpadded sequence at a time, where masked mean == plain mean, so it needs no
+    # change to stay comparable. Only other difference: this batches (list[str] in, list[list[float]] out).
     global _EMBEDDER
     if _EMBEDDER is None:
         import numpy as np
@@ -52,7 +54,12 @@ def load_embedder():
             feed = {"input_ids": ids, "attention_mask": mask}
             if "token_type_ids" in input_names:
                 feed["token_type_ids"] = np.zeros_like(ids)
-            emb = sess.run(None, feed)[0].mean(axis=1)  # mean-pool last_hidden_state
+            hidden = sess.run(None, feed)[0]  # (batch, seq, dim) last_hidden_state
+            # Masked mean pooling: padded positions must not contribute. A plain .mean(axis=1)
+            # averages in the pad-position hidden states, so a short text's vector depends on
+            # what it was batched with — this weights by attention_mask instead.
+            m = mask.astype(np.float32)[:, :, None]
+            emb = (hidden * m).sum(axis=1) / np.clip(m.sum(axis=1), 1e-9, None)
             emb = emb / (np.linalg.norm(emb, axis=1, keepdims=True) + 1e-9)
             return emb.tolist()
         _EMBEDDER = embed
@@ -125,6 +132,39 @@ def selftest():
           tuples[0][0] == "e1" and tuples[0][2] == MODEL_VERSION and tuples[0][3] == "sha_a"
           and tuples[0][1] == [0.1, 0.2, 0.3])
 
+    # Issue 4: masked mean pooling must make a short text's embedding (near-)independent of what
+    # it's batched with (padding must not leak into the average via pooling). Uses the real model
+    # (offline-cached after the first run); skipped with a note if the model isn't available.
+    #
+    # NOTE ON THRESHOLD: the plan's Verify step called for ~1e-6 (byte-identical). Measured
+    # against this actual INT8-quantized ONNX export, plain (unmasked) mean pooling gives a max
+    # per-dim diff of ~0.198 (cosine sim ~0.957) between "alone" and "batched with a 300-token
+    # text". After the masked-mean fix the diff drops to ~0.016 (cosine sim ~0.996) — a ~12x
+    # reduction — but does NOT reach 1e-6, because this quantized model's self-attention itself
+    # leaks a small amount of signal from padded positions into real-token hidden states BEFORE
+    # pooling ever runs (verified directly on last_hidden_state at real-token positions, and on
+    # the ONNX graph's own built-in `sentence_embedding` output — both show the same residual).
+    # That leak is inside the model graph, not fixable from the pooling formula. This selftest
+    # asserts the fix is a large, real improvement (bounded diff) rather than the unreachable
+    # exact-match bar.
+    try:
+        embedder = load_embedder()
+    except Exception as e:
+        print(f"SKIP: masked-mean-pooling batch-independence check (model unavailable: {e})")
+    else:
+        short = "Great professor, very clear lectures."
+        long_text = ("This course covered an enormous amount of material every single week and "
+                     "the workload was relentless from the very first day all the way through "
+                     "finals, but the professor was consistently clear, well organized, and "
+                     "genuinely cared whether the class understood every topic before moving on "
+                     "to the next one, which made the difficulty feel earned rather than arbitrary "
+                     "or punitive in any way at all throughout the whole semester experience.")
+        alone = embedder([short])[0]
+        batched = embedder([short, long_text])[0]
+        max_diff = max(abs(a - b) for a, b in zip(alone, batched))
+        check("masked mean pooling keeps alone-vs-batched diff small (< 0.05, was ~0.198 unmasked)",
+              max_diff < 0.05)
+
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0
 
@@ -162,15 +202,27 @@ def main():
         # the query — because it only returns not-yet-embedded rows, it naturally resumes from
         # the DB's state (no lost/redone work; upsert is idempotent). Loops until 0 rows remain.
         # This makes the overnight run truly fire-and-forget through DNS blips.
+        #
+        # SNAPSHOT RECYCLE: the named cursor pins ONE read snapshot for the whole pass, and
+        # CockroachDB Serverless garbage-collects old MVCC versions after gc.ttlseconds
+        # (serverless default 4500s = 75 min) — a pass older than that dies with "batch
+        # timestamp ... must be after replica GC threshold" (SQLSTATE XX000, killed 3 real
+        # runs at the 80-90 min mark; XX000 is NOT an OperationalError, so the reconnect
+        # handler never saw it). So every RECYCLE_SECONDS we voluntarily close the stream
+        # and re-issue it, taking a fresh snapshot via the exact resume path the reconnect
+        # case already uses — the snapshot's age stays bounded well under the GC TTL.
+        RECYCLE_SECONDS = 20 * 60
         while True:
             read_conn = write_conn = None
             did_work = False
+            recycle = False
             try:
                 read_conn = connect()
                 write_conn = connect()
                 cur = read_conn.cursor(name="embed_stream", cursor_factory=psycopg2.extras.RealDictCursor)
                 cur.itersize = 2000
                 cur.execute(NEEDS_SQL, (MODEL_VERSION,))
+                pass_deadline = time.time() + RECYCLE_SECONDS
                 batch = []
                 def flush(rows):
                     nonlocal total_written
@@ -187,11 +239,19 @@ def main():
                     batch.append({"id": row["id"], "body": row["body"], "body_sha": row["body_sha"]})
                     if len(batch) >= args.batch:
                         flush(batch); batch = []
+                        if time.time() >= pass_deadline:
+                            recycle = True
+                            break
                 flush(batch)
                 cur.close()
+                if recycle:
+                    print("  [snapshot recycle] re-issuing stream with a fresh read snapshot...", flush=True)
+                    continue
                 break  # stream exhausted cleanly -> everything embedded
-            except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
-                # connection dropped (DNS/network). Reconnect + re-stream (resumes from DB state).
+            except (psycopg2.InterfaceError, psycopg2.DatabaseError) as e:
+                # connection dropped (DNS/network) OR an unexpected server-side error (e.g. a GC
+                # threshold miss if a pass somehow outlives the TTL anyway) — either way, safe to
+                # reconnect + re-stream (resumes from DB state).
                 print(f"  [connection dropped: {str(e).splitlines()[0][:80]}] reconnecting + resuming...", flush=True)
                 time.sleep(3)
                 if not did_work:

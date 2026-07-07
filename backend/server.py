@@ -430,11 +430,25 @@ def query_one(sql, params=None):
 def _chat_write(sql, params=None):
     """Write helper for the question path (ask_log INSERTs): execute + commit, never fetch.
     The read-only query()/query_one() call fetchall(), which raises on a non-RETURNING INSERT;
-    and the pool is not autocommit, so writes must commit explicitly."""
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(sql, params or ())
-    conn.commit()
+    and the pool is not autocommit, so writes must commit explicitly.
+    A logging write must never fail the request that already generated a successful answer:
+    retry once on a stale connection (mirrors query()), then swallow and log any further error."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(sql, params or ())
+        conn.commit()
+    except (psycopg2.InterfaceError, psycopg2.OperationalError):
+        try:
+            _discard_db_conn()
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute(sql, params or ())
+            conn.commit()
+        except Exception as e:
+            print(f"_chat_write: log write failed after retry, dropping: {e}")
+    except Exception as e:
+        print(f"_chat_write: log write failed, dropping: {e}")
 
 def _chat_write_rc(sql, params=None):
     """Like _chat_write but returns the executed statement's rowcount."""
@@ -814,6 +828,34 @@ def _get_radar_metric_value(scores, pattern_groups):
         if match and match["mean"] > 0:
             values.append(match["mean"])
     return round(sum(values) / len(values), 2) if values else None
+
+
+def _department_colleagues(department, exclude_slug):
+    """Up to 8 other professors_catalog rows in the same department, highest
+    review-count first. Cached per department (shared across every professor
+    in it) since professors_catalog is indexed on department already."""
+    if not department:
+        return []
+    cache_key = f"colleagues:{department}"
+    rows = cache_get(cache_key)
+    if rows is None:
+        rows = query("""
+            SELECT name, slug, avg_rating, total_reviews FROM professors_catalog
+            WHERE department = %s AND slug IS NOT NULL AND total_reviews >= 1
+            ORDER BY total_reviews DESC LIMIT 9
+        """, (department,))
+        cache_set(cache_key, rows)
+    colleagues = []
+    for r in rows:
+        if r["slug"] == exclude_slug:
+            continue
+        colleagues.append({
+            "name": r["name"],
+            "slug": r["slug"],
+            "avgRating": round(r["avg_rating"], 2) if r["avg_rating"] else None,
+            "totalRatings": r["total_reviews"],
+        })
+    return colleagues[:8]
 
 
 # ──────────────────────────────────────────────
@@ -1214,6 +1256,7 @@ def professor_profile(slug):
     # else: profile["difficulty"] already set to rmp_diff (or None) above
 
     profile["traceCourses"] = trace_course_list
+    profile["colleagues"] = _department_colleagues(prof["department"], prof["slug"])
 
     cache_set(cache_key, profile)
     resp = jsonify(profile)
@@ -1373,6 +1416,9 @@ def professor_full(slug):
                                   is_authed=False)
         if profile_data is None:
             return jsonify({"error": "Professor not found"}), 404
+        # Same colleagues field the authed branch gets via professor_profile —
+        # served from the per-department cache, no per-request DB cost.
+        profile_data["colleagues"] = _department_colleagues(profile_data["department"], slug)
     else:
         profile_resp = professor_profile(slug)
         if isinstance(profile_resp, tuple):
@@ -1425,6 +1471,98 @@ def departments():
         """)
     BAD_DEPTS = {"Computer amp Informational Tech.", "Computer  Informational Tech.", "Counseling amp Educational Psych", "Counseling  Educational Psych"}
     result = [r['department'] for r in rows if r['department'] and r['department'] not in BAD_DEPTS]
+    cache_set(cache_key, result)
+    return jsonify(result)
+
+
+def department_slug(name):
+    """Deterministic, reversible department slug: lowercase, '&' -> 'and',
+    any run of non-alphanumerics -> single '-', trim leading/trailing '-'."""
+    s = name.lower().replace("&", "and")
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+    return s
+
+
+def _department_hub_map():
+    """slug -> {name, professorCount, avgRating} for every department with
+    >=1 rated professor (same inclusion rule as professors_catalog), built
+    from a single grouped query. Cached like the other catalog lookups.
+    Collisions (two department names slugging to the same value) keep the
+    first-seen entry and drop the rest."""
+    cached = cache_get("dept_hub_map")
+    if cached is not None:
+        return cached
+    rows = query("""
+        SELECT department, COUNT(*) as cnt, AVG(avg_rating) as avg
+        FROM professors_catalog
+        WHERE avg_rating IS NOT NULL AND department IS NOT NULL AND department != ''
+        GROUP BY department
+    """)
+    BAD_DEPTS = {"Computer amp Informational Tech.", "Computer  Informational Tech.", "Counseling amp Educational Psych", "Counseling  Educational Psych"}
+    by_slug = {}
+    for r in rows:
+        name = r["department"]
+        if not name or name in BAD_DEPTS:
+            continue
+        slug = department_slug(name)
+        if slug in by_slug:
+            continue  # collision: keep the first-seen department for this slug
+        by_slug[slug] = {
+            "slug": slug,
+            "name": name,
+            "professorCount": r["cnt"],
+            "avgRating": round(r["avg"], 2) if r["avg"] is not None else None,
+        }
+    cache_set("dept_hub_map", by_slug)
+    return by_slug
+
+
+@app.route("/api/departments/hub")
+def departments_hub():
+    cache_key = "depts_hub_list"
+    cached = cache_get(cache_key)
+    if cached:
+        return jsonify(cached)
+    by_slug = _department_hub_map()
+    entries = sorted(by_slug.values(), key=lambda d: d["professorCount"], reverse=True)
+    result = {"departments": entries, "total": len(entries)}
+    cache_set(cache_key, result)
+    return jsonify(result)
+
+
+@app.route("/api/departments/<slug>")
+def department_hub_detail(slug):
+    cache_key = f"dept_hub:{slug}"
+    cached = cache_get(cache_key)
+    if cached:
+        return jsonify(cached)
+    by_slug = _department_hub_map()
+    entry = by_slug.get(slug)
+    if not entry:
+        return jsonify({"error": "Department not found"}), 404
+
+    rows = query("""
+        SELECT name, slug, avg_rating, difficulty, would_take_again_pct, total_reviews
+        FROM professors_catalog
+        WHERE department = %s AND avg_rating IS NOT NULL
+        ORDER BY avg_rating DESC
+    """, (entry["name"],))
+    professors = [{
+        "name": r["name"],
+        "slug": r["slug"],
+        "avgRating": round(r["avg_rating"], 2) if r["avg_rating"] is not None else None,
+        "difficulty": round(r["difficulty"], 2) if r["difficulty"] is not None else None,
+        "wouldTakeAgainPct": round(r["would_take_again_pct"], 1) if r["would_take_again_pct"] is not None else None,
+        "totalRatings": r["total_reviews"],
+    } for r in rows]
+
+    result = {
+        "name": entry["name"],
+        "slug": entry["slug"],
+        "professorCount": entry["professorCount"],
+        "avgRating": entry["avgRating"],
+        "professors": professors,
+    }
     cache_set(cache_key, result)
     return jsonify(result)
 
@@ -1802,6 +1940,9 @@ def course_profile(code):
         "avgRating": round(avg_rating, 2) if avg_rating is not None else None,
         "avgEnrollment": round(total_enrollment / total_sections_with_enrollment) if total_sections_with_enrollment > 0 else None,
         "latestTermTitle": latest_term_title,
+        # Count of TRACE "overall" question responses backing avgRating, for
+        # AggregateRating JSON-LD (schema.org requires ratingCount alongside ratingValue).
+        "ratingCount": total_responses if total_responses > 0 else None,
     }
 
     # Build instructor aggregates

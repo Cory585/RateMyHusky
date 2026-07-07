@@ -2,11 +2,14 @@
 first request — cold load on a 0.5GB Railway instance can take seconds). Returns None on any
 error/timeout so retrieval falls back to lexical-only."""
 import sys, argparse
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FTimeout
 
 MODEL_VERSION = "bge-small-en-v1.5-q8"
 _POOL = ThreadPoolExecutor(max_workers=1)
 _RAW = None
+_CACHE = OrderedDict()  # text -> vector, small LRU in front of embed_query (~64 entries)
+_CACHE_MAX = 64
 
 def _load():
     # Pure onnxruntime — no torch, no optimum. The optimum wrapper (a) crashes on some
@@ -54,19 +57,30 @@ def _load():
         _RAW = embed
     return _RAW
 
-def _embed_with_timeout(fn, text, timeout_s=2.0):
+def _embed_with_timeout(fn, text, timeout_s=4.0):
+    future = _POOL.submit(fn, text)
     try:
-        return _POOL.submit(fn, text).result(timeout=timeout_s)
+        return future.result(timeout=timeout_s)
     except (_FTimeout, Exception):
+        future.cancel()  # no-op if already running/started; drops it while still queued
         return None
 
 def embed_query(text):
     if not text or not text.strip():
         return None
+    if text in _CACHE:
+        _CACHE.move_to_end(text)
+        return _CACHE[text]
     try:
-        return _embed_with_timeout(_load(), text, timeout_s=2.0)
+        vec = _embed_with_timeout(_load(), text, timeout_s=4.0)
     except Exception:
-        return None
+        vec = None
+    if vec is not None:
+        _CACHE[text] = vec
+        _CACHE.move_to_end(text)
+        if len(_CACHE) > _CACHE_MAX:
+            _CACHE.popitem(last=False)
+    return vec
 
 # Warm-load at import so the first real request is fast (best-effort; failure is non-fatal).
 try:
@@ -81,7 +95,11 @@ def selftest():
         if not cond: fails.append(label)
         print(("PASS" if cond else "FAIL") + ": " + label)
 
-    check("model_version matches document side", MODEL_VERSION == "bge-small-en-v1.5-q8")
+    # Doc side is versioned separately as "bge-small-en-v1.5-q8-maskedmean" (Issue 4's masked-
+    # mean pooling fix bumped it to force a re-embed); this constant does NOT need to match it —
+    # a single unpadded query sequence's masked mean equals its plain mean, so query vectors are
+    # still comparable without a query-side change. Retrieval never filters on model_version.
+    check("query-side model version constant is the expected literal", MODEL_VERSION == "bge-small-en-v1.5-q8")
 
     ok = _embed_with_timeout(lambda t: [0.1, 0.2], "q", timeout_s=1.0)
     check("returns vector on success", ok == [0.1, 0.2])
@@ -92,6 +110,39 @@ def selftest():
     import time as _t
     def slow(t): _t.sleep(2.0); return [9.9]
     check("returns None on timeout", _embed_with_timeout(slow, "q", timeout_s=0.2) is None)
+
+    # ── Issue 17: cancel-on-timeout drops a queued (not-yet-started) task instead of letting
+    # the abandoned work keep running and sustain the backlog ──
+    def sleeper(t):
+        _t.sleep(3.0)
+        return [9.9]
+    fut = _POOL.submit(sleeper, "warm")  # occupies the single worker
+    try:
+        queued_fut = _POOL.submit(lambda t: [1.0], "queued")
+        cancelled = queued_fut.cancel()
+        check("a still-queued (not-started) task can be cancelled", cancelled is True)
+    finally:
+        fut.result(timeout=5.0)  # drain the pool before continuing
+
+    # ── Issue 17: memoization — two calls with the same text hit the model once ──
+    _CACHE.clear()
+    calls = []
+    def counting_embed(t):
+        calls.append(t)
+        return [0.5, 0.5]
+    global _RAW
+    saved_raw = _RAW
+    _RAW = counting_embed
+    try:
+        v1 = embed_query("same text")
+        v2 = embed_query("same text")
+        check("memoized embed_query returns the same vector", v1 == v2 == [0.5, 0.5])
+        check("memoized embed_query calls the model once", len(calls) == 1)
+        v3 = embed_query("different text")
+        check("a new text still calls the model", len(calls) == 2 and v3 == [0.5, 0.5])
+    finally:
+        _RAW = saved_raw
+        _CACHE.clear()
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0
