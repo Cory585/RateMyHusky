@@ -53,6 +53,7 @@ export async function glideClick(page, selector, ms = 700) {
     ([x, y, ms]) => window.__cursor.moveTo(x, y, ms),
     [x, y, ms]
   );
+  await page.waitForTimeout(120 + Math.random() * 130); // human settle before click
   await page.evaluate(() => window.__cursor.pulse());
   await page.mouse.click(x, y);
 }
