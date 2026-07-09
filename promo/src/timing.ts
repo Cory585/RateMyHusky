@@ -1,8 +1,6 @@
 export const FPS = 30;
-export const TRANSITION_FRAMES = 12;
 
-// Scene lengths in frames at 30fps. Transitions overlap scenes by
-// TRANSITION_FRAMES, so total = sum - 7 * TRANSITION_FRAMES = 846 (28.2s).
+// Scene lengths in frames at 30fps.
 export const SCENES = {
   intro: 80,
   search: 130,
@@ -14,7 +12,20 @@ export const SCENES = {
   outro: 100,
 } as const;
 
+// Transition lengths in frames, keyed by the scene each one leads INTO.
+// Whip pans 10, zoom-through 12, fades 5-8. Transitions overlap scenes,
+// so total = sum(SCENES) - sum(TRANSITIONS) = 869 (~29.0s).
+export const TRANSITIONS = {
+  search: 6,
+  professor: 10,
+  ask: 12,
+  compare: 10,
+  courses: 10,
+  darkmode: 5,
+  outro: 8,
+} as const;
+
 const ids = Object.keys(SCENES) as (keyof typeof SCENES)[];
 export const TOTAL_FRAMES =
   ids.reduce((sum, id) => sum + SCENES[id], 0) -
-  TRANSITION_FRAMES * (ids.length - 1);
+  Object.values(TRANSITIONS).reduce((a, b) => a + b, 0);

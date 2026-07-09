@@ -1,14 +1,23 @@
-import { AbsoluteFill, Audio, interpolate, staticFile } from 'remotion';
+import {
+  AbsoluteFill,
+  Audio,
+  Easing,
+  interpolate,
+  staticFile,
+  useVideoConfig,
+} from 'remotion';
 import { TransitionSeries, linearTiming } from '@remotion/transitions';
 import { fade } from '@remotion/transitions/fade';
-import { slide } from '@remotion/transitions/slide';
 import manifest from './manifest.json';
 import { DARK, MUSIC } from './branding';
 import { AskScene } from './scenes/AskScene';
 import { FootageScene } from './scenes/FootageScene';
 import { IntroCard } from './scenes/IntroCard';
 import { OutroCard } from './scenes/OutroCard';
-import { FPS, SCENES, TOTAL_FRAMES, TRANSITION_FRAMES } from './timing';
+import { driftFade } from './transitions/driftFade';
+import { whipPan } from './transitions/whipPan';
+import { zoomThrough } from './transitions/zoomThrough';
+import { FPS, SCENES, TOTAL_FRAMES, TRANSITIONS } from './timing';
 
 type SceneName = keyof typeof manifest.scenes;
 
@@ -19,9 +28,15 @@ const fitRate = (name: SceneName, frames: number) => {
   return Math.min(2, Math.max(1, d / (frames / FPS)));
 };
 
-const t = () => linearTiming({ durationInFrames: TRANSITION_FRAMES });
+const soft = (frames: number) => linearTiming({ durationInFrames: frames });
+const snap = (frames: number) =>
+  linearTiming({
+    durationInFrames: frames,
+    easing: Easing.bezier(0.65, 0, 0.35, 1),
+  });
 
 export const PromoVideo: React.FC = () => {
+  const { width } = useVideoConfig();
   const dm = manifest.scenes.darkmode;
   const darkStart = Math.max(
     0,
@@ -43,7 +58,7 @@ export const PromoVideo: React.FC = () => {
         <TransitionSeries.Sequence durationInFrames={SCENES.intro}>
           <IntroCard />
         </TransitionSeries.Sequence>
-        <TransitionSeries.Transition presentation={slide({ direction: 'from-right' })} timing={t()} />
+        <TransitionSeries.Transition presentation={driftFade()} timing={soft(TRANSITIONS.search)} />
         <TransitionSeries.Sequence durationInFrames={SCENES.search}>
           <FootageScene
             src={manifest.scenes.search.file}
@@ -51,7 +66,7 @@ export const PromoVideo: React.FC = () => {
             caption="Find any professor in seconds"
           />
         </TransitionSeries.Sequence>
-        <TransitionSeries.Transition presentation={fade()} timing={t()} />
+        <TransitionSeries.Transition presentation={whipPan({ width })} timing={snap(TRANSITIONS.professor)} />
         <TransitionSeries.Sequence durationInFrames={SCENES.professor}>
           <FootageScene
             src={manifest.scenes.professor.file}
@@ -59,11 +74,11 @@ export const PromoVideo: React.FC = () => {
             caption="Every review source. One page."
           />
         </TransitionSeries.Sequence>
-        <TransitionSeries.Transition presentation={slide({ direction: 'from-bottom' })} timing={t()} />
+        <TransitionSeries.Transition presentation={zoomThrough()} timing={snap(TRANSITIONS.ask)} />
         <TransitionSeries.Sequence durationInFrames={SCENES.ask}>
           <AskScene />
         </TransitionSeries.Sequence>
-        <TransitionSeries.Transition presentation={slide({ direction: 'from-right' })} timing={t()} />
+        <TransitionSeries.Transition presentation={whipPan({ width })} timing={snap(TRANSITIONS.compare)} />
         <TransitionSeries.Sequence durationInFrames={SCENES.compare}>
           <FootageScene
             src={manifest.scenes.compare.file}
@@ -71,7 +86,7 @@ export const PromoVideo: React.FC = () => {
             caption="Compare head-to-head"
           />
         </TransitionSeries.Sequence>
-        <TransitionSeries.Transition presentation={fade()} timing={t()} />
+        <TransitionSeries.Transition presentation={whipPan({ width })} timing={snap(TRANSITIONS.courses)} />
         <TransitionSeries.Sequence durationInFrames={SCENES.courses}>
           <FootageScene
             src={manifest.scenes.courses.file}
@@ -79,11 +94,11 @@ export const PromoVideo: React.FC = () => {
             caption="Browse every course and department"
           />
         </TransitionSeries.Sequence>
-        <TransitionSeries.Transition presentation={slide({ direction: 'from-bottom' })} timing={t()} />
+        <TransitionSeries.Transition presentation={fade()} timing={soft(TRANSITIONS.darkmode)} />
         <TransitionSeries.Sequence durationInFrames={SCENES.darkmode}>
           <FootageScene src={dm.file} startFrom={darkStart} />
         </TransitionSeries.Sequence>
-        <TransitionSeries.Transition presentation={fade()} timing={t()} />
+        <TransitionSeries.Transition presentation={fade()} timing={soft(TRANSITIONS.outro)} />
         <TransitionSeries.Sequence durationInFrames={SCENES.outro}>
           <OutroCard />
         </TransitionSeries.Sequence>
