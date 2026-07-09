@@ -1,0 +1,6 @@
+node_modules/
+capture/raw/
+public/clips/
+public/music/
+public/logo.png
+out/
