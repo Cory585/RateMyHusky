@@ -122,6 +122,8 @@ def build_profile_unauthed(prof, trace_course_rows, query):
         "totalRatings": prof["total_reviews"],
         "professorUrl": prof["professor_url"],
         "imageUrl": prof["image_url"],
+        "focusX": prof.get("focus_x") if prof.get("focus_x") is not None else 50.0,
+        "focusY": prof.get("focus_y") if prof.get("focus_y") is not None else 30.0,
         "hoursPerWeek": round(prof["avg_hours"], 1) if prof["avg_hours"] else None,
     }
 

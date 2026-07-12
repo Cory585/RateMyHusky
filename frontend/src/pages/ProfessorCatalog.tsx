@@ -717,6 +717,7 @@ export default function ProfessorCatalog() {
                         src={prof.imageUrl}
                         alt=""
                         className="prof-avatar-img"
+                        style={{ objectPosition: `${prof.focusX ?? 50}% ${prof.focusY ?? 30}%` }}
                         onError={(e) => {
                           const target = e.currentTarget;
                           target.style.display = 'none';
@@ -769,6 +770,7 @@ export default function ProfessorCatalog() {
                           src={prof.imageUrl}
                           alt=""
                           className="prof-avatar-img"
+                          style={{ objectPosition: `${prof.focusX ?? 50}% ${prof.focusY ?? 30}%` }}
                           onError={(e) => {
                             const target = e.currentTarget;
                             target.style.display = 'none';

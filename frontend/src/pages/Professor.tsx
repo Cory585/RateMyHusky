@@ -942,6 +942,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
                 src={profile.imageUrl}
                 alt={profile.name}
                 className="prof-avatar-img"
+                style={{ objectPosition: `${profile.focusX ?? 50}% ${profile.focusY ?? 30}%` }}
                 onError={(e) => {
                   const target = e.currentTarget;
                   target.style.display = 'none';

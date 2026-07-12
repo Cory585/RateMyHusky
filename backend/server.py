@@ -904,6 +904,8 @@ def professor_profile(slug):
         "totalRatings": prof["total_reviews"],
         "professorUrl": prof["professor_url"],
         "imageUrl": prof["image_url"],
+        "focusX": prof.get("focus_x") if prof.get("focus_x") is not None else 50.0,
+        "focusY": prof.get("focus_y") if prof.get("focus_y") is not None else 30.0,
         "hoursPerWeek": round(prof["avg_hours"], 1) if prof["avg_hours"] else None,
     }
 
@@ -1709,6 +1711,8 @@ def professors_catalog():
             "totalComments": row.get("total_comments", 0) or 0,
             "wouldTakeAgainPct": round(row["would_take_again_pct"], 1) if row["would_take_again_pct"] else None,
             "imageUrl": row["image_url"],
+            "focusX": row.get("focus_x") if row.get("focus_x") is not None else 50.0,
+            "focusY": row.get("focus_y") if row.get("focus_y") is not None else 30.0,
         })
 
     result = {
