@@ -89,8 +89,103 @@ async function sceneSmoke(browser) {
   return saveScene(s, 'smoke');
 }
 
+// Scene 2: homepage search — type "rachlin", suggestions drop down,
+// hover the top results. ("machine learning" verified to return [] live.)
+async function sceneSearch(browser) {
+  const s = await newScene(browser);
+  const { page } = s;
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.evaluate(() => window.__cursor.show());
+  await page.waitForTimeout(600);
+  await glideClick(page, '.search-input', 800);
+  await page.keyboard.type('rachlin', { delay: 70 });
+  await page.locator('.search-suggestions .suggestion-item').first().waitFor();
+  const suggestionsAt = mark(s);
+  await page.waitForTimeout(400);
+  const items = page.locator('.suggestion-item');
+  const n = Math.min(await items.count(), 3);
+  for (let i = 0; i < n; i++) {
+    const box = await items.nth(i).boundingBox();
+    await page.evaluate(
+      ([x, y]) => window.__cursor.moveTo(x, y, 350),
+      [box.x + box.width / 2, box.y + box.height / 2]
+    );
+  }
+  await page.waitForTimeout(800);
+  return saveScene(s, 'search', { suggestionsAt });
+}
+
+// Scene 3: professor page — scroll to the review tabs, flip
+// RMP (default) -> TRACE -> Reddit to show all three sources.
+async function sceneProfessor(browser) {
+  const s = await newScene(browser);
+  const { page } = s;
+  await page.goto(`${BASE}/professors/john-rachlin`, {
+    waitUntil: 'networkidle',
+  });
+  await page.evaluate(() => window.__cursor.show());
+  await page.waitForTimeout(900);
+  const tabs = page.locator('.prof-review-tabs');
+  await tabs.waitFor();
+  const tabsY = await tabs.evaluate(
+    (el) => el.getBoundingClientRect().top + window.scrollY
+  );
+  await page.evaluate(
+    ([y]) => window.__cursor.scrollTo(y - 140, 1400),
+    [tabsY]
+  );
+  await page.waitForTimeout(400);
+  await glideClick(page, '.prof-review-tabs button:has-text("TRACE")', 500);
+  await page.waitForTimeout(1000);
+  await glideClick(page, '.prof-review-tabs button:has-text("Reddit")', 500);
+  await page.waitForTimeout(1400);
+  return saveScene(s, 'professor');
+}
+
+// Scene 4: Ask AI — click the homepage "Try Now" bubble (switches the
+// bar to Ask mode and focuses it), type a question, wait for the
+// answer. Records the full LLM wait; Remotion jump-cuts typedAt ->
+// answerAt. NOTE: fires a real /api/chat question, which has a daily
+// limit — do not run this scene in a loop.
+async function sceneAsk(browser) {
+  const s = await newScene(browser);
+  const { page } = s;
+  // Ask is sign-in gated: inject the user's session token (gitignored file)
+  // before navigation so the question actually reaches /api/chat.
+  const token = readFileSync(
+    fileURLToPath(new URL('./auth-token.txt', import.meta.url)),
+    'utf8'
+  ).trim();
+  await s.context.addInitScript((t) => localStorage.setItem('auth_token', t), token);
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.evaluate(() => window.__cursor.show());
+  await page.waitForTimeout(500);
+  await glideClick(page, '.home-ask-bubble-trynow', 900);
+  await page.waitForTimeout(400);
+  await page.keyboard.type('Is John Rachlin a good professor?', {
+    delay: 55,
+  });
+  await page.waitForTimeout(300);
+  const typedAt = mark(s);
+  await page.keyboard.press('Enter');
+  await page.locator('.ask-result').waitFor();
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector('.ask-result');
+      return el && !el.querySelector('.ask-thinking');
+    },
+    { timeout: 90000 }
+  );
+  const answerAt = mark(s);
+  await page.waitForTimeout(3000); // linger so citations are readable
+  return saveScene(s, 'ask', { typedAt, answerAt });
+}
+
 export const SCENE_FNS = {
   smoke: sceneSmoke,
+  search: sceneSearch,
+  professor: sceneProfessor,
+  ask: sceneAsk,
 };
 
 /* ---------------- CLI ---------------- */

@@ -1,5 +1,6 @@
 node_modules/
 capture/raw/
+capture/auth-token.txt
 public/clips/
 public/music/
 public/logo.png

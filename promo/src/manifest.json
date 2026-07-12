@@ -1,3 +1,24 @@
 {
-  "scenes": {}
+  "scenes": {
+    "search": {
+      "file": "clips/search.mp4",
+      "markers": {
+        "suggestionsAt": 4.068
+      },
+      "durationSec": 5.733333
+    },
+    "professor": {
+      "file": "clips/professor.mp4",
+      "markers": {},
+      "durationSec": 8.366667
+    },
+    "ask": {
+      "file": "clips/ask.mp4",
+      "markers": {
+        "typedAt": 5.944,
+        "answerAt": 10.823
+      },
+      "durationSec": 14.433333
+    }
+  }
 }
