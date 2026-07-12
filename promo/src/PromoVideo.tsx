@@ -1,14 +1,14 @@
-import { AbsoluteFill } from 'remotion';
+import { AbsoluteFill, Audio, interpolate, staticFile } from 'remotion';
 import { TransitionSeries, linearTiming } from '@remotion/transitions';
 import { fade } from '@remotion/transitions/fade';
 import { slide } from '@remotion/transitions/slide';
 import manifest from './manifest.json';
-import { DARK } from './branding';
+import { DARK, MUSIC } from './branding';
 import { AskScene } from './scenes/AskScene';
 import { FootageScene } from './scenes/FootageScene';
 import { IntroCard } from './scenes/IntroCard';
 import { OutroCard } from './scenes/OutroCard';
-import { FPS, SCENES, TRANSITION_FRAMES } from './timing';
+import { FPS, SCENES, TOTAL_FRAMES, TRANSITION_FRAMES } from './timing';
 
 type SceneName = keyof typeof manifest.scenes;
 
@@ -88,6 +88,17 @@ export const PromoVideo: React.FC = () => {
           <OutroCard />
         </TransitionSeries.Sequence>
       </TransitionSeries>
+      <Audio
+        src={staticFile(MUSIC)}
+        volume={(f) =>
+          interpolate(
+            f,
+            [0, 24, TOTAL_FRAMES - 60, TOTAL_FRAMES - 6],
+            [0, 1, 1, 0],
+            { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
+          )
+        }
+      />
     </AbsoluteFill>
   );
 };

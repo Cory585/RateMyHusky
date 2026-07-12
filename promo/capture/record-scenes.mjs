@@ -1,9 +1,10 @@
-// Records one WebM per scene off the live site with the fake cursor
-// injected, transcodes to H.264 MP4 for Remotion, and writes trim
-// markers to ../src/manifest.json.
+// Records one H.264 MP4 per scene off the live site with the fake cursor
+// injected (quality-100 screencast JPEG frames assembled via the ffmpeg
+// concat demuxer), and writes trim markers to ../src/manifest.json.
 // Usage (from promo/): node capture/record-scenes.mjs [scene ...]
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
@@ -19,14 +20,24 @@ const cursorSrc = readFileSync(
 export async function newScene(browser) {
   const context = await browser.newContext({
     viewport: { width: 1920, height: 1080 },
-    recordVideo: { dir: RAW, size: { width: 1920, height: 1080 } },
+    deviceScaleFactor: 2, // 4K framebuffer; screencast downsamples -> crisp 1080p
   });
   await context.addInitScript(cursorSrc);
   await context.addInitScript(() => {
     localStorage.setItem('prof_course_tip_dismissed', '1');
   });
   const page = await context.newPage();
-  return { context, page, rec0: Date.now() };
+  const scene = { context, page, rec0: 0, frames: [] };
+  // Quality-100 JPEG frames, bypassing recordVideo's hardcoded 1 Mbps VP8.
+  await page.screencast.start({
+    quality: 100,
+    size: { width: 1920, height: 1080 },
+    onFrame: (frame) => {
+      if (scene.frames.length === 0) scene.rec0 = Date.now();
+      scene.frames.push({ data: frame.data, timestamp: frame.timestamp });
+    },
+  });
+  return scene;
 }
 
 // Seconds since the recording (page) started — used for trim markers.
@@ -57,20 +68,41 @@ export function probeDuration(file) {
   );
 }
 
-function transcode(src, dst) {
+export async function saveScene(scene, name, markers = {}) {
+  await scene.page.screencast.stop();
+  const stopWall = Date.now();
+  await scene.context.close();
+  const { frames, rec0 } = scene;
+  if (frames.length === 0) throw new Error(`no frames captured for ${name}`);
+  const dir = `${RAW}/${name}`;
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  // onFrame timestamps are epoch milliseconds: Playwright converts CDP's
+  // metadata.timestamp (seconds) via *1000 before dispatching frames
+  // (playwright-core 1.61 coreBundle.js, screencastFrame dispatch).
+  const ts = frames.map((f) => f.timestamp);
+  const lines = ['ffconcat version 1.0'];
+  frames.forEach((f, i) => {
+    const file = `f${String(i).padStart(5, '0')}.jpg`;
+    writeFileSync(`${dir}/${file}`, f.data);
+    // Screencast only emits on change: hold each frame until the next one
+    // (last frame holds until stop time, measured on the wall clock).
+    const dur =
+      i + 1 < frames.length
+        ? (ts[i + 1] - ts[i]) / 1000
+        : (stopWall - rec0) / 1000 - (ts[i] - ts[0]) / 1000;
+    lines.push(`file ${file}`, `duration ${Math.max(dur, 1 / 120).toFixed(6)}`);
+  });
+  // concat demuxer quirk: repeat the last file so its duration is honored.
+  lines.push(`file f${String(frames.length - 1).padStart(5, '0')}.jpg`);
+  writeFileSync(`${dir}/frames.ffconcat`, lines.join('\n') + '\n');
   execFileSync(
     'ffmpeg',
-    ['-y', '-i', src, '-r', '30', '-c:v', 'libx264', '-crf', '18',
-     '-pix_fmt', 'yuv420p', '-an', dst],
+    ['-y', '-f', 'concat', '-i', `${dir}/frames.ffconcat`,
+     '-vf', 'fps=30', '-c:v', 'libx264', '-crf', '16', '-preset', 'slow',
+     '-pix_fmt', 'yuv420p', '-an', resolve(CLIPS, `${name}.mp4`)],
     { stdio: 'inherit' }
   );
-}
-
-export async function saveScene(scene, name, markers = {}) {
-  const video = scene.page.video();
-  await scene.context.close(); // flushes the recording to disk
-  await video.saveAs(`${RAW}/${name}.webm`);
-  transcode(`${RAW}/${name}.webm`, `${CLIPS}/${name}.mp4`);
   return { file: `clips/${name}.mp4`, markers };
 }
 
@@ -150,10 +182,25 @@ async function injectAuth(scene) {
     fileURLToPath(new URL('./auth-token.txt', import.meta.url)),
     'utf8'
   ).trim();
+  // Origin-guarded: init scripts run in every frame, including third-party
+  // iframes — the token must only ever land in the site's own localStorage.
   await scene.context.addInitScript(
-    (t) => localStorage.setItem('auth_token', t),
+    (t) => {
+      if (location.origin === 'https://www.ratemyhusky.com' || location.origin === 'https://ratemyhusky.com') {
+        localStorage.setItem('auth_token', t);
+      }
+    },
     token
   );
+  // Promo cosmetics: the navbar shows the account's first name; show
+  // "Husky" with the site's husky icon instead of the real account.
+  await scene.context.route('**/api/auth/me', async (route) => {
+    const resp = await route.fetch();
+    const json = await resp.json();
+    json.name = 'Husky';
+    json.picture = 'https://www.ratemyhusky.com/neu-husky-icon.png';
+    await route.fulfill({ response: resp, json });
+  });
 }
 
 // Scene 4: Ask AI — click the homepage "Try Now" bubble (switches the
@@ -272,9 +319,11 @@ export const SCENE_FNS = {
 /* ---------------- CLI ---------------- */
 
 async function main() {
+  // Bare runs skip `smoke` (debug-only) and `ask` (burns a real,
+  // daily-limited LLM question) — name them explicitly to run them.
   const names = process.argv.slice(2).length
     ? process.argv.slice(2)
-    : Object.keys(SCENE_FNS);
+    : Object.keys(SCENE_FNS).filter((n) => n !== 'smoke' && n !== 'ask');
   for (const n of names) {
     if (!SCENE_FNS[n]) throw new Error(`unknown scene: ${n}`);
   }
