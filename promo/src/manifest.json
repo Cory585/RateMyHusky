@@ -3,39 +3,39 @@
     "search": {
       "file": "clips/search.mp4",
       "markers": {
-        "suggestionsAt": 4.068
+        "suggestionsAt": 4.174
       },
-      "durationSec": 5.733333
+      "durationSec": 6.066667
     },
     "professor": {
       "file": "clips/professor.mp4",
       "markers": {},
-      "durationSec": 8.366667
+      "durationSec": 9.466667
     },
     "ask": {
       "file": "clips/ask.mp4",
       "markers": {
-        "typedAt": 5.944,
-        "answerAt": 10.823
+        "typedAt": 6.153,
+        "answerAt": 9.406
       },
-      "durationSec": 14.433333
+      "durationSec": 12.6
     },
     "compare": {
       "file": "clips/compare.mp4",
       "markers": {},
-      "durationSec": 12.633333
+      "durationSec": 12.2
     },
     "courses": {
       "file": "clips/courses.mp4",
       "markers": {},
-      "durationSec": 8.933333
+      "durationSec": 10.966667
     },
     "darkmode": {
       "file": "clips/darkmode.mp4",
       "markers": {
-        "toggledAt": 3.682
+        "toggledAt": 3.637
       },
-      "durationSec": 6.566667
+      "durationSec": 5.666667
     }
   }
 }

@@ -2,7 +2,9 @@ import {
   AbsoluteFill,
   Audio,
   Easing,
+  Freeze,
   interpolate,
+  Sequence,
   staticFile,
   useVideoConfig,
 } from 'remotion';
@@ -11,6 +13,7 @@ import { fade } from '@remotion/transitions/fade';
 import manifest from './manifest.json';
 import { DARK, MUSIC } from './branding';
 import { AskScene } from './scenes/AskScene';
+import { Caption } from './components/Caption';
 import { FootageScene } from './scenes/FootageScene';
 import { IntroCard } from './scenes/IntroCard';
 import { OutroCard } from './scenes/OutroCard';
@@ -42,16 +45,21 @@ export const PromoVideo: React.FC = () => {
     0,
     Math.round((dm.markers.toggledAt - 0.8) * FPS)
   );
-  // compare.mp4 and courses.mp4 have no markers, and their slots (4.3s /
-  // 3.8s) are much shorter than the clips (12.6s / 8.9s), so fitRate's 2x
-  // cap would still land mid-typing / mid-navigation. Both clips end on
-  // their settled, most-illustrative state (populated comparison table;
-  // course page scrolled to the Rating History chart), so anchor startFrom
-  // to play the clip's tail: end of clip lines up with end of slot.
+  // compare.mp4 has no markers and its slot is much shorter than the clip,
+  // so fitRate's 2x cap would still land mid-typing. The clip ends on its
+  // settled, most-illustrative state (populated comparison table), so anchor
+  // startFrom to play the clip's tail: end of clip lines up with end of slot.
   const compareStart =
     Math.round(manifest.scenes.compare.durationSec * FPS) - SCENES.compare;
-  const coursesStart =
-    Math.round(manifest.scenes.courses.durationSec * FPS) - SCENES.courses;
+  // courses.mp4: the CS3500 page top is fully painted at ~6.6s (everything
+  // earlier is the dept hop + loading fade-in) and the clip ends settled on
+  // the Rating History chart. Play from that first painted frame through the
+  // clip end, and freeze-hold the painted top for whatever the slot has left
+  // over, so the page top holds on screen instead of flashing by mid-scroll.
+  const coursesPlayFrom = Math.round(6.6 * FPS);
+  const coursesPlayFrames =
+    Math.round(manifest.scenes.courses.durationSec * FPS) - coursesPlayFrom;
+  const coursesHold = Math.max(0, SCENES.courses - coursesPlayFrames);
   return (
     <AbsoluteFill style={{ backgroundColor: DARK }}>
       <TransitionSeries>
@@ -88,11 +96,21 @@ export const PromoVideo: React.FC = () => {
         </TransitionSeries.Sequence>
         <TransitionSeries.Transition presentation={whipPan({ width })} timing={snap(TRANSITIONS.courses)} />
         <TransitionSeries.Sequence durationInFrames={SCENES.courses}>
-          <FootageScene
-            src={manifest.scenes.courses.file}
-            startFrom={coursesStart}
-            caption="Browse every course and department"
-          />
+          <Sequence durationInFrames={coursesHold}>
+            <Freeze frame={0}>
+              <FootageScene
+                src={manifest.scenes.courses.file}
+                startFrom={coursesPlayFrom}
+              />
+            </Freeze>
+          </Sequence>
+          <Sequence from={coursesHold}>
+            <FootageScene
+              src={manifest.scenes.courses.file}
+              startFrom={coursesPlayFrom}
+            />
+          </Sequence>
+          <Caption text="Browse every course and department" />
         </TransitionSeries.Sequence>
         <TransitionSeries.Transition presentation={fade()} timing={soft(TRANSITIONS.darkmode)} />
         <TransitionSeries.Sequence durationInFrames={SCENES.darkmode}>

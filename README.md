@@ -12,9 +12,9 @@ TRACE evaluations, RateMyProfessors ratings, and Reddit chatter for 9,300+ North
 [![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](frontend)
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](frontend)
 [![Flask](https://img.shields.io/badge/Flask-000000?style=for-the-badge&logo=flask&logoColor=white)](backend)
-[![CockroachDB](https://img.shields.io/badge/CockroachDB-6933FF?style=for-the-badge&logo=cockroachlabs&logoColor=white)](#-architecture)
+[![CockroachDB](https://img.shields.io/badge/CockroachDB-6933FF?style=for-the-badge&logo=cockroachlabs&logoColor=white)](#architecture)
 
-[**Visit the site**](https://ratemyhusky.com) · [Features](#-features) · [Architecture](#-architecture) · [Getting Started](#-getting-started)
+[**Visit the site**](https://ratemyhusky.com) · [Features](#features) · [Architecture](#architecture) · [Getting Started](#getting-started)
 
 <img src="frontend/public/ratemyhusky.png" alt="RateMyHusky" width="850" />
 

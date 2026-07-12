@@ -97,6 +97,9 @@ export async function saveScene(scene, name, markers = {}) {
   // concat demuxer quirk: repeat the last file so its duration is honored.
   lines.push(`file f${String(frames.length - 1).padStart(5, '0')}.jpg`);
   writeFileSync(`${dir}/frames.ffconcat`, lines.join('\n') + '\n');
+  // Clips stay full-range (ffmpeg keeps the JPEG range despite -pix_fmt
+  // yuv420p); that's fine for intermediates — the final render normalizes
+  // to bt709 limited via Config.setColorSpace in remotion.config.ts.
   execFileSync(
     'ffmpeg',
     ['-y', '-f', 'concat', '-i', `${dir}/frames.ffconcat`,

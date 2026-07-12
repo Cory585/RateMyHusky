@@ -7,14 +7,14 @@ export const SCENES = {
   professor: 160,
   ask: 145,
   compare: 130,
-  courses: 115,
+  courses: 160,
   darkmode: 70,
   outro: 100,
 } as const;
 
 // Transition lengths in frames, keyed by the scene each one leads INTO.
 // Whip pans 10, zoom-through 12, fades 5-8. Transitions overlap scenes,
-// so total = sum(SCENES) - sum(TRANSITIONS) = 869 (~29.0s).
+// so total = sum(SCENES) - sum(TRANSITIONS) = 914 (~30.5s).
 export const TRANSITIONS = {
   search: 6,
   professor: 10,
