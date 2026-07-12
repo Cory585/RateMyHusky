@@ -19,6 +19,23 @@
         "answerAt": 10.823
       },
       "durationSec": 14.433333
+    },
+    "compare": {
+      "file": "clips/compare.mp4",
+      "markers": {},
+      "durationSec": 12.633333
+    },
+    "courses": {
+      "file": "clips/courses.mp4",
+      "markers": {},
+      "durationSec": 8.933333
+    },
+    "darkmode": {
+      "file": "clips/darkmode.mp4",
+      "markers": {
+        "toggledAt": 3.682
+      },
+      "durationSec": 6.566667
     }
   }
 }

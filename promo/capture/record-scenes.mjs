@@ -142,6 +142,20 @@ async function sceneProfessor(browser) {
   return saveScene(s, 'professor');
 }
 
+// Ask and the course rating-history chart are sign-in gated: inject the
+// user's session token (gitignored file) before navigation so gated
+// features render. Never log or echo the token.
+async function injectAuth(scene) {
+  const token = readFileSync(
+    fileURLToPath(new URL('./auth-token.txt', import.meta.url)),
+    'utf8'
+  ).trim();
+  await scene.context.addInitScript(
+    (t) => localStorage.setItem('auth_token', t),
+    token
+  );
+}
+
 // Scene 4: Ask AI — click the homepage "Try Now" bubble (switches the
 // bar to Ask mode and focuses it), type a question, wait for the
 // answer. Records the full LLM wait; Remotion jump-cuts typedAt ->
@@ -150,13 +164,7 @@ async function sceneProfessor(browser) {
 async function sceneAsk(browser) {
   const s = await newScene(browser);
   const { page } = s;
-  // Ask is sign-in gated: inject the user's session token (gitignored file)
-  // before navigation so the question actually reaches /api/chat.
-  const token = readFileSync(
-    fileURLToPath(new URL('./auth-token.txt', import.meta.url)),
-    'utf8'
-  ).trim();
-  await s.context.addInitScript((t) => localStorage.setItem('auth_token', t), token);
+  await injectAuth(s);
   await page.goto(BASE, { waitUntil: 'networkidle' });
   await page.evaluate(() => window.__cursor.show());
   await page.waitForTimeout(500);
@@ -181,11 +189,84 @@ async function sceneAsk(browser) {
   return saveScene(s, 'ask', { typedAt, answerAt });
 }
 
+// Scene 5: compare — pick Rachlin vs Fontenot, scroll the metrics table.
+async function sceneCompare(browser) {
+  const s = await newScene(browser);
+  const { page } = s;
+  await page.goto(`${BASE}/compare`, { waitUntil: 'networkidle' });
+  await page.evaluate(() => window.__cursor.show());
+  await page.waitForTimeout(600);
+  await glideClick(page, 'input[aria-label="Search left professor"]', 700);
+  await page.keyboard.type('rachlin', { delay: 60 });
+  await glideClick(page, '.compare-suggestion-list .compare-suggestion', 500);
+  await page.waitForTimeout(500);
+  await glideClick(page, 'input[aria-label="Search right professor"]', 700);
+  await page.keyboard.type('fontenot', { delay: 60 });
+  await glideClick(page, '.compare-suggestion-list .compare-suggestion', 500);
+  const table = page.locator('.compare-table');
+  await table.waitFor();
+  await page.waitForTimeout(500);
+  const tableY = await table.evaluate(
+    (el) => el.getBoundingClientRect().top + window.scrollY
+  );
+  await page.evaluate(
+    ([y]) => window.__cursor.scrollTo(y - 120, 1300),
+    [tableY]
+  );
+  await page.waitForTimeout(1600);
+  return saveScene(s, 'compare');
+}
+
+// Scene 6: department hub -> course page with the section history chart
+// (the chart is sign-in gated, so this scene runs authenticated).
+async function sceneCourses(browser) {
+  const s = await newScene(browser);
+  const { page } = s;
+  await injectAuth(s);
+  await page.goto(`${BASE}/departments/computer-science`, {
+    waitUntil: 'networkidle',
+  });
+  await page.evaluate(() => window.__cursor.show());
+  await page.waitForTimeout(900);
+  await page.evaluate(() => window.__cursor.scrollTo(500, 1000));
+  await page.waitForTimeout(700);
+  await page.goto(`${BASE}/courses/CS3500`, { waitUntil: 'networkidle' });
+  await page.evaluate(() => window.__cursor.show());
+  await page.waitForTimeout(800);
+  const chartPanel = page.locator('.course-panel:has-text("Rating History")');
+  await chartPanel.waitFor();
+  const chartY = await chartPanel.evaluate(
+    (el) => el.getBoundingClientRect().top + window.scrollY
+  );
+  await page.evaluate(
+    ([y]) => window.__cursor.scrollTo(y - 120, 1200),
+    [chartY]
+  );
+  await page.waitForTimeout(1400);
+  return saveScene(s, 'courses');
+}
+
+// Scene 7: dark mode flip on the homepage (floating toggle button).
+async function sceneDarkmode(browser) {
+  const s = await newScene(browser);
+  const { page } = s;
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.evaluate(() => window.__cursor.show());
+  await page.waitForTimeout(800);
+  await glideClick(page, 'button[aria-label="Toggle dark mode"]', 800);
+  const toggledAt = mark(s);
+  await page.waitForTimeout(2000);
+  return saveScene(s, 'darkmode', { toggledAt });
+}
+
 export const SCENE_FNS = {
   smoke: sceneSmoke,
   search: sceneSearch,
   professor: sceneProfessor,
   ask: sceneAsk,
+  compare: sceneCompare,
+  courses: sceneCourses,
+  darkmode: sceneDarkmode,
 };
 
 /* ---------------- CLI ---------------- */
