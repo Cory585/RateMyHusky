@@ -282,6 +282,11 @@ def handle_question(q, session_token, ip_hash, deps):
             # A superlative/ranking question ("which CS course has the highest rating") resolves to
             # a ranked-course block regardless of the (often junk) hint; answer it directly.
             if r.get("kind") == "course_ranking":
+                # _handle_course_ranking reserves its own daily slot; release ours first so
+                # the pair can't falsely trip the budget check on the last slot of the day.
+                if daily_reserved:
+                    release_reservation("daily", 1)
+                    daily_reserved = False
                 return _handle_course_ranking(q, r, deps, _log, session_token, ip_hash)
             # A course named by title that matches several distinct courses → disambiguate
             # (mirrors the professor name-collision flow); stop the whole question, no LLM.
@@ -936,6 +941,29 @@ def selftest():
         lambda self, subject, metric, direction, courses: (_ for _ in ()).throw(LLMUnavailable("down")), d_rke)
     payload, code = handle_question("Which CS course has the highest rating?", "s", "iphash", d_rke)
     check("ranking LLMUnavailable -> keyword fallback", code == 200 and "comments" in payload)
+
+    # ── ranking on the LAST daily-budget slot: the hint-loop delegation must not count the
+    # outer frame's own in-flight reservation against _handle_course_ranking's budget check
+    # (double-reservation -> false "Daily question limit reached" at db_count == budget-1).
+    chat_throttle._reservations["daily"].clear()
+    chat_throttle._reservations["minute_tokens"].clear()
+    d_rkb = Deps()
+    d_rkb.gate_fn = types.MethodType(lambda self, q: {"ok": True, "status": "ok",
+        "professors_or_courses": ["CS course"], "professor_or_course": "CS course", "message": None}, d_rkb)
+    d_rkb.retrieve_fn = types.MethodType(lambda self, q, hint: {
+        "kind": "course_ranking", "subject": "CS", "metric": "rating", "direction": "desc",
+        "courses": [{"code": "CS3100", "name": "PDI 2", "department": "CS", "value": 4.45, "responses": 100}],
+        "course_count": 1, "entity_key": "rank:CS:rating", "course_code": None,
+        "professor_slug": None, "facts": {}, "comments": [], "comment_count": 0}, d_rkb)
+    # 239 of the 240-question budget (3 keys) already used; session/minute queries stay at zero.
+    d_rkb.query_one_fn = types.MethodType(
+        lambda self, sql, params=None: {"c": 239} if "result_status = 'ok'" in sql else {"c": 0, "t": 0},
+        d_rkb)
+    payload, code = handle_question("Which CS course has the highest rating?", "s", "iphash", d_rkb)
+    check("ranking on last budget slot answers, not false rate_limited",
+          code == 200 and payload.get("mode") == "course_list")
+    check("ranking on last budget slot leaves no daily reservation behind",
+          len(chat_throttle._reservations["daily"]) == 0)
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0

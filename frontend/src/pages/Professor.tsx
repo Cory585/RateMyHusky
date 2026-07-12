@@ -1669,20 +1669,6 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
         )}
       </section>
 
-      {(profile.colleagues?.length ?? 0) > 0 && (
-        <section className="prof-section">
-          <h2 className="prof-section-title">More {profile.department} professors at Northeastern</h2>
-          <ul>
-            {profile.colleagues!.map(c => (
-              <li key={c.slug}>
-                <Link to={`/professors/${c.slug}`}>{c.name}</Link>
-                {c.avgRating != null ? ` (${c.avgRating}/5)` : ''}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
       <Footer />
       <SignInModal open={showSignIn} onClose={() => setShowSignIn(false)} />
       <button

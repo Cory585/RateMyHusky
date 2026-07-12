@@ -1,0 +1,1236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ask Admin</title>
+<style>
+  :root {
+    --border: #d8dbe0;
+    --bg: #f7f8fa;
+    --text: #1c1f24;
+    --muted: #6b7280;
+    --red-bg: #fbe4e4; --red-fg: #9c2626;
+    --amber-bg: #fbedd1; --amber-fg: #8a5b00;
+    --green-bg: #e0f2e2; --green-fg: #1f6b2e;
+    --grey-bg: #e7e8ea; --grey-fg: #4b4f56;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+  }
+  header {
+    background: #fff;
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+  }
+  h1 {
+    font-size: 16px;
+    margin: 0 0 10px 0;
+  }
+  .date-range {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .date-range label {
+    color: var(--muted);
+    font-size: 12px;
+  }
+  input[type="date"], input[type="text"] {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: #fff;
+    color: var(--text);
+  }
+  .tabs {
+    display: flex;
+    gap: 4px;
+  }
+  .tab-btn {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 7px 14px;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    background: var(--bg);
+    color: var(--muted);
+    cursor: pointer;
+    border-radius: 4px 4px 0 0;
+  }
+  .tab-btn.active {
+    background: #fff;
+    color: var(--text);
+    font-weight: 600;
+  }
+  main {
+    padding: 20px;
+  }
+  .pane {
+    display: none;
+  }
+  .pane.active {
+    display: block;
+  }
+  .placeholder {
+    color: var(--muted);
+    padding: 40px;
+    text-align: center;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    background: #fff;
+  }
+  .filters {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+  .filters-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .filter-field label {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  select[multiple] {
+    font-family: inherit;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px;
+    min-width: 180px;
+    height: 110px;
+  }
+  .presets {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  button {
+    font-family: inherit;
+    font-size: 12px;
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: #fff;
+    color: var(--text);
+    cursor: pointer;
+  }
+  button:hover {
+    background: var(--bg);
+  }
+  button.primary {
+    background: var(--text);
+    color: #fff;
+    border-color: var(--text);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    vertical-align: top;
+  }
+  th {
+    background: var(--bg);
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.03em;
+  }
+  tbody tr {
+    cursor: pointer;
+  }
+  tbody tr:hover {
+    background: #f2f4f7;
+  }
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+  .chip {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .chip-red { background: var(--red-bg); color: var(--red-fg); }
+  .chip-amber { background: var(--amber-bg); color: var(--amber-fg); }
+  .chip-green { background: var(--green-bg); color: var(--green-fg); }
+  .chip-grey { background: var(--grey-bg); color: var(--grey-fg); }
+  .flag-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--red-fg);
+  }
+  .truncate {
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .token-link {
+    font-family: ui-monospace, Consolas, monospace;
+    color: #2554c7;
+    text-decoration: none;
+  }
+  .token-link:hover {
+    text-decoration: underline;
+  }
+  .expand-row td {
+    background: #fbfbfc;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .expand-block {
+    margin-bottom: 10px;
+  }
+  .expand-block .label {
+    font-size: 10px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 4px;
+    letter-spacing: 0.03em;
+  }
+  .pagination {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .pagination span {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .status-line {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .row-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .row-actions button {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+  button.danger {
+    color: var(--red-fg);
+    border-color: var(--red-fg);
+  }
+  .highlight-row {
+    background: #fff7d6 !important;
+  }
+  .detail-panel {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+  .detail-panel h3 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+  }
+  .detail-panel .label {
+    font-size: 10px;
+    text-transform: uppercase;
+    color: var(--muted);
+    letter-spacing: 0.03em;
+  }
+  .modal-backdrop {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.4);
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  .modal-backdrop.active {
+    display: flex;
+  }
+  .modal {
+    background: #fff;
+    border-radius: 6px;
+    padding: 20px;
+    width: 380px;
+    max-width: 90vw;
+  }
+  .modal h3 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+  }
+  .modal p {
+    font-size: 13px;
+    margin: 0 0 12px 0;
+  }
+  .modal input[type="text"] {
+    width: 100%;
+    margin-bottom: 12px;
+  }
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .stat-tiles {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .stat-tile {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 16px;
+    min-width: 150px;
+  }
+  .stat-tile .label {
+    font-size: 10px;
+    text-transform: uppercase;
+    color: var(--muted);
+    letter-spacing: 0.03em;
+    margin-bottom: 4px;
+  }
+  .stat-tile .value {
+    font-size: 20px;
+    font-weight: 600;
+  }
+  .chart-wrap {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .chart-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    height: 160px;
+  }
+  .chart-bar-col {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+    flex: 1;
+    height: 100%;
+  }
+  .chart-bar-stack {
+    width: 100%;
+    max-width: 36px;
+    display: flex;
+    flex-direction: column-reverse;
+  }
+  .chart-bar-seg {
+    width: 100%;
+  }
+  .chart-bar-label {
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 4px;
+    white-space: nowrap;
+  }
+  .section-heading {
+    font-size: 13px;
+    font-weight: 600;
+    margin: 16px 0 8px 0;
+  }
+  h2.section-heading:first-child {
+    margin-top: 0;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Ask Admin</h1>
+  <div class="date-range">
+    <label for="from-date">From</label>
+    <input type="date" id="from-date">
+    <label for="to-date">To</label>
+    <input type="date" id="to-date">
+    <button id="apply-range" class="primary">Apply range</button>
+  </div>
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="logs">Logs</button>
+    <button class="tab-btn" data-tab="users">Users</button>
+    <button class="tab-btn" data-tab="usage">Usage</button>
+  </div>
+</header>
+
+<main>
+  <section id="pane-logs" class="pane active">
+    <div class="filters">
+      <div class="filters-row">
+        <div class="filter-field">
+          <label for="filter-user">User (session_token)</label>
+          <input type="text" id="filter-user" placeholder="exact session token">
+        </div>
+        <div class="filter-field">
+          <label for="filter-q">Search query text</label>
+          <input type="text" id="filter-q" placeholder="substring...">
+        </div>
+        <div class="filter-field">
+          <label for="filter-status">Status</label>
+          <select id="filter-status" multiple></select>
+        </div>
+        <div class="filter-field">
+          <label for="filter-flagged">Flagged</label>
+          <select id="filter-flagged">
+            <option value="">Any</option>
+            <option value="true">Flagged only</option>
+            <option value="false">Unflagged only</option>
+          </select>
+        </div>
+      </div>
+      <div class="presets">
+        <button data-preset="all">All</button>
+        <button data-preset="strike-worthy">Strike-worthy</button>
+        <button data-preset="flagged">Flagged</button>
+        <button data-preset="errors">Errors</button>
+        <button data-preset="refused">Refused (non-ok)</button>
+        <button id="apply-filters" class="primary">Apply</button>
+      </div>
+    </div>
+
+    <div class="status-line" id="logs-status"></div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Session token</th>
+          <th>Query</th>
+          <th>Status</th>
+          <th>Professor</th>
+          <th>Retrieved</th>
+          <th>Tokens</th>
+          <th>Resp ms</th>
+          <th>Flag</th>
+        </tr>
+      </thead>
+      <tbody id="logs-tbody"></tbody>
+    </table>
+
+    <div class="pagination">
+      <button id="prev-page">Prev</button>
+      <span id="page-indicator">Page 1</span>
+      <button id="next-page">Next</button>
+    </div>
+  </section>
+
+  <section id="pane-users" class="pane">
+    <div class="status-line" id="users-status"></div>
+    <div id="user-detail-panel"></div>
+    <table>
+      <thead>
+        <tr>
+          <th>Session token</th>
+          <th>State</th>
+          <th>Strikes (7d)</th>
+          <th>Strikes (range)</th>
+          <th>Total</th>
+          <th>OK count</th>
+          <th>Tokens</th>
+          <th>Last seen</th>
+          <th>IP hashes</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="users-tbody"></tbody>
+    </table>
+  </section>
+
+  <section id="pane-usage" class="pane">
+    <div class="stat-tiles" id="usage-tiles"></div>
+    <div class="chart-wrap">
+      <div class="section-heading">Questions per day by status</div>
+      <div class="chart-bars" id="usage-chart"></div>
+    </div>
+    <div class="section-heading">Status totals (range)</div>
+    <table>
+      <thead>
+        <tr><th>Status</th><th>Count</th></tr>
+      </thead>
+      <tbody id="usage-status-totals-tbody"></tbody>
+    </table>
+    <div class="section-heading">Top users (range, by OK count)</div>
+    <table>
+      <thead>
+        <tr><th>Session token</th><th>OK count</th></tr>
+      </thead>
+      <tbody id="usage-top-users-tbody"></tbody>
+    </table>
+  </section>
+</main>
+
+<div class="modal-backdrop" id="modal-backdrop">
+  <div class="modal">
+    <h3 id="modal-title"></h3>
+    <p id="modal-body"></p>
+    <input type="text" id="modal-confirm-input" placeholder="Type DELETE to confirm">
+    <div class="modal-actions">
+      <button id="modal-cancel">Cancel</button>
+      <button id="modal-confirm" class="primary danger" disabled>Confirm delete</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var ALL_STATUSES = [
+    "ok", "ok_cached", "kill_switch", "rate_limited", "off_topic",
+    "injection_blocked", "too_long", "gate_error", "ambiguous", "out_of_scope",
+    "thin_data", "llm_error", "validation_failed"
+  ];
+  var STRIKE_WORTHY = ["injection_blocked", "off_topic"];
+  var ERROR_STATUSES = ["gate_error", "llm_error", "validation_failed"];
+  var RED_STATUSES = ["injection_blocked", "off_topic"];
+  var GREEN_STATUSES = ["ok", "ok_cached"];
+  var AMBER_STATUSES = [
+    "kill_switch", "rate_limited", "too_long", "gate_error", "ambiguous",
+    "out_of_scope", "thin_data", "llm_error", "validation_failed"
+  ];
+
+  var PAGE_SIZE = 50;
+  var state = {
+    page: 1,
+    total: 0,
+    rows: [],
+    expandedId: null
+  };
+
+  var debounceTimer = null;
+  function debounce(fn, ms) {
+    return function () {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(fn, ms);
+    };
+  }
+
+  function fmtDate(d) {
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  function initDateRange() {
+    var today = new Date();
+    var weekAgo = new Date();
+    weekAgo.setDate(today.getDate() - 6);
+    document.getElementById("to-date").value = fmtDate(today);
+    document.getElementById("from-date").value = fmtDate(weekAgo);
+  }
+
+  function initStatusSelect() {
+    var sel = document.getElementById("filter-status");
+    ALL_STATUSES.forEach(function (s) {
+      var opt = document.createElement("option");
+      opt.value = s;
+      opt.textContent = s;
+      sel.appendChild(opt);
+    });
+  }
+
+  function selectedStatuses() {
+    var sel = document.getElementById("filter-status");
+    return Array.from(sel.selectedOptions).map(function (o) { return o.value; });
+  }
+
+  function setSelectedStatuses(list) {
+    var sel = document.getElementById("filter-status");
+    Array.from(sel.options).forEach(function (o) {
+      o.selected = list.indexOf(o.value) !== -1;
+    });
+  }
+
+  function applyPreset(name) {
+    var flaggedSel = document.getElementById("filter-flagged");
+    flaggedSel.value = "";
+    if (name === "all") {
+      setSelectedStatuses([]);
+    } else if (name === "strike-worthy") {
+      setSelectedStatuses(STRIKE_WORTHY);
+    } else if (name === "flagged") {
+      setSelectedStatuses([]);
+      flaggedSel.value = "true";
+    } else if (name === "errors") {
+      setSelectedStatuses(ERROR_STATUSES);
+    } else if (name === "refused") {
+      setSelectedStatuses(ALL_STATUSES.filter(function (s) {
+        return s !== "ok" && s !== "ok_cached";
+      }));
+    }
+    state.page = 1;
+    fetchLogs();
+  }
+
+  function chipClass(status) {
+    if (RED_STATUSES.indexOf(status) !== -1) return "chip-red";
+    if (GREEN_STATUSES.indexOf(status) !== -1) return "chip-green";
+    if (AMBER_STATUSES.indexOf(status) !== -1) return "chip-amber";
+    return "chip-grey";
+  }
+
+  function truncate(text, n) {
+    if (text == null) return "";
+    var s = String(text);
+    return s.length > n ? s.slice(0, n) + "…" : s;
+  }
+
+  function el(tag, opts) {
+    var node = document.createElement(tag);
+    opts = opts || {};
+    if (opts.className) node.className = opts.className;
+    if (opts.text != null) node.textContent = opts.text;
+    if (opts.title != null) node.title = opts.title;
+    return node;
+  }
+
+  function buildQueryString() {
+    var params = new URLSearchParams();
+    var from = document.getElementById("from-date").value;
+    var to = document.getElementById("to-date").value;
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+
+    var user = document.getElementById("filter-user").value.trim();
+    if (user) params.set("user", user);
+
+    var statuses = selectedStatuses();
+    if (statuses.length) params.set("status", statuses.join(","));
+
+    var flagged = document.getElementById("filter-flagged").value;
+    if (flagged) params.set("flagged", flagged);
+
+    var q = document.getElementById("filter-q").value.trim();
+    if (q) params.set("q", q);
+
+    params.set("page", String(state.page));
+    params.set("page_size", String(PAGE_SIZE));
+    return params.toString();
+  }
+
+  function fetchLogs() {
+    var qs = buildQueryString();
+    var statusLine = document.getElementById("logs-status");
+    statusLine.textContent = "Loading...";
+    fetch("/api/logs?" + qs)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        state.rows = data.rows || [];
+        state.total = data.total || 0;
+        state.expandedId = null;
+        renderTable();
+        renderPagination();
+        statusLine.textContent = state.total + " result" + (state.total === 1 ? "" : "s");
+      })
+      .catch(function (err) {
+        statusLine.textContent = "Error loading logs: " + err;
+      });
+  }
+
+  function renderTable() {
+    var tbody = document.getElementById("logs-tbody");
+    tbody.textContent = "";
+    state.rows.forEach(function (row) {
+      var tr = document.createElement("tr");
+      tr.dataset.id = row.id;
+
+      var tdTime = el("td");
+      var timeText = "";
+      if (row.created_at) {
+        var d = new Date(row.created_at);
+        timeText = isNaN(d.getTime()) ? String(row.created_at) : d.toLocaleString();
+      }
+      tdTime.textContent = timeText;
+      tr.appendChild(tdTime);
+
+      var tdToken = el("td");
+      var tokenLink = document.createElement("a");
+      tokenLink.href = "#";
+      tokenLink.className = "token-link";
+      tokenLink.textContent = truncate(row.session_token, 12);
+      tokenLink.title = row.session_token || "";
+      tokenLink.dataset.user = row.session_token || "";
+      tokenLink.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        jumpToUserDetail(tokenLink.dataset.user);
+      });
+      tdToken.appendChild(tokenLink);
+      tr.appendChild(tdToken);
+
+      var tdQuery = el("td", { className: "truncate", text: truncate(row.query, 60), title: row.query || "" });
+      tr.appendChild(tdQuery);
+
+      var tdStatus = el("td");
+      var chip = el("span", { className: "chip " + chipClass(row.result_status), text: row.result_status || "" });
+      tdStatus.appendChild(chip);
+      tr.appendChild(tdStatus);
+
+      tr.appendChild(el("td", { text: row.professor_slug || "" }));
+      tr.appendChild(el("td", { text: row.retrieved_count != null ? String(row.retrieved_count) : "" }));
+      tr.appendChild(el("td", { text: row.tokens_used != null ? String(row.tokens_used) : "" }));
+      tr.appendChild(el("td", { text: row.response_ms != null ? String(row.response_ms) : "" }));
+
+      var tdFlag = el("td");
+      if (row.flagged) {
+        tdFlag.appendChild(el("span", { className: "flag-dot", title: "flagged" }));
+      }
+      tr.appendChild(tdFlag);
+
+      tr.addEventListener("click", function () {
+        toggleExpand(row.id);
+      });
+
+      tbody.appendChild(tr);
+
+      if (state.expandedId === row.id) {
+        tbody.appendChild(buildExpandRow(row));
+      }
+    });
+  }
+
+  function buildExpandRow(row) {
+    var tr = el("tr", { className: "expand-row" });
+    var td = el("td");
+    td.colSpan = 9;
+
+    var qBlock = el("div", { className: "expand-block" });
+    qBlock.appendChild(el("div", { className: "label", text: "Full query" }));
+    var qBody = el("div");
+    qBody.textContent = row.query || "";
+    qBlock.appendChild(qBody);
+    td.appendChild(qBlock);
+
+    var aBlock = el("div", { className: "expand-block" });
+    aBlock.appendChild(el("div", { className: "label", text: "Answer text" }));
+    var aBody = el("div");
+    aBody.textContent = row.answer_text || "(none)";
+    aBlock.appendChild(aBody);
+    td.appendChild(aBlock);
+
+    tr.appendChild(td);
+    return tr;
+  }
+
+  function toggleExpand(id) {
+    state.expandedId = state.expandedId === id ? null : id;
+    renderTable();
+  }
+
+  function renderPagination() {
+    var totalPages = Math.max(1, Math.ceil(state.total / PAGE_SIZE));
+    document.getElementById("page-indicator").textContent = "Page " + state.page + " of " + totalPages;
+    document.getElementById("prev-page").disabled = state.page <= 1;
+    document.getElementById("next-page").disabled = state.page >= totalPages;
+  }
+
+  function switchTab(name) {
+    document.querySelectorAll(".tab-btn").forEach(function (b) {
+      b.classList.toggle("active", b.dataset.tab === name);
+    });
+    document.querySelectorAll(".pane").forEach(function (p) { p.classList.remove("active"); });
+    document.getElementById("pane-" + name).classList.add("active");
+  }
+
+  function initTabs() {
+    var buttons = document.querySelectorAll(".tab-btn");
+    buttons.forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        switchTab(btn.dataset.tab);
+        if (btn.dataset.tab === "users") fetchUsers();
+        if (btn.dataset.tab === "usage") fetchUsage();
+      });
+    });
+  }
+
+  // ---- Cross-tab jumps ----
+
+  function jumpToLogsForUser(token) {
+    document.getElementById("filter-user").value = token || "";
+    state.page = 1;
+    switchTab("logs");
+    fetchLogs();
+  }
+
+  function jumpToUserDetail(token) {
+    if (!token) return;
+    switchTab("users");
+    fetchUsers(function () {
+      highlightUserRow(token);
+      showUserDetail(token);
+    });
+  }
+
+  function highlightUserRow(token) {
+    var tbody = document.getElementById("users-tbody");
+    Array.from(tbody.querySelectorAll("tr")).forEach(function (tr) {
+      tr.classList.toggle("highlight-row", tr.dataset.token === token);
+    });
+    var target = tbody.querySelector('tr[data-token="' + CSS.escape(token) + '"]');
+    if (target) target.scrollIntoView({ block: "nearest" });
+  }
+
+  // ---- Users tab ----
+
+  var usersState = { rows: [] };
+
+  function fetchUsers(onDone) {
+    var params = new URLSearchParams();
+    var from = document.getElementById("from-date").value;
+    var to = document.getElementById("to-date").value;
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+
+    var statusLine = document.getElementById("users-status");
+    statusLine.textContent = "Loading...";
+    fetch("/api/users?" + params.toString())
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        usersState.rows = data.rows || [];
+        renderUsersTable();
+        statusLine.textContent = usersState.rows.length + " user" + (usersState.rows.length === 1 ? "" : "s");
+        if (onDone) onDone();
+      })
+      .catch(function (err) {
+        statusLine.textContent = "Error loading users: " + err;
+      });
+  }
+
+  function userStateChipClass(stateStr) {
+    if (stateStr === "BANNED") return "chip-red";
+    if (stateStr && stateStr.indexOf("CAPPED") === 0) return "chip-amber";
+    if (stateStr === "WARNED") return "chip-amber";
+    return "chip-green";
+  }
+
+  function renderUsersTable() {
+    var tbody = document.getElementById("users-tbody");
+    tbody.textContent = "";
+    usersState.rows.forEach(function (row) {
+      var tr = document.createElement("tr");
+      tr.dataset.token = row.session_token || "";
+
+      var tdToken = el("td", { className: "truncate", text: truncate(row.session_token, 20), title: row.session_token || "" });
+      tr.appendChild(tdToken);
+
+      var tdState = el("td");
+      tdState.appendChild(el("span", { className: "chip " + userStateChipClass(row.state), text: row.state || "" }));
+      tr.appendChild(tdState);
+
+      tr.appendChild(el("td", { text: row.strikes_7d != null ? String(row.strikes_7d) : "0" }));
+      tr.appendChild(el("td", { text: row.strike_count_range != null ? String(row.strike_count_range) : "0" }));
+      tr.appendChild(el("td", { text: row.total != null ? String(row.total) : "0" }));
+      tr.appendChild(el("td", { text: row.ok_count != null ? String(row.ok_count) : "0" }));
+      tr.appendChild(el("td", { text: Number(row.tokens_used || 0).toLocaleString() }));
+
+      var lastSeenText = "";
+      if (row.last_seen) {
+        var d = new Date(row.last_seen);
+        lastSeenText = isNaN(d.getTime()) ? String(row.last_seen) : d.toLocaleString();
+      }
+      tr.appendChild(el("td", { text: lastSeenText }));
+
+      var ipText = (row.ip_hashes && row.ip_hashes.length) ? row.ip_hashes.join(", ") : "";
+      tr.appendChild(el("td", { className: "truncate", text: truncate(ipText, 30), title: ipText }));
+
+      var tdActions = el("td", { className: "row-actions" });
+      var viewBtn = el("button", { text: "View logs" });
+      viewBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        jumpToLogsForUser(row.session_token);
+      });
+      var clearBtn = el("button", { text: "Clear strikes" });
+      clearBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        openConfirmModal("clear_strikes", row.session_token);
+      });
+      var purgeBtn = el("button", { className: "danger", text: "Purge account" });
+      purgeBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        openConfirmModal("purge", row.session_token);
+      });
+      tdActions.appendChild(viewBtn);
+      tdActions.appendChild(clearBtn);
+      tdActions.appendChild(purgeBtn);
+      tr.appendChild(tdActions);
+
+      tr.addEventListener("click", function () {
+        showUserDetail(row.session_token);
+      });
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  function showUserDetail(token) {
+    var panel = document.getElementById("user-detail-panel");
+    panel.textContent = "";
+    if (!token) return;
+    var box = el("div", { className: "detail-panel" });
+    box.appendChild(el("h3", { text: "Detail: " + token }));
+    var loading = el("div", { text: "Loading..." });
+    box.appendChild(loading);
+    panel.appendChild(box);
+
+    fetch("/api/users/" + encodeURIComponent(token))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        box.textContent = "";
+        box.appendChild(el("h3", { text: "Detail: " + token }));
+
+        var summary = el("div");
+        summary.appendChild(el("span", { className: "chip " + userStateChipClass(data.state), text: data.state || "" }));
+        summary.appendChild(document.createTextNode(
+          "  strikes (7d): " + data.strikes_7d + "   questions today: " + data.questions_today
+        ));
+        box.appendChild(summary);
+
+        var table = document.createElement("table");
+        table.style.marginTop = "10px";
+        var thead = document.createElement("thead");
+        var headTr = document.createElement("tr");
+        ["Status", "Count", "First", "Last"].forEach(function (h) {
+          headTr.appendChild(el("th", { text: h }));
+        });
+        thead.appendChild(headTr);
+        table.appendChild(thead);
+
+        var tbody = document.createElement("tbody");
+        (data.breakdown || []).forEach(function (b) {
+          var tr = document.createElement("tr");
+          var tdStatus = el("td");
+          tdStatus.appendChild(el("span", { className: "chip " + chipClass(b.result_status), text: b.result_status || "" }));
+          tr.appendChild(tdStatus);
+          tr.appendChild(el("td", { text: String(b.c) }));
+          tr.appendChild(el("td", { text: b.first ? new Date(b.first).toLocaleString() : "" }));
+          tr.appendChild(el("td", { text: b.last ? new Date(b.last).toLocaleString() : "" }));
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        box.appendChild(table);
+      })
+      .catch(function (err) {
+        box.textContent = "Error loading detail: " + err;
+      });
+  }
+
+  // ---- Destructive confirm modal (shared by clear_strikes + purge) ----
+
+  var modalState = { kind: null, token: null };
+
+  function openConfirmModal(kind, token) {
+    modalState.kind = kind;
+    modalState.token = token;
+    var title = kind === "purge" ? "Purge account" : "Clear strikes";
+    document.getElementById("modal-title").textContent = title;
+    document.getElementById("modal-body").textContent = "Checking...";
+    document.getElementById("modal-confirm-input").value = "";
+    document.getElementById("modal-confirm").disabled = true;
+    document.getElementById("modal-backdrop").classList.add("active");
+
+    var path = "/api/users/" + encodeURIComponent(token) + "/" + kind;
+    fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dry_run: true })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (modalState.kind !== kind || modalState.token !== token) return;
+        document.getElementById("modal-body").textContent =
+          data.deleted + " row(s) will be deleted for " + token;
+      })
+      .catch(function (err) {
+        if (modalState.kind !== kind || modalState.token !== token) return;
+        document.getElementById("modal-body").textContent = "Error checking count: " + err;
+      });
+  }
+
+  function closeConfirmModal() {
+    document.getElementById("modal-backdrop").classList.remove("active");
+    modalState.kind = null;
+    modalState.token = null;
+  }
+
+  function initModal() {
+    document.getElementById("modal-confirm-input").addEventListener("input", function (e) {
+      document.getElementById("modal-confirm").disabled = e.target.value !== "DELETE";
+    });
+    document.getElementById("modal-cancel").addEventListener("click", closeConfirmModal);
+    document.getElementById("modal-backdrop").addEventListener("click", function (e) {
+      if (e.target.id === "modal-backdrop") closeConfirmModal();
+    });
+    document.getElementById("modal-confirm").addEventListener("click", function () {
+      if (document.getElementById("modal-confirm-input").value !== "DELETE") return;
+      var kind = modalState.kind;
+      var token = modalState.token;
+      var path = "/api/users/" + encodeURIComponent(token) + "/" + kind;
+      document.getElementById("modal-body").textContent = "Deleting...";
+      fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dry_run: false })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          closeConfirmModal();
+          var statusLine = document.getElementById("users-status");
+          statusLine.textContent = "Deleted " + data.deleted + " row(s) for " + token;
+          fetchUsers();
+        })
+        .catch(function (err) {
+          document.getElementById("modal-body").textContent = "Error deleting: " + err;
+        });
+    });
+  }
+
+  // ---- Usage tab ----
+
+  function usageRangeParams() {
+    var params = new URLSearchParams();
+    var from = document.getElementById("from-date").value;
+    var to = document.getElementById("to-date").value;
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    return params;
+  }
+
+  function fetchUsage() {
+    var usersParams = new URLSearchParams();
+    var from = document.getElementById("from-date").value;
+    var to = document.getElementById("to-date").value;
+    if (from) usersParams.set("from", from);
+    if (to) usersParams.set("to", to);
+
+    var usersReady = fetch("/api/users?" + usersParams.toString())
+      .then(function (r) { return r.json(); })
+      .then(function (data) { usersState.rows = data.rows || []; })
+      .catch(function () { /* fall back to whatever usersState already has */ });
+
+    var usageReady = fetch("/api/usage?" + usageRangeParams().toString())
+      .then(function (r) { return r.json(); });
+
+    Promise.all([usersReady, usageReady])
+      .then(function (results) {
+        var data = results[1];
+        renderUsageTiles(data);
+        renderUsageChart(data.days || []);
+        renderUsageStatusTotals(data.status_totals || []);
+        renderUsageTopUsers(data.top_users || []);
+      })
+      .catch(function (err) {
+        document.getElementById("usage-tiles").textContent = "Error loading usage: " + err;
+      });
+  }
+
+  function statTile(label, value) {
+    var tile = el("div", { className: "stat-tile" });
+    tile.appendChild(el("div", { className: "label", text: label }));
+    tile.appendChild(el("div", { className: "value", text: value }));
+    return tile;
+  }
+
+  function renderUsageTiles(data) {
+    var wrap = document.getElementById("usage-tiles");
+    wrap.textContent = "";
+    var today = data.today || {};
+    var okCount = Number(today.ok_count || 0);
+    var tokens = Number(today.tokens || 0);
+
+    var answeredValue = today.daily_budget != null
+      ? okCount + " / " + Number(today.daily_budget)
+      : String(okCount);
+    wrap.appendChild(statTile("Today's answered", answeredValue));
+
+    var tokensValue = today.token_ceiling != null
+      ? tokens.toLocaleString() + " / " + Number(today.token_ceiling).toLocaleString()
+      : tokens.toLocaleString();
+    wrap.appendChild(statTile("Today's tokens", tokensValue));
+
+    var projectionValue = today.projection != null ? String(Number(today.projection)) : "—";
+    wrap.appendChild(statTile("Projected EOD answers", projectionValue));
+
+    wrap.appendChild(statTile("Active users (range)", String(usersState.rows.length)));
+  }
+
+  function renderUsageChart(days) {
+    var chart = document.getElementById("usage-chart");
+    chart.textContent = "";
+    var maxTotal = 1;
+    days.forEach(function (day) {
+      var total = Object.keys(day.statuses || {}).reduce(function (sum, k) {
+        return sum + Number(day.statuses[k]);
+      }, 0);
+      if (total > maxTotal) maxTotal = total;
+    });
+
+    days.forEach(function (day) {
+      var col = el("div", { className: "chart-bar-col" });
+      var stack = el("div", { className: "chart-bar-stack" });
+
+      var statuses = day.statuses || {};
+      var total = 0;
+      var titleParts = [];
+      ALL_STATUSES.forEach(function (s) {
+        var c = Number(statuses[s] || 0);
+        if (c > 0) {
+          total += c;
+          titleParts.push(s + ": " + c);
+          var seg = el("div", { className: "chart-bar-seg " + chipBarClass(s) });
+          seg.style.height = Math.max(2, (c / maxTotal) * 150) + "px";
+          seg.title = s + ": " + c;
+          stack.appendChild(seg);
+        }
+      });
+      col.title = (day.date ? String(day.date).slice(0, 10) : "") +
+        (titleParts.length ? "\n" + titleParts.join("\n") : "\nno data");
+      col.appendChild(stack);
+
+      var dateLabel = day.date ? String(day.date).slice(5, 10) : "";
+      col.appendChild(el("div", { className: "chart-bar-label", text: dateLabel }));
+
+      chart.appendChild(col);
+    });
+  }
+
+  function chipBarClass(status) {
+    if (RED_STATUSES.indexOf(status) !== -1) return "chip-red";
+    if (GREEN_STATUSES.indexOf(status) !== -1) return "chip-green";
+    if (AMBER_STATUSES.indexOf(status) !== -1) return "chip-amber";
+    return "chip-grey";
+  }
+
+  function renderUsageStatusTotals(rows) {
+    var tbody = document.getElementById("usage-status-totals-tbody");
+    tbody.textContent = "";
+    rows.forEach(function (row) {
+      var tr = document.createElement("tr");
+      var tdStatus = el("td");
+      tdStatus.appendChild(el("span", { className: "chip " + chipClass(row.result_status), text: row.result_status || "" }));
+      tr.appendChild(tdStatus);
+      tr.appendChild(el("td", { text: String(Number(row.c || 0)) }));
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderUsageTopUsers(rows) {
+    var tbody = document.getElementById("usage-top-users-tbody");
+    tbody.textContent = "";
+    rows.forEach(function (row) {
+      var tr = document.createElement("tr");
+      var tdToken = el("td", { className: "truncate", text: truncate(row.session_token, 24), title: row.session_token || "" });
+      tokenCellJump(tdToken, row.session_token);
+      tr.appendChild(tdToken);
+      tr.appendChild(el("td", { text: String(Number(row.ok_count || 0)) }));
+      tbody.appendChild(tr);
+    });
+  }
+
+  function tokenCellJump(td, token) {
+    td.style.cursor = "pointer";
+    td.style.color = "#2554c7";
+    td.addEventListener("click", function () {
+      jumpToUserDetail(token);
+    });
+  }
+
+  function init() {
+    initDateRange();
+    initStatusSelect();
+    initTabs();
+    initModal();
+
+    document.getElementById("apply-range").addEventListener("click", function () {
+      state.page = 1;
+      fetchLogs();
+      var activeTab = document.querySelector(".tab-btn.active").dataset.tab;
+      if (activeTab === "users") fetchUsers();
+      if (activeTab === "usage") fetchUsage();
+    });
+
+    document.getElementById("apply-filters").addEventListener("click", function () {
+      state.page = 1;
+      fetchLogs();
+    });
+
+    document.querySelectorAll("[data-preset]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        applyPreset(btn.dataset.preset);
+      });
+    });
+
+    var debouncedFetch = debounce(function () {
+      state.page = 1;
+      fetchLogs();
+    }, 400);
+    document.getElementById("filter-user").addEventListener("input", debouncedFetch);
+    document.getElementById("filter-q").addEventListener("input", debouncedFetch);
+    document.getElementById("filter-flagged").addEventListener("change", function () {
+      state.page = 1;
+      fetchLogs();
+    });
+
+    document.getElementById("prev-page").addEventListener("click", function () {
+      if (state.page > 1) {
+        state.page -= 1;
+        fetchLogs();
+      }
+    });
+    document.getElementById("next-page").addEventListener("click", function () {
+      var totalPages = Math.max(1, Math.ceil(state.total / PAGE_SIZE));
+      if (state.page < totalPages) {
+        state.page += 1;
+        fetchLogs();
+      }
+    });
+
+    fetchLogs();
+  }
+
+  init();
+})();
+</script>
+
+</body>
+</html>
