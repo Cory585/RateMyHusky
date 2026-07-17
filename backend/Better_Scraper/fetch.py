@@ -20,9 +20,6 @@ Usage:
     python fetch.py -s <SCHOOL_ID> --json           # also export JSON
 """
 
-__author__ = "Benjamin"
-__version__ = "3.1.0"
-
 # Standard library imports
 import base64
 import csv

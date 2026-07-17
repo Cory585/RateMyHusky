@@ -19,9 +19,6 @@ Usage:
     python trace_reports.py --cookie "your_cookie" --limit 50         # test with 50 courses
 """
 
-__author__ = "Benjamin"
-__version__ = "1.0.0"
-
 import csv
 import io
 import os

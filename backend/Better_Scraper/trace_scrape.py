@@ -18,9 +18,6 @@ Usage:
     python trace_scrape.py --rpp 200   # smaller pages if 500 times out
 """
 
-__author__ = "Benjamin"
-__version__ = "1.0.0"
-
 import csv
 import os
 import argparse

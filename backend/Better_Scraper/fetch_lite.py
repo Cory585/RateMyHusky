@@ -10,9 +10,6 @@ Usage:
     python fetch_lite.py -s 696 --json
 """
 
-__author__ = "Benjamin"
-__version__ = "4.0.0"
-
 import base64
 import csv
 import json
