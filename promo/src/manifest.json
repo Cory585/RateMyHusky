@@ -1,0 +1,41 @@
+{
+  "scenes": {
+    "search": {
+      "file": "clips/search.mp4",
+      "markers": {
+        "suggestionsAt": 4.174
+      },
+      "durationSec": 6.066667
+    },
+    "professor": {
+      "file": "clips/professor.mp4",
+      "markers": {},
+      "durationSec": 9.466667
+    },
+    "ask": {
+      "file": "clips/ask.mp4",
+      "markers": {
+        "typedAt": 6.153,
+        "answerAt": 9.406
+      },
+      "durationSec": 12.6
+    },
+    "compare": {
+      "file": "clips/compare.mp4",
+      "markers": {},
+      "durationSec": 12.2
+    },
+    "courses": {
+      "file": "clips/courses.mp4",
+      "markers": {},
+      "durationSec": 10.966667
+    },
+    "darkmode": {
+      "file": "clips/darkmode.mp4",
+      "markers": {
+        "toggledAt": 3.637
+      },
+      "durationSec": 5.666667
+    }
+  }
+}

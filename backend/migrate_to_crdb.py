@@ -298,17 +298,23 @@ TABLES = {
                 id INT8 DEFAULT unique_rowid() PRIMARY KEY,
                 name TEXT NOT NULL,
                 image_url TEXT,
+                focus_x FLOAT,
+                focus_y FLOAT,
                 source_page TEXT,
                 UNIQUE (name, source_page)
             );
+            ALTER TABLE professor_photos ADD COLUMN IF NOT EXISTS focus_x FLOAT;
+            ALTER TABLE professor_photos ADD COLUMN IF NOT EXISTS focus_y FLOAT;
         """,
-        "columns": ["name", "image_url", "source_page"],
+        "columns": ["name", "image_url", "focus_x", "focus_y", "source_page"],
         "key_columns": ["name", "source_page"],
         "csv": "professor_photos.csv",
         "on_conflict": "ON CONFLICT (name, source_page) DO NOTHING",
         "transform": lambda row: {
             "name": row.get("name", ""),
             "image_url": row.get("image_url", ""),
+            "focus_x": row.get("focus_x", "") or None,
+            "focus_y": row.get("focus_y", "") or None,
             "source_page": row.get("source_page", ""),
         },
     },

@@ -673,16 +673,6 @@
   color: #ccc;
 }
 
-.catalog-disclaimer-link {
-  color: #d6394c;
-  font-weight: 700;
-  text-decoration: none;
-}
-
-.catalog-disclaimer-link:hover {
-  text-decoration: underline;
-}
-
 /* ─── VIEW TOGGLE ─────────────────────────────────────────── */
 
 .catalog-view-toggle {
@@ -780,6 +770,7 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center 30%;
   border-radius: 50%;
 }
 
@@ -952,6 +943,7 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center 30%;
   border-radius: 0;
   image-rendering: -webkit-optimize-contrast;
   image-rendering: crisp-edges;
@@ -1612,10 +1604,6 @@
 
 .dark .catalog-disclaimer span {
   color: #4a4a4a;
-}
-
-.dark .catalog-disclaimer-link {
-  color: #f06d7d;
 }
 
 .dark .reviews-number-input {

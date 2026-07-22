@@ -58,7 +58,16 @@ function selftest(): number {
     result: { mode: 'question', answer: 'hi', professor_slug: 'ada', course_code: null, disclaimer: 'AI-generated.' },
     askedAt: 456,
   });
-  check('loadAskSession returns null when result has no sources array', loadAskSession() === null);
+  check('loadAskSession returns null when a question result has no sources array', loadAskSession() === null);
+
+  // course_list answers (topic lists / rankings) legitimately carry `answer` with no
+  // `sources` — they must survive the gate so their "← Ask" breadcrumb restore works.
+  store[ASK_SESSION_KEY] = JSON.stringify({
+    query: 'best cs courses?',
+    result: { mode: 'course_list', answer: 'CS3100 tops the list.', courses: [], disclaimer: 'AI-generated.' },
+    askedAt: 789,
+  });
+  check('loadAskSession restores a course_list result without sources', loadAskSession()?.askedAt === 789);
 
   console.log(fails.length ? `${fails.length} FAIL(s): ` + fails.join(', ') : 'ALL PASS');
   return fails.length ? 1 : 0;

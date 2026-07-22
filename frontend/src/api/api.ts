@@ -64,6 +64,8 @@ export interface ProfessorProfile {
   professorUrl: string | null;
   traceCourses: TraceCourse[];
   imageUrl: string | null;
+  focusX: number;
+  focusY: number;
   hoursPerWeek: number | null;
   traceRatingCounts?: Record<string, TraceRatingCounts>;
   radarData?: RadarDataPoint[] | null;
@@ -270,6 +272,8 @@ export interface CatalogProfessor {
   totalComments: number;
   wouldTakeAgainPct: number | null;
   imageUrl: string | null;
+  focusX: number;
+  focusY: number;
 }
 
 export interface CatalogResponse {

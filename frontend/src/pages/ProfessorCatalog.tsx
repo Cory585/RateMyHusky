@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   fetchProfessorsCatalog,
   fetchDepartments,
@@ -681,8 +681,7 @@ export default function ProfessorCatalog() {
           </div>
           <p className="catalog-disclaimer">
             Professors without any rating data are not shown.{' '}
-            <span>They may still have a profile if found via search.</span>{' '}
-            <Link to="/departments" className="catalog-disclaimer-link">Browse by department</Link>
+            <span>They may still have a profile if found via search.</span>
           </p>
 
           {loading ? (
@@ -717,6 +716,7 @@ export default function ProfessorCatalog() {
                         src={prof.imageUrl}
                         alt=""
                         className="prof-avatar-img"
+                        style={{ objectPosition: `${prof.focusX ?? 50}% ${prof.focusY ?? 30}%` }}
                         onError={(e) => {
                           const target = e.currentTarget;
                           target.style.display = 'none';
@@ -769,6 +769,7 @@ export default function ProfessorCatalog() {
                           src={prof.imageUrl}
                           alt=""
                           className="prof-avatar-img"
+                          style={{ objectPosition: `${prof.focusX ?? 50}% ${prof.focusY ?? 30}%` }}
                           onError={(e) => {
                             const target = e.currentTarget;
                             target.style.display = 'none';
