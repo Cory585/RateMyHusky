@@ -41,13 +41,21 @@ jobs:
 
       # Guardrail: a broken/rate-limited scrape returns near-empty results.
       # Abort before touching the DB or the data store so good data survives.
+      # Floors are ~70-80% of the normal haul (≈3,889 profs / ≈44.5k reviews);
+      # the professor floor sits above a lost 1,000-row search page, and both
+      # phases are checked since reviews can fail while professors succeed.
       - name: Sanity check scrape
         working-directory: backend
         run: |
-          rows=$(python -c "import pandas as pd; print(len(pd.read_csv('Better_Scraper/output_data/rmp_professors.csv')))")
-          echo "Scraped $rows professors"
-          if [ "$rows" -lt 500 ]; then
-            echo "::error::Only $rows professors scraped (< 500 floor). Aborting to protect existing data."
+          profs=$(python -c "import pandas as pd; print(len(pd.read_csv('Better_Scraper/output_data/rmp_professors.csv')))")
+          reviews=$(python -c "import pandas as pd; print(len(pd.read_csv('Better_Scraper/output_data/rmp_reviews.csv')))")
+          echo "Scraped $profs professors, $reviews reviews"
+          if [ "$profs" -lt 3000 ]; then
+            echo "::error::Only $profs professors scraped (< 3000 floor). Aborting to protect existing data."
+            exit 1
+          fi
+          if [ "$reviews" -lt 30000 ]; then
+            echo "::error::Only $reviews reviews scraped (< 30000 floor). Aborting to protect existing data."
             exit 1
           fi
 

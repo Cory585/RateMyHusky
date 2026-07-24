@@ -17,6 +17,7 @@ import base64
 import csv
 import json
 import os
+import sys
 import time
 import argparse
 import logging
@@ -534,6 +535,18 @@ def main() -> None:
     args: argparse.Namespace = parser.parse_args()
 
     school: RMPSchool = RMPSchool(args.sid, scrape_reviews=not args.no_reviews)
+
+    # Fail loud instead of writing an empty CSV. For a fixed, populated school
+    # an empty result never happens legitimately — it means RMP blocked the
+    # requests (403/429) or changed its API. Exit non-zero WITHOUT writing so
+    # the failure surfaces here and existing output is left untouched.
+    if not school.professors_list:
+        school.close()
+        sys.exit(
+            f"✗ Scrape failed: 0 professors collected for school {args.sid}. "
+            "Likely a 403/429 block or an RMP API change (see logs above). "
+            "Aborting without writing output to preserve existing data."
+        )
 
     school_name_fp: str = school.school_name.replace(" ", "").replace("-", "_").lower()
     script_dir: str = os.path.dirname(os.path.abspath(__file__))
