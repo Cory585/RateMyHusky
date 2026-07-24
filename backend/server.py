@@ -13,6 +13,7 @@ from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.extras import RealDictCursor
 from functools import lru_cache
 from dotenv import load_dotenv
+from prof_aliases import ALIAS_MAP
 from flask import Flask, g, jsonify, request, redirect, make_response
 from flask_cors import CORS
 from flask_compress import Compress
@@ -87,56 +88,6 @@ def normalize_name(name):
     s = re.sub(r'\s+', ' ', s).strip()
     return s
 
-
-# Maps RMP name variants → canonical trace names (normalized).
-# Must stay in sync with ALIAS_MAP in precompute.py.
-ALIAS_MAP = {
-    "laney strange": "elena strange",
-    "ben tasker": "benjamin tasker",
-    "alberto de la torre": "alberto de la torre duran",
-    "justin wang": "hsiao-an wang",
-    "sakib miazi": "md nazmus sakib miazi",
-    "nazmus miazi": "md nazmus sakib miazi",
-    "alex depaoli": "alexander depaoli",
-    "denisee spencer": "denise spencer",
-    "chris bruell": "christopher bruell",
-    "hande ondemir": "hande musdal ondemir",
-    "francis frank georges": "francis georges",
-    "isabel campos": "isabel sobral campos",
-    "mary sue potts-santone": "mary-susan potts-santone",
-    "ronald c. zullo": "ronald zullo",
-    "steve granelli": "steven granelli",
-    "william (bill) goldman": "william goldman",
-    "virgiliu pavlu": "virgil pavlu",
-    "zhiyuan (katherine) zhang": "zhiyuan zhang",
-    "katherine zhang": "zhiyuan zhang",
-    "bill goldman": "william goldman",
-    "aarti sathyanaran": "aarti sathyanarayana",
-    "akash murty": "akash murthy",
-    "ali chaleshtari": "ali shirzadeh chaleshtari",
-    "sriram rajagopalan": "sriramasundarar rajagopalan",
-    "mauricio codesso": "mauricio mello codesso",
-    "magda cooney": "magdalena cooney",
-    "john lowery": "john lowrey",
-    "iesha karasik": "ieshia karasik",
-    "ifa khan": "iffat khan",
-    "h. david sherman": "h sherman",
-    "ganish krisnamoorthy": "ganesh krishnamoorthy",
-    "farena sultan": "fareena sultan",
-    "cathy merlo": "catherine merlo",
-    "ye yin": "yi yin",
-    "silvio amir": "silvio amir alves moreira",
-    "olin shivers": "olin shivers iii",
-    "rush sanghrajka": "rushit sanghrajka",
-    "john alexis gomez": "john alexis guerra gomez",
-    "ji yong shin": "ji-yong shin",
-    "ghita amor tijani": "ghita amor-tijani",
-    "bob lupi": "robert lupi",
-    "hany sadaka": "hanai sadaka",
-    "mary- susan potts": "mary-susan potts-santone",
-    "xiaotao (kelvin) liu": "xiaotao liu",
-    "kelvin liu": "xiaotao liu",
-}
 
 # Build a word-level mapping so partial/typeahead queries also resolve.
 # e.g. typing "virgiliu" (an RMP-only spelling) still finds "virgil".

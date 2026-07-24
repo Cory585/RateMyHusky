@@ -1,0 +1,90 @@
+name: Data Refresh
+
+on:
+  schedule:
+    - cron: "0 10 * * 0"  # 10:00 UTC every Sunday
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      # Pull the CSV data store (TRACE data, photos, previous RMP data) into
+      # output_data. precompute.py reads all six CSVs from here; the RMP scrape
+      # below overwrites rmp_professors.csv / rmp_reviews.csv with fresh data.
+      - name: Fetch data store
+        env:
+          RMH_DATA_TOKEN: ${{ secrets.RMH_DATA_TOKEN }}
+        run: |
+          git clone --depth 1 \
+            "https://x-access-token:${RMH_DATA_TOKEN}@github.com/RayanR000/RateMyHusky-data.git" \
+            backend/Better_Scraper/output_data
+
+      - name: RMP scrape
+        working-directory: backend
+        run: |
+          python Better_Scraper/fetch_lite.py \
+            -s 696 \
+            --file_path Better_Scraper/output_data/rmp_professors.csv
+
+      # Guardrail: a broken/rate-limited scrape returns near-empty results.
+      # Abort before touching the DB or the data store so good data survives.
+      - name: Sanity check scrape
+        working-directory: backend
+        run: |
+          rows=$(python -c "import pandas as pd; print(len(pd.read_csv('Better_Scraper/output_data/rmp_professors.csv')))")
+          echo "Scraped $rows professors"
+          if [ "$rows" -lt 500 ]; then
+            echo "::error::Only $rows professors scraped (< 500 floor). Aborting to protect existing data."
+            exit 1
+          fi
+
+      # Upsert the freshly scraped RMP rows into the raw DB tables so new
+      # review text / new professors reach the site. Idempotent — skips rows
+      # already present, so weekly writes are just the delta.
+      - name: Load fresh RMP rows into CockroachDB
+        working-directory: backend
+        env:
+          CRDB_DATABASE_URL: ${{ secrets.CRDB_DATABASE_URL }}
+        run: python migrate_to_crdb.py rmp_professors rmp_reviews
+
+      # RMP-only refresh: TRACE data is unchanged this run, so skip the heavy
+      # TRACE table maintenance (REFRESH_TRACE=false). Run a full precompute
+      # (REFRESH_TRACE unset/true) after a manual TRACE re-scrape.
+      - name: Precompute & write to CockroachDB
+        working-directory: backend
+        env:
+          CRDB_DATABASE_URL: ${{ secrets.CRDB_DATABASE_URL }}
+          REFRESH_TRACE: "false"
+        run: python precompute.py
+
+      # Commit the refreshed CSVs back as a single squashed commit (orphan
+      # branch) so the data store stays a flat snapshot rather than growing
+      # history on every weekly run.
+      - name: Push refreshed data back to store
+        working-directory: backend/Better_Scraper/output_data
+        env:
+          RMH_DATA_TOKEN: ${{ secrets.RMH_DATA_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan refreshed
+          git add -A
+          git commit -q -m "Data refresh $(date -u +%Y-%m-%dT%H:%MZ)"
+          git branch -D main
+          git branch -m main
+          git push -f \
+            "https://x-access-token:${RMH_DATA_TOKEN}@github.com/RayanR000/RateMyHusky-data.git" \
+            main
