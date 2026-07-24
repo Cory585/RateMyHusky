@@ -47,8 +47,22 @@ jobs:
       - name: Sanity check scrape
         working-directory: backend
         run: |
-          profs=$(python -c "import pandas as pd; print(len(pd.read_csv('Better_Scraper/output_data/rmp_professors.csv')))")
-          reviews=$(python -c "import pandas as pd; print(len(pd.read_csv('Better_Scraper/output_data/rmp_reviews.csv')))")
+          # precompute.py reads all six CSVs; a missing TRACE/photo file crashes
+          # it mid-run. Fail loud here before touching the DB. trace_comments may
+          # be shipped as .csv or .zip (precompute falls back), so accept either.
+          data_dir="Better_Scraper/output_data"
+          for f in rmp_professors.csv rmp_reviews.csv trace_courses.csv trace_scores.csv professor_photos.csv; do
+            if [ ! -f "$data_dir/$f" ]; then
+              echo "::error::Missing required data file: $f. Aborting before DB writes."
+              exit 1
+            fi
+          done
+          if [ ! -f "$data_dir/trace_comments.csv" ] && [ ! -f "$data_dir/trace_comments.zip" ]; then
+            echo "::error::Missing trace_comments (.csv or .zip). Aborting before DB writes."
+            exit 1
+          fi
+          profs=$(python -c "import pandas as pd; print(len(pd.read_csv('$data_dir/rmp_professors.csv')))")
+          reviews=$(python -c "import pandas as pd; print(len(pd.read_csv('$data_dir/rmp_reviews.csv')))")
           echo "Scraped $profs professors, $reviews reviews"
           if [ "$profs" -lt 3000 ]; then
             echo "::error::Only $profs professors scraped (< 3000 floor). Aborting to protect existing data."
