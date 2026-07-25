@@ -13,3 +13,7 @@ node_modules/
 
 backend/groq_keys.local.json
 *.local.json
+
+# Local Claude Code config & memory (not shared)
+.claude/
+CLAUDE.md
