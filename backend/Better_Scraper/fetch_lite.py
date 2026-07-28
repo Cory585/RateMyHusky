@@ -55,24 +55,24 @@ class TokenBucket:
     """Thread-safe token bucket rate limiter. Disabled when rate <= 0."""
     def __init__(self, rate: float, capacity: int):
         self._rate = rate
-        self._capacity = capacity
-        self._tokens = capacity
+        self._disabled = rate <= 0
+        # When enabled, capacity must be >= 1 or acquire() can block forever.
+        self._capacity = max(1, capacity) if not self._disabled else capacity
+        self._tokens = float(self._capacity)
         self._last_refill = time.monotonic()
         self._lock = threading.Lock()
-        self._disabled = rate <= 0
 
     def acquire(self, tokens: int = 1) -> None:
         if self._disabled:
             return
-        with self._lock:
-            self._refill()
-            while self._tokens < tokens:
-                self._lock.release()
-                time.sleep((tokens - self._tokens) / self._rate)
-                self._lock.acquire()
+        while True:
+            with self._lock:
                 self._refill()
-            self._tokens -= tokens
-
+                if self._tokens >= tokens:
+                    self._tokens -= tokens
+                    return
+                sleep_for = (tokens - self._tokens) / self._rate
+            time.sleep(sleep_for)
     def _refill(self) -> None:
         now = time.monotonic()
         elapsed = now - self._last_refill
