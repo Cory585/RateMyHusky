@@ -71,7 +71,8 @@ def parse_demographics(soup):
     """Parse frequency/demographics blocks (attendance, hours per week)."""
     demographics = []
     for block in soup.find_all("div", class_="FrequencyBlock_FullMain"):
-        title_el = block.find("h4", class_="FrequencyQuestionTitle")
+        # Bluera renders the title as h4 in pre-July-2026 reports, h5 since — accept both.
+        title_el = block.find(["h4", "h5"], class_="FrequencyQuestionTitle")
         if not title_el:
             continue
         question = title_el.get_text(strip=True)
@@ -317,6 +318,8 @@ _FIXTURE_HTML = """
 <div class="FrequencyBlock_FullMain"><h4 class="FrequencyQuestionTitle">How many hours per week did you spend on this course?</h4>
 <ul><li><div class="frequency-data-item-choice-text">3-4</div><div class="frequency-data-item-choice-nb">12</div></li>
 <li><div class="frequency-data-item-choice-text">5-7</div><div class="frequency-data-item-choice-nb">8</div></li></ul></div>
+<div class="FrequencyBlock_FullMain"><h5 class="FrequencyQuestionTitle">How often did you attend this class both in-person and remotely?</h5>
+<ul><li><div class="frequency-data-item-choice-text text-ellipsis">80-100%</div><div class="frequency-data-item-choice-nb">10</div></li></ul></div>
 <div class="RespS_Sheet"><ul><li class="RespS_QuestionTitle_ListItem">
 <div class="RespS_QuestionTitle_font"><span class="RespS_QuestionTitle_index">1</span><span>Online course materials were organized</span></div>
 <span class="RespS_Resp_font">Strongly Agree</span></li></ul></div>
@@ -340,6 +343,9 @@ def selftest():
           [c["comment"] for c in r["comments"]] == ["Great lectures; loved it"])
     check("comment prompt attached", r["comments"][0]["prompt"] == "What were the strengths of this course?")
     check("demographics distribution", r["demographics"][0]["distribution"] == {"3-4": 12, "5-7": 8})
+    check("demographics h5 title parsed (Bluera post-July-2026 markup)",
+          r["demographics"][1]["distribution"] == {"80-100%": 10}
+          and r["demographics"][1]["question"].startswith("How often did you attend"))
     check("score distribution counted", r["score_distributions"]["Online course materials were organized"] == {5: 1})
 
     s = term_summary([r, dict(r, term="Sprong 2026"), {"error": "download failed", "report_name": "x"}])
