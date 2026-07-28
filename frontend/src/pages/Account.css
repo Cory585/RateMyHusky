@@ -180,6 +180,10 @@
   font-size: 2.2rem;
 }
 
+.account-bookmarks .prof-avatar-img {
+  border-radius: 0;
+}
+
 /* ── Dark mode ── */
 .dark .account-signin-gate {
   background: #1e1e1e;
