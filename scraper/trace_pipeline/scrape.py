@@ -356,6 +356,16 @@ def selftest():
     check("session-expiry detector passes a real report page",
           is_session_expired(_FIXTURE_HTML) is False)
 
+    import tempfile, shutil
+    tmp = tempfile.mkdtemp()
+    try:
+        p = os.path.join(tmp, "roundtrip.json")
+        save_json(p, [{"comment": "non‑breaking hyphen"}], indent=2)
+        check("json state files round-trip non-cp1252 chars (Windows crash regression)",
+              load_json(p)[0]["comment"] == "non‑breaking hyphen")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0
 
@@ -364,6 +374,18 @@ def state_paths(out_dir, term):
     return (os.path.join(out_dir, f"{term}.urls.json"),
             os.path.join(out_dir, f"{term}.results.json"),
             os.path.join(out_dir, f"{term}.csv"))
+
+
+def save_json(path, data, indent=None):
+    """Windows defaults text files to cp1252, which can't encode chars TRACE comments
+    contain (e.g. U+2011 non-breaking hyphen) — state files must be explicit UTF-8."""
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=indent, ensure_ascii=False)
+
+
+def load_json(path):
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 def is_session_expired(html_text):
@@ -409,8 +431,7 @@ def main():
 
     # Step 1: Collect URLs
     if os.path.exists(URLS_FILE):
-        with open(URLS_FILE) as f:
-            all_reports = json.load(f)
+        all_reports = load_json(URLS_FILE)
         print(f"Loaded {len(all_reports)} URLs from {URLS_FILE}\n")
     else:
         all_reports = []
@@ -424,7 +445,7 @@ def main():
                 all_reports.append({"name": link.get_text(strip=True), "url": href.replace("&amp;", "&")})
             print(f"  Page {page}: total {len(all_reports)} URLs")
             if page % 10 == 0:
-                with open(URLS_FILE, "w") as f: json.dump(all_reports, f)
+                save_json(URLS_FILE, all_reports)
             next_btn = None
             for inp in soup.find_all("input", id=re.compile(r"btnNext")):
                 if not inp.has_attr("disabled") and "Disabled" not in str(inp.get("class", "")):
@@ -445,14 +466,13 @@ def main():
                 break
             page += 1
             time.sleep(0.5)
-        with open(URLS_FILE, "w") as f: json.dump(all_reports, f)
+        save_json(URLS_FILE, all_reports)
 
     # Step 2: Download & parse
     done_names = set()
     results = []
     if os.path.exists(RESULTS_FILE):
-        with open(RESULTS_FILE) as f:
-            results = json.load(f)
+        results = load_json(RESULTS_FILE)
         done_names = {r.get("report_name", "") for r in results}
         remaining = len(all_reports) - len(done_names)
         if remaining > 0:
@@ -467,8 +487,7 @@ def main():
         r = fetch(s, "GET", report["url"])
         if r:
             if is_session_expired(r.text):
-                with open(RESULTS_FILE, "w") as f:
-                    json.dump(results, f, indent=2, ensure_ascii=False)
+                save_json(RESULTS_FILE, results, indent=2)
                 print(f"\nSession expired mid-run (report {i+1}/{total}). "
                       f"Refresh cookies.txt and re-run the same command to resume.")
                 sys.exit(1)
@@ -488,13 +507,11 @@ def main():
             results.append({"report_name": report["name"], "error": "download failed"})
             print(f"  [{i+1}/{total}] ✗ download failed")
         if new_dl % 50 == 0 and new_dl > 0:
-            with open(RESULTS_FILE, "w") as f:
-                json.dump(results, f, ensure_ascii=False)
+            save_json(RESULTS_FILE, results)
             print(f"  ... saved ({len(results)} reports)")
         time.sleep(0.4)
 
-    with open(RESULTS_FILE, "w") as f:
-        json.dump(results, f, indent=2, ensure_ascii=False)
+    save_json(RESULTS_FILE, results, indent=2)
 
     # Step 3: CSV
     print("\nConverting to CSV...")
