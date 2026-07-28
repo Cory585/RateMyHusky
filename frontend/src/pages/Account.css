@@ -162,6 +162,24 @@
   margin-bottom: 16px;
 }
 
+/* .prof-card here sits outside .catalog-page, so the compact catalog sizing
+   for .prof-name/.prof-avatar doesn't apply and they fall back to the much
+   larger detail-page styles in Professor.css. Restore the catalog sizing. */
+.account-bookmarks .prof-name {
+  font-size: 0.97rem;
+  font-weight: 700;
+  color: #1a1a1a;
+  letter-spacing: normal;
+  margin: 0 0 2px;
+}
+
+.account-bookmarks .prof-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  font-size: 2.2rem;
+}
+
 /* ── Dark mode ── */
 .dark .account-signin-gate {
   background: #1e1e1e;
@@ -212,5 +230,9 @@
 }
 
 .dark .account-bookmarks-heading {
+  color: #e0e0e0;
+}
+
+.dark .account-bookmarks .prof-name {
   color: #e0e0e0;
 }
