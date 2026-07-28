@@ -22,7 +22,7 @@ _FIXTURE_SQL = """-- ratemyhusky NEW cluster backup
 SET sql_safe_updates = false;
 
 DROP TABLE IF EXISTS trace_comments CASCADE;
-CREATE TABLE trace_comments (
+CREATE TABLE public.trace_comments (
     id INT8 NOT NULL,
     comment STRING NULL
 );
@@ -87,7 +87,7 @@ def iter_statements(lines):
     if tail:
         yield tail
 
-_TABLE_RE = re.compile(r"^(?:DROP TABLE IF EXISTS|CREATE TABLE|INSERT INTO)\s+\"?([A-Za-z0-9_]+)\"?", re.I)
+_TABLE_RE = re.compile(r"^(?:DROP TABLE IF EXISTS|CREATE TABLE|INSERT INTO)\s+(?:\"?[A-Za-z0-9_]+\"?\.)?\"?([A-Za-z0-9_]+)\"?", re.I)
 
 def statement_table(stmt):
     m = _TABLE_RE.match(stmt.strip())
@@ -169,6 +169,8 @@ def selftest():
 
     check("table of DROP", statement_table("DROP TABLE IF EXISTS trace_comments CASCADE") == "trace_comments")
     check("table of CREATE", statement_table('CREATE TABLE trace_comments (\n id INT8)') == "trace_comments")
+    check("table of schema-qualified CREATE",
+          statement_table('CREATE TABLE public.trace_comments (\n id INT8)') == "trace_comments")
     check("table of INSERT", statement_table("INSERT INTO stats_cache (key) VALUES ('x')") == "stats_cache")
     check("SET has no table", statement_table("SET sql_safe_updates = false") is None)
 
