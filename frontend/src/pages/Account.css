@@ -62,6 +62,7 @@
 
 /* ── Tabs ── */
 .account-tabs {
+  position: relative;
   display: flex;
   gap: 8px;
   border-bottom: 1px solid #e8e8e8;
@@ -75,8 +76,7 @@
   font-size: 1rem;
   color: #888;
   text-decoration: none;
-  border-bottom: 2px solid transparent;
-  transition: color 0.15s, border-color 0.15s;
+  transition: color 0.15s;
 }
 
 .account-tab:hover {
@@ -85,7 +85,15 @@
 
 .account-tab.active {
   color: #d6394c;
-  border-bottom-color: #d6394c;
+}
+
+.account-tab-indicator {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 2px;
+  background: #d6394c;
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1), width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ── Profile tab ── */
@@ -156,7 +164,7 @@
 }
 
 .account-bookmarks-heading {
-  font-size: 1.1rem;
+  font-size: 1.3rem;
   font-weight: 800;
   color: #1a1a1a;
   margin-bottom: 16px;
@@ -212,7 +220,10 @@
 
 .dark .account-tab.active {
   color: #f06d7d;
-  border-bottom-color: #f06d7d;
+}
+
+.dark .account-tab-indicator {
+  background: #f06d7d;
 }
 
 .dark .account-profile-name {

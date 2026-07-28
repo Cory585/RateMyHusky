@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { useLayoutEffect, useRef, useState } from 'react';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import SignInModal from '../components/SignInModal';
 import './Account.css';
@@ -7,6 +7,17 @@ import './Account.css';
 export default function Account() {
   const { user, loading } = useAuth();
   const [showSignIn, setShowSignIn] = useState(false);
+  const location = useLocation();
+  const profileTabRef = useRef<HTMLAnchorElement>(null);
+  const bookmarksTabRef = useRef<HTMLAnchorElement>(null);
+  const [indicator, setIndicator] = useState({ left: 0, width: 0 });
+
+  useLayoutEffect(() => {
+    const activeTab = location.pathname === '/account/bookmarks' ? bookmarksTabRef.current : profileTabRef.current;
+    if (activeTab) {
+      setIndicator({ left: activeTab.offsetLeft, width: activeTab.offsetWidth });
+    }
+  }, [location.pathname]);
 
   if (loading) return null;
 
@@ -30,12 +41,13 @@ export default function Account() {
     <div className="account-page">
       <div className="account-shell">
         <nav className="account-tabs">
-          <NavLink to="/account" end className={({ isActive }) => `account-tab${isActive ? ' active' : ''}`}>
+          <NavLink ref={profileTabRef} to="/account" end className={({ isActive }) => `account-tab${isActive ? ' active' : ''}`}>
             Profile
           </NavLink>
-          <NavLink to="/account/bookmarks" className={({ isActive }) => `account-tab${isActive ? ' active' : ''}`}>
+          <NavLink ref={bookmarksTabRef} to="/account/bookmarks" className={({ isActive }) => `account-tab${isActive ? ' active' : ''}`}>
             Bookmarks
           </NavLink>
+          <span className="account-tab-indicator" style={{ transform: `translateX(${indicator.left}px)`, width: indicator.width }} />
         </nav>
         <div className="account-tab-content">
           <Outlet />

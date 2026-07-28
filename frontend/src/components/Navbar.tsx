@@ -175,7 +175,6 @@ const Navbar = () => {
             {showUserMenu && (
               <div className="navbar-user-dropdown">
                 <p className="navbar-user-email">{user.email}</p>
-                <Link to="/account" className="navbar-user-link" onClick={() => { setShowUserMenu(false); setMenuOpen(false); }}>My Account</Link>
                 <Link to="/account/bookmarks" className="navbar-user-link" onClick={() => { setShowUserMenu(false); setMenuOpen(false); }}>Bookmarks</Link>
                 <button className="navbar-user-signout" onClick={() => { logout(); setShowUserMenu(false); setMenuOpen(false); }}>Sign Out</button>
               </div>
