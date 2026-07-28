@@ -12,6 +12,9 @@ import Course from './pages/Course';
 import Departments from './pages/Departments';
 import Department from './pages/Department';
 import Compare from './pages/Compare';
+import Account from './pages/Account';
+import AccountProfile from './pages/AccountProfile';
+import AccountBookmarks from './pages/AccountBookmarks';
 import NotFound from './pages/NotFound';
 import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
@@ -47,6 +50,10 @@ function App() {
               <Route path="/departments" element={<Departments />} />
               <Route path="/departments/:slug" element={<Department />} />
               <Route path="/compare" element={<Compare />} />
+              <Route path="/account" element={<Account />}>
+                <Route index element={<AccountProfile />} />
+                <Route path="bookmarks" element={<AccountBookmarks />} />
+              </Route>
               <Route path="/terms" element={<Terms />} />
               <Route path="/privacy" element={<Privacy />} />
               <Route path="*" element={<NotFound />} />
