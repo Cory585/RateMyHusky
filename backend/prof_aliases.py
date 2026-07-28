@@ -108,9 +108,19 @@ ALIAS_MAP = {
     "Tim Brown": "Timothy Brown",
     "Tim Rupert": "Timothy Rupert",
     "A Zilleruelo": "Arturo Zilleruelo",
-    "donald omalley": "don omalley",
-    "Grayson Kimball": "G. Kimball",
-    "Robert Eidson": "R Cole Eidson",
-    "Surendra Gupta": "S. M Gupta",
-    "sarthak suhrid gupta": "sarthak gupta",
+    "don omalley": "donald omalley",
+    "G. Kimball": "Grayson Kimball",
+    "R Cole Eidson": "Robert Eidson",
+    "S. M Gupta": "Surendra Gupta",
+    "sarthak gupta": "sarthak suhrid gupta",
 }
+
+def _normalize_name(name: str) -> str:
+    import re, unicodedata
+    s = str(name).strip().lower()
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+# Ensure keys/values match normalize_name() used by server.py/precompute.py.
+ALIAS_MAP = {_normalize_name(k): _normalize_name(v) for k, v in ALIAS_MAP.items()}
