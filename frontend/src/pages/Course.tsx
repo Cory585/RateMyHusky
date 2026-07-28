@@ -12,6 +12,7 @@ import Breadcrumbs from '../components/Breadcrumbs';
 import Seo from '../components/Seo';
 import { useAuth } from '../context/AuthContext';
 import SignInModal from '../components/SignInModal';
+import BookmarkButton from '../components/BookmarkButton';
 import './Course.css';
 
 const INITIAL_INSTRUCTORS_VISIBLE = 5;
@@ -205,7 +206,10 @@ const Course = () => {
 				<header className="course-hero">
 					<div>
 						<p className="course-code">{summary.code}</p>
-						<h1>{summary.name}</h1>
+						<h1>
+							{summary.name}
+							<BookmarkButton itemType="course" itemKey={summary.code} size="md" className="course-hero-bookmark" />
+						</h1>
 						<p className="course-dept">{summary.department}</p>
 					</div>
 				</header>

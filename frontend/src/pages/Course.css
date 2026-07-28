@@ -48,6 +48,11 @@
 	animation: courseSlideUp 0.5s 0.12s ease both;
 }
 
+.course-hero-bookmark {
+	vertical-align: middle;
+	margin-left: 12px;
+}
+
 .course-code {
 	margin: 0 0 8px;
 	font-size: 0.76rem;
