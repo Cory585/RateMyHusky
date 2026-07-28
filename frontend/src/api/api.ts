@@ -414,6 +414,48 @@ export async function submitFeedback(payload: {
   }
 }
 
+/* ---- Bookmarks ---- */
+export interface BookmarksResponse {
+  professors: (CatalogProfessor & { bookmarkedAt: string })[];
+  courses: (CatalogCourse & { bookmarkedAt: string })[];
+}
+
+export const fetchBookmarks = () => get<BookmarksResponse>('/api/bookmarks');
+
+function bookmarkAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem('auth_token');
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
+export async function addBookmark(itemType: 'professor' | 'course', itemKey: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/bookmarks`, {
+    method: 'POST',
+    headers: bookmarkAuthHeaders(),
+    body: JSON.stringify({ itemType, itemKey }),
+  });
+  if (maintenanceGuard(res)) throw new Error('Site is under maintenance');
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `API ${res.status}`);
+  }
+}
+
+export async function removeBookmark(itemType: 'professor' | 'course', itemKey: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/bookmarks`, {
+    method: 'DELETE',
+    headers: bookmarkAuthHeaders(),
+    body: JSON.stringify({ itemType, itemKey }),
+  });
+  if (maintenanceGuard(res)) throw new Error('Site is under maintenance');
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `API ${res.status}`);
+  }
+}
+
 /* ---- Department hub pages ---- */
 export interface HubDepartment {
   slug: string;

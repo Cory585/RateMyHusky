@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-route
 import { Analytics } from '@vercel/analytics/react';
 import { SpeedInsights } from '@vercel/speed-insights/react';
 import { AuthProvider } from './context/AuthContext';
+import { BookmarksProvider } from './context/BookmarksContext';
 import Homepage from './pages/Homepage';
 import Professor from './pages/Professor';
 import ProfessorCatalog from './pages/ProfessorCatalog';
@@ -32,29 +33,31 @@ function ScrollToTop() {
 function App() {
   return (
     <AuthProvider>
-      <Router>
-        <ScrollToTop />
-        <Navbar />
-        <ErrorBoundary>
-          <Routes>
-            <Route path="/" element={<Homepage />} />
-            <Route path="/professors" element={<ProfessorCatalog />} />
-            <Route path="/professors/:slug" element={<Professor />} />
-            <Route path="/courses" element={<Courses />} />
-            <Route path="/courses/:code" element={<Course />} />
-            <Route path="/departments" element={<Departments />} />
-            <Route path="/departments/:slug" element={<Department />} />
-            <Route path="/compare" element={<Compare />} />
-            <Route path="/terms" element={<Terms />} />
-            <Route path="/privacy" element={<Privacy />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </ErrorBoundary>
-        <FeedbackTab />
-        <ThemeToggle />
-      </Router>
-      <Analytics />
-      <SpeedInsights />
+      <BookmarksProvider>
+        <Router>
+          <ScrollToTop />
+          <Navbar />
+          <ErrorBoundary>
+            <Routes>
+              <Route path="/" element={<Homepage />} />
+              <Route path="/professors" element={<ProfessorCatalog />} />
+              <Route path="/professors/:slug" element={<Professor />} />
+              <Route path="/courses" element={<Courses />} />
+              <Route path="/courses/:code" element={<Course />} />
+              <Route path="/departments" element={<Departments />} />
+              <Route path="/departments/:slug" element={<Department />} />
+              <Route path="/compare" element={<Compare />} />
+              <Route path="/terms" element={<Terms />} />
+              <Route path="/privacy" element={<Privacy />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </ErrorBoundary>
+          <FeedbackTab />
+          <ThemeToggle />
+        </Router>
+        <Analytics />
+        <SpeedInsights />
+      </BookmarksProvider>
     </AuthProvider>
   );
 }
