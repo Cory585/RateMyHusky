@@ -684,7 +684,10 @@ def main():
         raw_rows = list(csv.DictReader(f))
 
     # 2. Resolve the term title from the raw rows.
-    title, blanks = resolve_term_title(raw_rows)
+    try:
+        title, blanks = resolve_term_title(raw_rows)
+    except ValueError as e:
+        sys.exit(str(e))
     if title != args.term:
         print(f"WARNING: raw CSV term title '{title}' differs from --term '{args.term}'")
 

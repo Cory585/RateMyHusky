@@ -305,7 +305,7 @@ _FIXTURE_HTML = """
 <html><head><title>Student TRACE report for CS3500-01 Object-Oriented Design (Jane Doe)</title></head>
 <body>
 <span id="ctl00_ProjectTitle">Spring 2026</span>
-<span id="ctl00_lblPublishDateInfo"><strong>4/28/2026</strong></span>
+<span id="ctl00_lbPublishDateInfo"><strong>4/28/2026</strong></span>
 <span id="ctl00_lblInvited">30</span><span id="ctl00_lblResponded">20</span>
 <h3><strong>Course Related Questions</strong></h3>
 <table class='block-table'>
@@ -332,6 +332,7 @@ def selftest():
     r = parse_report_html(_FIXTURE_HTML)
     check("course_info parsed", r["course_info"] == "CS3500-01 Object-Oriented Design (Jane Doe)")
     check("term parsed from ProjectTitle", r["term"] == "Spring 2026")
+    check("created_date parsed", r["created_date"] == "4/28/2026")
     check("audience/responses", r["audience"] == 30 and r["responses"] == 20)
     check("section table parsed", r["sections"][0]["section"] == "Course Related Questions"
           and r["sections"][0]["questions"][0]["Course Mean"] == 4.5)
@@ -350,6 +351,11 @@ def selftest():
           u.endswith("Spring 2026.urls.json") and j.endswith("Spring 2026.results.json")
           and c.endswith("Spring 2026.csv"))
 
+    check("session-expiry detector flags a login page",
+          is_session_expired("<html><body><h1>Sign in</h1></body></html>") is True)
+    check("session-expiry detector passes a real report page",
+          is_session_expired(_FIXTURE_HTML) is False)
+
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0
 
@@ -358,6 +364,12 @@ def state_paths(out_dir, term):
     return (os.path.join(out_dir, f"{term}.urls.json"),
             os.path.join(out_dir, f"{term}.results.json"),
             os.path.join(out_dir, f"{term}.csv"))
+
+
+def is_session_expired(html_text):
+    """A mid-run cookie expiry returns the Bluera sign-in page instead of a report.
+    Real report pages always carry a ProjectTitle span; login pages say 'Sign in'."""
+    return "Sign in" in html_text or "ProjectTitle" not in html_text
 
 
 def term_summary(results):
@@ -454,6 +466,12 @@ def main():
         if report["name"] in done_names: continue
         r = fetch(s, "GET", report["url"])
         if r:
+            if is_session_expired(r.text):
+                with open(RESULTS_FILE, "w") as f:
+                    json.dump(results, f, indent=2, ensure_ascii=False)
+                print(f"\nSession expired mid-run (report {i+1}/{total}). "
+                      f"Refresh cookies.txt and re-run the same command to resume.")
+                sys.exit(1)
             try:
                 parsed = parse_report_html(r.text)
                 parsed["report_name"] = report["name"]
