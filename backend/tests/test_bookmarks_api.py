@@ -12,7 +12,7 @@ import os
 import jwt
 import pytest
 
-TEST_SECRET = "test-secret-0123456789abcdefghijklmnop"  # >=32 bytes for HS256
+TEST_SECRET = "test-secret-0123456789abcdefghijklmnop"  # >=32 bytes for HS256  # gitleaks:allow
 
 
 def make_token(sub="user-123", expired=False):

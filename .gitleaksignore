@@ -1,0 +1,20 @@
+# Baseline: known historical findings, amnestied 2026-07-29.
+# 15 x expired TRACE Blue session cookies in old scraper/main.py commits.
+# 1 x dummy TEST_SECRET in backend/tests/test_bookmarks_api.py (false positive).
+# Anything NOT listed here still fails CI.
+0b186f8ea5613de81d392aa4a5fef6f92d9d78b2:backend/tests/test_bookmarks_api.py:generic-api-key:15
+5c24a56631e9a77f564c429551599ea134637762:scraper/main.py:generic-api-key:32
+5c24a56631e9a77f564c429551599ea134637762:scraper/main.py:generic-api-key:37
+5c24a56631e9a77f564c429551599ea134637762:scraper/main.py:jwt:33
+5c24a56631e9a77f564c429551599ea134637762:scraper/main.py:jwt:34
+eb684d3829da6bcc54f5334e104d21c85f0b20c0:scraper/main.py:generic-api-key:31
+eb684d3829da6bcc54f5334e104d21c85f0b20c0:scraper/main.py:jwt:32
+eb684d3829da6bcc54f5334e104d21c85f0b20c0:scraper/main.py:jwt:33
+76292ed8240a9a55b73717b3d8e9230a79291f88:scraper/main.py:jwt:20
+76292ed8240a9a55b73717b3d8e9230a79291f88:scraper/main.py:jwt:21
+76292ed8240a9a55b73717b3d8e9230a79291f88:scraper/main.py:generic-api-key:19
+76292ed8240a9a55b73717b3d8e9230a79291f88:scraper/main.py:generic-api-key:24
+a5a12d457dffef72c1286cb7a7bb6fcbc0cc777c:scraper/main.py:jwt:20
+a5a12d457dffef72c1286cb7a7bb6fcbc0cc777c:scraper/main.py:jwt:21
+a5a12d457dffef72c1286cb7a7bb6fcbc0cc777c:scraper/main.py:generic-api-key:19
+a5a12d457dffef72c1286cb7a7bb6fcbc0cc777c:scraper/main.py:generic-api-key:24
