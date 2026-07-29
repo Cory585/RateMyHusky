@@ -12,6 +12,8 @@ import re
 import sys
 import os
 import csv
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from collections import Counter
 from bs4 import BeautifulSoup
 from html.parser import HTMLParser
@@ -26,6 +28,8 @@ BASE_URL = "https://northeastern-bc.bluera.com"
 DEFAULT_OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "raw")
 DEFAULT_COOKIES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
 TIMEOUT = 60
+BLOCK_STATUSES = (403, 429, 503)
+CHECKPOINT_EVERY = 500  # results.json is ~100MB at term scale; saving it is not free
 
 AGREE_MAP = {
     "Strongly Agree": 5, "Agree": 4, "Neutral": 3,
@@ -217,6 +221,8 @@ def fetch(session, method, url, **kwargs):
     for attempt in range(3):
         try:
             r = session.get(url, **kwargs) if method == "GET" else session.post(url, **kwargs)
+            if r.status_code in BLOCK_STATUSES:
+                return r  # rate-limit/WAF block: retrying only deepens it
             r.raise_for_status()
             return r
         except Exception as e:
@@ -224,6 +230,35 @@ def fetch(session, method, url, **kwargs):
             print(f"    ⚠ {type(e).__name__}, retry in {w}s ({attempt+1}/3)")
             time.sleep(w)
     return None
+
+
+def make_worker_session(cookies):
+    """One session per download thread. Bluera's ASP.NET session lock serializes
+    every request sharing an ASP.NET_SessionId, so workers must not share one —
+    omit it and the server hands each worker its own session."""
+    s = requests.Session()
+    s.cookies.update({k: v for k, v in cookies.items() if k != "ASP.NET_SessionId"})
+    s.headers.update({"User-Agent": "Mozilla/5.0"})
+    return s
+
+
+def scrape_one(session, report, fetch_fn=fetch):
+    """Download+parse one report. Returns (result, abort): abort is None, "expired"
+    or "blocked:<code>". Per-report failures become error rows; expiry and blocks
+    must stop the whole run instead of filling results with thousands of them."""
+    r = fetch_fn(session, "GET", report["url"])
+    if r is None:
+        return {"report_name": report["name"], "error": "download failed"}, None
+    if r.status_code in BLOCK_STATUSES:
+        return None, f"blocked:{r.status_code}"
+    if is_session_expired(r.text):
+        return None, "expired"
+    try:
+        parsed = parse_report_html(r.text)
+        parsed["report_name"] = report["name"]
+        return parsed, None
+    except Exception as e:
+        return {"report_name": report["name"], "error": str(e)}, None
 
 
 def results_to_csv(results, output_file):
@@ -362,6 +397,65 @@ def selftest():
     check("session-expiry detector passes a real report page",
           is_session_expired(_FIXTURE_HTML) is False)
 
+    # ── parallel download helpers ──
+    ws = make_worker_session({"ASP.NET_SessionId": "shared", "session_token": "keep"})
+    check("worker session omits the shared ASP.NET_SessionId (server serializes on it)",
+          ws.cookies.get("ASP.NET_SessionId") is None and ws.cookies.get("session_token") == "keep")
+
+    class _Resp:
+        def __init__(self, status=200, text=""):
+            self.status_code, self.text = status, text
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise Exception(f"HTTP {self.status_code}")
+
+    def fake_fetch(status=200, text=_FIXTURE_HTML):
+        def f(session, method, url, **kw):
+            return None if status is None else _Resp(status, text)
+        return f
+
+    rep = {"name": "CS3500-01", "url": "http://x/report"}
+
+    res, why = scrape_one(None, rep, fetch_fn=fake_fetch())
+    check("scrape_one parses a report and tags it with report_name",
+          why is None and res["report_name"] == "CS3500-01" and res["term"] == "Spring 2026")
+
+    res, why = scrape_one(None, rep, fetch_fn=fake_fetch(status=None))
+    check("scrape_one logs a download failure without aborting the run",
+          why is None and res["error"] == "download failed")
+
+    res, why = scrape_one(None, rep, fetch_fn=fake_fetch(text="<html><body>Sign in</body></html>"))
+    check("scrape_one aborts the run on mid-run session expiry",
+          res is None and why == "expired")
+
+    blocked = [scrape_one(None, rep, fetch_fn=fake_fetch(status=c)) for c in (403, 429, 503)]
+    check("scrape_one aborts on WAF block statuses instead of logging error rows",
+          all(r is None and w == f"blocked:{c}"
+              for (r, w), c in zip(blocked, (403, 429, 503))))
+
+    tries = {"n": 0}
+    class _BlockSession:
+        def get(self, url, **kw):
+            tries["n"] += 1
+            return _Resp(429, "blocked")
+    _saved_sleep = time.sleep
+    time.sleep = lambda s: None
+    try:
+        br = fetch(_BlockSession(), "GET", "http://x")
+    finally:
+        time.sleep = _saved_sleep
+    check("fetch returns a blocked response at once (retrying deepens the block)",
+          br.status_code == 429 and tries["n"] == 1)
+
+    _saved_parse = globals()["parse_report_html"]
+    globals()["parse_report_html"] = lambda t: (_ for _ in ()).throw(ValueError("bad table"))
+    try:
+        res, why = scrape_one(None, rep, fetch_fn=fake_fetch())
+    finally:
+        globals()["parse_report_html"] = _saved_parse
+    check("scrape_one logs a parse failure as an error row",
+          why is None and res["error"] == "bad table")
+
     import tempfile, shutil
     tmp = tempfile.mkdtemp()
     try:
@@ -416,6 +510,8 @@ def main():
     parser.add_argument("--rid", required=True, help="Bluera report-list rid GUID")
     parser.add_argument("--cookies", default=DEFAULT_COOKIES, help="Path to cookie header file")
     parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR, help="Output directory for state/CSV")
+    parser.add_argument("--workers", type=int, default=6,
+                        help="Parallel report downloads (default 6, same as a browser)")
     parser.add_argument("--selftest", action="store_true", help="Run offline selftest and exit")
     args = parser.parse_args()
 
@@ -430,6 +526,10 @@ def main():
 
     print("Testing session...")
     test = fetch(s, "GET", LIST_URL)
+    if test is not None and test.status_code in BLOCK_STATUSES:
+        print(f"ERROR: server returned HTTP {test.status_code} (rate-limit/WAF block). "
+              f"Wait a few minutes and re-run.")
+        sys.exit(1)
     if not test or "Sign in" in test.text:
         print("ERROR: Cookies expired.")
         sys.exit(1)
@@ -471,7 +571,6 @@ def main():
                 print(f"\nConnection lost at page {page}. Re-run to resume.")
                 break
             page += 1
-            time.sleep(0.5)
         save_json(URLS_FILE, all_reports)
 
     # Step 2: Download & parse
@@ -487,37 +586,54 @@ def main():
             print(f"All {len(done_names)} reports downloaded.\n")
 
     total = len(all_reports)
-    new_dl = 0
-    for i, report in enumerate(all_reports):
-        if report["name"] in done_names: continue
-        r = fetch(s, "GET", report["url"])
-        if r:
-            if is_session_expired(r.text):
-                save_json(RESULTS_FILE, results, indent=2)
-                print(f"\nSession expired mid-run (report {i+1}/{total}). "
-                      f"Refresh cookies.txt and re-run the same command to resume.")
-                sys.exit(1)
-            try:
-                parsed = parse_report_html(r.text)
-                parsed["report_name"] = report["name"]
-                nc = len(parsed.get("comments", []))
-                nd = len(parsed.get("demographics", []))
-                ns = len(parsed.get("score_distributions", {}))
-                results.append(parsed)
-                new_dl += 1
-                print(f"  [{i+1}/{total}] ✓ {report['name']} ({nc} comments, {ns} scored, {nd} demo)")
-            except Exception as e:
-                results.append({"report_name": report["name"], "error": str(e)})
-                print(f"  [{i+1}/{total}] ✗ {e}")
-        else:
-            results.append({"report_name": report["name"], "error": "download failed"})
-            print(f"  [{i+1}/{total}] ✗ download failed")
-        if new_dl % 50 == 0 and new_dl > 0:
-            save_json(RESULTS_FILE, results)
-            print(f"  ... saved ({len(results)} reports)")
-        time.sleep(0.4)
+    pending = [r for r in all_reports if r["name"] not in done_names]
+    abort = None
+
+    if pending:
+        print(f"Downloading {len(pending)} reports with {args.workers} workers...")
+        local = threading.local()
+        stop = threading.Event()
+
+        def run_one(report):
+            if stop.is_set():
+                return None, "stopped"
+            if not hasattr(local, "session"):
+                local.session = make_worker_session(cookies)
+            result, why = scrape_one(local.session, report)
+            if why:
+                stop.set()
+            return result, why
+
+        done = len(done_names)
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            for report, (result, why) in zip(pending, pool.map(run_one, pending)):
+                if why:
+                    abort = abort or why
+                    continue
+                results.append(result)
+                done += 1
+                if "error" in result:
+                    print(f"  [{done}/{total}] ✗ {report['name']}: {result['error']}")
+                else:
+                    nc = len(result.get("comments", []))
+                    nd = len(result.get("demographics", []))
+                    ns = len(result.get("score_distributions", {}))
+                    print(f"  [{done}/{total}] ✓ {report['name']} ({nc} comments, {ns} scored, {nd} demo)")
+                if done % CHECKPOINT_EVERY == 0:
+                    save_json(RESULTS_FILE, results)
+                    print(f"  ... saved ({len(results)} reports)")
 
     save_json(RESULTS_FILE, results, indent=2)
+
+    if abort == "expired":
+        print(f"\nSession expired mid-run ({len(results)}/{total} saved). "
+              f"Refresh cookies.txt and re-run the same command to resume.")
+        sys.exit(1)
+    if abort:
+        print(f"\nServer returned HTTP {abort.split(':')[1]} (rate-limit/WAF block) mid-run "
+              f"({len(results)}/{total} saved). Wait a few minutes, then re-run the same command "
+              f"to resume, with --workers {max(1, args.workers // 2)} if it recurs.")
+        sys.exit(1)
 
     # Step 3: CSV
     print("\nConverting to CSV...")

@@ -10,10 +10,12 @@ live: data is public the moment `finalize` finishes precompute. No redeploy invo
 2. **Refresh cookies.** With that page open: DevTools → Network → click any request to
    `northeastern-bc.bluera.com` → copy the full `Cookie:` request-header value → paste into
    `scraper/trace_pipeline/cookies.txt`. **NEVER commit this file** (it is gitignored; keep it that way).
-3. **Scrape** (hours for a full semester; resumable — re-run the same command after any failure):
+3. **Scrape** (~25 min for a full semester; resumable — re-run the same command after any failure):
    `python scraper/trace_pipeline/scrape.py --term "Spring 2026" --rid <guid>`
    Output: `scraper/data/raw/Spring 2026.csv` (+ `.urls.json`/`.results.json` state). Check the
    end-of-run summary: errors should be 0 and the term histogram should show exactly one title.
+   URL collection is sequential (~20 min for 495 pages — Bluera's pager keeps its position in the
+   ASP.NET session, so it can't be parallelized); reports download 6 at a time (`--workers`).
 4. **Dry-run the ingest and read the report** (row counts, new-ID allocations, unparseable samples):
    `python scraper/trace_pipeline/ingest.py --term "Spring 2026" --dry-run`
 5. **Ingest:** `python scraper/trace_pipeline/ingest.py --term "Spring 2026"`
@@ -32,6 +34,9 @@ live: data is public the moment `finalize` finishes precompute. No redeploy invo
 
 - **Scrape died mid-run** (cookies expired: "Sign in" errors): refresh cookies.txt, re-run the same
   command — it resumes from `<Term>.results.json`.
+- **Scrape stopped with "rate-limit/WAF block"** (403/429/503 from FortiWeb in front of Bluera): it
+  aborts on the first one rather than logging thousands of error rows. Wait a few minutes and re-run;
+  add `--workers 3` if it recurs.
 - **Ingest was wrong/partial:** `python scraper/trace_pipeline/ingest.py --term "<T>" --replace`.
 - **Prod tables damaged:** restore the pre-finalize backup:
   `python backend/restore_db.py --tables trace_courses,trace_scores,trace_comments`
@@ -41,6 +46,8 @@ live: data is public the moment `finalize` finishes precompute. No redeploy invo
 
 ## Known gotchas (hard-won)
 
+- If a scrape is killed *during URL collection*, delete `<Term>.urls.json` before re-running: an
+  existing urls file is treated as complete, so a partial one silently scrapes only part of the term.
 - This machine's DNS intermittently fails on *.cockroachlabs.cloud — every tool here retries; if a
   command dies with "could not translate host name" anyway, just re-run.
 - CockroachDB serverless: writes are multi-row INSERTs, one statement per commit (5000 rows for
