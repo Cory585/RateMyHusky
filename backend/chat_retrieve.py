@@ -411,28 +411,40 @@ def _entity_filter(slug, code):
     return ("(e.course_code = %s OR (e.source = 'reddit' AND (e.body ILIKE %s OR e.body ILIKE %s)))",
             (code, f"%{norm}%", f"%{spaced}%"))
 
+def _lexical_candidates(where, entity_params, query, query_fn, limit=40):
+    """Top lexical candidates for an entity-scoped evidence search, best-first [(id, ts_rank)].
+    Shared by fetch_evidence and backend/eval/pool_candidates.py — the eval pool must run the
+    EXACT production SQL, so tuning here automatically flows into the eval harness."""
+    if not (query and query.strip()):
+        return []
+    rows = query_fn(
+        "SELECT e.id, ts_rank(e.body_tsv, plainto_tsquery('english', %s)) AS r "
+        "FROM evidence e WHERE " + where +
+        " AND e.flagged = false AND e.body_tsv @@ plainto_tsquery('english', %s) "
+        "ORDER BY r DESC LIMIT " + str(int(limit)),
+        (query,) + entity_params + (query,))
+    return [(r["id"], r.get("r", 0)) for r in rows]
+
+def _vector_candidates(where, entity_params, qv, query_fn, limit=40):
+    """Top vector candidates by cosine, best-first [(id, similarity)]. qv is the precomputed
+    query embedding; None (embed failed/skipped) -> no vector leg."""
+    if qv is None:
+        return []
+    rows = query_fn(
+        "SELECT e.id, 1 - (ee.embedding <=> %s::vector) AS sim "
+        "FROM evidence_embeddings ee JOIN evidence e ON e.id = ee.evidence_id "
+        "WHERE " + where + " AND e.flagged = false"
+        " ORDER BY ee.embedding <=> %s::vector LIMIT " + str(int(limit)),
+        (str(qv),) + entity_params + (str(qv),))
+    return [(r["id"], r.get("sim", 0)) for r in rows]
+
 def fetch_evidence(slug, code, query, embed_query_fn, query_fn, limit=8):
     where, entity_params = _entity_filter(slug, code)
     # 1. lexical
-    lexical = []
-    if query and query.strip():
-        lex_rows = query_fn(
-            "SELECT e.id, ts_rank(e.body_tsv, plainto_tsquery('english', %s)) AS r "
-            "FROM evidence e WHERE " + where +
-            " AND e.flagged = false AND e.body_tsv @@ plainto_tsquery('english', %s) ORDER BY r DESC LIMIT 40",
-            (query,) + entity_params + (query,))
-        lexical = [(r["id"], r.get("r", 0)) for r in lex_rows]
+    lexical = _lexical_candidates(where, entity_params, query, query_fn)
     # 2. vector (skip if embed fails → lexical-only)
-    vector = []
     qv = embed_query_fn(query) if (embed_query_fn and query) else None
-    if qv is not None:
-        vec_rows = query_fn(
-            "SELECT e.id, 1 - (ee.embedding <=> %s::vector) AS sim "
-            "FROM evidence_embeddings ee JOIN evidence e ON e.id = ee.evidence_id "
-            "WHERE " + where + " AND e.flagged = false"
-            " ORDER BY ee.embedding <=> %s::vector LIMIT 40",
-            (str(qv),) + entity_params + (str(qv),))
-        vector = [(r["id"], r.get("sim", 0)) for r in vec_rows]
+    vector = _vector_candidates(where, entity_params, qv, query_fn)
     # 3. fuse (if only lexical, RRF over one list = lexical order)
     fused = _rrf_fuse(lexical, vector)
     if not fused:
@@ -869,6 +881,27 @@ def selftest():
         return []
     nc = resolve_course_by_name("operating", name_codenoise_query)
     check("course-by-name drops code-only noise (name lacks hint)", nc == [])
+
+    # ── extracted candidate fetchers (shared with backend/eval pooling) ──
+    cand_calls = []
+    def cand_query(sql, params):
+        cand_calls.append((sql, params))
+        if "plainto_tsquery" in sql:
+            return [{"id": "a", "r": 0.9}, {"id": "b", "r": 0.5}]
+        if "evidence_embeddings" in sql:
+            return [{"id": "b", "sim": 0.8}]
+        return []
+    w_c, p_c = _entity_filter("guha-prof", None)
+    lex_c = _lexical_candidates(w_c, p_c, "is guha hard", cand_query)
+    check("lexical candidates are (id, score) best-first", lex_c == [("a", 0.9), ("b", 0.5)])
+    check("lexical candidates default depth 40", "LIMIT 40" in cand_calls[0][0])
+    check("lexical candidates keep the entity filter", w_c in cand_calls[0][0])
+    vec_c = _vector_candidates(w_c, p_c, [0.1, 0.2], cand_query)
+    check("vector candidates are (id, sim) best-first", vec_c == [("b", 0.8)])
+    check("blank query -> no lexical candidates", _lexical_candidates(w_c, p_c, "  ", cand_query) == [])
+    check("None embedding -> no vector candidates", _vector_candidates(w_c, p_c, None, cand_query) == [])
+    _lexical_candidates(w_c, p_c, "q", cand_query, limit=20)
+    check("candidate depth is parameterized", "LIMIT 20" in cand_calls[-1][0])
 
     # professor-name hint that matches NO catalog name -> falls through to professor resolution
     def prof_fallthrough_query(sql, params):
