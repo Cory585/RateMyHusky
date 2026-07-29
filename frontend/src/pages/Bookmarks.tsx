@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -22,8 +22,8 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'alpha',  label: 'A – Z' },
 ];
 
-const PREVIEW = 10; // per-section preview on the All tab
-const BATCH = 24;   // "Show more" batch size on the type tabs
+const PREVIEW_ROWS = 2; // per-section preview rows on the All tab
+const BATCH_ROWS = 4;   // "Show more" rows per batch on the type tabs (matches catalog pages)
 
 function ratingColor(v: number | null): 'high' | 'mid' | 'low' | 'neutral' {
   if (v === null) return 'neutral';
@@ -189,7 +189,24 @@ export default function Bookmarks() {
   const [tab, setTab] = useState<Tab>('all');
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortKey>('saved');
-  const [shown, setShown] = useState({ professors: BATCH, courses: BATCH });
+  const [shownBatches, setShownBatches] = useState({ professors: 1, courses: 1 });
+
+  // Measure the grid's column count so preview/batch sizes are always a
+  // multiple of it and every row renders full, whatever the device width
+  // (same trick as ProfessorCatalog.tsx). React 19 cleanup refs let the
+  // same callback observe every grid on the page.
+  const [numCols, setNumCols] = useState(4);
+  const gridRef = useCallback((node: HTMLDivElement) => {
+    const update = () => {
+      setNumCols(window.getComputedStyle(node).gridTemplateColumns.split(' ').length);
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    update();
+    return () => observer.disconnect();
+  }, []);
+  const preview = numCols * PREVIEW_ROWS;
+  const batch = numCols * BATCH_ROWS;
   const [sortOpen, setSortOpen] = useState(false);
   const sortRef = useRef<HTMLDivElement>(null);
   const sortPopRef = useRef<HTMLDivElement>(null);
@@ -240,7 +257,7 @@ export default function Bookmarks() {
 
   const switchTab = (t: Tab) => {
     setTab(t);
-    setShown({ professors: BATCH, courses: BATCH });
+    setShownBatches({ professors: 1, courses: 1 });
   };
 
   if (authLoading) return null;
@@ -351,7 +368,6 @@ export default function Bookmarks() {
                     <span className="filter-toggle-bar" />
                   </span>
                   Sort
-                  {sort !== 'saved' && <span className="filter-active-badge">1</span>}
                 </button>
                 {sortOpen && !isMobileSort && sortPopContent}
               </div>
@@ -377,15 +393,15 @@ export default function Bookmarks() {
                       <div className="bm-section-head">
                         <h2 className="bm-section-title">Professors</h2>
                         <span className="bm-section-count">{profs.length}</span>
-                        {!q && profs.length > PREVIEW && (
+                        {!q && profs.length > preview && (
                           <button className="bm-showall" onClick={() => switchTab('professors')}>Show all {profs.length} →</button>
                         )}
                       </div>
                       {visibleProfessors.length === 0 ? (
                         <div className="bm-mini-empty">No professors saved yet — <Link to="/professors">browse professors</Link> and tap the flag to add one.</div>
                       ) : (
-                        <div className="catalog-grid">
-                          {(q ? profs : profs.slice(0, PREVIEW)).map(prof => (
+                        <div className="catalog-grid" ref={gridRef}>
+                          {(q ? profs : profs.slice(0, preview)).map(prof => (
                             <ProfCard key={prof.slug} prof={prof} onOpen={() => navigate(`/professors/${prof.slug}`)} onRemove={() => requestRemove('professor', prof.slug, stripPrefix(prof.name))} />
                           ))}
                         </div>
@@ -397,15 +413,15 @@ export default function Bookmarks() {
                       <div className="bm-section-head">
                         <h2 className="bm-section-title">Courses</h2>
                         <span className="bm-section-count">{courses.length}</span>
-                        {!q && courses.length > PREVIEW && (
+                        {!q && courses.length > preview && (
                           <button className="bm-showall" onClick={() => switchTab('courses')}>Show all {courses.length} →</button>
                         )}
                       </div>
                       {visibleCourses.length === 0 ? (
                         <div className="bm-mini-empty">No courses saved yet — <Link to="/courses">browse courses</Link> and tap the flag to add one.</div>
                       ) : (
-                        <div className="catalog-grid">
-                          {(q ? courses : courses.slice(0, PREVIEW)).map(course => (
+                        <div className="catalog-grid" ref={gridRef}>
+                          {(q ? courses : courses.slice(0, preview)).map(course => (
                             <CourseCard key={course.code} course={course} onOpen={() => navigate(`/courses/${course.code.toLowerCase()}`)} onRemove={() => requestRemove('course', course.code, course.code)} />
                           ))}
                         </div>
@@ -437,24 +453,24 @@ export default function Bookmarks() {
                 </div>
               ) : (
                 <>
-                  <div className="catalog-grid">
-                    {(q ? profs : profs.slice(0, shown.professors)).map(prof => (
+                  <div className="catalog-grid" ref={gridRef}>
+                    {(q ? profs : profs.slice(0, shownBatches.professors * batch)).map(prof => (
                       <ProfCard key={prof.slug} prof={prof} onOpen={() => navigate(`/professors/${prof.slug}`)} onRemove={() => requestRemove('professor', prof.slug, stripPrefix(prof.name))} />
                     ))}
                   </div>
                   {!q && (
-                    shown.professors >= profs.length ? (
-                      profs.length > BATCH && (
+                    shownBatches.professors * batch >= profs.length ? (
+                      profs.length > batch && (
                         <div className="bm-loadmore-row"><span className="bm-viewing">Viewing all {profs.length}</span></div>
                       )
                     ) : (
                       <div className="bm-loadmore-row">
-                        <span className="bm-viewing">Viewing {Math.min(shown.professors, profs.length)} of {profs.length}</span>
+                        <span className="bm-viewing">Viewing {Math.min(shownBatches.professors * batch, profs.length)} of {profs.length}</span>
                         <button
                           className="clear-btn prominent secondary"
-                          onClick={() => setShown(s => ({ ...s, professors: s.professors + BATCH }))}
+                          onClick={() => setShownBatches(s => ({ ...s, professors: s.professors + 1 }))}
                         >
-                          Show {Math.min(BATCH, profs.length - shown.professors)} more
+                          Show {Math.min(batch, profs.length - shownBatches.professors * batch)} more
                         </button>
                       </div>
                     )
@@ -484,24 +500,24 @@ export default function Bookmarks() {
                 </div>
               ) : (
                 <>
-                  <div className="catalog-grid">
-                    {(q ? courses : courses.slice(0, shown.courses)).map(course => (
+                  <div className="catalog-grid" ref={gridRef}>
+                    {(q ? courses : courses.slice(0, shownBatches.courses * batch)).map(course => (
                       <CourseCard key={course.code} course={course} onOpen={() => navigate(`/courses/${course.code.toLowerCase()}`)} onRemove={() => requestRemove('course', course.code, course.code)} />
                     ))}
                   </div>
                   {!q && (
-                    shown.courses >= courses.length ? (
-                      courses.length > BATCH && (
+                    shownBatches.courses * batch >= courses.length ? (
+                      courses.length > batch && (
                         <div className="bm-loadmore-row"><span className="bm-viewing">Viewing all {courses.length}</span></div>
                       )
                     ) : (
                       <div className="bm-loadmore-row">
-                        <span className="bm-viewing">Viewing {Math.min(shown.courses, courses.length)} of {courses.length}</span>
+                        <span className="bm-viewing">Viewing {Math.min(shownBatches.courses * batch, courses.length)} of {courses.length}</span>
                         <button
                           className="clear-btn prominent secondary"
-                          onClick={() => setShown(s => ({ ...s, courses: s.courses + BATCH }))}
+                          onClick={() => setShownBatches(s => ({ ...s, courses: s.courses + 1 }))}
                         >
-                          Show {Math.min(BATCH, courses.length - shown.courses)} more
+                          Show {Math.min(batch, courses.length - shownBatches.courses * batch)} more
                         </button>
                       </div>
                     )
