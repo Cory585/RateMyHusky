@@ -3,10 +3,15 @@ Transfer all tables from old CockroachDB cluster to new one.
 Reads CRDB_DATABASE_URL (old) and NEW_CRDB_DATABASE_URL (new) from .env.
 """
 
-import os, sys, time
+import argparse, os, sys, time
 from dotenv import load_dotenv
 import psycopg2
-from psycopg2.extras import execute_values
+from psycopg2.extensions import register_adapter
+from psycopg2.extras import execute_values, Json
+
+# JSONB columns come back as dict; mogrify has no adapter for a raw dict,
+# which crashes execute_values (evidence.rmp_meta).
+register_adapter(dict, Json)
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
@@ -117,13 +122,29 @@ def transfer_table(old_conn, new_conn, table):
     print(f"  {transferred:,} / {total_rows:,} done.")
 
 
+EVIDENCE_TABLES = ("evidence", "evidence_embeddings")
+
+
 def main():
+    parser = argparse.ArgumentParser(description="Transfer all tables from old CockroachDB cluster to new one.")
+    parser.add_argument(
+        "--skip-evidence",
+        action="store_true",
+        help="Skip the evidence and evidence_embeddings tables (leaves them untouched on the new cluster)",
+    )
+    args = parser.parse_args()
+
     print("Connecting to old cluster...")
     old_conn = connect_database("CRDB_DATABASE_URL", OLD_URL)
     print("Connecting to new cluster...")
     new_conn = connect_database("NEW_CRDB_DATABASE_URL", NEW_URL)
 
     tables = get_tables(old_conn)
+    if args.skip_evidence:
+        skipped = [t for t in tables if t in EVIDENCE_TABLES]
+        tables = [t for t in tables if t not in EVIDENCE_TABLES]
+        if skipped:
+            print(f"Skipping: {', '.join(skipped)}")
     print(f"Found {len(tables)} tables: {', '.join(tables)}\n")
 
     for table in tables:

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Analytics } from '@vercel/analytics/react';
 import { SpeedInsights } from '@vercel/speed-insights/react';
 import { AuthProvider } from './context/AuthContext';
@@ -12,9 +12,7 @@ import Course from './pages/Course';
 import Departments from './pages/Departments';
 import Department from './pages/Department';
 import Compare from './pages/Compare';
-import Account from './pages/Account';
-import AccountProfile from './pages/AccountProfile';
-import AccountBookmarks from './pages/AccountBookmarks';
+import Bookmarks from './pages/Bookmarks';
 import NotFound from './pages/NotFound';
 import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
@@ -50,10 +48,9 @@ function App() {
               <Route path="/departments" element={<Departments />} />
               <Route path="/departments/:slug" element={<Department />} />
               <Route path="/compare" element={<Compare />} />
-              <Route path="/account" element={<Account />}>
-                <Route index element={<AccountProfile />} />
-                <Route path="bookmarks" element={<AccountBookmarks />} />
-              </Route>
+              <Route path="/bookmarks" element={<Bookmarks />} />
+              <Route path="/account" element={<Navigate to="/bookmarks" replace />} />
+              <Route path="/account/bookmarks" element={<Navigate to="/bookmarks" replace />} />
               <Route path="/terms" element={<Terms />} />
               <Route path="/privacy" element={<Privacy />} />
               <Route path="*" element={<NotFound />} />

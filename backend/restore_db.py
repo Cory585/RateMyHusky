@@ -109,30 +109,49 @@ def confirm(host, tables, dump_name, input_fn=input, assume_yes=False):
         return True
     return input_fn(f"Type the cluster name ('{label}') to proceed: ").strip() == label
 
+def _fmt_secs(secs):
+    secs = int(secs)
+    if secs >= 3600:
+        return f"{secs // 3600}h{(secs % 3600) // 60:02d}m"
+    if secs >= 60:
+        return f"{secs // 60}m{secs % 60:02d}s"
+    return f"{secs}s"
+
+
 def restore(conn, path, tables):
     import gzip, psycopg2, time as _t
     executed = skipped = 0
-    with gzip.open(path, "rt", encoding="utf-8") as f:
+    total_bytes = os.path.getsize(path)
+    start = last_print = _t.time()
+    # Progress = compressed bytes consumed from the dump; ETA extrapolates from
+    # elapsed time, so it overshoots early while skipping filtered tables and
+    # corrects as real execution dominates.
+    with open(path, "rb") as raw, gzip.open(raw, "rt", encoding="utf-8") as f:
         for stmt in iter_statements(f):
             t = statement_table(stmt)
             if tables is not None and t is not None and t not in tables:
                 skipped += 1
-                continue
-            for attempt in range(6):
-                try:
-                    with conn.cursor() as cur:
-                        cur.execute(stmt)
-                    conn.commit()
-                    break
-                except psycopg2.errors.SerializationFailure:
-                    conn.rollback()
-                    if attempt == 5:
-                        raise
-                    _t.sleep(0.5 * (2 ** attempt))
-            executed += 1
-            if executed % 200 == 0:
-                print(f"  {executed:,} statements executed...", end="\r")
-    print(f"\nDone: {executed:,} statements executed, {skipped:,} skipped (filtered tables).")
+            else:
+                for attempt in range(6):
+                    try:
+                        with conn.cursor() as cur:
+                            cur.execute(stmt)
+                        conn.commit()
+                        break
+                    except psycopg2.errors.SerializationFailure:
+                        conn.rollback()
+                        if attempt == 5:
+                            raise
+                        _t.sleep(0.5 * (2 ** attempt))
+                executed += 1
+            now = _t.time()
+            if now - last_print >= 2:
+                last_print = now
+                frac = raw.tell() / total_bytes
+                eta = _fmt_secs((now - start) * (1 - frac) / frac) if frac > 0 else "?"
+                print(f"  {executed:,} statements executed | {frac:.1%} of dump | ~{eta} left   ", end="\r")
+    print(f"\nDone: {executed:,} statements executed, {skipped:,} skipped (filtered tables) "
+          f"in {_fmt_secs(_t.time() - start)}.")
 
 
 def connect_database(label, url, attempts=8):
@@ -186,6 +205,10 @@ def selftest():
     check("confirm honors --yes",
           confirm("h.x.y", ["t"], "d", input_fn=lambda _: (_ for _ in ()).throw(AssertionError("prompted")),
                   assume_yes=True) is True)
+
+    check("fmt seconds", _fmt_secs(45) == "45s")
+    check("fmt minutes", _fmt_secs(130) == "2m10s")
+    check("fmt hours", _fmt_secs(7500) == "2h05m")
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0

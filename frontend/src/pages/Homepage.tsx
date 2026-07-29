@@ -9,6 +9,7 @@ import Seo from '../components/Seo';
 import { fetchGoatProfessors, fetchProfessorsCatalog } from '../api/api';
 import type { CatalogProfessor, Professor } from '../api/api';
 import neuIcon from '../assets/neu-circle-icon.png';
+import { ASK_ENABLED } from '../config';
 import './Homepage.css';
 
 const STATS = [
@@ -425,7 +426,7 @@ const Homepage = () => {
         }}
       />
 
-      {showAskTip && (
+      {ASK_ENABLED && showAskTip && (
         <div className="home-ask-bubble" role="status">
           <div className="home-ask-bubble-icon">✨</div>
           <div className="home-ask-bubble-body">

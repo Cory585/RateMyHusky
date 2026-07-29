@@ -708,7 +708,7 @@ export default function ProfessorCatalog() {
                   tabIndex={0}
                   onClick={() => navigate(`/professors/${prof.slug}`, { state: { fromCatalog: `/professors?${searchParams.toString()}` } })}
                   onKeyDown={e =>
-                    e.key === 'Enter' && navigate(`/professors/${prof.slug}`, { state: { fromCatalog: `/professors?${searchParams.toString()}` } })
+                    e.key === 'Enter' && e.target === e.currentTarget && navigate(`/professors/${prof.slug}`, { state: { fromCatalog: `/professors?${searchParams.toString()}` } })
                   }
                 >
                   <BookmarkButton itemType="professor" itemKey={prof.slug} size="sm" className="prof-list-bookmark" />
@@ -761,7 +761,7 @@ export default function ProfessorCatalog() {
                   tabIndex={0}
                   onClick={() => navigate(`/professors/${prof.slug}`, { state: { fromCatalog: `/professors?${searchParams.toString()}` } })}
                   onKeyDown={e =>
-                    e.key === 'Enter' && navigate(`/professors/${prof.slug}`, { state: { fromCatalog: `/professors?${searchParams.toString()}` } })
+                    e.key === 'Enter' && e.target === e.currentTarget && navigate(`/professors/${prof.slug}`, { state: { fromCatalog: `/professors?${searchParams.toString()}` } })
                   }
                 >
                   <BookmarkButton itemType="professor" itemKey={prof.slug} size="sm" className="prof-card-bookmark" />

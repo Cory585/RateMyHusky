@@ -7,9 +7,10 @@ interface BookmarkButtonProps {
   itemKey: string;
   size?: 'sm' | 'md';
   className?: string;
+  onToggle?: () => void; // when set, parent owns the toggle (used for undo-able removal)
 }
 
-export default function BookmarkButton({ itemType, itemKey, size = 'sm', className }: BookmarkButtonProps) {
+export default function BookmarkButton({ itemType, itemKey, size = 'sm', className, onToggle }: BookmarkButtonProps) {
   const { user } = useAuth();
   const { isBookmarked, toggleBookmark } = useBookmarks();
   const bookmarked = isBookmarked(itemType, itemKey);
@@ -19,6 +20,10 @@ export default function BookmarkButton({ itemType, itemKey, size = 'sm', classNa
     e.preventDefault();
     if (!user) {
       window.dispatchEvent(new CustomEvent('open-signin'));
+      return;
+    }
+    if (onToggle) {
+      onToggle();
       return;
     }
     toggleBookmark(itemType, itemKey);

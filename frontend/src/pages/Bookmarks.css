@@ -1,0 +1,502 @@
+/* Bookmarks page — shell/chrome only. Card + grid styles come from
+   ProfessorCatalog.css and Courses.css (imported by Bookmarks.tsx). */
+
+.bm-content {
+  padding: 0 clamp(16px, 3vw, 48px) 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+
+/* ── Section headings (All tab) ── */
+.bm-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.bm-section-title {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #1a1a1a;
+  margin: 0;
+}
+
+.bm-section-count {
+  font-size: 0.8rem;
+  color: #aaa;
+  font-weight: 600;
+}
+
+/* ── Sign-in gate (ported from the deleted Account.css) ──
+   .catalog-page already adds 72px top padding; 40px margin lands the gate at
+   the old Account page's 112px offset. */
+.bookmarks-page .bm-signin-gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 80px 24px;
+  max-width: 480px;
+  margin: 40px auto 72px;
+  background: #fff;
+  border-radius: 16px;
+  border: 1.5px dashed #e0e0e0;
+}
+
+.bm-lock-icon {
+  width: 40px;
+  height: 40px;
+  color: #d6394c;
+  margin-bottom: 16px;
+}
+
+.bm-signin-gate p {
+  font-size: 0.95rem;
+  color: #888;
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+
+.husky-email {
+  font-weight: 700;
+  color: #555;
+}
+
+.bm-signin-btn {
+  background: #d6394c;
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  padding: 11px 32px;
+  font-family: 'Nunito', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.bm-signin-btn:hover {
+  background: #b52d3e;
+  transform: translateY(-1px);
+}
+
+/* ── Empty-state extras (layered on the existing .catalog-empty) ── */
+.bm-empty-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #fef0f0;
+  color: #d6394c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bm-empty-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
+.bm-empty-title {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #555;
+  margin: 0;
+}
+
+.bm-empty-hint {
+  font-size: 0.86rem;
+  color: #aaa;
+  margin: -6px 0 4px;
+  max-width: 380px;
+  line-height: 1.5;
+}
+
+.bm-empty-ctas {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.clear-btn.prominent.secondary {
+  background: transparent;
+  border: 1.5px solid #d6394c;
+  color: #d6394c;
+}
+
+.clear-btn.prominent.secondary:hover {
+  background: #fef0f0;
+}
+
+/* ── Dark mode ── */
+.dark .bm-section-title { color: #e0e0e0; }
+.dark .bm-section-count { color: #666; }
+
+.dark .bookmarks-page .bm-signin-gate {
+  background: #1e1e1e;
+  border-color: #333;
+}
+
+.dark .bm-signin-gate p { color: #777; }
+.dark .husky-email { color: #aaa; }
+
+.dark .bm-empty-icon {
+  background: #3a2020;
+  color: #f06d7d;
+}
+
+.dark .bm-empty-title { color: #aaa; }
+.dark .bm-empty-hint { color: #666; }
+.dark .clear-btn.prominent.secondary:hover { background: #3a2020; }
+
+/* ── Controls row: tabs + search + sort ── */
+.bm-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 0 clamp(16px, 3vw, 48px);
+  margin-bottom: 20px;
+}
+
+.bm-tabs {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.04);
+  padding: 4px;
+  border-radius: 24px;
+}
+
+.bm-tab {
+  border: none;
+  background: transparent;
+  font-family: 'Nunito', sans-serif;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #666;
+  padding: 8px 16px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+  white-space: nowrap;
+}
+
+.bm-tab:hover { color: #d6394c; }
+
+.bm-tab.active {
+  background: #d6394c;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(214, 57, 76, 0.25);
+}
+
+.bm-tab-count {
+  opacity: 0.65;
+  font-weight: 800;
+  margin-left: 5px;
+  font-size: 0.8rem;
+}
+
+.bm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.bm-search {
+  width: min(340px, 100%);
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1.5px solid #e2e2e2;
+  background: #fff;
+  font-size: 0.96rem;
+  color: #222;
+  font-family: 'Nunito', sans-serif;
+  outline: none;
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+
+.bm-search:focus {
+  border-color: #d6394c;
+  box-shadow: 0 2px 16px rgba(214, 57, 76, 0.18);
+}
+
+/* Sort button = same look as .catalog-filter-toggle; the 3-bar icon and
+   badge classes are reused from ProfessorCatalog.css. */
+.bm-sort { position: relative; }
+
+.bm-sort-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1.5px solid #e0e0e0;
+  background: #fff;
+  font-family: 'Nunito', sans-serif;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #555;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bm-sort.open .filter-toggle-bar:nth-child(1) { transform: rotate(45deg) translate(4px, 4px); }
+.bm-sort.open .filter-toggle-bar:nth-child(2) { opacity: 0; }
+.bm-sort.open .filter-toggle-bar:nth-child(3) { transform: rotate(-45deg) translate(4px, -4px); }
+
+.bm-sort-overlay { display: none; }
+
+.bm-sort-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 90;
+  min-width: 190px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
+  padding: 6px;
+  animation: bmPopIn 0.15s ease;
+}
+
+@keyframes bmPopIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.bm-sort-opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  background: none;
+  border-radius: 7px;
+  font-family: 'Nunito', sans-serif;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: #444;
+  cursor: pointer;
+  text-align: left;
+}
+
+.bm-sort-opt:hover { background: #f5f5f5; }
+.bm-sort-opt.selected { color: #d6394c; font-weight: 800; }
+
+/* ── Mini-empty (All tab, one type empty) ── */
+.bm-mini-empty {
+  font-size: 0.86rem;
+  color: #999;
+  background: #fff;
+  border: 1.5px dashed #e0e0e0;
+  border-radius: 12px;
+  padding: 18px 20px;
+}
+
+.bm-mini-empty a {
+  color: #d6394c;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.bm-mini-empty a:hover { text-decoration: underline; }
+
+/* ── Mobile: sticky controls + sort bottom sheet ── */
+@media (max-width: 540px) {
+  .bm-controls {
+    position: sticky;
+    top: 58px; /* just below the fixed navbar */
+    z-index: 30;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    background: rgba(247, 248, 250, 0.94);
+  }
+
+  .bm-tabs { width: 100%; }
+
+  .bm-tab {
+    flex: 1;
+    text-align: center;
+    padding: 8px 6px;
+    font-size: 0.84rem;
+  }
+
+  .bm-toolbar { width: 100%; }
+
+  .bm-search {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+  }
+
+  .bm-sort { position: static; }
+
+  .bm-sort-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 150;
+  }
+
+  .bm-sort-pop {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    border-radius: 18px 18px 0 0;
+    z-index: 151;
+    padding: 14px 14px 26px;
+    animation: bmSheetUp 0.22s ease;
+  }
+
+  .bm-sort-opt {
+    padding: 13px 12px;
+    font-size: 0.95rem;
+  }
+}
+
+@keyframes bmSheetUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+/* ── Dark mode ── */
+.dark .bm-tabs { background: rgba(255, 255, 255, 0.06); }
+.dark .bm-tab { color: #aaa; }
+.dark .bm-tab:hover { color: #d6394c; }
+.dark .bm-tab.active { background: #d6394c; color: #fff; }
+
+.dark .bm-search {
+  background: #232323;
+  border-color: #3a3a3a;
+  color: #e0e0e0;
+}
+
+.dark .bm-search::placeholder { color: #6f6f6f; }
+
+.dark .bm-sort-btn {
+  background: #232323;
+  border-color: #3a3a3a;
+  color: #aaa;
+}
+
+.dark .bm-sort-pop {
+  background: #232323;
+  border-color: #3a3a3a;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+}
+
+.dark .bm-sort-opt { color: #bbb; }
+.dark .bm-sort-opt:hover { background: #2a2a2a; }
+.dark .bm-sort-opt.selected { color: #f06d7d; }
+
+.dark .bm-mini-empty {
+  background: #212121;
+  border-color: #383838;
+  color: #777;
+}
+
+.dark .bm-mini-empty a { color: #f06d7d; }
+
+@media (max-width: 540px) {
+  .dark .bm-controls { background: rgba(26, 26, 26, 0.94); }
+}
+
+/* ── Undo snackbar ── */
+.bm-snackbar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: #1a1a1a;
+  color: #fff;
+  border-radius: 12px;
+  padding: 12px 18px;
+  font-family: 'Nunito', sans-serif;
+  font-size: 0.88rem;
+  font-weight: 600;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+  z-index: 200;
+  max-width: calc(100vw - 32px);
+  animation: bmSnackIn 0.2s ease;
+}
+
+@keyframes bmSnackIn {
+  from { opacity: 0; transform: translate(-50%, 12px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.bm-snackbar-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bm-undo {
+  background: none;
+  border: none;
+  color: #f06d7d;
+  font-family: 'Nunito', sans-serif;
+  font-size: 0.88rem;
+  font-weight: 800;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.bm-undo:hover { text-decoration: underline; }
+
+.dark .bm-snackbar {
+  background: #f2f2f2;
+  color: #1a1a1a;
+}
+
+.dark .bm-undo { color: #d6394c; }
+
+/* ── Windowing: Show all / Show more ── */
+.bm-showall {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #d6394c;
+  font-family: 'Nunito', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
+.bm-showall:hover { text-decoration: underline; }
+
+.bm-loadmore-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.bm-viewing {
+  font-size: 0.8rem;
+  color: #999;
+  font-weight: 600;
+}
+
+.dark .bm-showall { color: #f06d7d; }
+.dark .bm-viewing { color: #666; }

@@ -46,6 +46,9 @@ class FakeDb:
 
     def query_one(self, sql, params=None):
         s = sql.lower()
+        if "count(*)" in s and "from bookmarks" in s:
+            (user_sub,) = params
+            return {"cnt": sum(1 for r in self.bookmark_rows if r["user_sub"] == user_sub)}
         if "from professors_catalog" in s:
             (slug,) = params
             row = self.professors.get(slug)
@@ -90,19 +93,50 @@ def test_item_exists_false_for_unknown_key_or_type():
     assert item_exists("not-a-real-type", "olin-guha", db.query_one) is False
 
 
-def test_add_bookmark_returns_false_for_nonexistent_item():
+def test_add_bookmark_returns_not_found_for_nonexistent_item():
     db = FakeDb()
-    ok = add_bookmark("user-1", "professor", "does-not-exist", db.query_one, db.write)
-    assert ok is False
+    status = add_bookmark("user-1", "professor", "does-not-exist", db.query_one, db.write)
+    assert status == "not_found"
     assert db.bookmark_rows == []
 
 
 def test_add_bookmark_creates_row_for_real_item():
     db = FakeDb()
-    ok = add_bookmark("user-1", "professor", "olin-guha", db.query_one, db.write)
-    assert ok is True
+    status = add_bookmark("user-1", "professor", "olin-guha", db.query_one, db.write)
+    assert status == "ok"
     assert len(db.bookmark_rows) == 1
     assert db.bookmark_rows[0]["item_key"] == "olin-guha"
+
+
+def _fill_bookmarks(db, user_sub, n):
+    for i in range(n):
+        db.bookmark_rows.append({
+            "user_sub": user_sub, "item_type": "course", "item_key": f"FAKE{i}",
+            "created_at": datetime.datetime.now(datetime.timezone.utc),
+        })
+
+
+def test_add_bookmark_rejected_at_cap():
+    db = FakeDb()
+    _fill_bookmarks(db, "user-1", 200)
+    status = add_bookmark("user-1", "professor", "olin-guha", db.query_one, db.write)
+    assert status == "limit_reached"
+    assert len(db.bookmark_rows) == 200  # nothing inserted
+
+
+def test_add_bookmark_allowed_just_below_cap():
+    db = FakeDb()
+    _fill_bookmarks(db, "user-1", 199)
+    status = add_bookmark("user-1", "professor", "olin-guha", db.query_one, db.write)
+    assert status == "ok"
+    assert len(db.bookmark_rows) == 200
+
+
+def test_bookmark_cap_is_per_user():
+    db = FakeDb()
+    _fill_bookmarks(db, "someone-else", 200)
+    status = add_bookmark("user-1", "professor", "olin-guha", db.query_one, db.write)
+    assert status == "ok"
 
 
 def test_add_bookmark_is_idempotent():

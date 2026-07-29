@@ -4,6 +4,7 @@ import Dropdown from './Dropdown';
 import { fetchSearchSuggestions, askChat } from '../api/api';
 import type { SearchSuggestion, ChatResponse } from '../api/api';
 import { saveAskSession, loadAskSession, clearAskSession } from '../utils/askSession';
+import { ASK_ENABLED } from '../config';
 import './SearchBar.css';
 
 // Navigation state a clicked citation carries so the destination breadcrumb reads "← Ask" and
@@ -20,7 +21,7 @@ const searchOptions = [
   { value: 'Professor', label: 'Professor' },
   { value: 'Course', label: 'Course' },
   { value: 'Ask', label: 'Ask' },
-];
+].filter((o) => ASK_ENABLED || o.value !== 'Ask');
 
 interface SearchBarProps {
   // Bump this (e.g. Date.now()) to force the bar into Ask mode and focus it.
@@ -37,11 +38,11 @@ const SearchBar = ({ forceAsk, restoreAsk }: SearchBarProps) => {
   // On mount only: restore the saved Ask session when arriving via the "← Ask" breadcrumb,
   // otherwise drop any stale session so a plain homepage load starts blank. Guarded to run once
   // so it never re-clears a session that a later ask has just saved (this runs every render).
-  const restored = useRef(restoreAsk ? loadAskSession() : null);
+  const restored = useRef(ASK_ENABLED && restoreAsk ? loadAskSession() : null);
   const didInit = useRef(false);
   if (!didInit.current) {
     didInit.current = true;
-    if (!restoreAsk) clearAskSession();
+    if (!restoreAsk || !ASK_ENABLED) clearAskSession();
   }
   const [searchType, setSearchType] = useState(restored.current ? 'Ask' : 'Professor');
   const [query, setQuery] = useState(restored.current?.query ?? '');
@@ -80,7 +81,7 @@ const SearchBar = ({ forceAsk, restoreAsk }: SearchBarProps) => {
 
   // "Try Now" (home ask bubble) switches the bar into Ask mode and focuses it.
   useEffect(() => {
-    if (forceAsk === undefined) return;
+    if (forceAsk === undefined || !ASK_ENABLED) return;
     setSearchType('Ask');
     inputRef.current?.focus();
   }, [forceAsk]);
