@@ -23,9 +23,6 @@ Usage
     python build_sentiment_tasks.py --selftest             # offline checks, then exit
 """
 
-__author__ = "RateMyHusky"
-__version__ = "1.1.0"
-
 import argparse
 import csv
 import os

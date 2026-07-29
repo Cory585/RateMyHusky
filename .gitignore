@@ -13,3 +13,6 @@ node_modules/
 
 backend/groq_keys.local.json
 *.local.json
+
+archive/
+scraper/trace_pipeline/cookies.txt

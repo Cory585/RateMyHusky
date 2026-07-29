@@ -15,9 +15,6 @@ Usage
     python match_professors.py --selftest            # offline checks, then exit
 """
 
-__author__ = "RateMyHusky"
-__version__ = "1.0.0"
-
 import argparse
 import csv
 import gzip
