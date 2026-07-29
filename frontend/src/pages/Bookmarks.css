@@ -1,0 +1,153 @@
+/* Bookmarks page — shell/chrome only. Card + grid styles come from
+   ProfessorCatalog.css and Courses.css (imported by Bookmarks.tsx). */
+
+.bm-content {
+  padding: 0 clamp(16px, 3vw, 48px) 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+
+/* ── Section headings (All tab) ── */
+.bm-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.bm-section-title {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #1a1a1a;
+  margin: 0;
+}
+
+.bm-section-count {
+  font-size: 0.8rem;
+  color: #aaa;
+  font-weight: 600;
+}
+
+/* ── Sign-in gate (ported from the deleted Account.css) ──
+   .catalog-page already adds 72px top padding; 40px margin lands the gate at
+   the old Account page's 112px offset. */
+.bookmarks-page .bm-signin-gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 80px 24px;
+  max-width: 480px;
+  margin: 40px auto 72px;
+  background: #fff;
+  border-radius: 16px;
+  border: 1.5px dashed #e0e0e0;
+}
+
+.bm-lock-icon {
+  width: 40px;
+  height: 40px;
+  color: #d6394c;
+  margin-bottom: 16px;
+}
+
+.bm-signin-gate p {
+  font-size: 0.95rem;
+  color: #888;
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+
+.husky-email {
+  font-weight: 700;
+  color: #555;
+}
+
+.bm-signin-btn {
+  background: #d6394c;
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  padding: 11px 32px;
+  font-family: 'Nunito', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.bm-signin-btn:hover {
+  background: #b52d3e;
+  transform: translateY(-1px);
+}
+
+/* ── Empty-state extras (layered on the existing .catalog-empty) ── */
+.bm-empty-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #fef0f0;
+  color: #d6394c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bm-empty-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
+.bm-empty-title {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #555;
+  margin: 0;
+}
+
+.bm-empty-hint {
+  font-size: 0.86rem;
+  color: #aaa;
+  margin: -6px 0 4px;
+  max-width: 380px;
+  line-height: 1.5;
+}
+
+.bm-empty-ctas {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.clear-btn.prominent.secondary {
+  background: transparent;
+  border: 1.5px solid #d6394c;
+  color: #d6394c;
+}
+
+.clear-btn.prominent.secondary:hover {
+  background: #fef0f0;
+}
+
+/* ── Dark mode ── */
+.dark .bm-section-title { color: #e0e0e0; }
+.dark .bm-section-count { color: #666; }
+
+.dark .bookmarks-page .bm-signin-gate {
+  background: #1e1e1e;
+  border-color: #333;
+}
+
+.dark .bm-signin-gate p { color: #777; }
+.dark .husky-email { color: #aaa; }
+
+.dark .bm-empty-icon {
+  background: #3a2020;
+  color: #f06d7d;
+}
+
+.dark .bm-empty-title { color: #aaa; }
+.dark .bm-empty-hint { color: #666; }
+.dark .clear-btn.prominent.secondary:hover { background: #3a2020; }
