@@ -8,8 +8,18 @@ Run: python backend/eval/eval_ui.py -> http://127.0.0.1:5052
 """
 import os, sys, argparse
 
-from eval_common import (load_json, save_json_atomic, unit_id,
+from eval_common import (load_json, save_json_atomic,
                          QRELS_PATH, POOL_PATH, RUNS_DIR, EVAL_DIR)
+
+def is_safe_run_name(run):
+    """Reject a run name that could escape RUNS_DIR via path traversal — the grading routes
+    take `run` straight from the URL path (<path:run>) and os.path.join it into RUNS_DIR, so
+    something like '../../etc' must be refused rather than resolved."""
+    if not run or os.path.sep in run or (os.path.altsep and os.path.altsep in run) or ".." in run:
+        return False
+    base = os.path.realpath(RUNS_DIR)
+    candidate = os.path.realpath(os.path.join(RUNS_DIR, run))
+    return candidate == base or candidate.startswith(base + os.path.sep)
 
 RUBRIC = {0: "doesn't help answer this question",
           1: "tangentially useful (right entity, adjacent topic)",
@@ -55,6 +65,28 @@ def unit_progress(pool, qrels):
     return out
 
 
+def next_ungraded(answers, grades):
+    # failing deterministic checks first (stable within groups), then file order
+    ordered = sorted(answers, key=lambda a: a.get("checks_passed", True))
+    for a in ordered:
+        if a["question_id"] not in grades:
+            return a
+    return None
+
+
+def grade_summary(grades):
+    vals = list(grades.values())
+    if not vals:
+        return {"graded": 0, "mean_faithfulness": None, "pct_fully_grounded": None,
+                "mean_relevance": None, "citation_precision": None}
+    cits = [ok for g in vals for ok in g.get("citations", {}).values()]
+    return {"graded": len(vals),
+            "mean_faithfulness": sum(g["faithfulness"] for g in vals) / len(vals),
+            "pct_fully_grounded": sum(1 for g in vals if g["faithfulness"] == 2) / len(vals),
+            "mean_relevance": sum(g["relevance"] for g in vals) / len(vals),
+            "citation_precision": (sum(cits) / len(cits)) if cits else None}
+
+
 def selftest():
     fails = []
     def check(label, cond):
@@ -87,6 +119,36 @@ def selftest():
     record_label(qrels, "u1", ent, cand("a"), 1)
     prog = unit_progress({"units": {"u1": pool_unit}}, qrels)
     check("progress counts", prog[0]["labeled"] == 1 and prog[0]["total"] == 2)
+
+    # ── grading helpers ──
+    answers = [{"question_id": "p01", "answer": "x [1]", "checks_passed": True},
+               {"question_id": "p02", "answer": "y", "checks_passed": True}]
+    grades = {}
+    check("next ungraded is first", next_ungraded(answers, grades)["question_id"] == "p01")
+    grades["p01"] = {"faithfulness": 2, "relevance": 1, "citations": {"1": True, "2": False}, "note": ""}
+    check("advances past graded", next_ungraded(answers, grades)["question_id"] == "p02")
+    grades["p02"] = {"faithfulness": 1, "relevance": 2, "citations": {}, "note": "meh"}
+    check("all graded -> None", next_ungraded(answers, grades) is None)
+    # deterministic-check failures grade FIRST (spec: failures listed first in the grading UI)
+    mixed = [{"question_id": "g1", "checks_passed": True},
+             {"question_id": "g2", "checks_passed": False}]
+    check("failing answers surface first", next_ungraded(mixed, {})["question_id"] == "g2")
+    s = grade_summary(grades)
+    check("summary means", s["mean_faithfulness"] == 1.5 and s["mean_relevance"] == 1.5)
+    check("summary pct fully grounded", s["pct_fully_grounded"] == 0.5)
+    check("summary citation precision 1/2", s["citation_precision"] == 0.5)
+    check("summary graded count", s["graded"] == 2)
+    s0 = grade_summary({})
+    check("empty summary has None means", s0["mean_faithfulness"] is None and s0["graded"] == 0)
+
+    # ── path-traversal guard for the grading routes ──
+    check("plain run name accepted", is_safe_run_name("2026-07-28-1200-baseline") is True)
+    check("dotdot traversal rejected", is_safe_run_name("../../etc/passwd") is False)
+    check("forward slash rejected", is_safe_run_name("foo/bar") is False)
+    check("backslash rejected", is_safe_run_name("foo\\bar") is False)
+    check("bare dotdot rejected", is_safe_run_name("..") is False)
+    check("empty run name rejected", is_safe_run_name("") is False)
+    check("None run name rejected", is_safe_run_name(None) is False)
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0
@@ -153,7 +215,55 @@ def create_app():
 
 
 def register_grading_routes(app):
-    pass  # Task 9 fills this in
+    from flask import jsonify, request
+
+    def _answers_path(run):
+        return os.path.join(RUNS_DIR, run, "answers.json")
+
+    def _grades_path(run):
+        return os.path.join(RUNS_DIR, run, "grades.json")
+
+    @app.route("/api/runs")
+    def api_runs():
+        out = []
+        if os.path.isdir(RUNS_DIR):
+            for d in sorted(os.listdir(RUNS_DIR), reverse=True):
+                if os.path.exists(_answers_path(d)):
+                    g = load_json(_grades_path(d), {"grades": {}})
+                    n = len(load_json(_answers_path(d), {"answers": []})["answers"])
+                    out.append({"run": d, "answers": n, "graded": len(g["grades"])})
+        return jsonify({"runs": out})
+
+    @app.route("/api/run/<path:run>/next")
+    def api_run_next(run):
+        if not is_safe_run_name(run):
+            return jsonify({"error": "invalid run name"}), 400
+        data = load_json(_answers_path(run), None)
+        if data is None:
+            return jsonify({"error": "unknown run"}), 404
+        grades = load_json(_grades_path(run), {"grades": {}})["grades"]
+        rec = next_ungraded(data["answers"], grades)
+        return jsonify({"run": run, "record": rec, "graded": len(grades),
+                        "total": len(data["answers"]),
+                        "summary": grade_summary(grades)})
+
+    @app.route("/api/run/<path:run>/grade", methods=["POST"])
+    def api_run_grade(run):
+        if not is_safe_run_name(run):
+            return jsonify({"error": "invalid run name"}), 400
+        body = request.get_json(force=True)
+        for f in ("faithfulness", "relevance"):
+            if int(body[f]) not in (0, 1, 2):
+                return jsonify({"error": f"{f} must be 0-2"}), 400
+        path = _grades_path(run)
+        data = load_json(path, {"grades": {}})
+        data["grades"][body["question_id"]] = {
+            "faithfulness": int(body["faithfulness"]), "relevance": int(body["relevance"]),
+            "citations": {str(k): bool(v) for k, v in (body.get("citations") or {}).items()},
+            "note": body.get("note", "")}
+        data["summary"] = grade_summary(data["grades"])
+        save_json_atomic(path, data)
+        return api_run_next(run)
 
 
 if __name__ == "__main__":
