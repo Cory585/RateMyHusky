@@ -414,3 +414,89 @@
 @media (max-width: 540px) {
   .dark .bm-controls { background: rgba(26, 26, 26, 0.94); }
 }
+
+/* ── Undo snackbar ── */
+.bm-snackbar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: #1a1a1a;
+  color: #fff;
+  border-radius: 12px;
+  padding: 12px 18px;
+  font-family: 'Nunito', sans-serif;
+  font-size: 0.88rem;
+  font-weight: 600;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+  z-index: 200;
+  max-width: calc(100vw - 32px);
+  animation: bmSnackIn 0.2s ease;
+}
+
+@keyframes bmSnackIn {
+  from { opacity: 0; transform: translate(-50%, 12px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.bm-snackbar-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bm-undo {
+  background: none;
+  border: none;
+  color: #f06d7d;
+  font-family: 'Nunito', sans-serif;
+  font-size: 0.88rem;
+  font-weight: 800;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.bm-undo:hover { text-decoration: underline; }
+
+.dark .bm-snackbar {
+  background: #f2f2f2;
+  color: #1a1a1a;
+}
+
+.dark .bm-undo { color: #d6394c; }
+
+/* ── Windowing: Show all / Show more ── */
+.bm-showall {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #d6394c;
+  font-family: 'Nunito', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
+.bm-showall:hover { text-decoration: underline; }
+
+.bm-loadmore-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.bm-viewing {
+  font-size: 0.8rem;
+  color: #999;
+  font-weight: 600;
+}
+
+.dark .bm-showall { color: #f06d7d; }
+.dark .bm-viewing { color: #666; }

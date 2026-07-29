@@ -27,7 +27,7 @@ const BookmarksContext = createContext<BookmarksContextType>({
 
 export function BookmarksProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [professorSlugs, setProfessorSlugs] = useState<Set<string>>(new Set());
   const [courseCodes, setCourseCodes] = useState<Set<string>>(new Set());
   const [bookmarkedProfessors, setBookmarkedProfessors] = useState<BookmarkedProfessor[]>([]);
@@ -42,6 +42,7 @@ export function BookmarksProvider({ children }: { children: ReactNode }) {
       setCourseCodes(new Set());
       setBookmarkedProfessors([]);
       setBookmarkedCourses([]);
+      setLoading(false);
       return;
     }
     setLoading(true);

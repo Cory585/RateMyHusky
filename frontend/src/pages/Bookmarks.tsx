@@ -22,6 +22,9 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'alpha',  label: 'A – Z' },
 ];
 
+const PREVIEW = 10; // per-section preview on the All tab
+const BATCH = 24;   // "Show more" batch size on the type tabs
+
 function ratingColor(v: number | null): 'high' | 'mid' | 'low' | 'neutral' {
   if (v === null) return 'neutral';
   if (v >= 4) return 'high';
@@ -37,7 +40,7 @@ const BOOKMARK_ICON = (
 
 // Exact copy of the catalog grid card (ProfessorCatalog.tsx:756-824), including
 // the footer stats row the old bookmarks page dropped.
-function ProfCard({ prof, onOpen }: { prof: BookmarkedProfessor; onOpen: () => void }) {
+function ProfCard({ prof, onOpen, onRemove }: { prof: BookmarkedProfessor; onOpen: () => void; onRemove: () => void }) {
   return (
     <div
       className="prof-card"
@@ -46,7 +49,7 @@ function ProfCard({ prof, onOpen }: { prof: BookmarkedProfessor; onOpen: () => v
       onClick={onOpen}
       onKeyDown={e => e.key === 'Enter' && e.target === e.currentTarget && onOpen()}
     >
-      <BookmarkButton itemType="professor" itemKey={prof.slug} size="sm" className="prof-card-bookmark" />
+      <BookmarkButton itemType="professor" itemKey={prof.slug} size="sm" className="prof-card-bookmark" onToggle={onRemove} />
       <div className="prof-card-photo">
         <div className="prof-avatar">
           {prof.imageUrl ? (
@@ -104,7 +107,7 @@ function ProfCard({ prof, onOpen }: { prof: BookmarkedProfessor; onOpen: () => v
 }
 
 // Exact copy of the course catalog card (Courses.tsx:478-505).
-function CourseCard({ course, onOpen }: { course: BookmarkedCourse; onOpen: () => void }) {
+function CourseCard({ course, onOpen, onRemove }: { course: BookmarkedCourse; onOpen: () => void; onRemove: () => void }) {
   return (
     <div
       className="prof-card course-card"
@@ -113,7 +116,7 @@ function CourseCard({ course, onOpen }: { course: BookmarkedCourse; onOpen: () =
       onClick={onOpen}
       onKeyDown={e => e.key === 'Enter' && e.target === e.currentTarget && onOpen()}
     >
-      <BookmarkButton itemType="course" itemKey={course.code} size="sm" className="prof-card-bookmark" />
+      <BookmarkButton itemType="course" itemKey={course.code} size="sm" className="prof-card-bookmark" onToggle={onRemove} />
       <div className="course-card-header">
         <span className="course-card-code">{course.code}</span>
       </div>
@@ -138,12 +141,55 @@ function CourseCard({ course, onOpen }: { course: BookmarkedCourse; onOpen: () =
 export default function Bookmarks() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
-  const { bookmarkedProfessors, bookmarkedCourses, loading } = useBookmarks();
+  const { bookmarkedProfessors, bookmarkedCourses, loading, toggleBookmark } = useBookmarks();
   const [showSignIn, setShowSignIn] = useState(false);
+
+  const [pending, setPending] = useState<{ type: 'professor' | 'course'; key: string; label: string } | null>(null);
+  const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const commitRef = useRef<() => void>(() => {});
+
+  // Keep the latest commit closure available to the timer and the unmount flush.
+  useEffect(() => {
+    commitRef.current = () => {
+      if (pendingTimer.current) {
+        clearTimeout(pendingTimer.current);
+        pendingTimer.current = null;
+      }
+      if (pending) void toggleBookmark(pending.type, pending.key);
+      setPending(null);
+    };
+  });
+
+  // Leaving the page commits any pending removal.
+  useEffect(() => () => commitRef.current(), []);
+
+  const requestRemove = (type: 'professor' | 'course', key: string, label: string) => {
+    commitRef.current(); // a second removal commits the previous one immediately
+    setPending({ type, key, label });
+    pendingTimer.current = setTimeout(() => commitRef.current(), 5000);
+  };
+
+  const undoRemove = () => {
+    if (pendingTimer.current) {
+      clearTimeout(pendingTimer.current);
+      pendingTimer.current = null;
+    }
+    setPending(null);
+  };
+
+  const visibleProfessors = useMemo(
+    () => bookmarkedProfessors.filter(p => !(pending?.type === 'professor' && pending.key === p.slug)),
+    [bookmarkedProfessors, pending]
+  );
+  const visibleCourses = useMemo(
+    () => bookmarkedCourses.filter(c => !(pending?.type === 'course' && pending.key === c.code)),
+    [bookmarkedCourses, pending]
+  );
 
   const [tab, setTab] = useState<Tab>('all');
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortKey>('saved');
+  const [shown, setShown] = useState({ professors: BATCH, courses: BATCH });
   const [sortOpen, setSortOpen] = useState(false);
   const sortRef = useRef<HTMLDivElement>(null);
   const sortPopRef = useRef<HTMLDivElement>(null);
@@ -177,22 +223,25 @@ export default function Bookmarks() {
   const q = query.trim().toLowerCase();
 
   const profs = useMemo(() => {
-    let list = bookmarkedProfessors;
+    let list = visibleProfessors;
     if (q) list = list.filter(p => `${p.name} ${p.department} ${p.college}`.toLowerCase().includes(q));
     if (sort === 'rating') list = [...list].sort((a, b) => (b.avgRating ?? -1) - (a.avgRating ?? -1));
     else if (sort === 'alpha') list = [...list].sort((a, b) => stripPrefix(a.name).localeCompare(stripPrefix(b.name)));
     return list; // 'saved' keeps server order (bookmarkedAt desc)
-  }, [bookmarkedProfessors, q, sort]);
+  }, [visibleProfessors, q, sort]);
 
   const courses = useMemo(() => {
-    let list = bookmarkedCourses;
+    let list = visibleCourses;
     if (q) list = list.filter(c => `${c.code} ${c.name} ${c.department}`.toLowerCase().includes(q));
     if (sort === 'rating') list = [...list].sort((a, b) => (b.avgRating ?? -1) - (a.avgRating ?? -1));
     else if (sort === 'alpha') list = [...list].sort((a, b) => a.code.localeCompare(b.code));
     return list;
-  }, [bookmarkedCourses, q, sort]);
+  }, [visibleCourses, q, sort]);
 
-  const switchTab = (t: Tab) => setTab(t);
+  const switchTab = (t: Tab) => {
+    setTab(t);
+    setShown({ professors: BATCH, courses: BATCH });
+  };
 
   if (authLoading) return null;
 
@@ -230,7 +279,7 @@ export default function Bookmarks() {
     );
   }
 
-  const total = bookmarkedProfessors.length + bookmarkedCourses.length;
+  const total = visibleProfessors.length + visibleCourses.length;
 
   // Shared popover content: rendered in place under the Sort button on
   // desktop, portaled to document.body as a bottom sheet on mobile.
@@ -279,10 +328,10 @@ export default function Bookmarks() {
                 All<span className="bm-tab-count">{total}</span>
               </button>
               <button role="tab" aria-selected={tab === 'professors'} className={`bm-tab${tab === 'professors' ? ' active' : ''}`} onClick={() => switchTab('professors')}>
-                Professors<span className="bm-tab-count">{bookmarkedProfessors.length}</span>
+                Professors<span className="bm-tab-count">{visibleProfessors.length}</span>
               </button>
               <button role="tab" aria-selected={tab === 'courses'} className={`bm-tab${tab === 'courses' ? ' active' : ''}`} onClick={() => switchTab('courses')}>
-                Courses<span className="bm-tab-count">{bookmarkedCourses.length}</span>
+                Courses<span className="bm-tab-count">{visibleCourses.length}</span>
               </button>
             </div>
             <div className="bm-toolbar">
@@ -323,35 +372,41 @@ export default function Bookmarks() {
                 </div>
               ) : (
                 <>
-                  {(profs.length > 0 || (!q && bookmarkedProfessors.length === 0)) && (
+                  {(profs.length > 0 || (!q && visibleProfessors.length === 0)) && (
                     <section>
                       <div className="bm-section-head">
                         <h2 className="bm-section-title">Professors</h2>
                         <span className="bm-section-count">{profs.length}</span>
+                        {!q && profs.length > PREVIEW && (
+                          <button className="bm-showall" onClick={() => switchTab('professors')}>Show all {profs.length} →</button>
+                        )}
                       </div>
-                      {bookmarkedProfessors.length === 0 ? (
+                      {visibleProfessors.length === 0 ? (
                         <div className="bm-mini-empty">No professors saved yet — <Link to="/professors">browse professors</Link> and tap the flag to add one.</div>
                       ) : (
                         <div className="catalog-grid">
-                          {profs.map(prof => (
-                            <ProfCard key={prof.slug} prof={prof} onOpen={() => navigate(`/professors/${prof.slug}`)} />
+                          {(q ? profs : profs.slice(0, PREVIEW)).map(prof => (
+                            <ProfCard key={prof.slug} prof={prof} onOpen={() => navigate(`/professors/${prof.slug}`)} onRemove={() => requestRemove('professor', prof.slug, stripPrefix(prof.name))} />
                           ))}
                         </div>
                       )}
                     </section>
                   )}
-                  {(courses.length > 0 || (!q && bookmarkedCourses.length === 0)) && (
+                  {(courses.length > 0 || (!q && visibleCourses.length === 0)) && (
                     <section>
                       <div className="bm-section-head">
                         <h2 className="bm-section-title">Courses</h2>
                         <span className="bm-section-count">{courses.length}</span>
+                        {!q && courses.length > PREVIEW && (
+                          <button className="bm-showall" onClick={() => switchTab('courses')}>Show all {courses.length} →</button>
+                        )}
                       </div>
-                      {bookmarkedCourses.length === 0 ? (
+                      {visibleCourses.length === 0 ? (
                         <div className="bm-mini-empty">No courses saved yet — <Link to="/courses">browse courses</Link> and tap the flag to add one.</div>
                       ) : (
                         <div className="catalog-grid">
-                          {courses.map(course => (
-                            <CourseCard key={course.code} course={course} onOpen={() => navigate(`/courses/${course.code.toLowerCase()}`)} />
+                          {(q ? courses : courses.slice(0, PREVIEW)).map(course => (
+                            <CourseCard key={course.code} course={course} onOpen={() => navigate(`/courses/${course.code.toLowerCase()}`)} onRemove={() => requestRemove('course', course.code, course.code)} />
                           ))}
                         </div>
                       )}
@@ -362,7 +417,7 @@ export default function Bookmarks() {
             )}
 
             {tab === 'professors' && (
-              bookmarkedProfessors.length === 0 ? (
+              visibleProfessors.length === 0 ? (
                 <div className="catalog-empty">
                   <div className="bm-empty-icon">{BOOKMARK_ICON}</div>
                   <p className="bm-empty-title">No saved professors yet</p>
@@ -381,16 +436,35 @@ export default function Bookmarks() {
                   </div>
                 </div>
               ) : (
-                <div className="catalog-grid">
-                  {profs.map(prof => (
-                    <ProfCard key={prof.slug} prof={prof} onOpen={() => navigate(`/professors/${prof.slug}`)} />
-                  ))}
-                </div>
+                <>
+                  <div className="catalog-grid">
+                    {(q ? profs : profs.slice(0, shown.professors)).map(prof => (
+                      <ProfCard key={prof.slug} prof={prof} onOpen={() => navigate(`/professors/${prof.slug}`)} onRemove={() => requestRemove('professor', prof.slug, stripPrefix(prof.name))} />
+                    ))}
+                  </div>
+                  {!q && (
+                    shown.professors >= profs.length ? (
+                      profs.length > BATCH && (
+                        <div className="bm-loadmore-row"><span className="bm-viewing">Viewing all {profs.length}</span></div>
+                      )
+                    ) : (
+                      <div className="bm-loadmore-row">
+                        <span className="bm-viewing">Viewing {Math.min(shown.professors, profs.length)} of {profs.length}</span>
+                        <button
+                          className="clear-btn prominent secondary"
+                          onClick={() => setShown(s => ({ ...s, professors: s.professors + BATCH }))}
+                        >
+                          Show {Math.min(BATCH, profs.length - shown.professors)} more
+                        </button>
+                      </div>
+                    )
+                  )}
+                </>
               )
             )}
 
             {tab === 'courses' && (
-              bookmarkedCourses.length === 0 ? (
+              visibleCourses.length === 0 ? (
                 <div className="catalog-empty">
                   <div className="bm-empty-icon">{BOOKMARK_ICON}</div>
                   <p className="bm-empty-title">No saved courses yet</p>
@@ -409,15 +483,40 @@ export default function Bookmarks() {
                   </div>
                 </div>
               ) : (
-                <div className="catalog-grid">
-                  {courses.map(course => (
-                    <CourseCard key={course.code} course={course} onOpen={() => navigate(`/courses/${course.code.toLowerCase()}`)} />
-                  ))}
-                </div>
+                <>
+                  <div className="catalog-grid">
+                    {(q ? courses : courses.slice(0, shown.courses)).map(course => (
+                      <CourseCard key={course.code} course={course} onOpen={() => navigate(`/courses/${course.code.toLowerCase()}`)} onRemove={() => requestRemove('course', course.code, course.code)} />
+                    ))}
+                  </div>
+                  {!q && (
+                    shown.courses >= courses.length ? (
+                      courses.length > BATCH && (
+                        <div className="bm-loadmore-row"><span className="bm-viewing">Viewing all {courses.length}</span></div>
+                      )
+                    ) : (
+                      <div className="bm-loadmore-row">
+                        <span className="bm-viewing">Viewing {Math.min(shown.courses, courses.length)} of {courses.length}</span>
+                        <button
+                          className="clear-btn prominent secondary"
+                          onClick={() => setShown(s => ({ ...s, courses: s.courses + BATCH }))}
+                        >
+                          Show {Math.min(BATCH, courses.length - shown.courses)} more
+                        </button>
+                      </div>
+                    )
+                  )}
+                </>
               )
             )}
           </div>
         </>
+      )}
+      {pending && (
+        <div className="bm-snackbar" role="status">
+          <span className="bm-snackbar-text">Removed {pending.label}</span>
+          <button className="bm-undo" onClick={undoRemove}>Undo</button>
+        </div>
       )}
       <Footer />
     </div>
