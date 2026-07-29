@@ -122,7 +122,7 @@ def selftest():
         if not cond: fails.append(label)
         print(("PASS" if cond else "FAIL") + ": " + label)
 
-    from key_pool import KeyPool
+    from .key_pool import KeyPool
 
     class FakeMsg:  # mimic openai response shape
         def __init__(self, content): self.message = type("M", (), {"content": content})

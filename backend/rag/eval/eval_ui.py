@@ -4,7 +4,7 @@ Labeling: shows one pooled evidence candidate at a time per unit; keys 0/1/2 lab
 u undoes. Labels append to qrels.json (atomic write per keypress).
 Grading (Task 9): grade generation-run answers into runs/<run>/grades.json.
 
-Run: python backend/eval/eval_ui.py -> http://127.0.0.1:5052
+Run: python backend/rag/eval/eval_ui.py -> http://127.0.0.1:5052
 """
 import os, sys, argparse
 

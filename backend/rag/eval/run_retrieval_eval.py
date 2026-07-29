@@ -1,5 +1,5 @@
 """Scores the current fetch_evidence configuration against the hand-labeled qrels.
-Run: python backend/eval/run_retrieval_eval.py --run --label baseline"""
+Run: python backend/rag/eval/run_retrieval_eval.py --run --label baseline"""
 import sys, os, argparse, collections, datetime
 
 from eval_common import (connect, make_query_fns, unit_id, entity_args, load_json,
@@ -105,8 +105,8 @@ def score_all(questions, qrels, query_fn, fetch_fn, embed_fn):
 
 
 def run(questions, qrels, label, run_dir_arg):
-    from chat_retrieve import fetch_evidence
-    from query_embedder import embed_query, MODEL_VERSION
+    from rag.chat_retrieve import fetch_evidence
+    from rag.query_embedder import embed_query, MODEL_VERSION
     conn = connect()
     query_fn, _ = make_query_fns(conn)
     res = score_all(questions, qrels, query_fn, fetch_evidence, embed_query)

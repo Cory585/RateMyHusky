@@ -160,9 +160,10 @@ The dev frontend talks to the backend on port 5001 automatically.
 ├── backend/                   # Flask API (Railway)
 │   ├── server.py              #   Routes, auth, connection pool
 │   ├── bookmarks.py           #   Bookmark add/remove/list (pure functions)
-│   ├── chat_*.py              #   Ask pipeline: gate, retrieve, answer,
-│   │                          #   validate, cache, throttle, abuse
-│   ├── query_embedder.py      #   ONNX BGE-small query embeddings
+│   ├── rag/                   #   Ask pipeline: gate, retrieve, answer,
+│   │   │                      #   validate, cache, throttle, abuse,
+│   │   │                      #   ONNX BGE-small query embeddings
+│   │   └── eval/              #   Retrieval eval sets + RAG metrics
 │   └── Better_Scraper/        #   TRACE/RMP scrapers + CSV outputs
 └── scraper/                   # Reddit corpus + evidence/embedding pipeline
 ```

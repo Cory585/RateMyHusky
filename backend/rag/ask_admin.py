@@ -9,7 +9,7 @@ of any deploy path.
 Reads NEW_CRDB_DATABASE_URL (fallback CRDB_DATABASE_URL) from backend/.env, using
 the same DNS-retry connect() as clear_ask_strikes.py.
 
-Run: python backend/ask_admin.py -> http://127.0.0.1:5051
+Run: python backend/rag/ask_admin.py -> http://127.0.0.1:5051
 """
 import os
 import sys
@@ -23,9 +23,10 @@ from flask import Flask, jsonify, request
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from chat_abuse import STRIKE_STATUSES, _CAPS
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from rag.chat_abuse import STRIKE_STATUSES, _CAPS
 
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 URL = os.getenv("NEW_CRDB_DATABASE_URL") or os.getenv("CRDB_DATABASE_URL")
 if not URL:
     sys.exit("Need NEW_CRDB_DATABASE_URL (or CRDB_DATABASE_URL) in backend/.env")

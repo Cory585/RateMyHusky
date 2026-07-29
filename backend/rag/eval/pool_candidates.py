@@ -8,7 +8,7 @@ import sys, argparse, collections, datetime
 from eval_common import (connect, make_query_fns, unit_id, entity_args,
                          load_json, save_json_atomic, git_sha,
                          QUESTIONS_PATH, POOL_PATH)
-from chat_retrieve import _entity_filter, _lexical_candidates, _vector_candidates, fetch_evidence
+from rag.chat_retrieve import _entity_filter, _lexical_candidates, _vector_candidates, fetch_evidence
 
 EXPECTED_MODES = {"professor": 14, "course": 10, "compare": 6}
 MIN_EVIDENCE = 20
@@ -56,7 +56,7 @@ def build_unit_pool(question_id, question, entity, query_fn, embed_fn, fetch_evi
 
 
 def build_pool(questions, query_fn):
-    from query_embedder import embed_query
+    from rag.query_embedder import embed_query
     units = {}
     for q in questions:
         for entity in q["entities"]:

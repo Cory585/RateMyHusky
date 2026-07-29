@@ -2,7 +2,7 @@
 and saves answers for hand-grading. Throttle/abuse/cache are neutralized; nothing is written
 to ask_log. answers.json contains evidence bodies -> gitignored, never committed.
 
-Run: python backend/eval/run_generation_eval.py --run --label baseline [--run-dir backend/eval/runs/<dir>]"""
+Run: python backend/rag/eval/run_generation_eval.py --run --label baseline [--run-dir backend/rag/eval/runs/<dir>]"""
 import sys, os, re, time, types, argparse, datetime
 
 from eval_common import (connect, make_query_fns, make_prof_search, load_json,
@@ -25,10 +25,10 @@ def deterministic_checks(record, num_sources):
 
 
 def build_deps(query_fn, query_one_fn, prof_search, adapter, num_keys, log_calls, last_gen):
-    from chat_gate import gate
-    from chat_retrieve import retrieve
-    from chat_answer import generate, generate_course_list, generate_course_ranking
-    from query_embedder import embed_query
+    from rag.chat_gate import gate
+    from rag.chat_retrieve import retrieve
+    from rag.chat_answer import generate, generate_course_list, generate_course_ranking
+    from rag.query_embedder import embed_query
 
     def generate_fn(qq, blocks):
         out = generate(qq, blocks, adapter)
@@ -58,7 +58,7 @@ def neutralize_throttle():
     """handle_question imported these names into its own namespace; patch THERE. Keeps the
     eval exempt from daily/minute budgets, the abuse ladder, and the answer cache — an eval
     run must never rate-limit itself or count against production budgets."""
-    import chat_question
+    from rag import chat_question
     chat_question.abuse_check = lambda session, q1: {"allowed": True, "message": None}
     chat_question.global_budget_hit = lambda *a, **k: False
     chat_question.session_allowed = lambda *a, **k: (True, None)
@@ -71,8 +71,8 @@ def neutralize_throttle():
 
 
 def run(questions, label, run_dir_arg):
-    from llm_adapter import GroqAdapter
-    from key_pool import KeyPool
+    from rag.llm_adapter import GroqAdapter
+    from rag.key_pool import KeyPool
     # Resolve + create the run dir BEFORE the (paid, ~30-call) Groq loop, not after: a
     # typo'd/relative --run-dir or a mid-loop exception must not throw away a full run.
     run_dir = ensure_run_dir(run_dir_arg, label)
@@ -131,7 +131,7 @@ def run(questions, label, run_dir_arg):
         print(f"\nwrote {run_dir}/answers.json — {len(answers)} answers, "
               f"{len(failed)} failing checks{': ' + ', '.join(failed) if failed else ''}")
 
-    print("grade them: python backend/eval/eval_ui.py -> Grade tab")
+    print("grade them: python backend/rag/eval/eval_ui.py -> Grade tab")
     return 1 if failed else 0
 
 

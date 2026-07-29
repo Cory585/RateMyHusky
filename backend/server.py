@@ -24,14 +24,14 @@ from urllib.parse import urlencode, urlparse
 from datetime import datetime, timedelta, timezone
 from threading import Lock, Thread, Event
 import time
-from chat_search import keyword_search
-from chat_question import handle_question
-from llm_adapter import GroqAdapter
-from key_pool import KeyPool
-from chat_gate import gate
-from chat_retrieve import retrieve, fetch_reddit_mentions
-from query_embedder import embed_query
-from chat_answer import generate, generate_course_list, generate_course_ranking
+from rag.chat_search import keyword_search
+from rag.chat_question import handle_question
+from rag.llm_adapter import GroqAdapter
+from rag.key_pool import KeyPool
+from rag.chat_gate import gate
+from rag.chat_retrieve import retrieve, fetch_reddit_mentions
+from rag.query_embedder import embed_query
+from rag.chat_answer import generate, generate_course_list, generate_course_ranking
 from professor_full import build_full
 import bookmarks
 import usage_alert

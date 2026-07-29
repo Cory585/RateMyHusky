@@ -11,7 +11,7 @@ import os
 os.environ.setdefault("CRDB_DATABASE_URL", "postgresql://stub")
 os.environ.setdefault("JWT_SECRET", "test-secret")
 
-from clear_ask_strikes import purge_account
+from rag.clear_ask_strikes import purge_account
 
 
 class FakeCursor:
