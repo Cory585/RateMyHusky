@@ -2305,9 +2305,11 @@ def bookmarks_add():
     if item_type not in ("professor", "course") or not item_key:
         return jsonify({"error": "itemType must be 'professor' or 'course', itemKey is required"}), 400
 
-    ok = bookmarks.add_bookmark(user_sub, item_type, item_key, query_one, _write)
-    if not ok:
+    status = bookmarks.add_bookmark(user_sub, item_type, item_key, query_one, _write)
+    if status == "not_found":
         return jsonify({"error": "Not found"}), 404
+    if status == "limit_reached":
+        return jsonify({"error": "Bookmark limit reached"}), 400
     return jsonify({"ok": True})
 
 

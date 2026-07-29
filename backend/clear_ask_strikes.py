@@ -92,17 +92,23 @@ def clear(conn, cur, account, dry_run):
 
 def purge_account(conn, cur, account, dry_run):
     """Data-erasure: delete EVERY ask_log row for one account (query text, answer_text,
-    ip_hash, all statuses) — not just strikes. Use for a user's 'remove my tracked data'
-    request. Also resets that account's strikes/daily-cap as a side effect."""
+    ip_hash, all statuses) — not just strikes — plus the account's bookmarks. Use for a
+    user's 'remove my tracked data' request. Also resets that account's strikes/daily-cap
+    as a side effect."""
     cur.execute("SELECT count(*) FROM ask_log WHERE session_token = %s", (account,))
     n = cur.fetchone()[0]
+    cur.execute("SELECT count(*) FROM bookmarks WHERE user_sub = %s", (account,))
+    nb = cur.fetchone()[0]
     if dry_run:
-        print(f"[dry-run] would delete ALL {n} ask_log row(s) for {account!r}")
+        print(f"[dry-run] would delete ALL {n} ask_log row(s) and {nb} bookmark row(s) "
+              f"for {account!r}")
         return
     cur.execute("DELETE FROM ask_log WHERE session_token = %s", (account,))
+    n_deleted = cur.rowcount
+    cur.execute("DELETE FROM bookmarks WHERE user_sub = %s", (account,))
     conn.commit()
-    print(f"Deleted {cur.rowcount} ask_log row(s) for {account!r}. All tracked data for "
-          f"this account is removed.")
+    print(f"Deleted {n_deleted} ask_log row(s) and {cur.rowcount} bookmark row(s) for "
+          f"{account!r}. All tracked data for this account is removed.")
 
 
 def main():

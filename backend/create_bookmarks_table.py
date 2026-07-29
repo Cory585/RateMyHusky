@@ -1,7 +1,8 @@
 """
 Create the bookmarks table in CockroachDB.
 Idempotent — safe to re-run (CREATE TABLE IF NOT EXISTS).
-Reads CRDB_DATABASE_URL from backend/.env.
+Reads NEW_CRDB_DATABASE_URL (fallback CRDB_DATABASE_URL) from backend/.env —
+the local .env's CRDB_DATABASE_URL points at the old, disabled cluster.
 
 Run:  python backend/create_bookmarks_table.py
 """
@@ -13,10 +14,10 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
-DATABASE_URL = os.getenv("CRDB_DATABASE_URL")
+DATABASE_URL = os.getenv("NEW_CRDB_DATABASE_URL") or os.getenv("CRDB_DATABASE_URL")
 
 if not DATABASE_URL:
-    sys.exit("Missing CRDB_DATABASE_URL in backend/.env")
+    sys.exit("Missing NEW_CRDB_DATABASE_URL (or CRDB_DATABASE_URL) in backend/.env")
 
 import psycopg2
 

@@ -11,6 +11,8 @@ _CATALOG_TABLES = {
     "course": ("course_catalog", "code"),
 }
 
+BOOKMARK_CAP = 200  # max bookmarks per user (professors + courses combined)
+
 
 def item_exists(item_type, item_key, query_one):
     """Check that item_key resolves to a real row in the relevant catalog table."""
@@ -25,17 +27,22 @@ def item_exists(item_type, item_key, query_one):
 def add_bookmark(user_sub, item_type, item_key, query_one, write):
     """Idempotently bookmark an item for a user.
 
-    Returns True once the bookmark exists, False if item_type/item_key don't
-    resolve to a real professor/course (caller maps False to 404).
+    Returns "ok" once the bookmark exists, "not_found" if item_type/item_key
+    don't resolve to a real professor/course (caller maps to 404), or
+    "limit_reached" if the user already holds BOOKMARK_CAP bookmarks
+    (caller maps to 400).
     """
     if not item_exists(item_type, item_key, query_one):
-        return False
+        return "not_found"
+    count_row = query_one("SELECT count(*) AS cnt FROM bookmarks WHERE user_sub = %s", (user_sub,))
+    if count_row and count_row["cnt"] >= BOOKMARK_CAP:
+        return "limit_reached"
     write(
         "INSERT INTO bookmarks (user_sub, item_type, item_key) VALUES (%s, %s, %s) "
         "ON CONFLICT (user_sub, item_type, item_key) DO NOTHING",
         (user_sub, item_type, item_key),
     )
-    return True
+    return "ok"
 
 
 def remove_bookmark(user_sub, item_type, item_key, write):
