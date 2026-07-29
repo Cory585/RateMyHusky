@@ -6,8 +6,8 @@ import type { CatalogProfessor, CatalogCourse } from '../api/api';
 
 type ItemType = 'professor' | 'course';
 
-type BookmarkedProfessor = CatalogProfessor & { bookmarkedAt: string };
-type BookmarkedCourse = CatalogCourse & { bookmarkedAt: string };
+export type BookmarkedProfessor = CatalogProfessor & { bookmarkedAt: string };
+export type BookmarkedCourse = CatalogCourse & { bookmarkedAt: string };
 
 interface BookmarksContextType {
   loading: boolean;
