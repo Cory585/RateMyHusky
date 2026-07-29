@@ -1,0 +1,115 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>RAG eval — label & grade</title>
+<style>
+  body { font: 15px/1.45 system-ui, sans-serif; margin: 0; background: #f5f6f8; color: #1c2733; }
+  header { background: #c8102e; color: #fff; padding: 10px 16px; display: flex; gap: 16px; align-items: center; }
+  header b { font-size: 17px; }
+  main { max-width: 880px; margin: 24px auto; padding: 0 16px; }
+  .card { background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.08); padding: 18px 20px; margin-bottom: 14px; }
+  .q { font-size: 18px; font-weight: 600; }
+  .meta { color: #5b6b7b; font-size: 13px; margin-top: 4px; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 700; color: #fff; }
+  .badge.reddit { background: #ff4500; } .badge.rmp { background: #1a73e8; } .badge.trace { background: #6b21a8; }
+  .body { white-space: pre-wrap; margin-top: 10px; }
+  .keys { color: #5b6b7b; font-size: 13px; }
+  .keys kbd { background: #eef1f4; border: 1px solid #d5dae0; border-radius: 4px; padding: 0 6px; font-weight: 700; }
+  select { font: inherit; padding: 4px; }
+  .done { color: #15803d; font-weight: 700; }
+  ul.units { list-style: none; padding: 0; } ul.units li { padding: 3px 0; cursor: pointer; }
+  ul.units li:hover { text-decoration: underline; }
+</style></head><body>
+<header><b>RAG eval</b><span id="progress"></span></header>
+<main>
+  <div class="card">
+    <label>Unit: <select id="unitPicker"></select></label>
+    <div class="keys" style="margin-top:8px">
+      <kbd>0</kbd> irrelevant &nbsp; <kbd>1</kbd> tangential &nbsp; <kbd>2</kbd> directly supports &nbsp; <kbd>u</kbd> undo
+    </div>
+  </div>
+  <div class="card" id="questionCard"><div class="q" id="question"></div><div class="meta" id="unitMeta"></div></div>
+  <div class="card" id="candCard"><span class="badge" id="srcBadge"></span><div class="body" id="candBody"></div></div>
+</main>
+<script>
+let units = [], uid = null, current = null, busy = false, jumpTimer = null;
+
+async function j(url, opts) { const r = await fetch(url, opts); return r.json(); }
+
+async function refreshState() {
+  const s = await j("/api/state");
+  units = s.units;
+  const total = units.reduce((a, u) => a + u.total, 0);
+  const done = units.reduce((a, u) => a + u.labeled, 0);
+  document.getElementById("progress").textContent = `${done} / ${total} labeled`;
+  const pick = document.getElementById("unitPicker");
+  pick.innerHTML = units.map(u =>
+    `<option value="${u.unit_id}">${u.unit_id} (${u.labeled}/${u.total})</option>`).join("");
+  if (!uid) uid = (units.find(u => u.labeled < u.total) || units[0] || {}).unit_id;
+  if (uid) { pick.value = uid; await loadUnit(uid); }
+}
+
+async function loadUnit(u) {
+  uid = u;
+  const d = await j("/api/unit/" + encodeURIComponent(u));
+  render(d);
+}
+
+function render(d) {
+  if (jumpTimer) { clearTimeout(jumpTimer); jumpTimer = null; }
+  current = d.candidate;
+  document.getElementById("question").textContent = d.question || "";
+  document.getElementById("unitMeta").textContent =
+    `${d.unit_id} — ${d.labeled}/${d.total} labeled`;
+  const badge = document.getElementById("srcBadge"), body = document.getElementById("candBody");
+  if (!current) {
+    badge.textContent = ""; badge.className = "badge";
+    body.innerHTML = '<span class="done">Unit complete ✓ — pick the next unit above.</span>';
+    // auto-jump to the next incomplete unit
+    const next = units.find(u => u.unit_id !== d.unit_id && u.labeled < u.total);
+    if (next) jumpTimer = setTimeout(() => { jumpTimer = null; document.getElementById("unitPicker").value = next.unit_id; loadUnit(next.unit_id); refreshTotals(); }, 600);
+    return;
+  }
+  badge.textContent = current.source.toUpperCase();
+  badge.className = "badge " + current.source;
+  body.textContent = current.body;
+}
+
+async function refreshTotals() {
+  const s = await j("/api/state");
+  units = s.units;
+  const total = units.reduce((a, u) => a + u.total, 0);
+  const done = units.reduce((a, u) => a + u.labeled, 0);
+  document.getElementById("progress").textContent = `${done} / ${total} labeled`;
+  const pick = document.getElementById("unitPicker");
+  [...pick.options].forEach(o => {
+    const u = units.find(x => x.unit_id === o.value);
+    if (u) o.textContent = `${u.unit_id} (${u.labeled}/${u.total})`;
+  });
+}
+
+document.addEventListener("keydown", async (e) => {
+  if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
+  if (busy) return;  // ignore key-repeat while a label/undo request is in flight
+  if (["0", "1", "2"].includes(e.key) && current) {
+    busy = true;
+    try {
+      const d = await j("/api/label", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ unit_id: uid, evidence_id: current.evidence_id, rel: +e.key }) });
+      render(d); refreshTotals();
+    } finally {
+      busy = false;
+    }
+  } else if (e.key === "u") {
+    busy = true;
+    try {
+      const d = await j("/api/undo", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ unit_id: uid }) });
+      render(d); refreshTotals();
+    } finally {
+      busy = false;
+    }
+  }
+});
+document.getElementById("unitPicker").addEventListener("change", (e) => loadUnit(e.target.value));
+refreshState();
+</script>
+</body></html>
