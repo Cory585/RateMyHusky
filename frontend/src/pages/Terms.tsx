@@ -8,7 +8,7 @@ const Terms = () => {
         <div className="terms-shell">
           <header className="terms-header">
             <h1>Terms &amp; Conditions</h1>
-            <p className="terms-meta">Effective June 29, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective July 28, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -38,9 +38,9 @@ const Terms = () => {
               <h2>2. Eligibility &amp; Access</h2>
               <p>
                 Most content on RateMyHusky is publicly accessible without an account. However,
-                access to TRACE course evaluation comments and to the Ask (AI question) feature
-                requires signing in with a valid Northeastern University Google account
-                (<code>@husky.neu.edu</code>).
+                access to TRACE course evaluation comments, to the Ask (AI question) feature, and
+                to the bookmarks feature requires signing in with a valid Northeastern University
+                Google account (<code>@husky.neu.edu</code>).
               </p>
               <p>
                 By signing in, you confirm that you are at least 18 years of age and that you
@@ -57,15 +57,19 @@ const Terms = () => {
               </p>
               <p>
                 This information is encoded in a JWT (JSON Web Token) that is stored in your
-                browser's <code>localStorage</code>. The token expires after 7 days.
+                browser's <code>localStorage</code>. The token expires after 30 days.
                 RateMyHusky does not maintain a persistent server-side user account database;
-                no account profile is stored beyond the duration of your session token, and
-                signing out deletes the token from your browser.
+                no account profile is stored beyond the duration of your session token, other
+                than the bookmarks and Ask feature data described below, and signing out
+                deletes the token from your browser.
               </p>
               <p>
-                The one exception is the Ask (AI question) feature: if you use it, we keep
-                server-side logs of your questions that are linked to a session-derived
-                identifier (see Section 4, "Data We Collect," and our{' '}
+                There are two exceptions. If you bookmark a professor or course, we store that
+                bookmark server-side, keyed to your Google account id; it persists across
+                sign-ins until you remove it or request deletion (see Section 4, "Data We
+                Collect"). And if you use the Ask (AI question) feature, we keep server-side
+                logs of your questions that are linked to a session-derived identifier (see
+                Section 4, "Data We Collect," and our{' '}
                 <a href="/privacy">Privacy Policy</a> for what is stored, how long it is kept,
                 and how to request deletion).
               </p>
@@ -89,6 +93,13 @@ const Terms = () => {
                   <strong>Anonymous usage data:</strong> Vercel Analytics, Vercel Speed
                   Insights, and Google Analytics collect anonymous page view and performance
                   metrics. No personally identifiable information is included.
+                </li>
+                <li>
+                  <strong>Bookmarks:</strong> when you bookmark a professor or course while
+                  signed in, we store your Google account id, the item type (professor or
+                  course), the professor or course identifier, and a timestamp, server-side in
+                  our database. Each account is capped at 200 bookmarks. See our{' '}
+                  <a href="/privacy">Privacy Policy</a> for details on retention and deletion.
                 </li>
                 <li>
                   <strong>Ask feature logs:</strong> when you submit a question to the Ask

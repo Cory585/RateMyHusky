@@ -8,7 +8,7 @@ const Privacy = () => {
         <div className="terms-shell">
           <header className="terms-header">
             <h1>Privacy Policy</h1>
-            <p className="terms-meta">Effective June 29, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective July 28, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -56,6 +56,13 @@ const Privacy = () => {
                   beyond handling your request.
                 </li>
                 <li>
+                  <strong>Bookmarks:</strong> when you are signed in and bookmark a professor or
+                  course, we store your Google account id, the item type (professor or course),
+                  the professor or course identifier, and a timestamp in our database. Each
+                  account is capped at 200 bookmarks. These records are retained on our servers
+                  — see <em>How We Store Your Information</em> below.
+                </li>
+                <li>
                   <strong>Ask (AI question) feature:</strong> when you are signed in and submit
                   a question to the Ask feature, we log the question to operate the feature and
                   to detect abuse. Each logged entry includes the question text, the AI-generated
@@ -79,6 +86,7 @@ const Privacy = () => {
                 <li>Authenticate your identity and confirm your <code>@husky.neu.edu</code> affiliation</li>
                 <li>Restrict access to TRACE course evaluation comments to signed-in users</li>
                 <li>Display your name and profile photo in the navigation bar while signed in</li>
+                <li>Save and display the professors and courses you bookmark</li>
                 <li>
                   Answer your Ask questions, enforce per-account and per-IP rate limits, and
                   detect and prevent abuse of the Ask feature (such as off-topic or
@@ -99,12 +107,20 @@ const Privacy = () => {
                 Google OAuth handshake, a short-lived <code>httpOnly</code> cookie is used
                 to facilitate the flow; once complete, the resulting JWT is stored in your
                 browser's <code>localStorage</code> and the handshake cookie is cleared.
-                The token expires automatically after 7 days. RateMyHusky does not maintain
+                The token expires automatically after 30 days. RateMyHusky does not maintain
                 a persistent server-side user database; no account record is stored beyond
-                the duration of your session token.
+                the duration of your session token, other than your bookmarks and Ask feature
+                logs, described below.
               </p>
               <p>
                 Signing out deletes the token from your browser immediately.
+              </p>
+              <p>
+                In addition, if you bookmark a professor or course, that bookmark is stored
+                server-side in our database, keyed to your Google account id, along with the
+                item type, the professor or course identifier, and a timestamp. Bookmarks
+                persist across sign-ins until you remove them or request deletion — see{' '}
+                <em>Your Rights &amp; Choices</em>.
               </p>
               <p>
                 Separately, if you use the Ask feature, the question logs described above are
@@ -247,26 +263,27 @@ const Privacy = () => {
               <ul>
                 <li>
                   <strong>Right to access:</strong> you may request a copy of the data we hold
-                  that is associated with you. In practice this is limited to your Ask feature
-                  logs (if any); your sign-in details and preferences live only in your own
-                  browser and are not accessible to us.
+                  that is associated with you. In practice this is limited to your bookmarks
+                  and Ask feature logs (if any); your sign-in details and preferences live only
+                  in your own browser and are not accessible to us.
                 </li>
                 <li>
                   <strong>Right to deletion:</strong> you can <strong>sign out</strong> at any
                   time to immediately delete your JWT token from your browser, and{' '}
                   <strong>clear localStorage</strong> in your browser settings to remove your
-                  session token and stored preferences. To delete the Ask feature logs we hold,
-                  sign in and submit a <strong>Data Deletion Request</strong> through the feedback
-                  form: an email address is required, and your signed-in account identifier is
-                  included so we can verify your identity and delete every Ask log tied to your
-                  account. (You may also email{' '}
+                  session token and stored preferences. You can remove an individual bookmark at
+                  any time by un-bookmarking it. To delete the Ask feature logs and bookmarks we
+                  hold, sign in and submit a <strong>Data Deletion Request</strong> through the
+                  feedback form: an email address is required, and your signed-in account
+                  identifier is included so we can verify your identity and delete every Ask log
+                  and bookmark tied to your account. (You may also email{' '}
                   <a href="mailto:support@ratemyhusky.com">support@ratemyhusky.com</a>, though
                   because we never store your email address, we can only act on a request we can
                   tie to your account — submitting the form while signed in is the reliable path.)
                   This is a separate request from appealing an Ask suspension: an{' '}
                   <strong>Ask Ban Appeal</strong> asks us to review and restore your access,
-                  whereas a <strong>Data Deletion Request</strong> removes your Ask data from our
-                  servers entirely.
+                  whereas a <strong>Data Deletion Request</strong> removes your Ask data and
+                  bookmarks from our servers entirely.
                 </li>
                 <li>
                   <strong>Right to correction:</strong> the only personal data we receive (your
@@ -283,8 +300,8 @@ const Privacy = () => {
               </ul>
               <p>
                 Note that there is no account to delete. Once your token is cleared, no personal
-                data remains in our systems, except for any Ask feature logs, which remain until
-                you request their deletion.
+                data remains in our systems, except for any bookmarks and Ask feature logs, which
+                remain until you request their deletion.
               </p>
             </section>
 
