@@ -151,3 +151,266 @@
 .dark .bm-empty-title { color: #aaa; }
 .dark .bm-empty-hint { color: #666; }
 .dark .clear-btn.prominent.secondary:hover { background: #3a2020; }
+
+/* ── Controls row: tabs + search + sort ── */
+.bm-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 0 clamp(16px, 3vw, 48px);
+  margin-bottom: 20px;
+}
+
+.bm-tabs {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.04);
+  padding: 4px;
+  border-radius: 24px;
+}
+
+.bm-tab {
+  border: none;
+  background: transparent;
+  font-family: 'Nunito', sans-serif;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #666;
+  padding: 8px 16px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+  white-space: nowrap;
+}
+
+.bm-tab:hover { color: #d6394c; }
+
+.bm-tab.active {
+  background: #d6394c;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(214, 57, 76, 0.25);
+}
+
+.bm-tab-count {
+  opacity: 0.65;
+  font-weight: 800;
+  margin-left: 5px;
+  font-size: 0.8rem;
+}
+
+.bm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.bm-search {
+  width: min(340px, 100%);
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1.5px solid #e2e2e2;
+  background: #fff;
+  font-size: 0.96rem;
+  color: #222;
+  font-family: 'Nunito', sans-serif;
+  outline: none;
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+
+.bm-search:focus {
+  border-color: #d6394c;
+  box-shadow: 0 2px 16px rgba(214, 57, 76, 0.18);
+}
+
+/* Sort button = same look as .catalog-filter-toggle; the 3-bar icon and
+   badge classes are reused from ProfessorCatalog.css. */
+.bm-sort { position: relative; }
+
+.bm-sort-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1.5px solid #e0e0e0;
+  background: #fff;
+  font-family: 'Nunito', sans-serif;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #555;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bm-sort.open .filter-toggle-bar:nth-child(1) { transform: rotate(45deg) translate(4px, 4px); }
+.bm-sort.open .filter-toggle-bar:nth-child(2) { opacity: 0; }
+.bm-sort.open .filter-toggle-bar:nth-child(3) { transform: rotate(-45deg) translate(4px, -4px); }
+
+.bm-sort-overlay { display: none; }
+
+.bm-sort-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 90;
+  min-width: 190px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
+  padding: 6px;
+  animation: bmPopIn 0.15s ease;
+}
+
+@keyframes bmPopIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.bm-sort-opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  background: none;
+  border-radius: 7px;
+  font-family: 'Nunito', sans-serif;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: #444;
+  cursor: pointer;
+  text-align: left;
+}
+
+.bm-sort-opt:hover { background: #f5f5f5; }
+.bm-sort-opt.selected { color: #d6394c; font-weight: 800; }
+
+/* ── Mini-empty (All tab, one type empty) ── */
+.bm-mini-empty {
+  font-size: 0.86rem;
+  color: #999;
+  background: #fff;
+  border: 1.5px dashed #e0e0e0;
+  border-radius: 12px;
+  padding: 18px 20px;
+}
+
+.bm-mini-empty a {
+  color: #d6394c;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.bm-mini-empty a:hover { text-decoration: underline; }
+
+/* ── Mobile: sticky controls + sort bottom sheet ── */
+@media (max-width: 540px) {
+  .bm-controls {
+    position: sticky;
+    top: 58px; /* just below the fixed navbar */
+    z-index: 30;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    background: rgba(247, 248, 250, 0.94);
+  }
+
+  .bm-tabs { width: 100%; }
+
+  .bm-tab {
+    flex: 1;
+    text-align: center;
+    padding: 8px 6px;
+    font-size: 0.84rem;
+  }
+
+  .bm-toolbar { width: 100%; }
+
+  .bm-search {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+  }
+
+  .bm-sort { position: static; }
+
+  .bm-sort-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 150;
+  }
+
+  .bm-sort-pop {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    border-radius: 18px 18px 0 0;
+    z-index: 151;
+    padding: 14px 14px 26px;
+    animation: bmSheetUp 0.22s ease;
+  }
+
+  .bm-sort-opt {
+    padding: 13px 12px;
+    font-size: 0.95rem;
+  }
+}
+
+@keyframes bmSheetUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+/* ── Dark mode ── */
+.dark .bm-tabs { background: rgba(255, 255, 255, 0.06); }
+.dark .bm-tab { color: #aaa; }
+.dark .bm-tab:hover { color: #d6394c; }
+.dark .bm-tab.active { background: #d6394c; color: #fff; }
+
+.dark .bm-search {
+  background: #232323;
+  border-color: #3a3a3a;
+  color: #e0e0e0;
+}
+
+.dark .bm-search::placeholder { color: #6f6f6f; }
+
+.dark .bm-sort-btn {
+  background: #232323;
+  border-color: #3a3a3a;
+  color: #aaa;
+}
+
+.dark .bm-sort-pop {
+  background: #232323;
+  border-color: #3a3a3a;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+}
+
+.dark .bm-sort-opt { color: #bbb; }
+.dark .bm-sort-opt:hover { background: #2a2a2a; }
+.dark .bm-sort-opt.selected { color: #f06d7d; }
+
+.dark .bm-mini-empty {
+  background: #212121;
+  border-color: #383838;
+  color: #777;
+}
+
+.dark .bm-mini-empty a { color: #f06d7d; }
+
+@media (max-width: 540px) {
+  .dark .bm-controls { background: rgba(26, 26, 26, 0.94); }
+}
