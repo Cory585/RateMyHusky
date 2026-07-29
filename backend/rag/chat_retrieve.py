@@ -413,7 +413,7 @@ def _entity_filter(slug, code):
 
 def _lexical_candidates(where, entity_params, query, query_fn, limit=40):
     """Top lexical candidates for an entity-scoped evidence search, best-first [(id, ts_rank)].
-    Shared by fetch_evidence and backend/eval/pool_candidates.py — the eval pool must run the
+    Shared by fetch_evidence and backend/rag/eval/pool_candidates.py — the eval pool must run the
     EXACT production SQL, so tuning here automatically flows into the eval harness."""
     if not (query and query.strip()):
         return []
@@ -882,7 +882,7 @@ def selftest():
     nc = resolve_course_by_name("operating", name_codenoise_query)
     check("course-by-name drops code-only noise (name lacks hint)", nc == [])
 
-    # ── extracted candidate fetchers (shared with backend/eval pooling) ──
+    # ── extracted candidate fetchers (shared with backend/rag/eval pooling) ──
     cand_calls = []
     def cand_query(sql, params):
         cand_calls.append((sql, params))

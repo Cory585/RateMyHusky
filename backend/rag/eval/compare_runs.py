@@ -1,5 +1,5 @@
 """Prints a metric-by-metric diff of two eval run folders.
-Run: python backend/eval/compare_runs.py backend/eval/runs/<A> backend/eval/runs/<B>"""
+Run: python backend/rag/eval/compare_runs.py backend/rag/eval/runs/<A> backend/rag/eval/runs/<B>"""
 import os, sys, argparse
 
 from eval_common import load_json

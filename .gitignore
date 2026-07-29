@@ -16,5 +16,5 @@ backend/groq_keys.local.json
 
 archive/
 scraper/trace_pipeline/cookies.txt
-backend/eval/pool.json*
-backend/eval/runs/*/answers.json*
+backend/rag/eval/pool.json*
+backend/rag/eval/runs/*/answers.json*

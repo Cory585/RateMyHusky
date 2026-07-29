@@ -14,7 +14,7 @@ _EMBEDDER = None
 
 def load_embedder():
     # Pure onnxruntime (no torch, no optimum) — same model/normalization as
-    # backend/query_embedder.py, but this side pools with attention-mask weighting (see `embed`
+    # backend/rag/query_embedder.py, but this side pools with attention-mask weighting (see `embed`
     # below) because it batches variable-length texts together with padding. The query side
     # embeds one unpadded sequence at a time, where masked mean == plain mean, so it needs no
     # change to stay comparable. Only other difference: this batches (list[str] in, list[list[float]] out).

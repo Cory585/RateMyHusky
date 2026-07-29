@@ -1,9 +1,9 @@
-"""Shared plumbing for backend/eval scripts: live-DB connection (DNS-retry, NEW cluster),
+"""Shared plumbing for backend/rag/eval scripts: live-DB connection (DNS-retry, NEW cluster),
 query fns, professor-search stand-in, natural-key label resolution, and run-folder helpers."""
 import os, sys, json, time, argparse, datetime, subprocess
 
 EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
-BACKEND_DIR = os.path.dirname(EVAL_DIR)
+BACKEND_DIR = os.path.dirname(os.path.dirname(EVAL_DIR))
 RUNS_DIR = os.path.join(EVAL_DIR, "runs")
 QUESTIONS_PATH = os.path.join(EVAL_DIR, "eval_questions.json")
 QRELS_PATH = os.path.join(EVAL_DIR, "qrels.json")
@@ -102,13 +102,13 @@ def ensure_run_dir(run_dir_arg, label, runs_dir=None):
     """Resolve the eval run dir (an explicit --run-dir, or a freshly stamped one from
     `label`) and require it sits DIRECTLY inside runs_dir -- its realpath's parent must equal
     realpath(runs_dir). answers.json/retrieval_metrics.json are only covered by the
-    backend/eval/runs/*/answers.json* gitignore rule when the run dir is a direct child of
+    backend/rag/eval/runs/*/answers.json* gitignore rule when the run dir is a direct child of
     runs/, so a relative --run-dir that resolves elsewhere (e.g. 'runs/../evil'), an absolute
     path outside runs_dir, or a --label containing '/' (nesting the dir another level) are
     all rejected instead of silently writing evidence bodies somewhere ungitignored. Creates
     the dir and returns its resolved path. runs_dir defaults to RUNS_DIR; overridable only so
     the selftest below can point it at a scratch temp dir instead of littering the real
-    backend/eval/runs."""
+    backend/rag/eval/runs."""
     runs_dir = RUNS_DIR if runs_dir is None else runs_dir
     path = run_dir_arg or new_run_dir(label, runs_dir)
     resolved = os.path.realpath(path)
