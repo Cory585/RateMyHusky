@@ -33,6 +33,7 @@ from chat_retrieve import retrieve, fetch_reddit_mentions
 from query_embedder import embed_query
 from chat_answer import generate, generate_course_list, generate_course_ranking
 from professor_full import build_full
+import bookmarks
 import usage_alert
 
 load_dotenv()
@@ -457,6 +458,23 @@ def _chat_write_rc(sql, params=None):
     cur.execute(sql, params or ())
     conn.commit()
     return cur.rowcount
+
+def _write(sql, params=None):
+    """Write helper for user-facing mutations (bookmarks add/remove): execute +
+    commit, retry once on a stale connection (mirrors query()). Unlike
+    _chat_write, this does not swallow errors — a failed bookmark write must
+    surface to the caller, not be silently dropped like a best-effort log write."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(sql, params or ())
+        conn.commit()
+    except (psycopg2.InterfaceError, psycopg2.OperationalError):
+        _discard_db_conn()
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(sql, params or ())
+        conn.commit()
 
 
 
@@ -2249,6 +2267,65 @@ def auth_logout():
     resp = make_response(jsonify({"ok": True}))
     resp.delete_cookie("auth_token")
     return resp
+
+
+def _require_bookmarks_auth():
+    """Hard-401 auth gate shared by all three /api/bookmarks routes (same
+    pattern as /api/chat's question mode). Returns the JWT `sub` claim, or
+    None if a 401 JSON response has already been returned in its place."""
+    token = _get_auth_token()
+    if not token:
+        return None
+    try:
+        claims = pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+    except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+        return None
+    return claims["sub"]
+
+
+@app.route("/api/bookmarks")
+@limiter.limit("30 per minute")
+def bookmarks_get():
+    user_sub = _require_bookmarks_auth()
+    if not user_sub:
+        return jsonify({"error": "Sign in required"}), 401
+    return jsonify(bookmarks.list_bookmarks(user_sub, query))
+
+
+@app.route("/api/bookmarks", methods=["POST"])
+@limiter.limit("20 per minute")
+def bookmarks_add():
+    user_sub = _require_bookmarks_auth()
+    if not user_sub:
+        return jsonify({"error": "Sign in required"}), 401
+
+    data = request.get_json(silent=True) or {}
+    item_type = (data.get("itemType") or "").strip()
+    item_key = (data.get("itemKey") or "").strip()
+    if item_type not in ("professor", "course") or not item_key:
+        return jsonify({"error": "itemType must be 'professor' or 'course', itemKey is required"}), 400
+
+    ok = bookmarks.add_bookmark(user_sub, item_type, item_key, query_one, _write)
+    if not ok:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify({"ok": True})
+
+
+@app.route("/api/bookmarks", methods=["DELETE"])
+@limiter.limit("20 per minute")
+def bookmarks_remove():
+    user_sub = _require_bookmarks_auth()
+    if not user_sub:
+        return jsonify({"error": "Sign in required"}), 401
+
+    data = request.get_json(silent=True) or {}
+    item_type = (data.get("itemType") or "").strip()
+    item_key = (data.get("itemKey") or "").strip()
+    if item_type not in ("professor", "course") or not item_key:
+        return jsonify({"error": "itemType must be 'professor' or 'course', itemKey is required"}), 400
+
+    bookmarks.remove_bookmark(user_sub, item_type, item_key, _write)
+    return jsonify({"ok": True})
 
 
 @app.route("/api/feedback", methods=["POST"])

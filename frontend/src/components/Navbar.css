@@ -175,6 +175,28 @@
   word-break: break-all;
 }
 
+.navbar-user-link {
+  display: block;
+  width: 100%;
+  padding: 8px 0;
+  color: #333;
+  font-family: 'Nunito', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.navbar-user-link:first-of-type {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.navbar-user-link:hover {
+  color: #d6394c;
+}
+
 .navbar-user-signout {
   width: 100%;
   padding: 10px 0 0;
@@ -217,6 +239,18 @@
 .dark .navbar-user-email {
   color: #777;
   border-bottom-color: #333;
+}
+
+.dark .navbar-user-link {
+  color: #ccc;
+}
+
+.dark .navbar-user-link:first-of-type {
+  border-top-color: #333;
+}
+
+.dark .navbar-user-link:hover {
+  color: #f06d7d;
 }
 
 .dark .navbar-user-signout {

@@ -1,0 +1,53 @@
+.bookmark-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 50%;
+  cursor: pointer;
+  color: #888;
+  padding: 0;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.bookmark-btn:hover {
+  color: #d6394c;
+  transform: scale(1.08);
+}
+
+.bookmark-btn.bookmarked {
+  color: #d6394c;
+}
+
+.bookmark-btn-sm {
+  width: 30px;
+  height: 30px;
+}
+
+.bookmark-btn-sm svg {
+  width: 16px;
+  height: 16px;
+}
+
+.bookmark-btn-md {
+  width: 38px;
+  height: 38px;
+}
+
+.bookmark-btn-md svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* ── Dark mode ── */
+
+.dark .bookmark-btn {
+  background: rgba(36, 36, 36, 0.85);
+  color: #888;
+}
+
+.dark .bookmark-btn:hover,
+.dark .bookmark-btn.bookmarked {
+  color: #f06d7d;
+}

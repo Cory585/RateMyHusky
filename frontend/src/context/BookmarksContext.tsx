@@ -1,0 +1,125 @@
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import type { ReactNode } from 'react';
+import { useAuth } from './AuthContext';
+import { fetchBookmarks, addBookmark, removeBookmark } from '../api/api';
+import type { CatalogProfessor, CatalogCourse } from '../api/api';
+
+type ItemType = 'professor' | 'course';
+
+type BookmarkedProfessor = CatalogProfessor & { bookmarkedAt: string };
+type BookmarkedCourse = CatalogCourse & { bookmarkedAt: string };
+
+interface BookmarksContextType {
+  loading: boolean;
+  isBookmarked: (type: ItemType, key: string) => boolean;
+  toggleBookmark: (type: ItemType, key: string) => Promise<void>;
+  bookmarkedProfessors: BookmarkedProfessor[];
+  bookmarkedCourses: BookmarkedCourse[];
+}
+
+const BookmarksContext = createContext<BookmarksContextType>({
+  loading: false,
+  isBookmarked: () => false,
+  toggleBookmark: async () => {},
+  bookmarkedProfessors: [],
+  bookmarkedCourses: [],
+});
+
+export function BookmarksProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [professorSlugs, setProfessorSlugs] = useState<Set<string>>(new Set());
+  const [courseCodes, setCourseCodes] = useState<Set<string>>(new Set());
+  const [bookmarkedProfessors, setBookmarkedProfessors] = useState<BookmarkedProfessor[]>([]);
+  const [bookmarkedCourses, setBookmarkedCourses] = useState<BookmarkedCourse[]>([]);
+
+  // Single fetch whenever the user transitions from signed-out to signed-in;
+  // clears everything on logout. This is what lets every card on a catalog
+  // page check bookmark status via an O(1) Set lookup instead of N requests.
+  useEffect(() => {
+    if (!user) {
+      setProfessorSlugs(new Set());
+      setCourseCodes(new Set());
+      setBookmarkedProfessors([]);
+      setBookmarkedCourses([]);
+      return;
+    }
+    setLoading(true);
+    fetchBookmarks()
+      .then(data => {
+        setProfessorSlugs(new Set(data.professors.map(p => p.slug)));
+        setCourseCodes(new Set(data.courses.map(c => c.code)));
+        setBookmarkedProfessors(data.professors);
+        setBookmarkedCourses(data.courses);
+      })
+      .catch(() => {
+        // Signed in but couldn't load bookmarks — leave state empty rather than stale.
+      })
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.email]);
+
+  const isBookmarked = useCallback(
+    (type: ItemType, key: string) => (type === 'professor' ? professorSlugs.has(key) : courseCodes.has(key)),
+    [professorSlugs, courseCodes]
+  );
+
+  const toggleBookmark = useCallback(async (type: ItemType, key: string) => {
+    const currentlyBookmarked = type === 'professor' ? professorSlugs.has(key) : courseCodes.has(key);
+    const removedProfessor = type === 'professor' && currentlyBookmarked
+      ? bookmarkedProfessors.find(p => p.slug === key)
+      : undefined;
+    const removedCourse = type === 'course' && currentlyBookmarked
+      ? bookmarkedCourses.find(c => c.code === key)
+      : undefined;
+
+    const flip = (prev: Set<string>) => {
+      const next = new Set(prev);
+      if (currentlyBookmarked) next.delete(key); else next.add(key);
+      return next;
+    };
+    if (type === 'professor') {
+      setProfessorSlugs(flip);
+      if (currentlyBookmarked) setBookmarkedProfessors(prev => prev.filter(p => p.slug !== key));
+    } else {
+      setCourseCodes(flip);
+      if (currentlyBookmarked) setBookmarkedCourses(prev => prev.filter(c => c.code !== key));
+    }
+
+    try {
+      if (currentlyBookmarked) {
+        await removeBookmark(type, key);
+      } else {
+        await addBookmark(type, key);
+        // Fetch the full list so the newly-added item's display data (name,
+        // rating, etc.) is available — we only have its key client-side.
+        const data = await fetchBookmarks();
+        setBookmarkedProfessors(data.professors);
+        setBookmarkedCourses(data.courses);
+      }
+    } catch {
+      const unflip = (prev: Set<string>) => {
+        const next = new Set(prev);
+        if (currentlyBookmarked) next.add(key); else next.delete(key);
+        return next;
+      };
+      if (type === 'professor') {
+        setProfessorSlugs(unflip);
+        if (removedProfessor) setBookmarkedProfessors(prev => [removedProfessor, ...prev]);
+      } else {
+        setCourseCodes(unflip);
+        if (removedCourse) setBookmarkedCourses(prev => [removedCourse, ...prev]);
+      }
+    }
+  }, [professorSlugs, courseCodes, bookmarkedProfessors, bookmarkedCourses]);
+
+  return (
+    <BookmarksContext.Provider
+      value={{ loading, isBookmarked, toggleBookmark, bookmarkedProfessors, bookmarkedCourses }}
+    >
+      {children}
+    </BookmarksContext.Provider>
+  );
+}
+
+export const useBookmarks = () => useContext(BookmarksContext);
