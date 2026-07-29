@@ -67,7 +67,7 @@ const Terms = () => {
                 bookmark server-side, keyed to your Google account id; it persists across
                 sign-ins until you remove it or request deletion (see Section 4, "Data We
                 Collect"). And if you use the Ask (AI question) feature, we keep server-side
-                logs of your questions that are linked to a session-derived identifier (see
+                logs of your questions that are linked to your Google account id (see
                 Section 4, "Data We Collect," and our{' '}
                 <a href="/privacy">Privacy Policy</a> for what is stored, how long it is kept,
                 and how to request deletion).
@@ -103,8 +103,8 @@ const Terms = () => {
                 <li>
                   <strong>Ask feature logs:</strong> when you submit a question to the Ask
                   feature while signed in, we store the question, the AI-generated answer, the
-                  professor or course identified, token and timing metadata, a session-derived
-                  identifier, and a one-way hash of your IP address. See our{' '}
+                  professor or course identified, token and timing metadata, your Google
+                  account id, and a one-way hash of your IP address. See our{' '}
                   <a href="/privacy">Privacy Policy</a> for details on retention and deletion.
                 </li>
               </ul>

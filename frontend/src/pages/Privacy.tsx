@@ -37,8 +37,8 @@ const Privacy = () => {
                   address, and profile photo from Google. This information is encoded in a
                   JWT token stored in your browser; your name, email, and photo are never
                   written to a server-side database. Your Google account id is stored
-                  server-side only if you bookmark a professor or course — see Bookmarks
-                  below.
+                  server-side if you bookmark a professor or course or use the Ask feature
+                  — see the Bookmarks and Ask items below.
                 </li>
                 <li>
                   <strong>Browser preferences:</strong> your selected theme (dark/light) and
@@ -69,8 +69,8 @@ const Privacy = () => {
                   a question to the Ask feature, we log the question to operate the feature and
                   to detect abuse. Each logged entry includes the question text, the AI-generated
                   answer, the professor or course identified, how many tokens were used, the
-                  response time, an identifier derived from your session token, and a one-way
-                  hash of your IP address (your raw IP address is never stored). These logs are
+                  response time, your Google account id, and a one-way hash of your IP address
+                  (your raw IP address is never stored). These logs are
                   retained on our servers — see <em>How We Store Your Information</em> below.
                 </li>
               </ul>
@@ -125,8 +125,8 @@ const Privacy = () => {
               </p>
               <p>
                 Separately, if you use the Ask feature, the question logs described above are
-                stored server-side in our database. These logs are keyed to a session-derived
-                identifier and a hashed IP address (never your raw IP) and are retained to
+                stored server-side in our database. These logs are keyed to your Google account
+                id and a hashed IP address (never your raw IP) and are retained to
                 operate the feature and detect abuse. You may request deletion of your Ask logs
                 by submitting a <strong>Data Deletion Request</strong> through the feedback form
                 while signed in — see <em>Your Rights &amp; Choices</em>.
@@ -290,10 +290,10 @@ const Privacy = () => {
                   <strong>Right to correction:</strong> your name, email, and photo come
                   directly from Google and are never stored on our servers, so corrections to
                   them are made through your Google account. Your Google account id also comes
-                  from Google and cannot be edited; we store it only as part of your bookmarks,
-                  and removing your bookmarks removes it (see Right to deletion). If you believe
-                  professor or course data displayed on the site is inaccurate, you can report
-                  it through the feedback form.
+                  from Google and cannot be edited; we store it with your bookmarks and Ask
+                  logs, and a Data Deletion Request removes it (see Right to deletion above).
+                  If you believe professor or course data displayed on the site is inaccurate,
+                  you can report it through the feedback form.
                 </li>
                 <li>
                   <strong>Right to raise a concern:</strong> you may contact us at any time at{' '}
