@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useBookmarks } from '../context/BookmarksContext';
@@ -11,6 +12,15 @@ import { getInitials, splitProfName, stripPrefix } from '../utils/nameUtils';
 import './ProfessorCatalog.css';
 import './Courses.css';
 import './Bookmarks.css';
+
+type Tab = 'all' | 'professors' | 'courses';
+type SortKey = 'saved' | 'rating' | 'alpha';
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: 'saved',  label: 'Recently saved' },
+  { value: 'rating', label: 'Highest rated' },
+  { value: 'alpha',  label: 'A – Z' },
+];
 
 function ratingColor(v: number | null): 'high' | 'mid' | 'low' | 'neutral' {
   if (v === null) return 'neutral';
@@ -131,6 +141,59 @@ export default function Bookmarks() {
   const { bookmarkedProfessors, bookmarkedCourses, loading } = useBookmarks();
   const [showSignIn, setShowSignIn] = useState(false);
 
+  const [tab, setTab] = useState<Tab>('all');
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<SortKey>('saved');
+  const [sortOpen, setSortOpen] = useState(false);
+  const sortRef = useRef<HTMLDivElement>(null);
+  const sortPopRef = useRef<HTMLDivElement>(null);
+
+  // ≤540px the sort popover is portaled to document.body as a bottom sheet
+  // (see below) so it can escape .bm-controls' stacking context and sit
+  // above the fixed navbar with a full-viewport dimmed overlay.
+  const [isMobileSort, setIsMobileSort] = useState(() => window.matchMedia('(max-width: 540px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 540px)');
+    const onChange = (e: MediaQueryListEvent) => setIsMobileSort(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  // Close the sort popover on outside click (same pattern as CollegeFilter).
+  // Checks sortPopRef too since the popover content may be portaled outside
+  // sortRef's subtree on mobile.
+  useEffect(() => {
+    if (!sortOpen) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (sortRef.current?.contains(target)) return;
+      if (sortPopRef.current?.contains(target)) return;
+      setSortOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [sortOpen]);
+
+  const q = query.trim().toLowerCase();
+
+  const profs = useMemo(() => {
+    let list = bookmarkedProfessors;
+    if (q) list = list.filter(p => `${p.name} ${p.department} ${p.college}`.toLowerCase().includes(q));
+    if (sort === 'rating') list = [...list].sort((a, b) => (b.avgRating ?? -1) - (a.avgRating ?? -1));
+    else if (sort === 'alpha') list = [...list].sort((a, b) => stripPrefix(a.name).localeCompare(stripPrefix(b.name)));
+    return list; // 'saved' keeps server order (bookmarkedAt desc)
+  }, [bookmarkedProfessors, q, sort]);
+
+  const courses = useMemo(() => {
+    let list = bookmarkedCourses;
+    if (q) list = list.filter(c => `${c.code} ${c.name} ${c.department}`.toLowerCase().includes(q));
+    if (sort === 'rating') list = [...list].sort((a, b) => (b.avgRating ?? -1) - (a.avgRating ?? -1));
+    else if (sort === 'alpha') list = [...list].sort((a, b) => a.code.localeCompare(b.code));
+    return list;
+  }, [bookmarkedCourses, q, sort]);
+
+  const switchTab = (t: Tab) => setTab(t);
+
   if (authLoading) return null;
 
   if (!user) {
@@ -169,6 +232,28 @@ export default function Bookmarks() {
 
   const total = bookmarkedProfessors.length + bookmarkedCourses.length;
 
+  // Shared popover content: rendered in place under the Sort button on
+  // desktop, portaled to document.body as a bottom sheet on mobile.
+  const sortPopContent = (
+    <>
+      <div className="bm-sort-overlay" onClick={() => setSortOpen(false)} />
+      <div className="bm-sort-pop" role="listbox" ref={sortPopRef}>
+        {SORT_OPTIONS.map(opt => (
+          <button
+            key={opt.value}
+            role="option"
+            aria-selected={sort === opt.value}
+            className={`bm-sort-opt${sort === opt.value ? ' selected' : ''}`}
+            onClick={() => { setSort(opt.value); setSortOpen(false); }}
+          >
+            {opt.label}
+            <span style={{ visibility: sort === opt.value ? 'visible' : 'hidden' }}>✓</span>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+
   return (
     <div className="catalog-page bookmarks-page">
       <div className="catalog-header">
@@ -187,34 +272,152 @@ export default function Bookmarks() {
           </div>
         </div>
       ) : (
-        <div className="bm-content">
-          {bookmarkedProfessors.length > 0 && (
-            <section>
-              <div className="bm-section-head">
-                <h2 className="bm-section-title">Professors</h2>
-                <span className="bm-section-count">{bookmarkedProfessors.length}</span>
+        <>
+          <div className="bm-controls">
+            <div className="bm-tabs" role="tablist">
+              <button role="tab" aria-selected={tab === 'all'} className={`bm-tab${tab === 'all' ? ' active' : ''}`} onClick={() => switchTab('all')}>
+                All<span className="bm-tab-count">{total}</span>
+              </button>
+              <button role="tab" aria-selected={tab === 'professors'} className={`bm-tab${tab === 'professors' ? ' active' : ''}`} onClick={() => switchTab('professors')}>
+                Professors<span className="bm-tab-count">{bookmarkedProfessors.length}</span>
+              </button>
+              <button role="tab" aria-selected={tab === 'courses'} className={`bm-tab${tab === 'courses' ? ' active' : ''}`} onClick={() => switchTab('courses')}>
+                Courses<span className="bm-tab-count">{bookmarkedCourses.length}</span>
+              </button>
+            </div>
+            <div className="bm-toolbar">
+              <input
+                type="text"
+                className="bm-search"
+                placeholder="Search your bookmarks…"
+                aria-label="Search your bookmarks"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+              />
+              <div className={`bm-sort${sortOpen ? ' open' : ''}`} ref={sortRef}>
+                <button className="bm-sort-btn" aria-haspopup="listbox" aria-expanded={sortOpen} onClick={() => setSortOpen(o => !o)}>
+                  <span className="filter-toggle-icon">
+                    <span className="filter-toggle-bar" />
+                    <span className="filter-toggle-bar" />
+                    <span className="filter-toggle-bar" />
+                  </span>
+                  Sort
+                  {sort !== 'saved' && <span className="filter-active-badge">1</span>}
+                </button>
+                {sortOpen && !isMobileSort && sortPopContent}
               </div>
-              <div className="catalog-grid">
-                {bookmarkedProfessors.map(prof => (
-                  <ProfCard key={prof.slug} prof={prof} onOpen={() => navigate(`/professors/${prof.slug}`)} />
-                ))}
-              </div>
-            </section>
-          )}
-          {bookmarkedCourses.length > 0 && (
-            <section>
-              <div className="bm-section-head">
-                <h2 className="bm-section-title">Courses</h2>
-                <span className="bm-section-count">{bookmarkedCourses.length}</span>
-              </div>
-              <div className="catalog-grid">
-                {bookmarkedCourses.map(course => (
-                  <CourseCard key={course.code} course={course} onOpen={() => navigate(`/courses/${course.code.toLowerCase()}`)} />
-                ))}
-              </div>
-            </section>
-          )}
-        </div>
+            </div>
+          </div>
+          {sortOpen && isMobileSort && createPortal(sortPopContent, document.body)}
+
+          <div className="bm-content">
+            {tab === 'all' && (
+              q && profs.length === 0 && courses.length === 0 ? (
+                <div className="catalog-empty">
+                  <div className="bm-empty-icon">{BOOKMARK_ICON}</div>
+                  <p className="bm-empty-title">No bookmarks match your search</p>
+                  <p className="bm-empty-hint">Try a different name, course code, or department.</p>
+                  <div className="bm-empty-ctas">
+                    <button className="clear-btn prominent" onClick={() => setQuery('')}>Clear search</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {(profs.length > 0 || (!q && bookmarkedProfessors.length === 0)) && (
+                    <section>
+                      <div className="bm-section-head">
+                        <h2 className="bm-section-title">Professors</h2>
+                        <span className="bm-section-count">{profs.length}</span>
+                      </div>
+                      {bookmarkedProfessors.length === 0 ? (
+                        <div className="bm-mini-empty">No professors saved yet — <Link to="/professors">browse professors</Link> and tap the flag to add one.</div>
+                      ) : (
+                        <div className="catalog-grid">
+                          {profs.map(prof => (
+                            <ProfCard key={prof.slug} prof={prof} onOpen={() => navigate(`/professors/${prof.slug}`)} />
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  )}
+                  {(courses.length > 0 || (!q && bookmarkedCourses.length === 0)) && (
+                    <section>
+                      <div className="bm-section-head">
+                        <h2 className="bm-section-title">Courses</h2>
+                        <span className="bm-section-count">{courses.length}</span>
+                      </div>
+                      {bookmarkedCourses.length === 0 ? (
+                        <div className="bm-mini-empty">No courses saved yet — <Link to="/courses">browse courses</Link> and tap the flag to add one.</div>
+                      ) : (
+                        <div className="catalog-grid">
+                          {courses.map(course => (
+                            <CourseCard key={course.code} course={course} onOpen={() => navigate(`/courses/${course.code.toLowerCase()}`)} />
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  )}
+                </>
+              )
+            )}
+
+            {tab === 'professors' && (
+              bookmarkedProfessors.length === 0 ? (
+                <div className="catalog-empty">
+                  <div className="bm-empty-icon">{BOOKMARK_ICON}</div>
+                  <p className="bm-empty-title">No saved professors yet</p>
+                  <p className="bm-empty-hint">Tap the bookmark flag on any professor card to keep them here.</p>
+                  <div className="bm-empty-ctas">
+                    <Link to="/professors" className="clear-btn prominent">Browse Professors</Link>
+                  </div>
+                </div>
+              ) : profs.length === 0 ? (
+                <div className="catalog-empty">
+                  <div className="bm-empty-icon">{BOOKMARK_ICON}</div>
+                  <p className="bm-empty-title">No bookmarks match your search</p>
+                  <p className="bm-empty-hint">Try a different name, course code, or department.</p>
+                  <div className="bm-empty-ctas">
+                    <button className="clear-btn prominent" onClick={() => setQuery('')}>Clear search</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="catalog-grid">
+                  {profs.map(prof => (
+                    <ProfCard key={prof.slug} prof={prof} onOpen={() => navigate(`/professors/${prof.slug}`)} />
+                  ))}
+                </div>
+              )
+            )}
+
+            {tab === 'courses' && (
+              bookmarkedCourses.length === 0 ? (
+                <div className="catalog-empty">
+                  <div className="bm-empty-icon">{BOOKMARK_ICON}</div>
+                  <p className="bm-empty-title">No saved courses yet</p>
+                  <p className="bm-empty-hint">Tap the bookmark flag on any course card to keep it here.</p>
+                  <div className="bm-empty-ctas">
+                    <Link to="/courses" className="clear-btn prominent">Browse Courses</Link>
+                  </div>
+                </div>
+              ) : courses.length === 0 ? (
+                <div className="catalog-empty">
+                  <div className="bm-empty-icon">{BOOKMARK_ICON}</div>
+                  <p className="bm-empty-title">No bookmarks match your search</p>
+                  <p className="bm-empty-hint">Try a different name, course code, or department.</p>
+                  <div className="bm-empty-ctas">
+                    <button className="clear-btn prominent" onClick={() => setQuery('')}>Clear search</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="catalog-grid">
+                  {courses.map(course => (
+                    <CourseCard key={course.code} course={course} onOpen={() => navigate(`/courses/${course.code.toLowerCase()}`)} />
+                  ))}
+                </div>
+              )
+            )}
+          </div>
+        </>
       )}
       <Footer />
     </div>
