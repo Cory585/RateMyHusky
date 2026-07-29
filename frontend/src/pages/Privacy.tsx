@@ -35,8 +35,10 @@ const Privacy = () => {
                   <strong>Google Sign-In:</strong> when you authenticate with your{' '}
                   <code>@husky.neu.edu</code> Google account, we receive your name, email
                   address, and profile photo from Google. This information is encoded in a
-                  JWT token stored in your browser; it is never written to a server-side
-                  database.
+                  JWT token stored in your browser; your name, email, and photo are never
+                  written to a server-side database. Your Google account id is stored
+                  server-side only if you bookmark a professor or course — see Bookmarks
+                  below.
                 </li>
                 <li>
                   <strong>Browser preferences:</strong> your selected theme (dark/light) and
@@ -51,9 +53,9 @@ const Privacy = () => {
                   a CAPTCHA challenge (see Third-Party Services). If you submit an "Ask Ban
                   Appeal" or a "Data Deletion Request," an email address is required so we can
                   respond, and (if you are signed in) your account identifier is included so we
-                  can locate your Ask activity to review it or delete it. That account identifier
-                  is derived from your sign-in token at the time you submit and is not retained
-                  beyond handling your request.
+                  can locate your Ask activity and bookmarks to review or delete them. That
+                  account identifier is derived from your sign-in token at the time you submit
+                  and is not retained beyond handling your request.
                 </li>
                 <li>
                   <strong>Bookmarks:</strong> when you are signed in and bookmark a professor or
@@ -108,9 +110,8 @@ const Privacy = () => {
                 to facilitate the flow; once complete, the resulting JWT is stored in your
                 browser's <code>localStorage</code> and the handshake cookie is cleared.
                 The token expires automatically after 30 days. RateMyHusky does not maintain
-                a persistent server-side user database; no account record is stored beyond
-                the duration of your session token, other than your bookmarks and Ask feature
-                logs, described below.
+                user accounts or profiles; the only per-user data we store server-side is your
+                bookmarks and any Ask feature logs, described below.
               </p>
               <p>
                 Signing out deletes the token from your browser immediately.
@@ -286,9 +287,11 @@ const Privacy = () => {
                   bookmarks from our servers entirely.
                 </li>
                 <li>
-                  <strong>Right to correction:</strong> the only personal data we receive (your
-                  name, email, and photo) comes directly from Google and is never stored on our
-                  servers, so corrections are made through your Google account. If you believe
+                  <strong>Right to correction:</strong> your name, email, and photo come
+                  directly from Google and are never stored on our servers, so corrections to
+                  them are made through your Google account. Your Google account id also comes
+                  from Google and cannot be edited; we store it only as part of your bookmarks,
+                  and removing your bookmarks removes it (see Right to deletion). If you believe
                   professor or course data displayed on the site is inaccurate, you can report
                   it through the feedback form.
                 </li>

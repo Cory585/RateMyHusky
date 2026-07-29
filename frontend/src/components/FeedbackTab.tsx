@@ -154,7 +154,7 @@ const FeedbackTab = () => {
       case 'banappeal':
         return "Explain why your access to Ask should be restored. Include any context about the questions you asked.";
       case 'datadeletion':
-        return "Request deletion of your Ask data. Sign in first so we can verify your account; we'll delete all Ask logs tied to it.";
+        return "Request deletion of your Ask data and bookmarks. Sign in first so we can verify your account; we'll delete all Ask logs and bookmarks tied to it.";
       case 'general':
         return "Share your thoughts, suggestions, or anything else on your mind.";
       default:

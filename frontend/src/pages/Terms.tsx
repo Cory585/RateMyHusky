@@ -58,10 +58,9 @@ const Terms = () => {
               <p>
                 This information is encoded in a JWT (JSON Web Token) that is stored in your
                 browser's <code>localStorage</code>. The token expires after 30 days.
-                RateMyHusky does not maintain a persistent server-side user account database;
-                no account profile is stored beyond the duration of your session token, other
-                than the bookmarks and Ask feature data described below, and signing out
-                deletes the token from your browser.
+                RateMyHusky does not maintain user accounts or profiles. The only per-user data
+                we store server-side is your bookmarks and any Ask feature logs, described
+                below. Signing out deletes the token from your browser.
               </p>
               <p>
                 There are two exceptions. If you bookmark a professor or course, we store that
@@ -141,10 +140,11 @@ const Terms = () => {
                 can review and, where appropriate, restore your access.
               </p>
               <p>
-                You may request deletion of the Ask logs we hold by signing in and submitting a
-                "Data Deletion Request" through the feedback form. As with an appeal, an email
-                address is required and your signed-in account identifier is included so we can
-                verify your identity and erase every Ask log tied to your account. See our{' '}
+                You may request deletion of the Ask logs and bookmarks we hold by signing in and
+                submitting a "Data Deletion Request" through the feedback form. As with an
+                appeal, an email address is required and your signed-in account identifier is
+                included so we can verify your identity and erase every Ask log and bookmark
+                tied to your account. See our{' '}
                 <a href="/privacy">Privacy Policy</a> for details.
               </p>
             </section>
