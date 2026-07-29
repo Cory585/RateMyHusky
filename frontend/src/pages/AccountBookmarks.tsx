@@ -43,7 +43,7 @@ export default function AccountBookmarks() {
                 role="button"
                 tabIndex={0}
                 onClick={() => navigate(`/professors/${prof.slug}`)}
-                onKeyDown={e => e.key === 'Enter' && navigate(`/professors/${prof.slug}`)}
+                onKeyDown={e => e.key === 'Enter' && e.target === e.currentTarget && navigate(`/professors/${prof.slug}`)}
               >
                 <BookmarkButton itemType="professor" itemKey={prof.slug} size="sm" className="prof-card-bookmark" />
                 <div className="prof-card-photo">
@@ -113,7 +113,7 @@ export default function AccountBookmarks() {
                 role="button"
                 tabIndex={0}
                 onClick={() => navigate(`/courses/${course.code.toLowerCase()}`)}
-                onKeyDown={e => e.key === 'Enter' && navigate(`/courses/${course.code.toLowerCase()}`)}
+                onKeyDown={e => e.key === 'Enter' && e.target === e.currentTarget && navigate(`/courses/${course.code.toLowerCase()}`)}
               >
                 <BookmarkButton itemType="course" itemKey={course.code} size="sm" className="prof-card-bookmark" />
                 <div className="course-card-header">

@@ -481,7 +481,7 @@ export default function Courses() {
 									role="button"
 									tabIndex={0}
 									onClick={() => navigate(`/courses/${course.code.toLowerCase()}`)}
-									onKeyDown={(e) => e.key === 'Enter' && navigate(`/courses/${course.code.toLowerCase()}`)}
+									onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && navigate(`/courses/${course.code.toLowerCase()}`)}
 								>
 									<BookmarkButton itemType="course" itemKey={course.code} size="sm" className="prof-card-bookmark" />
 									<div className="course-card-header">
