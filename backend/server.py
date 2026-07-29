@@ -2206,7 +2206,7 @@ def auth_google_callback():
         "email": user_info["email"],
         "name": user_info.get("name", ""),
         "picture": user_info.get("picture", ""),
-        "exp": datetime.now(timezone.utc) + timedelta(days=7),
+        "exp": datetime.now(timezone.utc) + timedelta(days=30),
     }
     token = pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
