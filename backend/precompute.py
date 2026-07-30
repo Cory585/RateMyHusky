@@ -239,6 +239,23 @@ def main():
         elif alias_tgt in photo_lookup and alias_src not in photo_lookup:
             photo_lookup[alias_src] = photo_lookup[alias_tgt]
 
+    # ── Focus lookups (default 50/30 when missing) ──
+    def _focus_col(col):
+        if col in photos.columns:
+            return pd.to_numeric(photos[col], errors="coerce")
+        return pd.Series([np.nan] * len(photos))
+
+    photos["_fx"] = _focus_col("focus_x").fillna(50.0)
+    photos["_fy"] = _focus_col("focus_y").fillna(30.0)
+    focus_x_lookup = dict(zip(photos["_key"], photos["_fx"]))
+    focus_y_lookup = dict(zip(photos["_key"], photos["_fy"]))
+    for alias_src, alias_tgt in ALIAS_MAP.items():
+        for lk in (focus_x_lookup, focus_y_lookup):
+            if alias_src in lk and alias_tgt not in lk:
+                lk[alias_tgt] = lk[alias_src]
+            elif alias_tgt in lk and alias_src not in lk:
+                lk[alias_src] = lk[alias_tgt]
+
     # ── Clean RMP data ──
     rmp_profs["rating"] = pd.to_numeric(rmp_profs["rating"], errors="coerce")
     rmp_profs["num_ratings"] = pd.to_numeric(rmp_profs["num_ratings"], errors="coerce")
@@ -480,6 +497,8 @@ def main():
             wta, difficulty,
             row.get("professor_url", None) or None,
             photo_lookup.get(row["_name_key"], None),
+            float(focus_x_lookup.get(row["_name_key"], 50.0)),
+            float(focus_y_lookup.get(row["_name_key"], 30.0)),
             avg_hours,
             comment_counts_lookup.get(row["_name_key"], 0),
         ))
@@ -507,6 +526,8 @@ def main():
             0, t_rev, t_rev,
             None, None, None,
             photo_lookup.get(nk, None),
+            float(focus_x_lookup.get(nk, 50.0)),
+            float(focus_y_lookup.get(nk, 30.0)),
             avg_hours_t,
             comment_counts_lookup.get(nk, 0),
         ))
@@ -561,6 +582,8 @@ def main():
             difficulty FLOAT,
             professor_url TEXT,
             image_url TEXT,
+            focus_x FLOAT,
+            focus_y FLOAT,
             avg_hours FLOAT,
             total_comments INT DEFAULT 0
         )
@@ -569,7 +592,7 @@ def main():
         INSERT INTO professors_catalog
         (slug, name, name_key, department, college, avg_rating, rmp_rating, trace_rating,
          num_ratings, trace_reviews, total_reviews, would_take_again_pct, difficulty,
-         professor_url, image_url, avg_hours, total_comments)
+         professor_url, image_url, focus_x, focus_y, avg_hours, total_comments)
         VALUES %s
     """, catalog_rows)
     cur.execute("CREATE INDEX idx_pc_name_key ON professors_catalog (name_key)")
