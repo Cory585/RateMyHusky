@@ -14,6 +14,7 @@ node_modules/
 backend/groq_keys.local.json
 *.local.json
 
-# Local Claude Code config & memory (not shared)
-.claude/
-CLAUDE.md
+archive/
+scraper/trace_pipeline/cookies.txt
+backend/rag/eval/pool.json*
+backend/rag/eval/runs/*/answers.json*
