@@ -1,5 +1,5 @@
 import pytest
-from chat_gate import gate
+from rag.chat_gate import gate
 
 MAX_QUERY_LEN = 500
 

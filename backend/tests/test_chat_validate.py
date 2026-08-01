@@ -1,6 +1,6 @@
 import pytest
 
-from chat_validate import (
+from rag.chat_validate import (
     has_structured_evidence,
     has_reddit_evidence,
     thin_data_check,

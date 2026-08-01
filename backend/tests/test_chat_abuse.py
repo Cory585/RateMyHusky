@@ -5,7 +5,7 @@ that returns a chosen strike count and daily-question count based on which SQL
 it is asked to run.
 """
 import pytest
-from chat_abuse import (
+from rag.chat_abuse import (
     abuse_check, strike_count, daily_question_count,
     STRIKE_STATUSES, STRIKE_WINDOW_DAYS, _CAPS,
 )

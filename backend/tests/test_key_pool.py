@@ -6,8 +6,8 @@ load_entries is driven entirely by env vars / a temp file via monkeypatch.
 """
 import json
 import pytest
-import key_pool
-from key_pool import KeyPool, load_entries, _entry, DEFAULT_RPD, DEFAULT_TPD
+from rag import key_pool
+from rag.key_pool import KeyPool, load_entries, _entry, DEFAULT_RPD, DEFAULT_TPD
 
 
 ENTRIES = [
