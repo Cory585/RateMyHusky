@@ -1,6 +1,8 @@
 /* ─── PAGE WRAPPER ─────────────────────────────────────────── */
 
 .catalog-page {
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
   padding-top: 72px;
   background: #f7f8fa;
@@ -9,6 +11,7 @@
 
 .catalog-layout {
   display: flex;
+  flex: 1;
   padding: 0 clamp(16px, 3vw, 48px) 60px;
   gap: 28px;
 }
@@ -1173,8 +1176,10 @@
 
 .catalog-empty {
   display: flex;
+  flex: 1;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 16px;
   padding: 80px 20px;
   text-align: center;
