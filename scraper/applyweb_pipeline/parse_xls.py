@@ -5,8 +5,9 @@ since column offsets differ between the two scale families (Agree/Effective)
 and whether an N/A column is present. Never drops a row for answer spread:
 xlrd gives blank cells as '' and zeros as 0.0 -- both mean count 0.
 
-Usage:  python scraper/applyweb_pipeline/parse_xls.py --selftest
+Usage:  python scraper/applyweb_pipeline/parse_xls.py --selftest [--require-fixtures]
 """
+import os
 import sys
 
 
@@ -158,7 +159,131 @@ PRE = [["Northeastern University Course Evaluations"], [], ["PHLS 1101, Section 
        ["Enrollment:", 22.0], ["Completed:", 15.0], ["Answer Counts"]]
 
 
-def selftest():
+# (question, c5, c4, c3, c2, c1, na, mean, median, std_dev) — mean/median/std_dev exclude N/A
+EXPECTED_1 = [  # Spring 2025 PHLS1101 I04 — new vintage; enrollment 22, completed 15
+    ('Online course materials', 13, 0, 0, 0, 0, 1, 5.0, 5.0, 0.0),
+    ('Online Interactions', 13, 0, 0, 0, 0, 1, 5.0, 5.0, 0.0),
+    ('Sense of community', 13, 0, 0, 0, 0, 1, 5.0, 5.0, 0.0),
+    ('Computer skills', 12, 0, 0, 1, 0, 1, 4.77, 5.0, 0.8),
+    ('Syllabus', 14, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
+    ('Course Materials', 14, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
+    ('In-class Sessions', 14, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
+    ('Out-of-class', 14, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
+    ('Challenging', 11, 2, 1, 0, 0, 0, 4.71, 5.0, 0.59),
+    ('Learned a lot', 14, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
+    ('Prepared', 14, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
+    ('Effective time', 13, 0, 1, 0, 0, 0, 4.86, 5.0, 0.52),
+    ('Clear communication', 13, 1, 0, 0, 0, 0, 4.93, 5.0, 0.26),
+    ('Feedback', 14, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
+    ('Fairly evaluated', 14, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
+    ('Outside assist', 14, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
+    ('Respect', 14, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
+    ('Enthusiasm', 14, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
+    ('Overall rating of teaching', 15, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
+]
+EXPECTED_2 = [  # Fall 2021 SCLY1210 I02 — OLD vintage; enrollment 28, completed 18
+    ('Online course materials', 12, 2, 1, 0, 0, 3, 4.73, 5.0, 0.57),
+    ('Online Interactions', 12, 2, 1, 0, 0, 3, 4.73, 5.0, 0.57),
+    ('Sense of community', 12, 1, 1, 1, 0, 3, 4.6, 5.0, 0.88),
+    ('Computer skills', 9, 3, 3, 0, 0, 3, 4.4, 5.0, 0.8),
+    ('Syllabus', 15, 2, 1, 0, 0, 0, 4.78, 5.0, 0.53),
+    ('Course Materials', 15, 2, 1, 0, 0, 0, 4.78, 5.0, 0.53),
+    ('In-class Sessions', 14, 3, 1, 0, 0, 0, 4.72, 5.0, 0.56),
+    ('Out-of-class', 14, 2, 2, 0, 0, 0, 4.67, 5.0, 0.67),
+    ('Challenging', 10, 3, 5, 0, 0, 0, 4.28, 5.0, 0.87),
+    ('Learned a lot', 14, 2, 2, 0, 0, 0, 4.67, 5.0, 0.67),
+    ('Prepared', 16, 1, 1, 0, 0, 0, 4.83, 5.0, 0.5),
+    ('Effective time', 16, 1, 1, 0, 0, 0, 4.83, 5.0, 0.5),
+    ('Clear communication', 16, 1, 1, 0, 0, 0, 4.83, 5.0, 0.5),
+    ('Feedback', 15, 2, 1, 0, 0, 0, 4.78, 5.0, 0.53),
+    ('Fairly evaluated', 14, 3, 1, 0, 0, 0, 4.72, 5.0, 0.56),
+    ('Outside assist', 14, 2, 2, 0, 0, 0, 4.67, 5.0, 0.67),
+    ('Respect', 15, 2, 1, 0, 0, 0, 4.78, 5.0, 0.53),
+    ('Enthusiasm', 16, 1, 1, 0, 0, 0, 4.83, 5.0, 0.5),
+    ('Overall rating of teaching', 13, 3, 2, 0, 0, 0, 4.61, 5.0, 0.68),
+]
+EXPECTED_3 = [  # Fall 2024 SCLY1210 I01 — new vintage; enrollment 19, completed 16
+    ('Online course materials', 12, 3, 0, 0, 0, 1, 4.8, 5.0, 0.4),
+    ('Online Interactions', 11, 3, 0, 0, 0, 2, 4.79, 5.0, 0.41),
+    ('Sense of community', 12, 2, 0, 0, 0, 2, 4.86, 5.0, 0.35),
+    ('Computer skills', 12, 2, 0, 0, 1, 1, 4.6, 5.0, 1.02),
+    ('Syllabus', 14, 2, 0, 0, 0, 0, 4.88, 5.0, 0.33),
+    ('Course Materials', 14, 2, 0, 0, 0, 0, 4.88, 5.0, 0.33),
+    ('In-class Sessions', 14, 2, 0, 0, 0, 0, 4.88, 5.0, 0.33),
+    ('Out-of-class', 14, 2, 0, 0, 0, 0, 4.88, 5.0, 0.33),
+    ('Challenging', 10, 4, 2, 0, 0, 0, 4.5, 5.0, 0.71),
+    ('Learned a lot', 14, 2, 0, 0, 0, 0, 4.88, 5.0, 0.33),
+    ('Prepared', 13, 3, 0, 0, 0, 0, 4.81, 5.0, 0.39),
+    ('Effective time', 14, 2, 0, 0, 0, 0, 4.88, 5.0, 0.33),
+    ('Clear communication', 14, 2, 0, 0, 0, 0, 4.88, 5.0, 0.33),
+    ('Feedback', 14, 2, 0, 0, 0, 0, 4.88, 5.0, 0.33),
+    ('Fairly evaluated', 14, 2, 0, 0, 0, 0, 4.88, 5.0, 0.33),
+    ('Outside assist', 14, 2, 0, 0, 0, 0, 4.88, 5.0, 0.33),
+    ('Respect', 14, 2, 0, 0, 0, 0, 4.88, 5.0, 0.33),
+    ('Enthusiasm', 14, 2, 0, 0, 0, 0, 4.88, 5.0, 0.33),
+    ('Overall rating of teaching', 15, 1, 0, 0, 0, 0, 4.94, 5.0, 0.24),
+]
+EXPECTED_4 = [  # Spring 2022 PHLS1145 I01 — OLD vintage; enrollment 18, completed 12
+    ('Online course materials', 8, 3, 0, 0, 0, 1, 4.73, 5.0, 0.45),
+    ('Online Interactions', 8, 3, 0, 0, 0, 1, 4.73, 5.0, 0.45),
+    ('Sense of community', 8, 2, 0, 0, 0, 2, 4.8, 5.0, 0.4),
+    ('Computer skills', 8, 3, 0, 0, 0, 1, 4.73, 5.0, 0.45),
+    ('Syllabus', 10, 1, 1, 0, 0, 0, 4.75, 5.0, 0.6),
+    ('Course Materials', 10, 2, 0, 0, 0, 0, 4.83, 5.0, 0.37),
+    ('In-class Sessions', 11, 1, 0, 0, 0, 0, 4.92, 5.0, 0.28),
+    ('Out-of-class', 9, 3, 0, 0, 0, 0, 4.75, 5.0, 0.43),
+    ('Challenging', 7, 1, 4, 0, 0, 0, 4.25, 5.0, 0.92),
+    ('Learned a lot', 9, 3, 0, 0, 0, 0, 4.75, 5.0, 0.43),
+    ('Prepared', 12, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
+    ('Effective time', 12, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
+    ('Clear communication', 12, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
+    ('Feedback', 11, 1, 0, 0, 0, 0, 4.92, 5.0, 0.28),
+    ('Fairly evaluated', 11, 1, 0, 0, 0, 0, 4.92, 5.0, 0.28),
+    ('Outside assist', 10, 2, 0, 0, 0, 0, 4.83, 5.0, 0.37),
+    ('Respect', 11, 1, 0, 0, 0, 0, 4.92, 5.0, 0.28),
+    ('Enthusiasm', 12, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
+    ('Overall rating of teaching', 11, 1, 0, 0, 0, 0, 4.92, 5.0, 0.28),
+]
+FIXTURE_META = {
+    "quantitative_report_1.xls": {"expected": EXPECTED_1, "enrollment": 22, "completed": 15,
+        "old_vintage": False, "expected_na_mismatches": 0, "triple": (102980, 87, 196)},
+    "quantitative_report_2.xls": {"expected": EXPECTED_2, "enrollment": 28, "completed": 18,
+        "old_vintage": True, "expected_na_mismatches": 4, "triple": (64329, 87, 145)},
+    "quantitative_report_3.xls": {"expected": EXPECTED_3, "enrollment": 19, "completed": 16,
+        "old_vintage": False, "expected_na_mismatches": 0, "triple": (97591, 87, 192)},
+    "quantitative_report_4.xls": {"expected": EXPECTED_4, "enrollment": 18, "completed": 12,
+        "old_vintage": True, "expected_na_mismatches": 4, "triple": (68797, 87, 148)},
+}
+
+
+def run_fixture_gate(fixtures_dir=None, verbose=True):
+    import common  # same-dir import, like trace_pipeline modules
+    fixtures_dir = fixtures_dir or common.FIXTURES_DIR
+    ok_all = True
+    for fname, meta in FIXTURE_META.items():
+        path = os.path.join(fixtures_dir, fname)
+        rep = parse_report(open(path, "rb").read())
+        errs = []
+        if rep["enrollment"] != meta["enrollment"]: errs.append("enrollment")
+        if rep["completed"] != meta["completed"]: errs.append("completed")
+        if rep["old_vintage"] != meta["old_vintage"]: errs.append("vintage")
+        if rep["expected_na_mismatches"] != meta["expected_na_mismatches"]: errs.append("na_mismatch_count")
+        if rep["blocks"] != 3: errs.append(f"blocks={rep['blocks']}")
+        if rep["summary_rows"] != 5: errs.append(f"summaries={rep['summary_rows']}")
+        if not report_ok(rep): errs.append(f"not ok: {rep['unexpected_rows']}{rep['mean_mismatches']}{rep['duplicate_questions']}")
+        got = [(q["question"], q["count_5"], q["count_4"], q["count_3"], q["count_2"], q["count_1"],
+                q["count_na"], q["mean"], q["median"], q["std_dev"]) for q in rep["questions"]]
+        if got != meta["expected"]:
+            for g, e in zip(got, meta["expected"]):
+                if g != e: errs.append(f"row {e[0]!r}: got {g}")
+            if len(got) != len(meta["expected"]): errs.append(f"row count {len(got)} != {len(meta['expected'])}")
+        status = "PASS" if not errs else "FAIL"
+        if verbose: print(f"{status}: fixture gate {fname}" + ("" if not errs else f" — {errs}"))
+        ok_all &= not errs
+    return ok_all
+
+
+def selftest(require_fixtures=False):
     fails = []
 
     def check(label, cond):
@@ -232,11 +357,21 @@ def selftest():
     rep = parse_sheet(_FakeSheet([["Title"], AGREE]))
     check("no enrollment/questions -> not ok", not report_ok(rep))
 
+    # 11. four-fixture byte-exact gate against real XLS files
+    import common  # same-dir import, like trace_pipeline modules
+    if os.path.isdir(common.FIXTURES_DIR):
+        if not run_fixture_gate():
+            fails.append("fixture gate")
+    else:
+        print("WARN: fixtures missing — gate skipped")
+        if require_fixtures:
+            fails.append("fixtures missing")
+
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0
 
 
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
-        sys.exit(selftest())
+        sys.exit(selftest(require_fixtures="--require-fixtures" in sys.argv))
     print("Import-only module. Use --selftest.")
