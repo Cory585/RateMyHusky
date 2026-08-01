@@ -728,6 +728,12 @@
   position: relative;
 }
 
+.prof-list-bookmark {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
 .prof-list-item:last-child {
   border-bottom: none;
 }
@@ -902,6 +908,14 @@
   flex-direction: column;
   transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
   text-align: left;
+  position: relative;
+}
+
+.prof-card-bookmark {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
 }
 
 .prof-card:hover {

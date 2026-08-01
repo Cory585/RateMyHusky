@@ -1,12 +1,12 @@
 import sys, argparse, time
 
-from chat_throttle import (global_budget_hit, session_allowed, minute_capacity_ok,
+from .chat_throttle import (global_budget_hit, session_allowed, minute_capacity_ok,
                             today_ok_count, release_reservation, EST_TOKENS_PER_Q)
-from chat_abuse import abuse_check
-from chat_cache import get_cached, set_cached
-from chat_validate import thin_data_check, validate_output
-from chat_retrieve import is_course_code
-from llm_adapter import LLMUnavailable
+from .chat_abuse import abuse_check
+from .chat_cache import get_cached, set_cached
+from .chat_validate import thin_data_check, validate_output
+from .chat_retrieve import is_course_code
+from .llm_adapter import LLMUnavailable
 
 def _fire_usage_alert(deps):
     fn = getattr(deps, "usage_alert_fn", None)
@@ -420,7 +420,7 @@ def selftest():
     # call happens in most of these fakes), so many selftest cases in a row can exhaust
     # the reservation budget and fail unrelated later cases. Reset it here so this file's
     # selftest run is self-contained regardless of run order.
-    import chat_throttle
+    from . import chat_throttle
     chat_throttle._reservations["daily"].clear()
     chat_throttle._reservations["minute_tokens"].clear()
 
@@ -475,7 +475,7 @@ def selftest():
     # gate_error (classifier failed closed) -> NON-strike: logged as gate_error, degraded to
     # keyword fallback, NOT flagged. This is the fix for innocent users getting capped by
     # transient classifier failures.
-    from chat_abuse import STRIKE_STATUSES as _STRIKES
+    from .chat_abuse import STRIKE_STATUSES as _STRIKES
     d_ge = Deps()
     d_ge.gate_fn = types.MethodType(lambda self, q: {"ok": False, "status": "gate_error", "professors_or_courses": [], "professor_or_course": None, "message": "try again"}, d_ge)
     payload, code = handle_question("is guha hard", "s", "iphash", d_ge)

@@ -19,9 +19,6 @@ Usage:
     python photo_scrape.py --skip-directories   # slug-only mode
 """
 
-__author__ = "Benjamin"
-__version__ = "3.0.0"
-
 import csv
 import os
 import re

@@ -9,13 +9,13 @@ see the strike rows per account and clear them for a specific account.
 Reads NEW_CRDB_DATABASE_URL from backend/.env (per crdb-dns-retry gotcha) and wraps
 connect() in the DNS-retry loop. Never prints the connection string.
 
-USAGE:
-  python clear_ask_strikes.py --show                       # list strikes per account
-  python clear_ask_strikes.py --show --account <sub>       # detail for one account
-  python clear_ask_strikes.py --clear  --account <sub>     # delete that account's strike rows
-  python clear_ask_strikes.py --clear  --account <sub> --dry-run
-  python clear_ask_strikes.py --purge-account <sub>        # delete ALL of one account's rows (data-erasure)
-  python clear_ask_strikes.py --purge-account <sub> --dry-run
+USAGE (from backend/):
+  python rag/clear_ask_strikes.py --show                       # list strikes per account
+  python rag/clear_ask_strikes.py --show --account <sub>       # detail for one account
+  python rag/clear_ask_strikes.py --clear  --account <sub>     # delete that account's strike rows
+  python rag/clear_ask_strikes.py --clear  --account <sub> --dry-run
+  python rag/clear_ask_strikes.py --purge-account <sub>        # delete ALL of one account's rows (data-erasure)
+  python rag/clear_ask_strikes.py --purge-account <sub> --dry-run
 
 The account id (<sub>) is the JWT 'sub' (server.py:764) — the value used as session_token.
 """
@@ -23,7 +23,7 @@ import os, sys, time, argparse
 from dotenv import load_dotenv
 import psycopg2
 
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 URL = os.getenv("NEW_CRDB_DATABASE_URL") or os.getenv("CRDB_DATABASE_URL")
 if not URL:
     sys.exit("Need NEW_CRDB_DATABASE_URL (or CRDB_DATABASE_URL) in backend/.env")
@@ -92,17 +92,23 @@ def clear(conn, cur, account, dry_run):
 
 def purge_account(conn, cur, account, dry_run):
     """Data-erasure: delete EVERY ask_log row for one account (query text, answer_text,
-    ip_hash, all statuses) — not just strikes. Use for a user's 'remove my tracked data'
-    request. Also resets that account's strikes/daily-cap as a side effect."""
+    ip_hash, all statuses) — not just strikes — plus the account's bookmarks. Use for a
+    user's 'remove my tracked data' request. Also resets that account's strikes/daily-cap
+    as a side effect."""
     cur.execute("SELECT count(*) FROM ask_log WHERE session_token = %s", (account,))
     n = cur.fetchone()[0]
+    cur.execute("SELECT count(*) FROM bookmarks WHERE user_sub = %s", (account,))
+    nb = cur.fetchone()[0]
     if dry_run:
-        print(f"[dry-run] would delete ALL {n} ask_log row(s) for {account!r}")
+        print(f"[dry-run] would delete ALL {n} ask_log row(s) and {nb} bookmark row(s) "
+              f"for {account!r}")
         return
     cur.execute("DELETE FROM ask_log WHERE session_token = %s", (account,))
+    n_deleted = cur.rowcount
+    cur.execute("DELETE FROM bookmarks WHERE user_sub = %s", (account,))
     conn.commit()
-    print(f"Deleted {cur.rowcount} ask_log row(s) for {account!r}. All tracked data for "
-          f"this account is removed.")
+    print(f"Deleted {n_deleted} ask_log row(s) and {cur.rowcount} bookmark row(s) for "
+          f"{account!r}. All tracked data for this account is removed.")
 
 
 def main():

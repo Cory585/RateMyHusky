@@ -10,9 +10,6 @@ Usage
     python reddit_scrape.py --selftest             # run offline unit checks and exit
 """
 
-__author__ = "RateMyHusky"
-__version__ = "1.0.0"
-
 import argparse
 import csv
 import json
@@ -37,7 +34,7 @@ ARCTIC_BASE: str = "https://arctic-shift.photon-reddit.com"
 DEFAULT_SUBREDDITS: List[str] = ["NEU"]
 PAGE_SIZE: int = 100  # Arctic Shift max per request
 CONTACT: str = "reddit@ratemyhusky.com"
-USER_AGENT: str = f"ratemyhusky-reddit-scraper/{__version__} (contact {CONTACT})"
+USER_AGENT: str = f"ratemyhusky-reddit-scraper/1.0.0 (contact {CONTACT})"
 
 SCRIPT_DIR: str = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR: str = os.path.join(SCRIPT_DIR, "reddit_data")

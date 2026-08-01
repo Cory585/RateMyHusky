@@ -10,6 +10,7 @@ import {
 import Footer from '../components/Footer';
 import Dropdown from '../components/Dropdown';
 import StarRating from '../components/StarRating';
+import BookmarkButton from '../components/BookmarkButton';
 import Seo from '../components/Seo';
 import { getInitials, splitProfName, stripPrefix } from '../utils/nameUtils';
 
@@ -707,9 +708,10 @@ export default function ProfessorCatalog() {
                   tabIndex={0}
                   onClick={() => navigate(`/professors/${prof.slug}`, { state: { fromCatalog: `/professors?${searchParams.toString()}` } })}
                   onKeyDown={e =>
-                    e.key === 'Enter' && navigate(`/professors/${prof.slug}`, { state: { fromCatalog: `/professors?${searchParams.toString()}` } })
+                    e.key === 'Enter' && e.target === e.currentTarget && navigate(`/professors/${prof.slug}`, { state: { fromCatalog: `/professors?${searchParams.toString()}` } })
                   }
                 >
+                  <BookmarkButton itemType="professor" itemKey={prof.slug} size="sm" className="prof-list-bookmark" />
                   <div className="prof-list-avatar">
                     {prof.imageUrl ? (
                       <img
@@ -759,9 +761,10 @@ export default function ProfessorCatalog() {
                   tabIndex={0}
                   onClick={() => navigate(`/professors/${prof.slug}`, { state: { fromCatalog: `/professors?${searchParams.toString()}` } })}
                   onKeyDown={e =>
-                    e.key === 'Enter' && navigate(`/professors/${prof.slug}`, { state: { fromCatalog: `/professors?${searchParams.toString()}` } })
+                    e.key === 'Enter' && e.target === e.currentTarget && navigate(`/professors/${prof.slug}`, { state: { fromCatalog: `/professors?${searchParams.toString()}` } })
                   }
                 >
+                  <BookmarkButton itemType="professor" itemKey={prof.slug} size="sm" className="prof-card-bookmark" />
                   <div className="prof-card-photo">
                     <div className="prof-avatar">
                       {prof.imageUrl ? (

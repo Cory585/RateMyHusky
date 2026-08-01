@@ -18,6 +18,7 @@ import { termSortKey } from '../utils/termUtils';
 import { isPinned, pinnedFirst } from '../utils/askPinMatch';
 import { useAuth } from '../context/AuthContext';
 import SignInModal from '../components/SignInModal';
+import BookmarkButton from '../components/BookmarkButton';
 import neuIcon from '../assets/neu-circle-icon.png';
 import './Professor.css';
 
@@ -959,7 +960,10 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
             </span>
           </div>
           <div className="prof-hero-info">
-            <h1 className="prof-name">{profile.name}</h1>
+            <h1 className="prof-name">
+              {profile.name}
+              <BookmarkButton itemType="professor" itemKey={slug!} size="md" className="prof-hero-bookmark" />
+            </h1>
             <p className="prof-dept">{profile.department}</p>
           </div>
         </div>

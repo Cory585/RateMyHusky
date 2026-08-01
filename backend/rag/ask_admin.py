@@ -9,7 +9,7 @@ of any deploy path.
 Reads NEW_CRDB_DATABASE_URL (fallback CRDB_DATABASE_URL) from backend/.env, using
 the same DNS-retry connect() as clear_ask_strikes.py.
 
-Run: python backend/ask_admin.py -> http://127.0.0.1:5051
+Run: python backend/rag/ask_admin.py -> http://127.0.0.1:5051
 """
 import os
 import sys
@@ -23,9 +23,10 @@ from flask import Flask, jsonify, request
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from chat_abuse import STRIKE_STATUSES, _CAPS
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from rag.chat_abuse import STRIKE_STATUSES, _CAPS
 
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 URL = os.getenv("NEW_CRDB_DATABASE_URL") or os.getenv("CRDB_DATABASE_URL")
 if not URL:
     sys.exit("Need NEW_CRDB_DATABASE_URL (or CRDB_DATABASE_URL) in backend/.env")
@@ -319,10 +320,13 @@ def api_purge(sub):
     dry_run = _dry_run_from_body()
     if dry_run:
         rows = query("SELECT count(*) AS c FROM ask_log WHERE session_token = %s", (sub,))
-        return jsonify({"deleted": rows[0]["c"] if rows else 0})
+        brows = query("SELECT count(*) AS c FROM bookmarks WHERE user_sub = %s", (sub,))
+        return jsonify({"deleted": rows[0]["c"] if rows else 0,
+                        "bookmarks_deleted": brows[0]["c"] if brows else 0})
 
     n = execute("DELETE FROM ask_log WHERE session_token=%s", (sub,))
-    return jsonify({"deleted": n})
+    nb = execute("DELETE FROM bookmarks WHERE user_sub=%s", (sub,))
+    return jsonify({"deleted": n, "bookmarks_deleted": nb})
 
 
 def _num_groq_keys():

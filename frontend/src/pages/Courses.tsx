@@ -10,6 +10,7 @@ import {
 import Dropdown from '../components/Dropdown';
 import Footer from '../components/Footer';
 import StarRating from '../components/StarRating';
+import BookmarkButton from '../components/BookmarkButton';
 import Seo from '../components/Seo';
 import './ProfessorCatalog.css';
 import './Courses.css';
@@ -480,8 +481,9 @@ export default function Courses() {
 									role="button"
 									tabIndex={0}
 									onClick={() => navigate(`/courses/${course.code.toLowerCase()}`)}
-									onKeyDown={(e) => e.key === 'Enter' && navigate(`/courses/${course.code.toLowerCase()}`)}
+									onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && navigate(`/courses/${course.code.toLowerCase()}`)}
 								>
+									<BookmarkButton itemType="course" itemKey={course.code} size="sm" className="prof-card-bookmark" />
 									<div className="course-card-header">
 										<span className="course-card-code">{course.code}</span>
 									</div>

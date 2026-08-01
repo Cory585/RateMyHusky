@@ -2,15 +2,15 @@ import os, sys, json, argparse, time, socket
 from psycopg2.extras import RealDictCursor
 import psycopg2
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from chat_retrieve import retrieve
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from rag.chat_retrieve import retrieve
 
 _HOST = "ratemyhusky-27066.j77.aws-us-east-1.cockroachlabs.cloud"
 
 
 def _connect():
     from dotenv import load_dotenv
-    load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
+    load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
     url = os.environ["CRDB_DATABASE_URL"]
     for _ in range(6):
         try:

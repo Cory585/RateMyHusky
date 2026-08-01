@@ -1,6 +1,6 @@
 import os, sys, json, argparse, time
 
-KEY_STORE = os.path.join(os.path.dirname(__file__), "groq_keys.local.json")
+KEY_STORE = os.path.join(os.path.dirname(__file__), "..", "groq_keys.local.json")
 DEFAULT_RPD = 1000
 DEFAULT_TPD = 200000  # synthesis model (gpt-oss-120b) free-tier TPD; TPD binds before RPD
 
@@ -111,9 +111,8 @@ def selftest():
     usage4 = {"k1": {"rpd": 0, "tpd": 0}, "k2": {"rpd": 0, "tpd": 0}}
     pool4 = KeyPool(entries, usage_fn=lambda k: usage4[k])
     fake_now = [1000.0]
-    import key_pool as _kp_mod
-    real_time = _kp_mod.time.time
-    _kp_mod.time.time = lambda: fake_now[0]
+    real_time = time.time
+    time.time = lambda: fake_now[0]
     try:
         pool4.retire("k1", cooldown_seconds=60)
         during = pool4.acquire(est_tokens=10)
@@ -125,7 +124,7 @@ def selftest():
         check("acquire returns key once cooldown has elapsed", recovered["key"] == "k1")
         check("expired cooldown entry is removed from exhausted", "k1" not in after.exhausted)
     finally:
-        _kp_mod.time.time = real_time
+        time.time = real_time
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0
 

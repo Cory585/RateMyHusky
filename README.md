@@ -49,6 +49,12 @@ Choosing classes at Northeastern means juggling TRACE PDFs, RateMyProfessors tab
 - **Citations that jump** — every cited snippet pins, scrolls to, and highlights its source on the professor page
 - **Guardrailed** — prompt-injection gate, topic classifier, output validation, per-user abuse strikes, adaptive rate limiting, and answer caching
 
+### Account
+- **Bookmarks** — one-click bookmark toggle on professor and course cards/profiles, backed by a global bookmarks context for instant, optimistic updates
+- **Bookmarks tab** — a dedicated view under Account listing all bookmarked professors and courses, reusing the catalog's card layout
+- Signed-out bookmark clicks prompt Google sign-in instead of failing silently
+- Profile/Bookmarks tabs share an animated sliding underline indicator
+
 ### Polished throughout
 - Dark mode, responsive layout, breadcrumb navigation
 - Google OAuth sign-in for gated functionality
@@ -144,15 +150,20 @@ The dev frontend talks to the backend on port 5001 automatically.
 .
 ├── frontend/                  # React 19 + TypeScript SPA (Vercel)
 │   └── src/
-│       ├── pages/             #   Homepage, catalogs, profiles, compare
-│       ├── components/        #   SearchBar (+ Ask mode), breadcrumbs, ...
+│       ├── pages/             #   Homepage, catalogs, profiles, compare,
+│       │                      #   Account + AccountBookmarks
+│       ├── components/        #   SearchBar (+ Ask mode), breadcrumbs,
+│       │                      #   BookmarkButton, Navbar, ...
+│       ├── context/           #   BookmarksContext (global bookmark state)
 │       ├── api/               #   Typed backend client
 │       └── utils/             #   Ask session persistence, citation pinning
 ├── backend/                   # Flask API (Railway)
 │   ├── server.py              #   Routes, auth, connection pool
-│   ├── chat_*.py              #   Ask pipeline: gate, retrieve, answer,
-│   │                          #   validate, cache, throttle, abuse
-│   ├── query_embedder.py      #   ONNX BGE-small query embeddings
+│   ├── bookmarks.py           #   Bookmark add/remove/list (pure functions)
+│   ├── rag/                   #   Ask pipeline: gate, retrieve, answer,
+│   │   │                      #   validate, cache, throttle, abuse,
+│   │   │                      #   ONNX BGE-small query embeddings
+│   │   └── eval/              #   Retrieval eval sets + RAG metrics
 │   └── Better_Scraper/        #   TRACE/RMP scrapers + CSV outputs
 └── scraper/                   # Reddit corpus + evidence/embedding pipeline
 ```

@@ -1,0 +1,239 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>RAG eval — label & grade</title>
+<style>
+  body { font: 15px/1.45 system-ui, sans-serif; margin: 0; background: #f5f6f8; color: #1c2733; }
+  header { background: #c8102e; color: #fff; padding: 10px 16px; display: flex; gap: 16px; align-items: center; }
+  header b { font-size: 17px; }
+  main { max-width: 880px; margin: 24px auto; padding: 0 16px; }
+  .card { background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.08); padding: 18px 20px; margin-bottom: 14px; }
+  .q { font-size: 18px; font-weight: 600; }
+  .meta { color: #5b6b7b; font-size: 13px; margin-top: 4px; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 700; color: #fff; }
+  .badge.reddit { background: #ff4500; } .badge.rmp { background: #1a73e8; } .badge.trace { background: #6b21a8; }
+  .body { white-space: pre-wrap; margin-top: 10px; }
+  .keys { color: #5b6b7b; font-size: 13px; }
+  .keys kbd { background: #eef1f4; border: 1px solid #d5dae0; border-radius: 4px; padding: 0 6px; font-weight: 700; }
+  select { font: inherit; padding: 4px; }
+  .done { color: #15803d; font-weight: 700; }
+  ul.units { list-style: none; padding: 0; } ul.units li { padding: 3px 0; cursor: pointer; }
+  ul.units li:hover { text-decoration: underline; }
+</style></head><body>
+<header><b>RAG eval</b><span id="progress"></span>
+  <nav><a href="#" id="tabLabel">Label</a> &middot; <a href="#" id="tabGrade">Grade</a></nav>
+</header>
+<main id="labelMain">
+  <div class="card">
+    <label>Unit: <select id="unitPicker"></select></label>
+    <div class="keys" style="margin-top:8px">
+      <kbd>0</kbd> irrelevant &nbsp; <kbd>1</kbd> tangential &nbsp; <kbd>2</kbd> directly supports &nbsp; <kbd>u</kbd> undo
+    </div>
+  </div>
+  <div class="card" id="questionCard"><div class="q" id="question"></div><div class="meta" id="unitMeta"></div></div>
+  <div class="card" id="candCard"><span class="badge" id="srcBadge"></span><div class="body" id="candBody"></div></div>
+</main>
+<main id="gradeMain" style="display:none; max-width: 1100px; margin: 24px auto; padding: 0 16px;">
+  <div class="card">
+    <label>Run: <select id="runPicker"></select></label>
+    <span id="gradeProgress" style="margin-left:12px"></span>
+    <div class="keys" style="margin-top:8px">
+      Faithfulness <kbd>q</kbd>0 <kbd>w</kbd>1 <kbd>e</kbd>2 &nbsp;&middot;&nbsp;
+      Relevance <kbd>a</kbd>0 <kbd>s</kbd>1 <kbd>d</kbd>2 &nbsp;&middot;&nbsp;
+      Citations <kbd>1</kbd>&ndash;<kbd>8</kbd> toggle &nbsp;&middot;&nbsp; <kbd>Enter</kbd> save + next
+    </div>
+  </div>
+  <div style="display:flex; gap:14px; align-items:flex-start">
+    <div class="card" style="flex:1">
+      <div class="q" id="gQuestion"></div>
+      <div class="body" id="gAnswer"></div>
+      <div class="meta" id="gPending" style="margin-top:10px"></div>
+      <input id="gNote" placeholder="note (optional)" style="width:100%; margin-top:8px; font:inherit; padding:6px">
+    </div>
+    <div class="card" style="flex:1" id="gSources"></div>
+  </div>
+</main>
+<script>
+let units = [], uid = null, current = null, busy = false, jumpTimer = null;
+
+async function j(url, opts) { const r = await fetch(url, opts); return r.json(); }
+
+async function refreshState() {
+  const s = await j("/api/state");
+  units = s.units;
+  const total = units.reduce((a, u) => a + u.total, 0);
+  const done = units.reduce((a, u) => a + u.labeled, 0);
+  document.getElementById("progress").textContent = `${done} / ${total} labeled`;
+  const pick = document.getElementById("unitPicker");
+  pick.innerHTML = units.map(u =>
+    `<option value="${u.unit_id}">${u.unit_id} (${u.labeled}/${u.total})</option>`).join("");
+  if (!uid) uid = (units.find(u => u.labeled < u.total) || units[0] || {}).unit_id;
+  if (uid) { pick.value = uid; await loadUnit(uid); }
+}
+
+async function loadUnit(u) {
+  uid = u;
+  const d = await j("/api/unit/" + encodeURIComponent(u));
+  render(d);
+}
+
+function render(d) {
+  if (jumpTimer) { clearTimeout(jumpTimer); jumpTimer = null; }
+  current = d.candidate;
+  document.getElementById("question").textContent = d.question || "";
+  document.getElementById("unitMeta").textContent =
+    `${d.unit_id} — ${d.labeled}/${d.total} labeled`;
+  const badge = document.getElementById("srcBadge"), body = document.getElementById("candBody");
+  if (!current) {
+    badge.textContent = ""; badge.className = "badge";
+    body.innerHTML = '<span class="done">Unit complete ✓ — pick the next unit above.</span>';
+    // auto-jump to the next incomplete unit
+    const next = units.find(u => u.unit_id !== d.unit_id && u.labeled < u.total);
+    if (next) jumpTimer = setTimeout(() => { jumpTimer = null; document.getElementById("unitPicker").value = next.unit_id; loadUnit(next.unit_id); refreshTotals(); }, 600);
+    return;
+  }
+  badge.textContent = current.source.toUpperCase();
+  badge.className = "badge " + current.source;
+  body.textContent = current.body;
+}
+
+async function refreshTotals() {
+  const s = await j("/api/state");
+  units = s.units;
+  const total = units.reduce((a, u) => a + u.total, 0);
+  const done = units.reduce((a, u) => a + u.labeled, 0);
+  document.getElementById("progress").textContent = `${done} / ${total} labeled`;
+  const pick = document.getElementById("unitPicker");
+  [...pick.options].forEach(o => {
+    const u = units.find(x => x.unit_id === o.value);
+    if (u) o.textContent = `${u.unit_id} (${u.labeled}/${u.total})`;
+  });
+}
+
+document.addEventListener("keydown", async (e) => {
+  if (gradeMode) return;
+  if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
+  if (busy) return;  // ignore key-repeat while a label/undo request is in flight
+  if (["0", "1", "2"].includes(e.key) && current) {
+    busy = true;
+    try {
+      const d = await j("/api/label", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ unit_id: uid, evidence_id: current.evidence_id, rel: +e.key }) });
+      render(d); refreshTotals();
+    } finally {
+      busy = false;
+    }
+  } else if (e.key === "u") {
+    busy = true;
+    try {
+      const d = await j("/api/undo", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ unit_id: uid }) });
+      render(d); refreshTotals();
+    } finally {
+      busy = false;
+    }
+  }
+});
+document.getElementById("unitPicker").addEventListener("change", (e) => loadUnit(e.target.value));
+refreshState();
+
+// ── Grade tab ──
+let gradeMode = false, gradeRun = null, gRecord = null, citState = {}, pending = { f: null, r: null };
+// HTML-escape for both text-node AND attribute-value contexts (also encodes quotes, so a
+// value interpolated into value="${esc(x)}" can't break out of the attribute).
+const esc = (s) => { const d = document.createElement("div"); d.textContent = s || "";
+  return d.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;"); };
+// The [N] markers an answer actually cites: the numbers in payload.cited plus any [n] the
+// answer text itself contains. Sources NOT in this set get no supports/doesn't-support
+// verdict and can't be toggled — citation_precision must be scored against what the answer
+// cited, not against every retrieved source (an unused source defaults to "uncited", not
+// "supports").
+function citedSourceNums(record) {
+  const nums = new Set(record.cited || []);
+  const re = /\[(\d+)\]/g;
+  let m;
+  while ((m = re.exec(record.answer || ""))) nums.add(Number(m[1]));
+  return nums;
+}
+
+document.getElementById("tabLabel").onclick = () => setTab(false);
+document.getElementById("tabGrade").onclick = () => { setTab(true); loadRuns(); };
+function setTab(grade) {
+  gradeMode = grade;
+  document.getElementById("labelMain").style.display = grade ? "none" : "";
+  document.getElementById("gradeMain").style.display = grade ? "" : "none";
+}
+
+async function loadRuns() {
+  const d = await j("/api/runs");
+  const pick = document.getElementById("runPicker");
+  pick.innerHTML = d.runs.map(r =>
+    `<option value="${esc(r.run)}">${esc(r.run)} (${r.graded}/${r.answers})</option>`).join("");
+  if (d.runs.length) { gradeRun = pick.value = (gradeRun || d.runs[0].run); loadNext(); }
+}
+document.getElementById("runPicker").addEventListener("change", (e) => { gradeRun = e.target.value; loadNext(); });
+
+async function loadNext() {
+  const d = await j("/api/run/" + encodeURIComponent(gradeRun) + "/next");
+  gRecord = d.record; citState = {}; pending = { f: null, r: null };
+  document.getElementById("gNote").value = "";
+  const s = d.summary || {};
+  document.getElementById("gradeProgress").textContent =
+    `${d.graded}/${d.total} graded` + (s.mean_faithfulness == null ? "" :
+      ` · faith ${s.mean_faithfulness.toFixed(2)} · rel ${s.mean_relevance.toFixed(2)}` +
+      (s.citation_precision == null ? "" : ` · cit ${(s.citation_precision * 100).toFixed(0)}%`));
+  const qEl = document.getElementById("gQuestion"), aEl = document.getElementById("gAnswer"),
+        srcEl = document.getElementById("gSources");
+  if (!gRecord) {
+    qEl.textContent = ""; srcEl.innerHTML = "";
+    aEl.innerHTML = '<span class="done">Run fully graded ✓</span>';
+    return;
+  }
+  qEl.textContent = `${gRecord.question_id} — ${gRecord.question}`;
+  aEl.innerHTML = esc(gRecord.answer).replace(/\[(\d+)\]/g, "<mark>[$1]</mark>")
+    + (gRecord.checks_passed ? "" : '<div style="color:#b91c1c;font-weight:700">deterministic checks FAILED: '
+       + esc(Object.entries(gRecord.checks).filter(([, v]) => !v).map(([k]) => k).join(", ")) + "</div>");
+  const cited = citedSourceNums(gRecord);
+  (gRecord.sources || []).forEach(src => { if (cited.has(src.n)) citState[src.n] = true; });
+  renderSources();
+  renderPending();
+}
+
+function renderSources() {
+  document.getElementById("gSources").innerHTML = (gRecord.sources || []).map(src => {
+    const cited = Object.prototype.hasOwnProperty.call(citState, src.n);
+    const verdict = cited
+      ? `<b style="color:${citState[src.n] ? "#15803d" : "#b91c1c"}">${citState[src.n] ? "supports" : "doesn't support"}</b>`
+      : '<span style="color:#5b6b7b">not cited</span>';
+    return `<div style="border-bottom:1px solid #eef1f4; padding:8px 0">
+       <b>[${src.n}]</b> <span class="badge ${esc(src.source)}">${esc((src.source || "").toUpperCase())}</span>
+       ${verdict}
+       <div class="body" style="font-size:13px">${esc(src.body)}</div>
+     </div>`;
+  }).join("") || "<i>facts-only answer — no numbered sources</i>";
+}
+
+function renderPending() {
+  document.getElementById("gPending").textContent =
+    `faithfulness: ${pending.f ?? "—"}   relevance: ${pending.r ?? "—"}   (Enter to save)`;
+}
+
+document.addEventListener("keydown", async (e) => {
+  if (!gradeMode || !gRecord) return;
+  if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT") {
+    if (e.key !== "Enter") return;           // allow Enter-to-save from the note box
+  }
+  const fKeys = { q: 0, w: 1, e: 2 }, rKeys = { a: 0, s: 1, d: 2 };
+  if (e.key in fKeys) { pending.f = fKeys[e.key]; renderPending(); }
+  else if (e.key in rKeys) { pending.r = rKeys[e.key]; renderPending(); }
+  else if (/^[1-8]$/.test(e.key) && citState[+e.key] !== undefined) {
+    citState[+e.key] = !citState[+e.key]; renderSources();
+  } else if (e.key === "Enter" && pending.f !== null && pending.r !== null) {
+    await j("/api/run/" + encodeURIComponent(gradeRun) + "/grade", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question_id: gRecord.question_id, faithfulness: pending.f,
+        relevance: pending.r, citations: citState,
+        note: document.getElementById("gNote").value }) });
+    loadNext();
+  }
+});
+</script>
+</body></html>

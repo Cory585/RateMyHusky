@@ -1,6 +1,6 @@
 import os, sys, argparse
 import requests as http_requests
-from chat_throttle import daily_budget, projected_daily_usage, _today_ok_count
+from rag.chat_throttle import daily_budget, projected_daily_usage, _today_ok_count
 
 
 TIERS = (50, 80, 100)
