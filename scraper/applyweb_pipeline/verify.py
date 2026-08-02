@@ -6,7 +6,8 @@ Gate 2: signature rate -- rows where the printed answer counts exceed
         Also reconciles count_na (spec 4.4): overall rate of rows where
         counts+count_na exceed `completed` (term_id < 900 only; count_na doesn't
         exist until ingest_xls's migrate() has run).
-Gate 3: avg TRACE rows/section per term (a healthy section has ~19 questions).
+Gate 3: avg TRACE rows/section per term (a healthy section has ~20 questions:
+        19 Likert + the hours-per-week row from the All Responses sheet).
 Gate 4: fixture-section reconciliation -- the 4 known sections' prod rows must
         match parse_xls.FIXTURE_META's known-good expected values (Gate 1 already
         pins those constants against the actual XLS bytes; Gate 4 only needs the
@@ -60,7 +61,9 @@ DISTRIBUTION_SQL = """
     SELECT CASE WHEN term_id < 900 THEN 'applyweb' ELSE 'bluera' END AS era,
            floor(mean * 2) / 2 AS bucket, count(*)
     FROM trace_scores
-    WHERE question = 'Overall rating of teaching' AND mean IS NOT NULL
+    WHERE question IN ('Overall rating of teaching',
+                       'What is your overall rating of this instructor teaching effectiveness?')
+      AND mean IS NOT NULL
     GROUP BY 1, 2 ORDER BY 1, 2"""
 
 SIGNATURE_RATE_MAX = 0.02
@@ -183,6 +186,7 @@ def run_db_gates(conn, pre, fixtures_dir=None):
     try:
         sig_rate, sig_per_term = gate_signature(conn)
     except Exception as e:
+        conn.rollback()   # a failed statement aborts the txn; unpoison for the next gate
         print(f"ERROR: Gate 2 -- {e}")
         if not pre:
             failed = True
@@ -198,6 +202,7 @@ def run_db_gates(conn, pre, fixtures_dir=None):
     try:
         reconcile_rate, reconcile_n, reconcile_bad = gate_reconcile(conn)
     except Exception as e:
+        conn.rollback()
         print(f"ERROR: Gate 2 (reconcile) -- {e}")
         if not pre:
             failed = True
@@ -211,6 +216,7 @@ def run_db_gates(conn, pre, fixtures_dir=None):
     try:
         rows_per_term = gate_rows_per_section(conn)
     except Exception as e:
+        conn.rollback()
         print(f"ERROR: Gate 3 -- {e}")
         if not pre:
             failed = True
@@ -234,6 +240,7 @@ def run_db_gates(conn, pre, fixtures_dir=None):
         try:
             fixture_mismatches = gate_fixture_sections(conn, fixtures_dir=fixtures_dir)
         except Exception as e:
+            conn.rollback()
             print(f"ERROR: Gate 4 -- {e}")
             if not pre:
                 failed = True
@@ -249,6 +256,7 @@ def run_db_gates(conn, pre, fixtures_dir=None):
     try:
         distribution = gate_distribution(conn)
     except Exception as e:
+        conn.rollback()
         print(f"ERROR: Distribution -- {e}")
     else:
         for era, bucket, count in distribution:
@@ -306,6 +314,33 @@ def selftest():
             self.handler = handler
         def cursor(self):
             return _FCur(self.handler)
+        def rollback(self):
+            pass
+
+    class _PoisonConn:
+        """Models real psycopg2 transaction poisoning: once any execute raises, every
+        subsequent execute raises "current transaction is aborted" until rollback()."""
+        def __init__(self, handler):
+            self.handler = handler
+            self.poisoned = False
+        def cursor(self):
+            conn = self
+            class _Cur:
+                def __enter__(self): return self
+                def __exit__(self, *a): return False
+                def execute(self, sql, params=None):
+                    if conn.poisoned:
+                        raise Exception("current transaction is aborted, "
+                                        "commands ignored until end of transaction block")
+                    try:
+                        self._rows = conn.handler(sql, params)
+                    except Exception:
+                        conn.poisoned = True
+                        raise
+                def fetchall(self): return self._rows
+            return _Cur()
+        def rollback(self):
+            self.poisoned = False
 
     # ── classify_signature / classify_rows: pure threshold logic ──
     check("signature verdict post", classify_signature(0.9, pre=False) == "FAIL")
@@ -350,6 +385,10 @@ def selftest():
         return []
     check("distribution passthrough", gate_distribution(_FConn(_dist_handler)) ==
           [("applyweb", 4.5, 10), ("bluera", 4.5, 20)])
+    # Bluera phrases the overall-teaching question differently; the era comparison is
+    # useless if the SQL only matches the ApplyWeb wording (probed live 2026-08-01).
+    check("distribution SQL covers bluera question text",
+          "instructor teaching effectiveness" in DISTRIBUTION_SQL)
 
     # ── gate_fixture_sections: canned DB rows built from FIXTURE_META itself, so this
     # exercises the real local fixture files + the real FIXTURE_META in this checkout ──
@@ -511,6 +550,18 @@ def selftest():
         failed_reconcile_pre = run_db_gates(_FConn(_reconcile_raising_handler), pre=True,
                                              fixtures_dir=no_fixtures_dir)
     check("reconcile query error does not fail --pre", failed_reconcile_pre is False)
+
+    # ── run_db_gates: same scenario on a transaction-poisoning connection (real psycopg2
+    # behavior on the unmigrated prod DB) -- the reconcile failure must not cascade
+    # "current transaction is aborted" into gates 3/4/distribution ──
+    buf_poison = io.StringIO()
+    with contextlib.redirect_stdout(buf_poison):
+        run_db_gates(_PoisonConn(_reconcile_raising_handler), pre=True, fixtures_dir=no_fixtures_dir)
+    out_poison = buf_poison.getvalue()
+    check("poisoned txn rolled back: gate 3 still computes",
+          "19.00" in out_poison and "ERROR: Gate 3" not in out_poison)
+    check("poisoned txn rolled back: distribution still computes",
+          "applyweb" in out_poison and "transaction is aborted" not in out_poison)
 
     # ── run_db_gates (I1): post-mode FAIL/PASS classification off the reconcile rate,
     # isolated from the (clean) signature rate in the same run ──

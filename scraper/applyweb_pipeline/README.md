@@ -23,7 +23,8 @@ repo) or `cookies.txt`. Both are gitignored — keep it that way.
 3. `python scraper/applyweb_pipeline/scrape_xls.py` — hours; resumable; on cookie expiry
    refresh `cookies.txt` and re-run (existing cached files are skipped automatically).
 4. `python scraper/applyweb_pipeline/ingest_xls.py --dry-run` — review parse stats
-   (expect ~19 rows/section).
+   (expect ~20 rows/section: 19 Likert + hours-per-week; a term stuck at ~19.0 means
+   its XLS files lack the All Responses sheet, i.e. no hours data).
 5. `python scraper/applyweb_pipeline/ingest_xls.py` — migrates the schema (`count_na`),
    section-scoped DELETE+INSERT per term, rewrites
    `backend/Better_Scraper/output_data/trace_scores.csv` (with a `.bak`).

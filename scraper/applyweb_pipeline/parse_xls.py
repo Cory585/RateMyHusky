@@ -5,6 +5,10 @@ since column offsets differ between the two scale families (Agree/Effective)
 and whether an N/A column is present. Never drops a row for answer spread:
 xlrd gives blank cells as '' and zeros as 0.0 -- both mean count 0.
 
+The hours-per-week demographic question never appears in sheet 0's Answer Counts
+blocks; it is recovered from the per-respondent 'All Responses' sheet instead
+(parse_hours_sheet) and appended as a 20th question row, Bluera-style.
+
 Usage:  python scraper/applyweb_pipeline/parse_xls.py --selftest [--require-fixtures]
 """
 import os
@@ -135,10 +139,48 @@ def parse_sheet(sheet):
     return rep
 
 
+# count_5="More than 10" .. count_1="0-2", same buckets/midpoints as trace_pipeline/ingest.py
+HOURS_MIDPOINTS = {5: 12, 4: 9, 3: 6, 2: 3.5, 1: 1}
+
+
+def parse_hours_sheet(sheet):
+    """Hours-per-week question from an 'All Responses' sheet -> question dict, or None.
+
+    Per-respondent 1..5 codes map to the ascending hour buckets (code semantics pinned
+    by the Likert columns, whose codes tally exactly to the summary sheet's
+    (1.0)..(5.0) counts). Mean is the Bluera midpoint mean -- backend/precompute.py
+    preserves it for hours questions instead of recomputing a 1-5 mean."""
+    for r in range(sheet.nrows):
+        for c in range(sheet.ncols):
+            v = sheet.cell(r, c).value
+            if not (isinstance(v, str) and "hours per week" in v.lower()):
+                continue
+            tally = {k: 0 for k in (1, 2, 3, 4, 5)}
+            for rr in range(r + 1, sheet.nrows):
+                f = _num(sheet.cell(rr, c).value)
+                if f is not None and f in tally:
+                    tally[f] += 1
+            n = sum(tally.values())
+            if n == 0:
+                return None
+            mean = round(sum(HOURS_MIDPOINTS[k] * tally[k] for k in tally) / n, 2)
+            return {"question": v.strip(),
+                    "count_5": tally[5], "count_4": tally[4], "count_3": tally[3],
+                    "count_2": tally[2], "count_1": tally[1], "count_na": 0,
+                    "mean": mean, "median": None, "std_dev": None}
+    return None
+
+
 def parse_report(xls_bytes):
     import xlrd
     wb = xlrd.open_workbook(file_contents=xls_bytes)
-    return parse_sheet(wb.sheet_by_index(0))
+    rep = parse_sheet(wb.sheet_by_index(0))
+    for si in range(1, wb.nsheets):
+        hours = parse_hours_sheet(wb.sheet_by_index(si))
+        if hours is not None:
+            rep["questions"].append(hours)
+            break
+    return rep
 
 
 def report_ok(rep):
@@ -159,7 +201,11 @@ PRE = [["Northeastern University Course Evaluations"], [], ["PHLS 1101, Section 
        ["Enrollment:", 22.0], ["Completed:", 15.0], ["Answer Counts"]]
 
 
-# (question, c5, c4, c3, c2, c1, na, mean, median, std_dev) — mean/median/std_dev exclude N/A
+HOURS_Q = ("The number of hours per week I devoted to this course outside "
+           "scheduled class meeting times.")
+
+# (question, c5, c4, c3, c2, c1, na, mean, median, std_dev) — mean/median/std_dev exclude N/A;
+# the trailing hours row comes from the All Responses sheet (midpoint mean, no median/std_dev)
 EXPECTED_1 = [  # Spring 2025 PHLS1101 I04 — new vintage; enrollment 22, completed 15
     ('Online course materials', 13, 0, 0, 0, 0, 1, 5.0, 5.0, 0.0),
     ('Online Interactions', 13, 0, 0, 0, 0, 1, 5.0, 5.0, 0.0),
@@ -180,6 +226,7 @@ EXPECTED_1 = [  # Spring 2025 PHLS1101 I04 — new vintage; enrollment 22, compl
     ('Respect', 14, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
     ('Enthusiasm', 14, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
     ('Overall rating of teaching', 15, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
+    (HOURS_Q, 3, 3, 2, 6, 1, 0, 6.47, None, None),
 ]
 EXPECTED_2 = [  # Fall 2021 SCLY1210 I02 — OLD vintage; enrollment 28, completed 18
     ('Online course materials', 12, 2, 1, 0, 0, 3, 4.73, 5.0, 0.57),
@@ -201,6 +248,7 @@ EXPECTED_2 = [  # Fall 2021 SCLY1210 I02 — OLD vintage; enrollment 28, complet
     ('Respect', 15, 2, 1, 0, 0, 0, 4.78, 5.0, 0.53),
     ('Enthusiasm', 16, 1, 1, 0, 0, 0, 4.83, 5.0, 0.5),
     ('Overall rating of teaching', 13, 3, 2, 0, 0, 0, 4.61, 5.0, 0.68),
+    (HOURS_Q, 1, 4, 6, 5, 2, 0, 5.75, None, None),
 ]
 EXPECTED_3 = [  # Fall 2024 SCLY1210 I01 — new vintage; enrollment 19, completed 16
     ('Online course materials', 12, 3, 0, 0, 0, 1, 4.8, 5.0, 0.4),
@@ -222,6 +270,7 @@ EXPECTED_3 = [  # Fall 2024 SCLY1210 I01 — new vintage; enrollment 19, complet
     ('Respect', 14, 2, 0, 0, 0, 0, 4.88, 5.0, 0.33),
     ('Enthusiasm', 14, 2, 0, 0, 0, 0, 4.88, 5.0, 0.33),
     ('Overall rating of teaching', 15, 1, 0, 0, 0, 0, 4.94, 5.0, 0.24),
+    (HOURS_Q, 1, 3, 2, 10, 0, 0, 5.38, None, None),
 ]
 EXPECTED_4 = [  # Spring 2022 PHLS1145 I01 — OLD vintage; enrollment 18, completed 12
     ('Online course materials', 8, 3, 0, 0, 0, 1, 4.73, 5.0, 0.45),
@@ -243,6 +292,7 @@ EXPECTED_4 = [  # Spring 2022 PHLS1145 I01 — OLD vintage; enrollment 18, compl
     ('Respect', 11, 1, 0, 0, 0, 0, 4.92, 5.0, 0.28),
     ('Enthusiasm', 12, 0, 0, 0, 0, 0, 5.0, 5.0, 0.0),
     ('Overall rating of teaching', 11, 1, 0, 0, 0, 0, 4.92, 5.0, 0.28),
+    (HOURS_Q, 1, 2, 5, 4, 0, 0, 6.17, None, None),
 ]
 FIXTURE_META = {
     "quantitative_report_1.xls": {"expected": EXPECTED_1, "enrollment": 22, "completed": 15,
@@ -357,7 +407,29 @@ def selftest(require_fixtures=False):
     rep = parse_sheet(_FakeSheet([["Title"], AGREE]))
     check("no enrollment/questions -> not ok", not report_ok(rep))
 
-    # 11. four-fixture byte-exact gate against real XLS files
+    # 11. hours-per-week from the All Responses sheet: 1..5 codes tallied into buckets
+    #     (1=0-2h .. 5=More than 10h), Bluera midpoint mean, blanks/junk/out-of-range ignored
+    hours_grid = [["Northeastern University Online Course Evaluations"], [],
+                  ["All Student Responses:"],
+                  ["", "The syllabus was accurate.", HOURS_Q],
+                  ["Eval #1", 5.0, 2.0],
+                  ["Eval #2", 5.0, 2.0],
+                  ["Eval #3", 4.0, 5.0],
+                  ["Eval #4", 5.0, ''],       # skipped the hours question
+                  ["Eval #5", 5.0, "junk"],
+                  ["Eval #6", 5.0, 7.0]]      # out-of-range code
+    q = parse_hours_sheet(_FakeSheet(hours_grid))
+    check("hours question text from header", q["question"] == HOURS_Q)
+    check("hours codes -> bucket counts",
+          (q["count_5"], q["count_4"], q["count_3"], q["count_2"], q["count_1"]) == (1, 0, 0, 2, 0))
+    check("hours midpoint mean", q["mean"] == 6.33)          # (12 + 2*3.5) / 3
+    check("hours row shape", q["count_na"] == 0 and q["median"] is None and q["std_dev"] is None)
+    check("hours header absent -> None",
+          parse_hours_sheet(_FakeSheet([["nothing here"], ["Eval #1", 5.0]])) is None)
+    check("hours all blank -> None",
+          parse_hours_sheet(_FakeSheet([["", HOURS_Q], ["Eval #1", '']])) is None)
+
+    # 12. four-fixture byte-exact gate against real XLS files
     import common  # same-dir import, like trace_pipeline modules
     if os.path.isdir(common.FIXTURES_DIR):
         if not run_fixture_gate():
