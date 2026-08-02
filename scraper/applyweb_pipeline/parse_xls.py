@@ -55,10 +55,11 @@ def _header_map(cells):
         if not isinstance(v, str):
             continue
         t = v.strip()
+        is_na = t == "N/A" or t.startswith("N/A (") or t.startswith("Not Applicable")
         for suf, key in _RATING_SUFFIX.items():
-            if t.endswith(suf) and not t.startswith("N/A"):
+            if t.endswith(suf) and not is_na:
                 cols[key] = c
-        if t == "N/A" or t.startswith("N/A ("):
+        if is_na:
             cols["na"] = c
             cols["na_old"] = (t != "N/A")
         elif t == "Mean":
@@ -197,6 +198,8 @@ NA_NEW = ["", "Strongly Agree (5.0)", "Agree (4.0)", "Neutral (3.0)", "Disagree 
           "Strongly Disagree (1.0)", "N/A", "Mean", "Median", "Std Dev", "Response Rate"]
 NA_OLD = ["", "Strongly Agree (5.0)", "Agree (4.0)", "Neutral (3.0)", "Disagree (2.0)",
           "Strongly Disagree (1.0)", "N/A (0.0)", "Mean", "Median", "Std Dev", "Response Rate"]
+NA_LAW = ["", "Strongly Agree (5.0)", "Agree (4.0)", "Neutral (3.0)", "Disagree (2.0)",
+          "Strongly Disagree (1.0)", "Not Applicable (0.0)", "Mean", "Median", "Std Dev", "Response Rate"]
 PRE = [["Northeastern University Course Evaluations"], [], ["PHLS 1101, Section I04"],
        ["Enrollment:", 22.0], ["Completed:", 15.0], ["Answer Counts"]]
 
@@ -375,39 +378,52 @@ def selftest(require_fixtures=False):
     check("expected na mismatch counted", rep["expected_na_mismatches"] == 1)
     check("not flagged as error", rep["mean_mismatches"] == [] and report_ok(rep))
 
-    # 4. all-N/A row -> stats None
+    # 4. Law-quarter template: N/A header spelled "Not Applicable (0.0)" -> treated as old
+    #    vintage, na counted correctly. Real numbers from a diagnosed Law XLS (Supplemental
+    #    row): counts 20/7/4/1/0, na=1, ApplyWeb's printed mean 4.303 counts na as 0
+    #    (142/33); recomputed mean excludes na -> 142/32 = 4.4375 -> 4.44
+    rep = parse_sheet(_FakeSheet(PRE + [NA_LAW,
+        ["Supplemental", 20.0, 7.0, 4.0, 1.0, 0.0, 1.0, 4.303, 5.0, 1.11, 0.97]]))
+    q = rep["questions"][0]
+    check("law header old vintage", rep["old_vintage"] is True)
+    check("law count_na captured", q["count_na"] == 1)
+    check("law mean excludes na", q["mean"] == 4.44)
+    check("law expected na mismatch counted", rep["expected_na_mismatches"] == 1)
+    check("law not flagged as error", rep["mean_mismatches"] == [] and report_ok(rep))
+
+    # 5. all-N/A row -> stats None
     rep = parse_sheet(_FakeSheet(PRE + [NA_NEW, ["Sense of community", '', '', '', '', '', 15.0, '', '', '', '']]))
     q = rep["questions"][0]
     check("all-na row kept", q["count_na"] == 15 and (q["count_5"], q["count_1"]) == (0, 0))
     check("all-na stats None", q["mean"] is None and q["median"] is None and q["std_dev"] is None)
 
-    # 5. effectiveness scale family maps by suffix
+    # 6. effectiveness scale family maps by suffix
     rep = parse_sheet(_FakeSheet(PRE + [EFFECT, ["Overall rating of teaching", 15.0, 0.0, 0.0, 0.0, 0.0, 5.0, 5.0, 0.0, 0.68]]))
     check("effect family parsed", rep["questions"][0]["mean"] == 5.0)
 
-    # 6. even-N median can be x.5
+    # 7. even-N median can be x.5
     rep = parse_sheet(_FakeSheet(PRE + [AGREE, ["Q", 1.0, 1.0, 0.0, 0.0, 0.0, 4.5, 4.5, 0.5, 0.1]]))
     check("even median 4.5", rep["questions"][0]["median"] == 4.5)
 
-    # 7. genuine printed-mean disagreement -> mean_mismatches, report not ok
+    # 8. genuine printed-mean disagreement -> mean_mismatches, report not ok
     rep = parse_sheet(_FakeSheet(PRE + [AGREE, ["Q", 10.0, 0.0, 0.0, 0.0, 0.0, 3.2, 5.0, 0.0, 0.5]]))
     check("mean mismatch flagged", rep["mean_mismatches"] == ["Q"] and not report_ok(rep))
 
-    # 8. junk row under a header -> unexpected_rows, report not ok
+    # 9. junk row under a header -> unexpected_rows, report not ok
     rep = parse_sheet(_FakeSheet(PRE + [AGREE, ["Some stray text", '', 'huh', '', '', '', '', '', '', '']]))
     check("unexpected row flagged", rep["unexpected_rows"] == ["Some stray text"] and not report_ok(rep))
 
-    # 9. duplicate question label -> flagged
+    # 10. duplicate question label -> flagged
     rep = parse_sheet(_FakeSheet(PRE + [AGREE,
         ["Syllabus", 14.0, 0.0, 0.0, 0.0, 0.0, 5.0, 5.0, 0.0, 0.64],
         ["Syllabus", 10.0, 0.0, 0.0, 0.0, 0.0, 5.0, 5.0, 0.0, 0.64]]))
     check("duplicate question flagged", rep["duplicate_questions"] == ["Syllabus"] and not report_ok(rep))
 
-    # 10. missing enrollment/completed or zero questions -> not ok
+    # 11. missing enrollment/completed or zero questions -> not ok
     rep = parse_sheet(_FakeSheet([["Title"], AGREE]))
     check("no enrollment/questions -> not ok", not report_ok(rep))
 
-    # 11. hours-per-week from the All Responses sheet: 1..5 codes tallied into buckets
+    # 12. hours-per-week from the All Responses sheet: 1..5 codes tallied into buckets
     #     (1=0-2h .. 5=More than 10h), Bluera midpoint mean, blanks/junk/out-of-range ignored
     hours_grid = [["Northeastern University Online Course Evaluations"], [],
                   ["All Student Responses:"],
@@ -429,7 +445,7 @@ def selftest(require_fixtures=False):
     check("hours all blank -> None",
           parse_hours_sheet(_FakeSheet([["", HOURS_Q], ["Eval #1", '']])) is None)
 
-    # 12. four-fixture byte-exact gate against real XLS files
+    # 13. four-fixture byte-exact gate against real XLS files
     import common  # same-dir import, like trace_pipeline modules
     if os.path.isdir(common.FIXTURES_DIR):
         if not run_fixture_gate():
