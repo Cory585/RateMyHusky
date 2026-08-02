@@ -916,12 +916,12 @@ def professor_profile(slug):
                                 THEN (COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0))::float
                                 ELSE CASE WHEN mean IS NOT NULL THEN 1.0 ELSE 0 END END
                            ELSE 0 END)::float AS challeng_weight,
-                       SUM(CASE WHEN LOWER(question) LIKE '%%overall%%' THEN
+                       SUM(CASE WHEN LOWER(question) LIKE '%%overall%%' AND LOWER(question) != 'overall effectiveness' THEN
                            CASE WHEN COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0) > 0
                                 THEN (1.0*COALESCE(count_1,0)::float+2.0*COALESCE(count_2,0)::float+3.0*COALESCE(count_3,0)::float+4.0*COALESCE(count_4,0)::float+5.0*COALESCE(count_5,0)::float)
                                 ELSE COALESCE(mean::float, 0) END
                            ELSE 0 END)::float AS overall_sum,
-                       SUM(CASE WHEN LOWER(question) LIKE '%%overall%%' THEN
+                       SUM(CASE WHEN LOWER(question) LIKE '%%overall%%' AND LOWER(question) != 'overall effectiveness' THEN
                            CASE WHEN COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0) > 0
                                 THEN (COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)+COALESCE(count_4,0)+COALESCE(count_5,0))::float
                                 ELSE CASE WHEN mean IS NOT NULL THEN 1.0 ELSE 0 END END
@@ -945,6 +945,7 @@ def professor_profile(slug):
                 JOIN trace_courses tc
                   ON ts.course_id=tc.course_id AND ts.instructor_id=tc.instructor_id AND ts.term_id=tc.term_id
                 WHERE tc.name_key = %s AND LOWER(ts.question) LIKE '%%overall%%'
+                  AND LOWER(ts.question) != 'overall effectiveness'
                 GROUP BY tc.display_name
             """, (name_key,))
             rating_dist_by_course = {}
@@ -1159,6 +1160,7 @@ def professor_profile(slug):
              AND ts.instructor_id = tc.instructor_id
              AND ts.term_id = tc.term_id
             WHERE tc.name_key = %s AND lower(ts.question) LIKE '%%overall%%'
+              AND lower(ts.question) != 'overall effectiveness'
         """, (name_key,))
         rating_dist_by_course = {}
         for s in overall_rows:
@@ -1842,16 +1844,16 @@ def course_profile(code):
     section_keys = tuple((s["course_id"], s["instructor_id"], s["term_id"]) for s in sections)
     combined_scores = query(
         "SELECT course_id, instructor_id, term_id, "
-        "SUM(CASE WHEN lower(question) LIKE '%%overall%%' THEN CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT) ELSE 0 END) as overall_weighted, "
-        "SUM(CASE WHEN lower(question) LIKE '%%overall%%' THEN CAST(total_responses AS INT) ELSE 0 END) as overall_responses, "
-        "SUM(CASE WHEN lower(question) LIKE '%%overall%%' THEN completed ELSE 0 END) as overall_completed, "
+        "SUM(CASE WHEN lower(question) LIKE '%%overall%%' AND lower(question) != 'overall effectiveness' THEN CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT) ELSE 0 END) as overall_weighted, "
+        "SUM(CASE WHEN lower(question) LIKE '%%overall%%' AND lower(question) != 'overall effectiveness' THEN CAST(total_responses AS INT) ELSE 0 END) as overall_responses, "
+        "SUM(CASE WHEN lower(question) LIKE '%%overall%%' AND lower(question) != 'overall effectiveness' THEN completed ELSE 0 END) as overall_completed, "
         "SUM(CASE WHEN lower(question) LIKE '%%challeng%%' THEN CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT) ELSE 0 END) as challeng_weighted, "
         "SUM(CASE WHEN lower(question) LIKE '%%challeng%%' THEN CAST(total_responses AS INT) ELSE 0 END) as challeng_responses, "
         "SUM(CASE WHEN lower(question) LIKE '%%hours%%' THEN CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT) ELSE 0 END) as hours_weighted, "
         "SUM(CASE WHEN lower(question) LIKE '%%hours%%' THEN CAST(total_responses AS INT) ELSE 0 END) as hours_responses "
         "FROM trace_scores "
         "WHERE (course_id, instructor_id, term_id) IN %s "
-        "AND (lower(question) LIKE '%%overall%%' OR lower(question) LIKE '%%challeng%%' OR lower(question) LIKE '%%hours%%') "
+        "AND ((lower(question) LIKE '%%overall%%' AND lower(question) != 'overall effectiveness') OR lower(question) LIKE '%%challeng%%' OR lower(question) LIKE '%%hours%%') "
         "GROUP BY course_id, instructor_id, term_id",
         (section_keys,)
     )

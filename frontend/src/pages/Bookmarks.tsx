@@ -265,15 +265,18 @@ export default function Bookmarks() {
   if (!user) {
     return (
       <div className="catalog-page bookmarks-page">
-        <div className="bm-signin-gate">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="bm-lock-icon">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-          </svg>
-          <p>Sign in with your <span className="husky-email">husky.neu.edu</span> account to view your bookmarks.</p>
-          <button className="bm-signin-btn" onClick={() => setShowSignIn(true)}>Sign In</button>
+        <div className="bm-signin-wrap">
+          <div className="bm-signin-gate">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="bm-lock-icon">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            <p>Sign in with your <span className="husky-email">husky.neu.edu</span> account to view your bookmarks.</p>
+            <button className="bm-signin-btn" onClick={() => setShowSignIn(true)}>Sign In</button>
+          </div>
         </div>
         <SignInModal open={showSignIn} onClose={() => setShowSignIn(false)} />
+        <Footer />
       </div>
     );
   }
@@ -292,6 +295,7 @@ export default function Bookmarks() {
             ))}
           </div>
         </div>
+        <Footer />
       </div>
     );
   }

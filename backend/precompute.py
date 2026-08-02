@@ -338,8 +338,11 @@ def main():
     trace_name_lookup = dict(zip(name_sorted.loc[valid, "name_key"], name_sorted.loc[valid, "_full"]))
 
     # ── TRACE overall rating (weighted avg of "overall" questions) ──
+    # Law sections carry two overall questions; ratings use 'Overall Course' only. The
+    # exclusion is exact-match because the Bluera label also contains "effectiveness".
     ts["question"] = ts["question"].astype(str)
-    overall = ts[ts["question"].str.lower().str.contains("overall", na=False)].copy()
+    _q_lower = ts["question"].str.lower()
+    overall = ts[_q_lower.str.contains("overall", na=False) & (_q_lower != "overall effectiveness")].copy()
     overall.dropna(subset=["mean"], inplace=True)
 
     instructor_courses = tc[["course_id", "instructor_id", "name_key"]].drop_duplicates()
@@ -897,6 +900,7 @@ def main():
                     AND tc.instructor_id = ts.instructor_id
                     AND tc.term_id = ts.term_id
                 WHERE LOWER(ts.question) LIKE '%%overall%%'
+                  AND LOWER(ts.question) != 'overall effectiveness'
                   AND tc.course_code IS NOT NULL
                 GROUP BY tc.course_code
             ) agg
