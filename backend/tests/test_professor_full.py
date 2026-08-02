@@ -159,6 +159,44 @@ def test_full_blends_difficulty_from_rmp_and_trace():
     assert data["difficulty"] == 3.55
 
 
+def test_full_ratings_use_overall_course_not_law_overall_effectiveness():
+    # Law sections carry TWO overall questions: 'Overall Course' and 'Overall
+    # Effectiveness'. Ratings must count only 'Overall Course' — but the exclusion
+    # must be exact, because the Bluera-era label ("What is your overall rating of
+    # this instructor teaching effectiveness?") also contains "effectiveness" and
+    # must keep counting.
+    class LawQuery(RecordingQuery):
+        def _rows_for(self, sql):
+            s = sql.lower()
+            if "from trace_scores" in s:
+                base = {"course_id": 2, "term_id": 159, "display_name": "LAW6101: Con Law"}
+                return [
+                    {**base, "question": "Overall Course", "mean": 2.5,
+                     "count_1": 1, "count_2": 0, "count_3": 0, "count_4": 1,
+                     "count_5": 0, "completed": 2},
+                    {**base, "question": "Overall Effectiveness", "mean": 3.0,
+                     "count_1": 0, "count_2": 1, "count_3": 0, "count_4": 1,
+                     "count_5": 0, "completed": 2},
+                    {**base, "question": "What is your overall rating of this "
+                     "instructor teaching effectiveness?", "mean": 4.5,
+                     "count_1": 0, "count_2": 0, "count_3": 0, "count_4": 1,
+                     "count_5": 1, "completed": 2},
+                ]
+            if "from trace_courses" in s:
+                return [{"course_id": 2, "term_id": 159, "term_title": "Fall 2022 Law",
+                         "department_name": "Law", "display_name": "LAW6101: Con Law",
+                         "section": "1", "enrollment": 20, "instructor_id": 8}]
+            return super()._rows_for(sql)
+
+    rq = LawQuery()
+    data = build_full("olin-guha", rq.query, rq.query_one, sanitize=lambda t: t,
+                      fetch_reddit_mentions=_fake_fetch_reddit_mentions, is_authed=False)
+    dist = data["traceRatingCounts"]["LAW6101"]
+    assert dist["count4"] == 2, "Overall Course + Bluera overall only"
+    assert dist["count2"] == 0, "Overall Effectiveness counts must not leak into ratings"
+    assert dist["completed"] == 4
+
+
 def test_full_404_when_professor_missing():
     rq = RecordingQuery()
     rq._rows_for = lambda sql: []  # nothing found

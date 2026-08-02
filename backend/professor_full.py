@@ -50,7 +50,8 @@ def _scan_trace_scores(name_key, query):
          AND ts.term_id = tc.term_id
         WHERE tc.name_key = %s
           AND (lower(ts.question) LIKE '%%challeng%%'
-               OR lower(ts.question) LIKE '%%overall%%'
+               OR (lower(ts.question) LIKE '%%overall%%'
+                   AND lower(ts.question) != 'overall effectiveness')
                OR lower(ts.question) LIKE '%%hours%%')
     """, (name_key,))
 
@@ -92,7 +93,9 @@ def _scan_trace_scores(name_key, query):
                 hours_by_ct[key]["sum"] += float(s["mean"])
                 hours_by_ct[key]["weight"] += 1
 
-        if "overall" in q:
+        # Law sections carry two overall questions; ratings use 'Overall Course' only.
+        # Exact match: the Bluera label also contains the word "effectiveness".
+        if "overall" in q and q != "overall effectiveness":
             code = _course_code(s["display_name"])
             if code not in rating_dist_by_course:
                 rating_dist_by_course[code] = {"count1": 0, "count2": 0, "count3": 0,
