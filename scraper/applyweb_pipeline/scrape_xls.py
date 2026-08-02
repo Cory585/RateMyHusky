@@ -173,7 +173,10 @@ class BrowserFetcher:
         self.page.goto(REPORTBROWSER_URL, wait_until="domcontentloaded")
 
     def fetch_batch(self, urls):
-        return normalize_results(self.page.evaluate(FETCH_BATCH_JS, urls))
+        try:
+            return normalize_results(self.page.evaluate(FETCH_BATCH_JS, urls))
+        except Exception:
+            return [(0, b"")] * len(urls)
 
     def probe(self):
         for i, url in enumerate(self.sentinel_urls):
@@ -201,6 +204,12 @@ class BrowserFetcher:
             pass
         waited = 0
         while True:
+            try:
+                alive = bool(self._ctx.pages)
+            except Exception:
+                alive = False
+            if not alive:
+                sys.exit("Browser window closed — re-run to resume (finished files are cached).")
             time.sleep(3)
             if self.probe():
                 print("Session active — resuming.")
@@ -266,6 +275,16 @@ def selftest():
         return [(200, good_body)]
     bf.fetch_batch = _raise_first
     check("probe: exception on one candidate doesn't skip the rest", bf.probe() is True)
+
+    bf2 = BrowserFetcher("unused_profile_dir", [(1, 2, 3)])
+    check("fetch_batch guards evaluate errors", bf2.fetch_batch(["u1", "u2"]) == [(0, b""), (0, b"")])
+
+    bf3 = BrowserFetcher("unused_profile_dir", [(1, 2, 3)])
+    try:
+        bf3.wait_for_login()
+        check("wait_for_login exits when browser closed", False)
+    except SystemExit:
+        check("wait_for_login exits when browser closed", True)
 
     import base64 as _b64
     check("normalize decodes",
@@ -337,6 +356,13 @@ def selftest():
         run_downloads([(62, 63, 64), (65, 66, 67)], td, f.fetch_batch, f.probe, f.wait_for_login,
                       batch_size=2, on_ok=seen.append, progress_cb=lambda: ticks.append(1))
         check("on_ok + progress_cb fire", seen == [(62, 63, 64)] and len(ticks) == 2)
+
+        f = _Fake([[(200, good), (200, good)], [(200, good)]], [])
+        tally, failures = run_downloads([(68, 69, 70), (71, 72, 73), (74, 75, 76)], td,
+                                        f.fetch_batch, f.probe, f.wait_for_login, batch_size=2)
+        check("multi-batch: 3 pending @ batch_size=2 -> two batches",
+              tally["ok"] == 3 and not failures
+              and [len(b) for b in f.batches] == [2, 1])
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0
