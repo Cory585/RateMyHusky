@@ -1,5 +1,4 @@
-"""Shared helpers for the ApplyWeb TRACE scores fix pipeline: DB connect w/ DNS
-retry, serialization-retry writes, cookie-file parsing.
+"""Shared helpers for the ApplyWeb TRACE scores fix pipeline: DB connect w/ DNS retry, serialization-retry writes.
 
 Adapted from trace_pipeline/common.py.
 
@@ -74,39 +73,11 @@ def batched_write(conn, sql, rows, template=None, batch=1000, attempts=6):
         total += len(chunk)
     return total
 
-def parse_cookie_header(text):
-    text = text.strip()
-    if text.lower().startswith("cookie:"):
-        text = text[len("cookie:"):]
-    out = {}
-    for seg in text.split(";"):
-        seg = seg.strip()
-        if not seg or "=" not in seg:
-            continue
-        k, _, v = seg.partition("=")
-        out[k.strip()] = v.strip()
-    return out
-
-def load_cookies(path):
-    if not os.path.exists(path) or not open(path, encoding="utf-8").read().strip():
-        sys.exit(f"Cookie file missing/empty: {path}\n"
-                 "Open DevTools on applyweb.com -> Network -> any request ->\n"
-                 "copy the 'Cookie:' request header value into that file. NEVER commit it.")
-    return parse_cookie_header(open(path, encoding="utf-8").read())
-
 def selftest():
     fails = []
     def check(label, cond):
         if not cond: fails.append(label)
         print(("PASS" if cond else "FAIL") + ": " + label)
-
-    # ── parse_cookie_header ──
-    check("cookie basic", parse_cookie_header("a=1; b=2") == {"a": "1", "b": "2"})
-    check("cookie strips Cookie: prefix",
-          parse_cookie_header("Cookie: a=1; b=2") == {"a": "1", "b": "2"})
-    check("cookie value containing =",
-          parse_cookie_header("tok=abc==; x=1") == {"tok": "abc==", "x": "1"})
-    check("cookie skips empty segments", parse_cookie_header("a=1; ; b=2;") == {"a": "1", "b": "2"})
 
     # ── batched_write: batching + commit-per-chunk + retry ──
     calls = {"execs": [], "commits": 0, "fail_first": [True]}

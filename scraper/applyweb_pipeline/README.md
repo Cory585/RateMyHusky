@@ -4,15 +4,15 @@ Fixes the ApplyWeb-era `trace_scores` corruption (Spring 2021 → Summer 1 2025,
 Law terms, which still publish via ApplyWeb after the Bluera cutover). Background:
 `docs/plans/APPLYWEB_CORRUPTION_REPORT.md` (local-only, not in the repo).
 
-**NEVER commit** `data/` (fixtures + raw XLS cache are NEU-confidential; this is a public
-repo) or `cookies.txt`. Both are gitignored — keep it that way.
+**NEVER commit** `data/` (fixtures + raw XLS cache + browser profile are NEU-confidential;
+this is a public repo). It is gitignored — keep it that way.
 
 ## Prereqs
 
-- `pip install requests xlrd python-dotenv psycopg2-binary tqdm`
+- `pip install playwright xlrd python-dotenv psycopg2-binary tqdm`
 - `backend/.env` with `NEW_CRDB_DATABASE_URL` set
-- ApplyWeb session cookie in `scraper/applyweb_pipeline/cookies.txt`: DevTools on
-  applyweb.com → any request → copy the full `Cookie:` request header value into the file.
+- Google Chrome installed — the scraper drives your real Chrome (headed) via Playwright;
+  no `playwright install` download needed.
 
 ## Run order
 
@@ -20,8 +20,10 @@ repo) or `cookies.txt`. Both are gitignored — keep it that way.
    counts (read-only, two SELECTs).
 2. `python scraper/applyweb_pipeline/verify.py --pre` — record the corruption baseline
    (optional).
-3. `python scraper/applyweb_pipeline/scrape_xls.py` — hours; resumable; on cookie expiry
-   refresh `cookies.txt` and re-run (existing cached files are skipped automatically).
+3. `python scraper/applyweb_pipeline/scrape_xls.py` — hours; resumable. A Chrome window
+   opens; on first run log in (NEU SSO + Duo) when prompted in the console. The session
+   persists in `data/browser_profile/`, so later runs usually skip login. If the session
+   expires mid-run the scrape pauses — re-login in the window and it resumes automatically.
 4. `python scraper/applyweb_pipeline/ingest_xls.py --dry-run` — review parse stats
    (expect ~20 rows/section: 19 Likert + hours-per-week; a term stuck at ~19.0 means
    its XLS files lack the All Responses sheet, i.e. no hours data).
@@ -45,8 +47,12 @@ All five print `ALL PASS`.
 
 ## Gotchas
 
-- Cookie expiry mid-scrape costs nothing to resume — refresh `cookies.txt`, re-run the
-  same command.
+- Session expiry mid-run pauses the scrape and prints a re-login prompt — log back in via
+  the open Chrome window; nothing is lost.
+- If the run pauses for login but you ARE logged in, all of the probe's candidate sections
+  (it tries up to 3) would have to be broken — vanishingly unlikely; if it ever happens,
+  use `--terms`/`--limit` to start from a different slice. After the first successful
+  download the probe uses a known-good section.
 - Review `failures.csv` / `parse_failures.csv` after a run; don't assume a clean exit
   means every section downloaded/parsed.
 - Law terms still publish via ApplyWeb — this pipeline is the Law path going forward, not
@@ -56,10 +62,6 @@ All five print `ALL PASS`.
 - `--delete-full-term` purges the whole term in the DB, but the CSV dual-write only drops
   ingested sections — only use the flag on a term after confirming its dry-run shows 0
   dirty sections and full download coverage.
-- On the real scrape run, watch the first minute: if ApplyWeb serves an HTML login page
-  with HTTP 200 instead of 401 on cookie expiry, downloads degrade to `fail` (caught by
-  the magic-byte check) rather than halting — a ballooning `failures.csv` early means a
-  bad cookie.
 - `verify.py --pre` runs before the `count_na` migration exists in prod; Gate 4 reporting
   `ERROR`/`SKIP` in `--pre` mode is expected, not a problem.
 - If `ingest_xls.py` aborts mid-run, the DB is partially updated while the CSV rewrite
