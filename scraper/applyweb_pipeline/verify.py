@@ -3,6 +3,9 @@
 Gate 1 (offline): parse_xls.run_fixture_gate against the 4 known-good fixtures.
 Gate 2: signature rate -- rows where the printed answer counts exceed
         `completed` (a hallmark of the ApplyWeb corruption). Aggregate + per-term.
+        Also reconciles count_na (spec 4.4): overall rate of rows where
+        counts+count_na exceed `completed` (term_id < 900 only; count_na doesn't
+        exist until ingest_xls's migrate() has run).
 Gate 3: avg TRACE rows/section per term (a healthy section has ~19 questions).
 Gate 4: fixture-section reconciliation -- the 4 known sections' prod rows must
         match parse_xls.FIXTURE_META's known-good expected values (Gate 1 already
@@ -13,12 +16,13 @@ Distribution (informational only, not gated): before/after mean-bucket histogram
 
 `--pre` is baseline mode: dirty numbers are expected, gates 2-4 are labeled
 BASELINE instead of PASS/FAIL, and the process always exits 0. Post mode
-(default) exits 1 if the overall signature rate is > 0.02, any main term
-(>= 100 sections) has avg rows/section < 18.5, Gate 1 fails, or Gate 4 finds
-mismatches. Small terms (< 100 sections) are reported but do not gate. Each DB
-gate is isolated: a query error prints "ERROR: Gate N -- <message>" (never a
-traceback) and is treated like a failed gate in post mode, but never in --pre.
-Gate 4 is SKIPPED (not a false PASS) if the local fixtures dir isn't present.
+(default) exits 1 if the overall signature rate is > 0.02, the count_na
+reconciliation rate is > 0.02, any main term (>= 100 sections) has avg
+rows/section < 18.5, Gate 1 fails, or Gate 4 finds mismatches. Small terms
+(< 100 sections) are reported but do not gate. Each DB gate is isolated: a
+query error prints "ERROR: Gate N -- <message>" (never a traceback) and is
+treated like a failed gate in post mode, but never in --pre. Gate 4 is
+SKIPPED (not a false PASS) if the local fixtures dir isn't present.
 
 Usage:
   python scraper/applyweb_pipeline/verify.py [--pre] [--skip-db]
@@ -38,11 +42,17 @@ SIGNATURE_SQL = """
                                   +COALESCE(count_4,0)+COALESCE(count_5,0) > completed
                               AND completed > 0) AS sig
     FROM trace_scores WHERE term_id < 900 GROUP BY term_id ORDER BY term_id"""
+RECONCILE_SQL = """
+    SELECT count(*) AS n,
+           count(*) FILTER (WHERE COALESCE(count_1,0)+COALESCE(count_2,0)+COALESCE(count_3,0)
+                                  +COALESCE(count_4,0)+COALESCE(count_5,0)+COALESCE(count_na,0) > completed
+                              AND completed > 0) AS bad
+    FROM trace_scores WHERE term_id < 900"""
 ROWS_PER_SECTION_SQL = """
     SELECT term_id, avg(nrows) FROM (
         SELECT term_id, course_id, instructor_id, count(*) AS nrows
         FROM trace_scores WHERE term_id < 900 GROUP BY 1, 2, 3
-    ) GROUP BY term_id ORDER BY term_id"""
+    ) sec GROUP BY term_id ORDER BY term_id"""
 FIXTURE_SECTION_SQL = """
     SELECT question, count_5, count_4, count_3, count_2, count_1, count_na, mean
     FROM trace_scores WHERE course_id = %s AND instructor_id = %s AND term_id = %s"""
@@ -84,6 +94,18 @@ def gate_signature(conn):
         total_sig += sig
     overall = (total_sig / total_n) if total_n else 0.0
     return overall, per_term
+
+
+def gate_reconcile(conn):
+    """-> (rate, n, bad) -- spec 4.4: sum(counts)+count_na <= completed should hold for
+    ~all rows. Overall rate only (term_id < 900). count_na doesn't exist until
+    ingest_xls's migrate() has run, so this errors on an unmigrated DB the same way
+    Gate 4's FIXTURE_SECTION_SQL does."""
+    with conn.cursor() as cur:
+        cur.execute(RECONCILE_SQL)
+        n, bad = cur.fetchall()[0]
+    n, bad = n or 0, bad or 0
+    return (bad / n) if n else 0.0, n, bad
 
 
 def gate_rows_per_section(conn):
@@ -171,6 +193,18 @@ def run_db_gates(conn, pre, fixtures_dir=None):
         sig_verdict = classify_signature(sig_rate, pre)
         print(f"overall: n={sum(n for _, n, _, _ in sig_per_term)} rate={sig_rate:.4f} -> {sig_verdict}")
         if sig_verdict == "FAIL":
+            failed = True
+
+    try:
+        reconcile_rate, reconcile_n, reconcile_bad = gate_reconcile(conn)
+    except Exception as e:
+        print(f"ERROR: Gate 2 (reconcile) -- {e}")
+        if not pre:
+            failed = True
+    else:
+        reconcile_verdict = classify_signature(reconcile_rate, pre)
+        print(f"reconcile: n={reconcile_n} bad={reconcile_bad} rate={reconcile_rate:.4f} -> {reconcile_verdict}")
+        if reconcile_verdict == "FAIL":
             failed = True
 
     print("\n=== Gate 3: avg rows/section (per term) ===")
@@ -290,6 +324,17 @@ def selftest():
     check("signature rate", abs(rate - 0.9) < 1e-9)
     check("signature per_term", per_term == [(196, 100, 90, 0.9)])
 
+    # ── gate_reconcile (I1): 5 reconciliation-bad rows of 100 -> 0.05 ──
+    def _reconcile_handler(sql, params):
+        if "COALESCE(count_na" in sql:
+            return [(100, 5)]
+        return []
+    reconcile_rate, reconcile_n, reconcile_bad = gate_reconcile(_FConn(_reconcile_handler))
+    check("reconcile rate", abs(reconcile_rate - 0.05) < 1e-9)
+    check("reconcile n/bad passthrough", (reconcile_n, reconcile_bad) == (100, 5))
+    check("reconcile post-mode classification FAIL", classify_signature(reconcile_rate, pre=False) == "FAIL")
+    check("reconcile pre-mode classification BASELINE", classify_signature(reconcile_rate, pre=True) == "BASELINE")
+
     # ── gate_rows_per_section: passthrough + float cast ──
     def _rows_handler(sql, params):
         if "avg(nrows)" in sql:
@@ -381,6 +426,8 @@ def selftest():
     def _gate4_raising_handler(sql, params):
         if "course_id = %s AND instructor_id = %s" in sql:
             raise Exception('column "count_na" does not exist')
+        if "COALESCE(count_na" in sql:
+            return [(100, 1)]
         if "FILTER (WHERE COALESCE" in sql:
             return [(196, 100, 1)]
         if "avg(nrows)" in sql:
@@ -412,6 +459,8 @@ def selftest():
     def _no_gate4_query_handler(sql, params):
         if "course_id = %s AND instructor_id = %s" in sql:
             raise AssertionError("Gate 4 must not query the DB when fixtures dir is absent")
+        if "COALESCE(count_na" in sql:
+            return [(100, 1)]
         if "FILTER (WHERE COALESCE" in sql:
             return [(196, 100, 1)]
         if "avg(nrows)" in sql:
@@ -428,6 +477,79 @@ def selftest():
     check("gate4 SKIP when fixtures absent, not a false PASS",
           "SKIP: fixtures not present" in out3 and "mismatch(es)" not in out3)
     check("gate4 SKIP does not fail post mode", failed_skip is False)
+
+    # ── run_db_gates (I1): the reconciliation query errors on an unmigrated DB (same
+    # trigger as Gate 4: count_na doesn't exist pre-migration) without breaking Gate 2's
+    # signature output or gates 3/4/distribution, and only fails post mode -- never --pre.
+    # fixtures_dir is absent so Gate 4 takes its SKIP path (already covered above). ──
+    def _reconcile_raising_handler(sql, params):
+        if "COALESCE(count_na" in sql:
+            raise Exception('column "count_na" does not exist')
+        if "FILTER (WHERE COALESCE" in sql:
+            return [(196, 100, 1)]
+        if "avg(nrows)" in sql:
+            return [(196, 19.0)]
+        if "floor(mean * 2)" in sql:
+            return [("applyweb", 4.5, 1)]
+        return []
+
+    no_fixtures_dir = os.path.join(common.PIPELINE_DIR, "no_such_dir")
+
+    buf4 = io.StringIO()
+    with contextlib.redirect_stdout(buf4):
+        failed_reconcile_post = run_db_gates(_FConn(_reconcile_raising_handler), pre=False,
+                                              fixtures_dir=no_fixtures_dir)
+    out4 = buf4.getvalue()
+    check("reconcile query error -> ERROR line, no traceback",
+          "ERROR: Gate 2 (reconcile)" in out4 and "Traceback" not in out4)
+    check("reconcile query error doesn't swallow gate 2 signature / gate 3 / distribution output",
+          "overall: n=" in out4 and "Gate 3: avg rows/section" in out4 and "Distribution" in out4)
+    check("reconcile query error fails post mode", failed_reconcile_post is True)
+
+    buf5 = io.StringIO()
+    with contextlib.redirect_stdout(buf5):
+        failed_reconcile_pre = run_db_gates(_FConn(_reconcile_raising_handler), pre=True,
+                                             fixtures_dir=no_fixtures_dir)
+    check("reconcile query error does not fail --pre", failed_reconcile_pre is False)
+
+    # ── run_db_gates (I1): post-mode FAIL/PASS classification off the reconcile rate,
+    # isolated from the (clean) signature rate in the same run ──
+    def _reconcile_rate_handler(bad_n):
+        def handler(sql, params):
+            if "COALESCE(count_na" in sql:
+                return [(100, bad_n)]
+            if "FILTER (WHERE COALESCE" in sql:
+                return [(196, 100, 1)]
+            if "avg(nrows)" in sql:
+                return [(196, 19.0)]
+            if "floor(mean * 2)" in sql:
+                return [("applyweb", 4.5, 1)]
+            return []
+        return handler
+
+    buf6 = io.StringIO()
+    with contextlib.redirect_stdout(buf6):
+        failed_reconcile_bad = run_db_gates(_FConn(_reconcile_rate_handler(5)), pre=False,
+                                             fixtures_dir=no_fixtures_dir)
+    out6 = buf6.getvalue()
+    check("reconcile rate 0.05 -> FAIL", "reconcile: n=100 bad=5 rate=0.0500 -> FAIL" in out6)
+    check("reconcile rate 0.05 fails post mode", failed_reconcile_bad is True)
+
+    buf7 = io.StringIO()
+    with contextlib.redirect_stdout(buf7):
+        failed_reconcile_clean = run_db_gates(_FConn(_reconcile_rate_handler(1)), pre=False,
+                                               fixtures_dir=no_fixtures_dir)
+    out7 = buf7.getvalue()
+    check("reconcile rate 0.01 -> PASS", "reconcile: n=100 bad=1 rate=0.0100 -> PASS" in out7)
+    check("reconcile rate 0.01 passes post mode", failed_reconcile_clean is False)
+
+    buf8 = io.StringIO()
+    with contextlib.redirect_stdout(buf8):
+        failed_reconcile_pre_bad = run_db_gates(_FConn(_reconcile_rate_handler(5)), pre=True,
+                                                 fixtures_dir=no_fixtures_dir)
+    out8 = buf8.getvalue()
+    check("reconcile rate 0.05 in --pre -> BASELINE", "reconcile: n=100 bad=5 rate=0.0500 -> BASELINE" in out8)
+    check("reconcile rate 0.05 in --pre does not fail", failed_reconcile_pre_bad is False)
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0

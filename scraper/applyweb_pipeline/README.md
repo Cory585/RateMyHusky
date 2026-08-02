@@ -61,3 +61,6 @@ All five print `ALL PASS`.
   bad cookie.
 - `verify.py --pre` runs before the `count_na` migration exists in prod; Gate 4 reporting
   `ERROR`/`SKIP` in `--pre` mode is expected, not a problem.
+- If `ingest_xls.py` aborts mid-run, the DB is partially updated while the CSV rewrite
+  (which happens after all terms) hasn't run — re-run ingest to completion before
+  `backup_db.py`/`precompute.py`; the run is idempotent (section-scoped delete+insert).
