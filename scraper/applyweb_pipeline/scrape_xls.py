@@ -30,6 +30,7 @@ TARGET_SQL = """SELECT DISTINCT course_id, instructor_id, term_id
                 WHERE term_id < 900 AND term_end_date >= '2021-01-01'
                 ORDER BY term_id, course_id, instructor_id"""
 REPORTBROWSER_URL = "https://www.applyweb.com/eval/new/reportbrowser"
+LOGIN_URL = "https://www.applyweb.com/eval/shibboleth/neu/36892#"   # NEU SSO entry; reportbrowser offers no sign-in
 
 FETCH_BATCH_JS = """
 async (urls) => {
@@ -199,7 +200,7 @@ class BrowserFetcher:
               "(NEU SSO + Duo). The run resumes automatically.")
         try:
             self.page.bring_to_front()
-            self.page.goto(REPORTBROWSER_URL, wait_until="domcontentloaded")
+            self.page.goto(LOGIN_URL, wait_until="domcontentloaded")
         except Exception:
             pass
         waited = 0
@@ -249,6 +250,7 @@ def selftest():
     check("magic accepted", validate_xls_bytes(OLE_MAGIC + b"\x00" * 600))
     check("html rejected", not validate_xls_bytes(b"<html>login</html>" + b" " * 600))
     check("short body rejected", not validate_xls_bytes(OLE_MAGIC + b"\x00" * 10))
+    check("login url is NEU SSO entry", LOGIN_URL.startswith("https://www.applyweb.com/eval/shibboleth/neu/"))
 
     bf = BrowserFetcher("unused_profile_dir", [(1, 2, 3), (4, 5, 6)])
     check("sentinel_urls from ctor triples",

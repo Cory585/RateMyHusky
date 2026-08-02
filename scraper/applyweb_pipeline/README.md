@@ -21,7 +21,8 @@ this is a public repo). It is gitignored — keep it that way.
 2. `python scraper/applyweb_pipeline/verify.py --pre` — record the corruption baseline
    (optional).
 3. `python scraper/applyweb_pipeline/scrape_xls.py` — hours; resumable. A Chrome window
-   opens; on first run log in (NEU SSO + Duo) when prompted in the console. The session
+   opens; when a login is needed the scraper navigates to the NEU Shibboleth login page
+   automatically — log in (NEU SSO + Duo) when prompted in the console. The session
    persists in `data/browser_profile/`, so later runs usually skip login. If the session
    expires mid-run the scrape pauses — re-login in the window and it resumes automatically.
 4. `python scraper/applyweb_pipeline/ingest_xls.py --dry-run` — review parse stats
