@@ -5,7 +5,9 @@ Gate 2: signature rate -- rows where the printed answer counts exceed
         `completed` (a hallmark of the ApplyWeb corruption). Aggregate + per-term.
 Gate 3: avg TRACE rows/section per term (a healthy section has ~19 questions).
 Gate 4: fixture-section reconciliation -- the 4 known sections' prod rows must
-        match what parse_xls extracts from the local fixture files.
+        match parse_xls.FIXTURE_META's known-good expected values (Gate 1 already
+        pins those constants against the actual XLS bytes; Gate 4 only needs the
+        constants + the DB, not the files themselves).
 Distribution (informational only, not gated): before/after mean-bucket histogram
         split applyweb (term_id < 900) vs bluera.
 
@@ -13,7 +15,10 @@ Distribution (informational only, not gated): before/after mean-bucket histogram
 BASELINE instead of PASS/FAIL, and the process always exits 0. Post mode
 (default) exits 1 if the overall signature rate is > 0.02, any main term
 (>= 100 sections) has avg rows/section < 18.5, Gate 1 fails, or Gate 4 finds
-mismatches. Small terms (< 100 sections) are reported but do not gate.
+mismatches. Small terms (< 100 sections) are reported but do not gate. Each DB
+gate is isolated: a query error prints "ERROR: Gate N -- <message>" (never a
+traceback) and is treated like a failed gate in post mode, but never in --pre.
+Gate 4 is SKIPPED (not a false PASS) if the local fixtures dir isn't present.
 
 Usage:
   python scraper/applyweb_pipeline/verify.py [--pre] [--skip-db]
@@ -25,7 +30,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
-from parse_xls import FIXTURE_META, parse_report, run_fixture_gate
+from parse_xls import FIXTURE_META, run_fixture_gate
 
 SIGNATURE_SQL = """
     SELECT term_id, count(*) AS n,
@@ -91,14 +96,16 @@ def gate_rows_per_section(conn):
 
 def gate_fixture_sections(conn, fixtures_dir=None):
     """-> list of human-readable mismatch strings; [] means every fixture section's DB
-    rows match what parse_xls extracts from the local fixture file. Skips entirely
-    (returns []) if the fixtures dir itself is missing."""
+    rows match FIXTURE_META's known-good expected values. Only runs when the fixtures
+    dir is present locally (used as the "this checkout has real fixtures" signal, same
+    as Gate 1) -- returns [] without querying the DB if it's missing. Callers that need
+    to tell that SKIP apart from a genuine pass should check os.path.isdir(fixtures_dir
+    or common.FIXTURES_DIR) themselves (see run_db_gates)."""
     fixtures_dir = fixtures_dir or common.FIXTURES_DIR
     if not os.path.isdir(fixtures_dir):
         return []
     mismatches = []
     for fname, meta in FIXTURE_META.items():
-        rep = parse_report(open(os.path.join(fixtures_dir, fname), "rb").read())
         expected = {row[0]: row[1:8] for row in meta["expected"]}  # question -> (c5,c4,c3,c2,c1,na,mean)
         cid, iid, tid = meta["triple"]
         with conn.cursor() as cur:
@@ -139,6 +146,83 @@ def run_gate1(fixtures_dir=None, verbose=True):
     return "PASS" if ok else "FAIL"
 
 
+def run_db_gates(conn, pre, fixtures_dir=None):
+    """Runs gates 2-4 + the informational distribution query against conn, printing each
+    gate's output as soon as it's computed and isolating each gate's DB call in its own
+    try/except -- one gate's SQL error (e.g. Gate 4's FIXTURE_SECTION_SQL selects
+    count_na, which doesn't exist until ingest_xls's migrate() has run, so it WILL error
+    on a --pre run against an unmigrated DB) must not abort the others or lose their
+    already-computed results. -> True if post mode (pre=False) should fail the run."""
+    fixtures_dir = fixtures_dir or common.FIXTURES_DIR
+    failed = False
+
+    print("\n=== Gate 2: signature rate (per term) ===")
+    sig_per_term = []
+    try:
+        sig_rate, sig_per_term = gate_signature(conn)
+    except Exception as e:
+        print(f"ERROR: Gate 2 -- {e}")
+        if not pre:
+            failed = True
+    else:
+        print(f"{'term_id':>10} | {'n':>8} | {'sig':>8} | {'rate':>7} | verdict")
+        for term_id, n, sig, rate in sig_per_term:
+            print(f"{term_id:>10} | {n:>8} | {sig:>8} | {rate:>7.4f} | {classify_signature(rate, pre)}")
+        sig_verdict = classify_signature(sig_rate, pre)
+        print(f"overall: n={sum(n for _, n, _, _ in sig_per_term)} rate={sig_rate:.4f} -> {sig_verdict}")
+        if sig_verdict == "FAIL":
+            failed = True
+
+    print("\n=== Gate 3: avg rows/section (per term) ===")
+    try:
+        rows_per_term = gate_rows_per_section(conn)
+    except Exception as e:
+        print(f"ERROR: Gate 3 -- {e}")
+        if not pre:
+            failed = True
+    else:
+        sig_n_by_term = {term_id: n for term_id, n, _, _ in sig_per_term}
+        print(f"{'term_id':>10} | {'sections':>8} | {'avg_rows':>8} | verdict")
+        for term_id, avg in rows_per_term:
+            n = sig_n_by_term.get(term_id, 0)
+            n_sections = round(n / avg) if avg else 0
+            is_main = n_sections >= MAIN_TERM_MIN_SECTIONS
+            verdict = classify_rows(avg, pre)
+            if verdict == "FAIL" and is_main:
+                failed = True
+            tag = verdict if (pre or is_main) else f"{verdict} (small term, not gated)"
+            print(f"{term_id:>10} | {n_sections:>8} | {avg:>8.2f} | {tag}")
+
+    print("\n=== Gate 4: fixture-section reconciliation ===")
+    if not os.path.isdir(fixtures_dir):
+        print("SKIP: fixtures not present locally (data/ is gitignored -- expected on a fresh clone)")
+    else:
+        try:
+            fixture_mismatches = gate_fixture_sections(conn, fixtures_dir=fixtures_dir)
+        except Exception as e:
+            print(f"ERROR: Gate 4 -- {e}")
+            if not pre:
+                failed = True
+        else:
+            for m in fixture_mismatches:
+                print(f"  MISMATCH: {m}")
+            fixture_verdict = "BASELINE" if pre else ("FAIL" if fixture_mismatches else "PASS")
+            print(f"-> {fixture_verdict} ({len(fixture_mismatches)} mismatch(es))")
+            if fixture_mismatches and not pre:
+                failed = True
+
+    print("\n=== Distribution (informational, not gated): mean bucket by era ===")
+    try:
+        distribution = gate_distribution(conn)
+    except Exception as e:
+        print(f"ERROR: Distribution -- {e}")
+    else:
+        for era, bucket, count in distribution:
+            print(f"  {era:>8} | bucket={bucket} | count={count}")
+
+    return failed
+
+
 def main():
     parser = argparse.ArgumentParser(description="Verification gates for the ApplyWeb TRACE scores fix.")
     parser.add_argument("--pre", action="store_true",
@@ -154,50 +238,11 @@ def main():
 
     conn = common.connect()
     try:
-        sig_rate, sig_per_term = gate_signature(conn)
-        rows_per_term = gate_rows_per_section(conn)
-        fixture_mismatches = gate_fixture_sections(conn)
-        distribution = gate_distribution(conn)
+        db_failed = run_db_gates(conn, args.pre)
     finally:
         conn.close()
 
-    failed = gate1 == "FAIL"
-
-    print("\n=== Gate 2: signature rate (per term) ===")
-    print(f"{'term_id':>10} | {'n':>8} | {'sig':>8} | {'rate':>7} | verdict")
-    for term_id, n, sig, rate in sig_per_term:
-        print(f"{term_id:>10} | {n:>8} | {sig:>8} | {rate:>7.4f} | {classify_signature(rate, args.pre)}")
-    sig_verdict = classify_signature(sig_rate, args.pre)
-    print(f"overall: n={sum(n for _, n, _, _ in sig_per_term)} rate={sig_rate:.4f} -> {sig_verdict}")
-    if sig_verdict == "FAIL":
-        failed = True
-
-    print("\n=== Gate 3: avg rows/section (per term) ===")
-    sig_n_by_term = {term_id: n for term_id, n, _, _ in sig_per_term}
-    print(f"{'term_id':>10} | {'sections':>8} | {'avg_rows':>8} | verdict")
-    for term_id, avg in rows_per_term:
-        n = sig_n_by_term.get(term_id, 0)
-        n_sections = round(n / avg) if avg else 0
-        is_main = n_sections >= MAIN_TERM_MIN_SECTIONS
-        verdict = classify_rows(avg, args.pre)
-        if verdict == "FAIL" and is_main:
-            failed = True
-        tag = verdict if (args.pre or is_main) else f"{verdict} (small term, not gated)"
-        print(f"{term_id:>10} | {n_sections:>8} | {avg:>8.2f} | {tag}")
-
-    print("\n=== Gate 4: fixture-section reconciliation ===")
-    if fixture_mismatches:
-        for m in fixture_mismatches:
-            print(f"  MISMATCH: {m}")
-        if not args.pre:
-            failed = True
-    fixture_verdict = "BASELINE" if args.pre else ("FAIL" if fixture_mismatches else "PASS")
-    print(f"-> {fixture_verdict} ({len(fixture_mismatches)} mismatch(es))")
-
-    print("\n=== Distribution (informational, not gated): mean bucket by era ===")
-    for era, bucket, count in distribution:
-        print(f"  {era:>8} | bucket={bucket} | count={count}")
-
+    failed = (gate1 == "FAIL") or db_failed
     if args.pre:
         print("\n--pre baseline run: exiting 0 regardless of gate results.")
         sys.exit(0)
@@ -325,6 +370,64 @@ def selftest():
             check("run_gate1 FAIL (not traceback) when a fixture file is missing", False)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    # ── run_db_gates (H1): one gate's SQL error prints "ERROR: Gate N -- ..." instead
+    # of an uncaught traceback, doesn't swallow the other gates' already-computed
+    # output, and only fails post mode -- never --pre. Uses Gate 4's exact real-world
+    # trigger: FIXTURE_SECTION_SQL selects count_na, which doesn't exist until
+    # ingest_xls.migrate() has run, so a --pre run against an unmigrated DB errors here. ──
+    import io, contextlib
+
+    def _gate4_raising_handler(sql, params):
+        if "course_id = %s AND instructor_id = %s" in sql:
+            raise Exception('column "count_na" does not exist')
+        if "FILTER (WHERE COALESCE" in sql:
+            return [(196, 100, 1)]
+        if "avg(nrows)" in sql:
+            return [(196, 19.0)]
+        if "floor(mean * 2)" in sql:
+            return [("applyweb", 4.5, 1)]
+        return []
+
+    if os.path.isdir(common.FIXTURES_DIR):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            failed_post = run_db_gates(_FConn(_gate4_raising_handler), pre=False, fixtures_dir=common.FIXTURES_DIR)
+        out = buf.getvalue()
+        check("gate4 query error -> ERROR line, no traceback",
+              "ERROR: Gate 4" in out and "Traceback" not in out)
+        check("gate4 query error doesn't swallow gates 2/3/distribution output",
+              "Gate 2: signature rate" in out and "Gate 3: avg rows/section" in out and "Distribution" in out)
+        check("gate4 query error fails post mode", failed_post is True)
+
+        buf2 = io.StringIO()
+        with contextlib.redirect_stdout(buf2):
+            failed_pre = run_db_gates(_FConn(_gate4_raising_handler), pre=True, fixtures_dir=common.FIXTURES_DIR)
+        check("gate4 query error does not fail --pre", failed_pre is False)
+    else:
+        print("WARN: fixtures missing -- run_db_gates Gate-4-error checks skipped")
+
+    # ── run_db_gates (M3): fixtures dir absent -> Gate 4 must print SKIP, never a
+    # false "-> PASS (0 mismatch(es))", and must not query the DB or fail either mode ──
+    def _no_gate4_query_handler(sql, params):
+        if "course_id = %s AND instructor_id = %s" in sql:
+            raise AssertionError("Gate 4 must not query the DB when fixtures dir is absent")
+        if "FILTER (WHERE COALESCE" in sql:
+            return [(196, 100, 1)]
+        if "avg(nrows)" in sql:
+            return [(196, 19.0)]
+        if "floor(mean * 2)" in sql:
+            return []
+        return []
+
+    buf3 = io.StringIO()
+    with contextlib.redirect_stdout(buf3):
+        failed_skip = run_db_gates(_FConn(_no_gate4_query_handler), pre=False,
+                                    fixtures_dir=os.path.join(common.PIPELINE_DIR, "no_such_dir"))
+    out3 = buf3.getvalue()
+    check("gate4 SKIP when fixtures absent, not a false PASS",
+          "SKIP: fixtures not present" in out3 and "mismatch(es)" not in out3)
+    check("gate4 SKIP does not fail post mode", failed_skip is False)
 
     print("ALL PASS" if not fails else f"{len(fails)} FAIL(s): " + ", ".join(fails))
     return 1 if fails else 0
