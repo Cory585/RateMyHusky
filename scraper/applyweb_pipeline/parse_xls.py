@@ -55,13 +55,13 @@ def _header_map(cells):
         if not isinstance(v, str):
             continue
         t = v.strip()
-        is_na = t == "N/A" or t.startswith("N/A (") or t.startswith("Not Applicable")
+        is_na = t == "N/A" or t.startswith("N/A (") or t.lower().startswith("not applicable")
         for suf, key in _RATING_SUFFIX.items():
             if t.endswith(suf) and not is_na:
                 cols[key] = c
         if is_na:
             cols["na"] = c
-            cols["na_old"] = (t != "N/A")
+            cols["na_old"] = t.endswith("(0.0)")
         elif t == "Mean":
             cols["mean"] = c
         elif t == "Median":
@@ -86,10 +86,38 @@ def _stats(counts):
     return mean, median, round(std, 2)
 
 
+# DMSB-template labels that legitimately repeat, mapped to which occurrence to keep.
+# Corpus-verified (all 49,458 files, 2026-08-02): only these two labels ever repeat, always
+# exactly twice -- 'Recommend' in the course then Section Instructor blocks (keep the course
+# row = first), 'Interaction' in the Lead then Section Instructor blocks (keep the Lead
+# row = first). Any other duplicate label stays fatal.
+ALLOWED_DUP_QUESTIONS = {"Recommend": "first", "Interaction": "first"}
+
+
+def _absorbed_zeros_reconcile(counts, mean_printed, std_printed):
+    """True when printed mean AND std both equal the stats of counts + k zero-scores for one
+    integer k >= 1. The Fall 2022 / Full Summer 2022 exports absorb N/A + unanswered into the
+    printed stats (denominator = students who reached the block) while the N/A column is dead
+    or missing entirely -- the counts are sound, only ApplyWeb's printed stats disagree. The
+    std cross-check pins n, sum AND sum of squares, so a misparsed count row cannot pass."""
+    if mean_printed <= 0 or std_printed is None:
+        return False
+    n = sum(counts)
+    s = sum(r * c for r, c in zip((5, 4, 3, 2, 1), counts))
+    k = s / mean_printed - n
+    if abs(k - round(k)) > 0.05 or round(k) < 1:
+        return False
+    k = int(round(k))
+    m = s / (n + k)
+    var = (sum(c * (r - m) ** 2 for r, c in zip((5, 4, 3, 2, 1), counts)) + k * m * m) / (n + k)
+    return abs(var ** 0.5 - std_printed) <= 0.01
+
+
 def parse_sheet(sheet):
     rep = {"enrollment": None, "completed": None, "questions": [], "blocks": 0,
            "summary_rows": 0, "old_vintage": False, "unexpected_rows": [],
-           "mean_mismatches": [], "expected_na_mismatches": 0, "duplicate_questions": []}
+           "mean_mismatches": [], "expected_na_mismatches": 0, "duplicate_questions": [],
+           "absorbed_na_mismatches": 0, "resolved_duplicates": []}
     seen = set()
     cols = None
     for r in range(sheet.nrows):
@@ -112,6 +140,7 @@ def parse_sheet(sheet):
                       for k in ("count_5", "count_4", "count_3", "count_2", "count_1")]
         na_val = _num(cells[cols["na"]]) if "na" in cols and cols["na"] < len(cells) else None
         mean_printed = _num(cells[cols["mean"]]) if cols["mean"] < len(cells) else None
+        std_printed = _num(cells[cols["std_dev"]]) if "std_dev" in cols and cols["std_dev"] < len(cells) else None
         if not first and all(v is None for v in count_vals + [na_val, mean_printed]):
             continue                            # blank spacer row
         if all(v is None for v in count_vals) and na_val is None and mean_printed is not None:
@@ -121,20 +150,34 @@ def parse_sheet(sheet):
             counts = [int(v or 0) for v in count_vals]
             na = int(na_val or 0) if "na" in cols else 0
             mean_u, median, std = _stats(counts)
+            replace_idx = None
             if first in seen:
-                rep["duplicate_questions"].append(first)
-                continue
+                keep = ALLOWED_DUP_QUESTIONS.get(first)
+                if keep is None:
+                    rep["duplicate_questions"].append(first)
+                    continue
+                rep["resolved_duplicates"].append(first)
+                if keep == "first":
+                    continue
+                # keep == "last": this row supersedes the earlier occurrence, in place
+                replace_idx = next(i for i, q in enumerate(rep["questions"]) if q["question"] == first)
             seen.add(first)
             if mean_u is not None and mean_printed is not None and abs(mean_u - mean_printed) > 0.01:
                 if cols.get("na_old") and na > 0:
                     rep["expected_na_mismatches"] += 1   # old vintage printed mean counts N/A as 0.0
+                elif _absorbed_zeros_reconcile(counts, mean_printed, std_printed):
+                    rep["absorbed_na_mismatches"] += 1   # Fall/Full Summer 2022: N/A column dead or absent
                 else:
                     rep["mean_mismatches"].append(first)
-            rep["questions"].append({
+            qrow = {
                 "question": first, "count_5": counts[0], "count_4": counts[1],
                 "count_3": counts[2], "count_2": counts[3], "count_1": counts[4],
                 "count_na": na, "mean": round(mean_u, 2) if mean_u is not None else None,
-                "median": median, "std_dev": std})
+                "median": median, "std_dev": std}
+            if replace_idx is None:
+                rep["questions"].append(qrow)
+            else:
+                rep["questions"][replace_idx] = qrow
             continue
         rep["unexpected_rows"].append(first or "<blank>")
     return rep
@@ -200,6 +243,8 @@ NA_OLD = ["", "Strongly Agree (5.0)", "Agree (4.0)", "Neutral (3.0)", "Disagree 
           "Strongly Disagree (1.0)", "N/A (0.0)", "Mean", "Median", "Std Dev", "Response Rate"]
 NA_LAW = ["", "Strongly Agree (5.0)", "Agree (4.0)", "Neutral (3.0)", "Disagree (2.0)",
           "Strongly Disagree (1.0)", "Not Applicable (0.0)", "Mean", "Median", "Std Dev", "Response Rate"]
+NA_DMSB = ["", "Strongly Agree (5.0)", "Agree (4.0)", "Neutral (3.0)", "Disagree (2.0)",
+           "Strongly Disagree (1.0)", "Not applicable", "Mean", "Median", "Std Dev", "Response Rate"]
 PRE = [["Northeastern University Course Evaluations"], [], ["PHLS 1101, Section I04"],
        ["Enrollment:", 22.0], ["Completed:", 15.0], ["Answer Counts"]]
 
@@ -445,7 +490,59 @@ def selftest(require_fixtures=False):
     check("hours all blank -> None",
           parse_hours_sheet(_FakeSheet([["", HOURS_Q], ["Eval #1", '']])) is None)
 
-    # 13. four-fixture byte-exact gate against real XLS files
+    # 13. Fall 2022 / Full Summer 2022 vintage: printed stats absorb N/A + unanswered as 0.0
+    #     scores while the N/A column is dead (always 0) or missing entirely -> excused ONLY
+    #     when printed mean AND std both reconcile with counts + integer k>=1 zeros. Real
+    #     numbers from MATM1341 I01 Fall 2022: counts 12/4/0/0/0, printed mean 76/18=4.222
+    #     (k=2 hidden), printed std 1.55; recomputed N/A-excluded mean = 76/16 = 4.75.
+    rep = parse_sheet(_FakeSheet(PRE + [AGREE,
+        ["Online course materials", 12.0, 4.0, 0.0, 0.0, 0.0, 4.222, 5.0, 1.55, 0.55]]))
+    q = rep["questions"][0]
+    check("absorbed-zeros mismatch excused", rep["mean_mismatches"] == [] and report_ok(rep))
+    check("absorbed-zeros counted", rep.get("absorbed_na_mismatches") == 1)
+    check("absorbed-zeros keeps recomputed stats", q["mean"] == 4.75 and q["count_na"] == 0)
+    rep = parse_sheet(_FakeSheet(PRE + [NA_NEW,
+        ["Sense of community", 12.0, 4.0, 0.0, 0.0, 0.0, 0.0, 4.222, 5.0, 1.55, 0.55]]))
+    check("dead na column variant excused",
+          rep["mean_mismatches"] == [] and rep.get("absorbed_na_mismatches") == 1 and report_ok(rep))
+
+    # 14. reconciliation stays a tripwire: non-integer k (76/4.35-16=1.47) or a printed std
+    #     that disagrees with counts + k zeros -> still quarantined
+    rep = parse_sheet(_FakeSheet(PRE + [AGREE,
+        ["Q", 12.0, 4.0, 0.0, 0.0, 0.0, 4.35, 5.0, 1.2, 0.55]]))
+    check("non-integer k still flagged", rep["mean_mismatches"] == ["Q"] and not report_ok(rep))
+    rep = parse_sheet(_FakeSheet(PRE + [AGREE,
+        ["Q", 12.0, 4.0, 0.0, 0.0, 0.0, 4.222, 5.0, 0.9, 0.55]]))
+    check("std disagreement still flagged", rep["mean_mismatches"] == ["Q"] and not report_ok(rep))
+
+    # 15. DMSB template legitimately repeats 'Recommend' (course block then Section Instructor
+    #     block -> keep the course row, i.e. the FIRST) and 'Interaction' (Lead then Section
+    #     Instructor block -> keep the Lead row, i.e. the FIRST), non-fatal; any other
+    #     duplicate label still quarantines (case 10 pins that).
+    rep = parse_sheet(_FakeSheet(PRE + [AGREE,
+        ["Recommend", 6.0, 8.0, 12.0, 5.0, 7.0, 3.026, 3.0, 1.31, 1.0],
+        ["Recommend", 5.0, 9.0, 9.0, 7.0, 9.0, 2.846, 3.0, 1.35, 1.0],
+        ["Interaction", 5.0, 15.0, 9.0, 5.0, 4.0, 3.316, 4.0, 1.17, 1.0],
+        ["Interaction", 9.0, 13.0, 7.0, 4.0, 4.0, 3.514, 4.0, 1.27, 1.0]]))
+    check("dmsb dup policy per label",
+          [(q["question"], q["count_4"]) for q in rep["questions"]] == [("Recommend", 8), ("Interaction", 15)])
+    check("dmsb dups non-fatal",
+          rep["duplicate_questions"] == [] and rep.get("resolved_duplicates") == ["Recommend", "Interaction"]
+          and report_ok(rep))
+
+    # 16. DMSB N/A header spelled 'Not applicable' (lowercase a) with NEW-style printed stats
+    #     (N/A excluded): recognized case-insensitively, NOT old vintage. Real DMSB row:
+    #     Textbook 10/8/9/3/2 + 7 N/A, printed mean 117/32 = 3.656 already excludes them.
+    rep = parse_sheet(_FakeSheet(PRE + [NA_DMSB,
+        ["Textbook", 10.0, 8.0, 9.0, 3.0, 2.0, 7.0, 3.656, 4.0, 1.19, 1.0]]))
+    q = rep["questions"][0]
+    check("lowercase not-applicable na captured", q["count_na"] == 7)
+    check("lowercase not-applicable is new vintage", rep["old_vintage"] is False)
+    check("dmsb new-style mean crosschecks clean",
+          q["mean"] == 3.66 and rep["mean_mismatches"] == [] and rep["expected_na_mismatches"] == 0
+          and report_ok(rep))
+
+    # 17. four-fixture byte-exact gate against real XLS files
     import common  # same-dir import, like trace_pipeline modules
     if os.path.isdir(common.FIXTURES_DIR):
         if not run_fixture_gate():
