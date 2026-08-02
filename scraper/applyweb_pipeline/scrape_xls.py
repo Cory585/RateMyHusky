@@ -153,9 +153,9 @@ class BrowserFetcher:
     """Real headed Chrome session; downloads run as in-page fetch() so they carry
     the browser's own TLS/client fingerprint (copied cookies get rejected)."""
 
-    def __init__(self, profile_dir, sentinel_triple):
+    def __init__(self, profile_dir, sentinel_triples):
         self.profile_dir = profile_dir
-        self.sentinel_url = build_url(*sentinel_triple)
+        self.sentinel_urls = [build_url(*t) for t in sentinel_triples]
         self._good_seen = False
         self._pw = self._ctx = self.page = None
 
@@ -176,11 +176,16 @@ class BrowserFetcher:
         return normalize_results(self.page.evaluate(FETCH_BATCH_JS, urls))
 
     def probe(self):
-        try:
-            status, body = self.fetch_batch([self.sentinel_url])[0]
-        except Exception:
-            return False
-        return status == 200 and validate_xls_bytes(body)
+        for i, url in enumerate(self.sentinel_urls):
+            try:
+                status, body = self.fetch_batch([url])[0]
+            except Exception:
+                continue
+            if status == 200 and validate_xls_bytes(body):
+                if i != 0:
+                    self.sentinel_urls.insert(0, self.sentinel_urls.pop(i))
+                return True
+        return False
 
     def ensure_login(self):
         if not self.probe():
@@ -202,12 +207,12 @@ class BrowserFetcher:
                 return
             waited += 3
             if waited % 30 == 0:
-                print(f"  still waiting for login... (probe: {self.sentinel_url})")
+                print(f"  still waiting for login... (probe: {self.sentinel_urls[0]})")
 
     def remember_good(self, triple):
         if not self._good_seen:
             self._good_seen = True
-            self.sentinel_url = build_url(*triple)
+            self.sentinel_urls = [build_url(*triple)]
 
     def close(self):
         for closer in ((lambda: self._ctx.close()), (lambda: self._pw.stop())):
@@ -236,11 +241,31 @@ def selftest():
     check("html rejected", not validate_xls_bytes(b"<html>login</html>" + b" " * 600))
     check("short body rejected", not validate_xls_bytes(OLE_MAGIC + b"\x00" * 10))
 
-    bf = BrowserFetcher("unused_profile_dir", (1, 2, 3))
-    check("sentinel from ctor triple", bf.sentinel_url == build_url(1, 2, 3))
-    bf.remember_good((4, 5, 6))
+    bf = BrowserFetcher("unused_profile_dir", [(1, 2, 3), (4, 5, 6)])
+    check("sentinel_urls from ctor triples",
+          bf.sentinel_urls == [build_url(1, 2, 3), build_url(4, 5, 6)])
     bf.remember_good((7, 8, 9))
-    check("remember_good replaces sentinel once", bf.sentinel_url == build_url(4, 5, 6))
+    bf.remember_good((10, 11, 12))
+    check("remember_good replaces sentinel list once", bf.sentinel_urls == [build_url(7, 8, 9)])
+
+    good_body = OLE_MAGIC + b"\x00" * 600
+    bf = BrowserFetcher("unused_profile_dir", [(1, 2, 3), (4, 5, 6)])
+    url_bad, url_good = build_url(1, 2, 3), build_url(4, 5, 6)
+    bf.fetch_batch = lambda urls: [(200, b"<html>") if u == url_bad else (200, good_body) for u in urls]
+    check("probe: first bad, second good -> True + promotes good to front",
+          bf.probe() is True and bf.sentinel_urls[0] == url_good)
+
+    bf = BrowserFetcher("unused_profile_dir", [(1, 2, 3), (4, 5, 6)])
+    bf.fetch_batch = lambda urls: [(200, b"<html>") for _ in urls]
+    check("probe: all candidates bad -> False", bf.probe() is False)
+
+    bf = BrowserFetcher("unused_profile_dir", [(1, 2, 3), (4, 5, 6)])
+    def _raise_first(urls):
+        if urls[0] == url_bad:
+            raise RuntimeError("boom")
+        return [(200, good_body)]
+    bf.fetch_batch = _raise_first
+    check("probe: exception on one candidate doesn't skip the rest", bf.probe() is True)
 
     import base64 as _b64
     check("normalize decodes",
@@ -367,8 +392,8 @@ def main():
         print(f"\n{dict(tally)}")
         return
 
-    sentinel = first_cached or pending[0]
-    fetcher = BrowserFetcher(os.path.join(data_dir, "browser_profile"), sentinel)
+    sentinels = ([first_cached] if first_cached else []) + pending[:3]
+    fetcher = BrowserFetcher(os.path.join(data_dir, "browser_profile"), sentinels[:3])
     fetcher.start()
     fetcher.ensure_login()
 
