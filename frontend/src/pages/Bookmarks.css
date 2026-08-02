@@ -2,6 +2,7 @@
    ProfessorCatalog.css and Courses.css (imported by Bookmarks.tsx). */
 
 .bm-content {
+  flex: 1;
   padding: 0 clamp(16px, 3vw, 48px) 56px;
   display: flex;
   flex-direction: column;
@@ -30,8 +31,16 @@
 }
 
 /* ── Sign-in gate (ported from the deleted Account.css) ──
-   .catalog-page already adds 72px top padding; 40px margin lands the gate at
-   the old Account page's 112px offset. */
+   The wrap grows to fill the page so the gate stays vertically centered in
+   the viewport and Footer (rendered as a sibling) sticks to the bottom. */
+.bookmarks-page .bm-signin-wrap {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+}
+
 .bookmarks-page .bm-signin-gate {
   display: flex;
   flex-direction: column;
@@ -39,7 +48,6 @@
   text-align: center;
   padding: 80px 24px;
   max-width: 480px;
-  margin: 40px auto 72px;
   background: #fff;
   border-radius: 16px;
   border: 1.5px dashed #e0e0e0;
