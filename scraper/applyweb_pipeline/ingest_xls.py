@@ -63,6 +63,24 @@ def replace_sections(conn, term_id, pairs, db_rows, chunk=100):
     return common.batched_write(conn, INSERT_SQL, db_rows, batch=1000)
 
 
+def delete_full_term(conn, term_id, batch=5000):
+    """Whole-term purge for terms whose download coverage is confirmed complete. Must run
+    BEFORE replace_sections for that term_id, never after -- an unqualified DELETE issued
+    after the section-scoped INSERT would wipe the fresh rows it just wrote. Relocated out
+    of replace_sections' call path, so it carries its own Bluera guard (house precedent:
+    scraper/trace_pipeline/ingest.py delete_term -- LIMIT-batched, deletes before inserts)."""
+    if term_id >= 900:
+        sys.exit(f"REFUSING to touch term_id {term_id} (>= 900 is Bluera-era).")
+    total = 0
+    while True:
+        n = common.execute_with_retry(
+            conn, "DELETE FROM trace_scores WHERE term_id = %s LIMIT %s", (term_id, batch))
+        total += max(n, 0)
+        if n <= 0:
+            break
+    return total
+
+
 def iter_cache(data_dir, terms=None):
     pat = re.compile(r"^(\d+)_(\d+)_(\d+)\.xls$")
     xls_root = os.path.join(data_dir, "xls")
@@ -161,17 +179,34 @@ def selftest():
         def commit(self): pass
         def rollback(self): pass
 
-    # ── term guard: term_id >= 900 must abort before any SQL ──
+    # ── term guard: term_id >= 900 must abort BEFORE any SQL (zero SQL captured, not just
+    # SystemExit -- a guard moved after the DELETE loop would still raise but leak SQL) ──
+    import psycopg2.extras as _pge
+    _saved_ev = _pge.execute_values
+    guard_ev_calls = []
+    _pge.execute_values = lambda *a, **k: guard_ev_calls.append(1)
     try:
-        replace_sections(_FakeConn(), 901, [(1, 2)], [])
-        check("bluera term guard", False)
-    except SystemExit:
-        check("bluera term guard", True)
+        guard_fake = _FakeConn()
+        try:
+            replace_sections(guard_fake, 901, [(1, 2)], [])
+            check("bluera term guard", False)
+        except SystemExit:
+            check("bluera term guard", True)
+        check("bluera term guard issues zero SQL", guard_fake.sqls == [] and guard_ev_calls == [])
+
+        guard_fake2 = _FakeConn()
+        try:
+            delete_full_term(guard_fake2, 901)
+            check("delete_full_term bluera guard", False)
+        except SystemExit:
+            check("delete_full_term bluera guard", True)
+        check("delete_full_term guard issues zero SQL", guard_fake2.sqls == [] and guard_ev_calls == [])
+    finally:
+        _pge.execute_values = _saved_ev
 
     # ── replace_sections: section-scoped DELETE before INSERT, chunked ──
     rows_as_db_tuples = [tuple(r[f] if r[f] != "" else None for f in DB_FIELD_ORDER) for r in rows]
     fake = _FakeConn()
-    import psycopg2.extras as _pge
     _saved_ev = _pge.execute_values
 
     def _fake_ev(cur, sql, chunk, template=None, page_size=None):
@@ -248,8 +283,9 @@ def main():
     parser.add_argument("--terms", help="Comma-separated term_id filter, e.g. 145,148")
     parser.add_argument("--migrate", action="store_true", help="Run the count_na ALTER TABLE standalone and exit")
     parser.add_argument("--delete-full-term", action="store_true",
-                        help="After each term's section-scoped replace, also purge any rows "
-                             "left over for that term_id (LIMIT-batched)")
+                        help="Before each term's section-scoped replace, purge ALL rows for "
+                             "that term_id (LIMIT-batched) -- only for terms whose download "
+                             "coverage is confirmed complete")
     parser.add_argument("--selftest", action="store_true", help="Run offline selftest and exit")
     args = parser.parse_args()
 
@@ -270,8 +306,14 @@ def main():
     dirty_by_term = {}
     clean, dirty = 0, 0
     for cid, iid, tid, path in iter_cache(common.DATA_DIR, terms=terms):
-        with open(path, "rb") as f:
-            rep = parse_report(f.read())
+        try:
+            with open(path, "rb") as f:
+                rep = parse_report(f.read())
+        except Exception as e:
+            failures.append((cid, iid, tid, repr(e)))
+            dirty_by_term[tid] = dirty_by_term.get(tid, 0) + 1
+            dirty += 1
+            continue
         if not report_ok(rep):
             failures.append((cid, iid, tid, _failure_reason(rep)))
             dirty_by_term[tid] = dirty_by_term.get(tid, 0) + 1
@@ -317,17 +359,11 @@ def main():
             rows = all_rows_by_term[tid]
             pairs = sorted({(cid, iid) for cid, iid, _ in sections})
             db_rows = [tuple(r[f] if r[f] != "" else None for f in DB_FIELD_ORDER) for r in rows]
+            if args.delete_full_term:
+                total = delete_full_term(conn, tid)
+                print(f"  term {tid}: --delete-full-term purged {total} row(s) before replace")
             n_inserted = replace_sections(conn, tid, pairs, db_rows)
             print(f"  term {tid}: deleted {len(pairs)} section(s), inserted {n_inserted} row(s)")
-            if args.delete_full_term:
-                total = 0
-                while True:
-                    n = common.execute_with_retry(
-                        conn, "DELETE FROM trace_scores WHERE term_id = %s LIMIT %s", (tid, 5000))
-                    total += max(n, 0)
-                    if n <= 0:
-                        break
-                print(f"  term {tid}: --delete-full-term purged {total} additional row(s)")
             for cid, iid, _ in sections:
                 replaced_triples.add((str(cid), str(iid), str(tid)))
             all_new_rows.extend(rows)
