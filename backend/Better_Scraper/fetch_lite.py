@@ -14,9 +14,11 @@ import base64
 import csv
 import json
 import os
+import sys
 import time
 import argparse
 import logging
+import threading
 from typing import List, Dict, Optional, Any, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 
@@ -32,9 +34,50 @@ RMP_GRAPHQL_URL: str = "https://www.ratemyprofessors.com/graphql"
 RMP_BASE_URL: str = "https://www.ratemyprofessors.com"
 GRAPHQL_PAGE_SIZE: int = 1000
 MAX_REVIEWS_PER_PROFESSOR: Optional[int] = None
+MAX_SEARCH_PAGES: int = 10   # safety limit: stop after 10 search pages (~10k professors)
+MAX_REVIEW_PAGES: int = 50   # safety limit: stop after 50 review pages (~5k reviews per prof)
 
 logging.basicConfig(level=logging.WARNING)
 logger: logging.Logger = logging.getLogger(__name__)
+
+RATE_LIMIT_REQ_PER_SEC: float = 0.0  # 0 = disabled (no rate limiting from residential IP; probe showed zero 429s at 5,555 req/min)
+RATE_LIMIT_BURST: int = 0
+
+# ---------------------------------------------------------------------------
+# Token bucket rate limiter
+# ---------------------------------------------------------------------------
+
+
+class TokenBucket:
+    """Thread-safe token bucket rate limiter. Disabled when rate <= 0."""
+    def __init__(self, rate: float, capacity: int):
+        self._rate = rate
+        self._disabled = rate <= 0
+        # When enabled, capacity must be >= 1 or acquire() can block forever.
+        self._capacity = max(1, capacity) if not self._disabled else capacity
+        self._tokens = float(self._capacity)
+        self._last_refill = time.monotonic()
+        self._lock = threading.Lock()
+
+    def acquire(self, tokens: int = 1) -> None:
+        if self._disabled:
+            return
+        while True:
+            with self._lock:
+                self._refill()
+                if self._tokens >= tokens:
+                    self._tokens -= tokens
+                    return
+                sleep_for = (tokens - self._tokens) / self._rate
+            time.sleep(sleep_for)
+    def _refill(self) -> None:
+        now = time.monotonic()
+        elapsed = now - self._last_refill
+        self._tokens = min(self._capacity, self._tokens + elapsed * self._rate)
+        self._last_refill = now
+
+
+_bucket: TokenBucket = TokenBucket(RATE_LIMIT_REQ_PER_SEC, RATE_LIMIT_BURST)
 
 # ---------------------------------------------------------------------------
 # GraphQL queries
@@ -154,10 +197,11 @@ class RMPSchool:
     # ------------------------------------------------------------------
 
     def _graphql_post(
-        self, payload: Dict[str, Any], retries: int = 3
+        self, payload: Dict[str, Any], retries: int = 2
     ) -> Optional[Dict[str, Any]]:
-        """Make a GraphQL POST request with retries."""
+        """Make a GraphQL POST request with rate limiting and fail-fast retries."""
         for attempt in range(retries):
+            _bucket.acquire()
             try:
                 resp: requests.Response = self._session.post(
                     RMP_GRAPHQL_URL,
@@ -167,15 +211,20 @@ class RMPSchool:
                 if resp.status_code == 403:
                     if attempt == 0:
                         print(f"  ⚠ Got 403 — retrying with different headers...")
-                    # Try without auth header
                     self._session.headers.pop("Authorization", None)
-                    time.sleep(1)
+                    time.sleep(2)
                     continue
+                if resp.status_code == 429:
+                    wait = 2 ** (attempt + 1)
+                    if attempt < retries - 1:
+                        time.sleep(wait)
+                        continue
+                    return None
                 resp.raise_for_status()
                 return resp.json()
             except requests.RequestException as e:
                 if attempt < retries - 1:
-                    time.sleep(1)
+                    time.sleep(2)
                     continue
                 logger.error(f"GraphQL request failed: {e}")
                 return None
@@ -188,10 +237,15 @@ class RMPSchool:
     def _collect_professors(self) -> None:
         cursor: Optional[str] = None
         has_next: bool = True
+        page_count: int = 0
 
         pbar: tqdm = tqdm(desc="Fetching professors", unit=" profs")
 
         while has_next:
+            page_count += 1
+            if page_count > MAX_SEARCH_PAGES:
+                print(f"\n  ⚠ Hit {MAX_SEARCH_PAGES}-page search limit — stopping pagination")
+                break
             payload: Dict[str, Any] = {
                 "query": TEACHER_SEARCH_QUERY,
                 "variables": {
@@ -325,8 +379,12 @@ class RMPSchool:
         reviews: List[Review] = []
         cursor: Optional[str] = None
         has_next: bool = True
+        page_count: int = 0
 
         while has_next:
+            page_count += 1
+            if page_count > MAX_REVIEW_PAGES:
+                break
             payload: Dict[str, Any] = {
                 "query": TEACHER_RATINGS_QUERY,
                 "variables": {
@@ -335,7 +393,7 @@ class RMPSchool:
                     "cursor": cursor or "",
                 },
             }
-            data: Optional[Dict[str, Any]] = self._graphql_post(payload, retries=2)
+            data: Optional[Dict[str, Any]] = self._graphql_post(payload)
             if not data:
                 break
 
@@ -365,7 +423,7 @@ class RMPSchool:
 
         pbar: tqdm = tqdm(total=total, desc="Fetching reviews", unit=" prof")
 
-        with ThreadPoolExecutor(max_workers=1) as executor:
+        with ThreadPoolExecutor(max_workers=10) as executor:
             futures: Dict[Future, Professor] = {
                 executor.submit(self._fetch_reviews_for_professor, prof): prof
                 for prof in profs_with_ratings
@@ -383,11 +441,31 @@ class RMPSchool:
 
         pbar.close()
 
+        # Second pass: retry failed professors with a small thread pool
+        failed_profs = [p for p in profs_with_ratings if not p.reviews]
+        if failed_profs:
+            print(f"  Retrying {len(failed_profs)} failed professors...")
+            recovered = 0
+            with ThreadPoolExecutor(max_workers=5) as retry_executor:
+                retry_futures: Dict[Future, Professor] = {
+                    retry_executor.submit(self._fetch_reviews_for_professor, prof): prof
+                    for prof in failed_profs
+                }
+                for future in tqdm(as_completed(retry_futures), total=len(failed_profs), desc="Retrying", unit=" prof"):
+                    prof: Professor = retry_futures[future]
+                    try:
+                        reviews: List[Review] = future.result()
+                        prof.reviews = reviews
+                        total_reviews += len(reviews)
+                        recovered += 1
+                    except Exception:
+                        pass
+
         profs_done: int = sum(1 for p in profs_with_ratings if p.reviews)
         print(
             f"  ✓ Fetched {total_reviews} reviews from "
             f"{profs_done}/{total} professors"
-            + (f" ({failed} failed)" if failed else "")
+            + (f" ({total - profs_done} still failed)" if profs_done < total else "")
         )
 
     # ------------------------------------------------------------------
@@ -454,6 +532,18 @@ def main() -> None:
     args: argparse.Namespace = parser.parse_args()
 
     school: RMPSchool = RMPSchool(args.sid, scrape_reviews=not args.no_reviews)
+
+    # Fail loud instead of writing an empty CSV. For a fixed, populated school
+    # an empty result never happens legitimately — it means RMP blocked the
+    # requests (403/429) or changed its API. Exit non-zero WITHOUT writing so
+    # the failure surfaces here and existing output is left untouched.
+    if not school.professors_list:
+        school.close()
+        sys.exit(
+            f"✗ Scrape failed: 0 professors collected for school {args.sid}. "
+            "Likely a 403/429 block or an RMP API change (see logs above). "
+            "Aborting without writing output to preserve existing data."
+        )
 
     school_name_fp: str = school.school_name.replace(" ", "").replace("-", "_").lower()
     script_dir: str = os.path.dirname(os.path.abspath(__file__))

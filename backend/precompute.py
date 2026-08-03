@@ -19,6 +19,13 @@ CRDB_URL = os.getenv("NEW_CRDB_DATABASE_URL") or os.getenv("CRDB_DATABASE_URL")
 if not CRDB_URL:
     raise RuntimeError("NEW_CRDB_DATABASE_URL required in .env")
 
+# TRACE data only changes on a manual TRACE re-scrape, so the TRACE-side DB
+# maintenance (course_catalog rebuild + name_key/course_code/total_responses/
+# comment-ID backfills) is wasted work on weekly RMP-only refreshes. Set
+# REFRESH_TRACE=false to skip it. The professors_catalog / stats_cache rebuild
+# and the rmp_reviews name_key update always run (they depend on RMP data).
+REFRESH_TRACE = os.getenv("REFRESH_TRACE", "true").strip().lower() not in ("0", "false", "no", "off")
+
 
 def _connect(attempts=20):
     """The local resolver flakes on *.cockroachlabs.cloud; retry on DNS failure."""
@@ -50,115 +57,7 @@ def upgrade_image_url(url):
     return re.sub(r'-\d+x\d+(?=\.\w+$)', '', str(url))
 
 
-ALIAS_MAP = {
-    "laney strange": "elena strange",
-    "ben tasker": "benjamin tasker",
-    "alberto de la torre": "alberto de la torre duran",
-    "justin wang": "hsiao-an wang",
-    "sakib miazi": "md nazmus sakib miazi",
-    "nazmus miazi": "md nazmus sakib miazi",
-    "alex depaoli": "alexander depaoli",
-    "denisee spencer": "denise spencer",
-    "chris bruell": "christopher bruell",
-    "hande ondemir": "hande musdal ondemir",
-    "francis frank georges": "francis georges",
-    "isabel campos": "isabel sobral campos",
-    "mary sue potts-santone": "mary-susan potts-santone",
-    "ronald c. zullo": "ronald zullo",
-    "steve granelli": "steven granelli",
-    "william (bill) goldman": "william goldman",
-    "virgiliu pavlu": "virgil pavlu",
-    "zhiyuan (katherine) zhang": "zhiyuan zhang",
-    "katherine zhang": "zhiyuan zhang",
-    "bill goldman": "william goldman",
-    "aarti sathyanaran": "aarti sathyanarayana",
-    "akash murty": "akash murthy",
-    "ali chaleshtari": "ali shirzadeh chaleshtari",
-    "sriram rajagopalan": "sriramasundarar rajagopalan",
-    "mauricio codesso": "mauricio mello codesso",
-    "magda cooney": "magdalena cooney",
-    "john lowery": "john lowrey",
-    "iesha karasik": "ieshia karasik",
-    "ifa khan": "iffat khan",
-    "h. david sherman": "h sherman",
-    "ganish krisnamoorthy": "ganesh krishnamoorthy",
-    "farena sultan": "fareena sultan",
-    "cathy merlo": "catherine merlo",
-    "ye yin": "yi yin",
-    "silvio amir": "silvio amir alves moreira",
-    "olin shivers": "olin shivers iii",
-    "rush sanghrajka": "rushit sanghrajka",
-    "john alexis gomez": "john alexis guerra gomez",
-    "ji yong shin": "ji-yong shin",
-    "ghita amor tijani": "ghita amor-tijani",
-    "bob lupi": "robert lupi",
-    "hany sadaka": "hanai sadaka",
-    "mary- susan potts": "mary-susan potts-santone",
-    "xiaotao (kelvin) liu": "xiaotao liu",
-    "kelvin liu": "xiaotao liu",
-    "Alex Budnitz": "Alexander Budnitz",
-    "Alex Martsinkovsky": "Alexander Martsinkovsky",
-    "Anu Gaur": "Anupama Gaur",
-    "Balasubrama Maheswaran": "Balasubramaniam Maheswaran",
-    "Barb Murrer": "Barbara Murrer",
-    "Ben Knudsen": "Benjamin Knudsen",
-    "Ben Machlin": "Benjamin Machlin",
-    "Bolo Amgalan": "Bolor Amgalan",
-    "Brad Lehman": "Bradley Lehman",
-    "Chris Ayala": "Christopher Ayala",
-    "Chris Beasley": "Christopher Beasley",
-    "Chris Bosso": "Christopher Bosso",
-    "Chris King": "Christopher King",
-    "Chris Robertson": "Christopher Robertson",
-    "Chris Selland": "Christopher Selland",
-    "Christo Wilson": "Christopher Wilson",
-    "Dan Kennedy": "Daniel Kennedy",
-    "Dan Lothian": "Daniel Lothian",
-    "Dan Matthew": "Daniel Matthew",
-    "Dan Metzger": "Daniel Metzger",
-    "Dan Sunderland": "Daniel Sunderland",
-    "Dan Urman": "Daniel Urman",
-    "Dan Zedek": "Daniel Zedek",
-    "Ed Witten": "Edward Witten",
-    "Gahye Song": "Ga Hye Song",
-    "Ganeshsingh Thakur": "Ganesh Thakur",
-    "Greg Allen": "Gregory Allen",
-    "Greg Collier": "Gregory Collier",
-    "Greg Fiete": "Gregory Fiete",
-    "Greg Goodale": "Gregory Goodale",
-    "Greg Kowalski": "Gregory Kowalski",
-    "Greg Wassall": "Gregory Wassall",
-    "Jean Francois Hamel": "Jeanfrancois Hamel",
-    "Jeff Howe": "Jeffrey Howe",
-    "Jeff Kushner": "Jeffrey Kushner",
-    "Ji-Yong Shin": "Ji Yong Shin",
-    "Kat Gonso": "Kathleen Gonso",
-    "Ken Baclawski": "Kenneth Baclawski",
-    "Kris Dorsey": "Kristen Dorsey",
-    "Marie-Odile Hobeika": "Marie Odile Hobeika",
-    "Matt Garcia": "Matthew Garcia",
-    "Matt Hunt": "Matthew Hunt",
-    "Matt Lee": "Matthew Lee",
-    "Matt Williams": "Matthew Williams",
-    "Meg Heckman": "Meghan Heckman",
-    "Mitch Franklin": "Mitchell Franklin",
-    "Muhammad Shabanpour": "Muhammadhussian Shabanpour",
-    "Nadaa Naji": "Nada Naji",
-    "N. Castor": "Nicole Castor",
-    "Pierre Tchetgen": "Pierrevalery Tchetgen",
-    "Ray Weaver": "Raymond Weaver",
-    "seo eun (sunny) yang": "seoeun yang",
-    "yang seoeun": "seoeun yang",
-    "Sheng Yen": "Shengche Yen",
-    "Tim Brown": "Timothy Brown",
-    "Tim Rupert": "Timothy Rupert",
-    "A Zilleruelo": "Arturo Zilleruelo",
-    "don omalley": "donald omalley",
-    "G. Kimball": "Grayson Kimball",
-    "R Cole Eidson": "Robert Eidson",
-    "S. M Gupta": "Surendra Gupta",
-    "sarthak gupta": "sarthak suhrid gupta",
-}
+from prof_aliases import ALIAS_MAP
 
 COLLEGE_MAP = {
     "Computer Science": "Khoury", "Information Science": "Khoury",
@@ -245,8 +144,45 @@ def chunk_insert(cur, sql, rows, page_size=5000):
         execute_values(cur, sql, rows[i:i + page_size])
 
 
+def trace_needs_maintenance(conn):
+    """Safety net for REFRESH_TRACE=false: detect un-processed TRACE rows.
+
+    migrate_to_crdb inserts new TRACE rows WITHOUT the precompute-added columns
+    (name_key / course_code / total_responses / parsed comment IDs), so a NULL in
+    any of them means TRACE data landed but was never backfilled. If a column
+    doesn't exist yet (first run), maintenance is obviously needed. Cheap: a few
+    EXISTS probes, run only when the flag would otherwise skip.
+    """
+    for table, col in (
+        ("trace_courses", "name_key"),
+        ("trace_courses", "course_code"),
+        ("trace_scores", "total_responses"),
+        ("trace_comments", "tc_course_id"),
+    ):
+        cur = conn.cursor()
+        try:
+            cur.execute(f"SELECT EXISTS(SELECT 1 FROM {table} WHERE {col} IS NULL)")
+            if cur.fetchone()[0]:
+                print(f"  Safety net: {table}.{col} has NULLs — forcing TRACE maintenance.")
+                return True
+        except Exception:
+            conn.rollback()
+            print(f"  Safety net: {table}.{col} not present — forcing TRACE maintenance.")
+            return True
+        finally:
+            cur.close()
+    return False
+
+
 def main():
     conn = _connect()
+
+    # Effective TRACE decision: honor REFRESH_TRACE, but never skip when there is
+    # un-backfilled TRACE data in the DB (self-heals a forgotten full run after a
+    # manual TRACE re-scrape). The DB probe runs only when the flag says skip.
+    do_trace = REFRESH_TRACE or trace_needs_maintenance(conn)
+    if not REFRESH_TRACE:
+        print(f"REFRESH_TRACE=false; TRACE maintenance {'forced by safety net' if do_trace else 'skipped'}")
 
     # Read from local CSVs (much faster than downloading from CRDB)
     csv_dir = os.path.join(os.path.dirname(__file__), "Better_Scraper", "output_data")
@@ -259,7 +195,10 @@ def main():
     print(f"  trace_courses: {len(tc)}")
     ts = pd.read_csv(os.path.join(csv_dir, "trace_scores.csv"))
     print(f"  trace_scores: {len(ts)}")
-    tcomments = pd.read_csv(os.path.join(csv_dir, "trace_comments.csv"))
+    tcomments_path = os.path.join(csv_dir, "trace_comments.csv")
+    if not os.path.exists(tcomments_path):
+        tcomments_path = os.path.join(csv_dir, "trace_comments.zip")
+    tcomments = pd.read_csv(tcomments_path)
     print(f"  trace_comments: {len(tcomments)}")
     photos = pd.read_csv(os.path.join(csv_dir, "professor_photos.csv"))
     print(f"  professor_photos: {len(photos)}")
@@ -423,8 +362,11 @@ def main():
     hours_q = ts[ts["question"].str.lower().str.contains("hours per week", na=False)].copy()
     hours_q.dropna(subset=["mean"], inplace=True)
     hours_merged = hours_q.merge(instructor_courses, on=["course_id", "instructor_id"], how="inner")
-    hours_avg = hours_merged.groupby("name_key").apply(weighted_avg, include_groups=False).reset_index().rename(columns={0: "avg_hours"})
-    hours_lookup = dict(zip(hours_avg["name_key"], hours_avg["avg_hours"]))
+    hours_avg = hours_merged.groupby("name_key").apply(weighted_avg, include_groups=False).reset_index()
+    if 0 in hours_avg.columns:
+        hours_lookup = dict(zip(hours_avg["name_key"], hours_avg.rename(columns={0: "avg_hours"})["avg_hours"]))
+    else:
+        hours_lookup = {}
 
     # ── TRACE review counts ──
     instructor_sections = tc[["course_id", "instructor_id", "term_id", "name_key"]].drop_duplicates(
@@ -662,23 +604,26 @@ def main():
     conn.commit()
     print(f"  Inserted {len(catalog_rows)} rows")
 
-    # 2. course_catalog
-    print("Creating course_catalog...")
-    cur.execute("DROP TABLE IF EXISTS course_catalog")
-    cur.execute("""
-        CREATE TABLE course_catalog (
-            code TEXT PRIMARY KEY,
-            name TEXT,
-            department TEXT,
-            search_text TEXT,
-            avg_rating FLOAT,
-            num_responses INT
-        )
-    """)
-    chunk_insert(cur, "INSERT INTO course_catalog (code, name, department, search_text) VALUES %s", course_rows)
-    cur.execute("CREATE INDEX idx_cc_dept ON course_catalog (department)")
-    conn.commit()
-    print(f"  Inserted {len(course_rows)} courses")
+    # 2. course_catalog (TRACE-derived — only rebuild when TRACE changed)
+    if do_trace:
+        print("Creating course_catalog...")
+        cur.execute("DROP TABLE IF EXISTS course_catalog")
+        cur.execute("""
+            CREATE TABLE course_catalog (
+                code TEXT PRIMARY KEY,
+                name TEXT,
+                department TEXT,
+                search_text TEXT,
+                avg_rating FLOAT,
+                num_responses INT
+            )
+        """)
+        chunk_insert(cur, "INSERT INTO course_catalog (code, name, department, search_text) VALUES %s", course_rows)
+        cur.execute("CREATE INDEX idx_cc_dept ON course_catalog (department)")
+        conn.commit()
+        print(f"  Inserted {len(course_rows)} courses")
+    else:
+        print("Skipping course_catalog rebuild (REFRESH_TRACE=false)")
 
     # 3. stats_cache
     print("Creating stats_cache...")
@@ -690,71 +635,76 @@ def main():
     )
     conn.commit()
 
-    # Reconnect with fresh connection for the update phase
-    conn.close()
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute("SET experimental_enable_temp_tables = 'on'")
-
-    # 4. Add name_key to trace_courses (batch via temp table)
-    print("Adding name_key to trace_courses...")
-    try:
-        cur.execute("ALTER TABLE trace_courses ADD COLUMN name_key TEXT")
-        conn.commit()
-    except Exception:
-        conn.rollback()
+    # Steps 4/4b operate on the TRACE tables — skip on RMP-only refreshes.
+    if do_trace:
+        # Reconnect with fresh connection for the update phase
+        conn.close()
+        conn = _connect()
         cur = conn.cursor()
+        cur.execute("SET experimental_enable_temp_tables = 'on'")
 
-    cur.execute("SET experimental_enable_temp_tables = 'on'")
+        # 4. Add name_key to trace_courses (batch via temp table)
+        print("Adding name_key to trace_courses...")
+        try:
+            cur.execute("ALTER TABLE trace_courses ADD COLUMN name_key TEXT")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            cur = conn.cursor()
 
-    unique_instructors = tc[["instructor_first_name", "instructor_last_name", "name_key"]].drop_duplicates()
-    mapping_rows = [
-        (r["instructor_first_name"], r["instructor_last_name"], r["name_key"])
-        for _, r in unique_instructors.iterrows()
-    ]
+        cur.execute("SET experimental_enable_temp_tables = 'on'")
 
-    cur.execute("CREATE TEMP TABLE _nk_map (first_name TEXT, last_name TEXT, name_key TEXT)")
-    chunk_insert(cur, "INSERT INTO _nk_map (first_name, last_name, name_key) VALUES %s", mapping_rows)
-    cur.execute("""
-        UPDATE trace_courses tc SET name_key = m.name_key
-        FROM _nk_map m
-        WHERE tc.instructor_first_name = m.first_name AND tc.instructor_last_name = m.last_name
-    """)
-    cur.execute("DROP TABLE _nk_map")
-    conn.commit()
+        unique_instructors = tc[["instructor_first_name", "instructor_last_name", "name_key"]].drop_duplicates()
+        mapping_rows = [
+            (r["instructor_first_name"], r["instructor_last_name"], r["name_key"])
+            for _, r in unique_instructors.iterrows()
+        ]
 
-    try:
-        cur.execute("CREATE INDEX idx_tc_name_key ON trace_courses (name_key)")
+        cur.execute("CREATE TEMP TABLE _nk_map (first_name TEXT, last_name TEXT, name_key TEXT)")
+        chunk_insert(cur, "INSERT INTO _nk_map (first_name, last_name, name_key) VALUES %s", mapping_rows)
+        cur.execute("""
+            UPDATE trace_courses tc SET name_key = m.name_key
+            FROM _nk_map m
+            WHERE tc.instructor_first_name = m.first_name AND tc.instructor_last_name = m.last_name
+              AND tc.name_key IS NULL
+        """)
+        cur.execute("DROP TABLE _nk_map")
         conn.commit()
-    except Exception:
-        conn.rollback()
-        cur = conn.cursor()
-    print(f"  Updated {len(unique_instructors)} unique instructors")
 
-    # 4b. Add precomputed course_code to trace_courses
-    print("Adding course_code to trace_courses...")
-    try:
-        cur.execute("ALTER TABLE trace_courses ADD COLUMN course_code TEXT")
+        try:
+            cur.execute("CREATE INDEX idx_tc_name_key ON trace_courses (name_key)")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            cur = conn.cursor()
+        print(f"  Updated {len(unique_instructors)} unique instructors")
+
+        # 4b. Add precomputed course_code to trace_courses
+        print("Adding course_code to trace_courses...")
+        try:
+            cur.execute("ALTER TABLE trace_courses ADD COLUMN course_code TEXT")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            cur = conn.cursor()
+
+        cur.execute("""
+            UPDATE trace_courses SET course_code = UPPER(REGEXP_REPLACE(
+                SPLIT_PART(display_name, ':', 1), '[^A-Za-z0-9]', '', 'g'
+            ))
+            WHERE course_code IS NULL AND display_name IS NOT NULL
+        """)
         conn.commit()
-    except Exception:
-        conn.rollback()
-        cur = conn.cursor()
 
-    cur.execute("""
-        UPDATE trace_courses SET course_code = UPPER(REGEXP_REPLACE(
-            SPLIT_PART(display_name, ':', 1), '[^A-Za-z0-9]', '', 'g'
-        ))
-        WHERE course_code IS NULL AND display_name IS NOT NULL
-    """)
-    conn.commit()
-
-    try:
-        cur.execute("CREATE INDEX idx_tc_course_code ON trace_courses (course_code)")
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        cur = conn.cursor()
-    print("  Done")
+        try:
+            cur.execute("CREATE INDEX idx_tc_course_code ON trace_courses (course_code)")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            cur = conn.cursor()
+        print("  Done")
+    else:
+        print("Skipping trace_courses name_key/course_code backfill (REFRESH_TRACE=false)")
 
     # 5. Add name_key to rmp_reviews (batch via temp table)
     print("Adding name_key to rmp_reviews...")
@@ -798,165 +748,174 @@ def main():
     print(f"  Updated {len(unique_rev_names)} unique review names")
 
     # 6. Fix trace_scores mean and add total_responses (single SQL statements)
-    print("Fixing trace_scores mean and adding total_responses...")
-    conn.close()
-    conn = _connect()
-    cur = conn.cursor()
-
-    try:
-        cur.execute("ALTER TABLE trace_scores ADD COLUMN total_responses INT")
-        conn.commit()
-    except Exception:
-        conn.rollback()
+    if do_trace:
+        print("Fixing trace_scores mean and adding total_responses...")
+        conn.close()
+        conn = _connect()
         cur = conn.cursor()
 
-    BATCH_SIZE = 10000
-    print("  Updating total_responses (batched)...")
-    while True:
-        cur.execute("""
-            UPDATE trace_scores SET
-                total_responses = COALESCE(count_1,0) + COALESCE(count_2,0) + COALESCE(count_3,0) + COALESCE(count_4,0) + COALESCE(count_5,0)
-            WHERE total_responses IS NULL
-            LIMIT %s
-        """, (BATCH_SIZE,))
-        updated = cur.rowcount
-        conn.commit()
-        if updated == 0:
-            break
-        print(f"    updated {updated} rows...")
-
-    print("  Updating mean (batched)...")
-    cur.execute("""
-        UPDATE trace_scores SET
-            mean = NULL
-        WHERE COALESCE(count_1,0) + COALESCE(count_2,0) + COALESCE(count_3,0) + COALESCE(count_4,0) + COALESCE(count_5,0) = 0
-          AND mean IS NOT NULL
-    """)
-    conn.commit()
-    while True:
-        cur.execute("""
-            UPDATE trace_scores SET
-                mean = (1.0*COALESCE(count_1,0) + 2.0*COALESCE(count_2,0) + 3.0*COALESCE(count_3,0) + 4.0*COALESCE(count_4,0) + 5.0*COALESCE(count_5,0))
-                     / (COALESCE(count_1,0) + COALESCE(count_2,0) + COALESCE(count_3,0) + COALESCE(count_4,0) + COALESCE(count_5,0))
-            WHERE total_responses > 0
-              AND mean IS NULL
-            LIMIT %s
-        """, (BATCH_SIZE,))
-        updated = cur.rowcount
-        conn.commit()
-        if updated == 0:
-            break
-        print(f"    updated {updated} rows...")
-
-    try:
-        cur.execute("CREATE INDEX idx_ts_ids ON trace_scores (course_id, instructor_id, term_id)")
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        cur = conn.cursor()
-    print("  Done")
-
-    # 7. Add parsed course_id, instructor_id, term_id columns to trace_comments
-    print("Adding parsed ID columns to trace_comments...")
-    conn.close()
-    conn = _connect()
-    cur = conn.cursor()
-    for col in ["tc_course_id", "tc_instructor_id", "tc_term_id"]:
         try:
-            cur.execute(f"ALTER TABLE trace_comments ADD COLUMN {col} INT")
+            cur.execute("ALTER TABLE trace_scores ADD COLUMN total_responses INT")
             conn.commit()
         except Exception:
             conn.rollback()
             cur = conn.cursor()
 
-    # Parse URLs from the CSV we already loaded, build a url→ids mapping
-    url_map = {}
-    for url in tcomments["course_url"].dropna().unique():
-        sp_matches = re.findall(r"sp=(\d+)", str(url))
-        if len(sp_matches) >= 3:
-            url_map[str(url)] = (int(sp_matches[0]), int(sp_matches[1]), int(sp_matches[2]))
-
-    # Create helper table with url→ids mapping
-    cur.execute("SET experimental_enable_temp_tables = 'on'")
-    cur.execute("CREATE TEMP TABLE _url_ids (course_url TEXT, cid INT, iid INT, tid INT)")
-    mapping_rows = [(url, cid, iid, tid) for url, (cid, iid, tid) in url_map.items()]
-    chunk_insert(cur, "INSERT INTO _url_ids (course_url, cid, iid, tid) VALUES %s", mapping_rows)
-    print(f"  Parsed {len(mapping_rows)} unique URLs")
-
-    # Batch join-update (smaller batches to avoid CockroachDB serialization failures)
-    COMMENT_BATCH = 5000
-    while True:
-        try:
+        BATCH_SIZE = 10000
+        print("  Updating total_responses (batched)...")
+        while True:
             cur.execute("""
-                UPDATE trace_comments tc SET
-                    tc_course_id = m.cid,
-                    tc_instructor_id = m.iid,
-                    tc_term_id = m.tid
-                FROM _url_ids m
-                WHERE tc.course_url = m.course_url
-                  AND tc.tc_course_id IS NULL
+                UPDATE trace_scores SET
+                    total_responses = COALESCE(count_1,0) + COALESCE(count_2,0) + COALESCE(count_3,0) + COALESCE(count_4,0) + COALESCE(count_5,0)
+                WHERE total_responses IS NULL
                 LIMIT %s
-            """, (COMMENT_BATCH,))
+            """, (BATCH_SIZE,))
             updated = cur.rowcount
             conn.commit()
-        except Exception as e:
+            if updated == 0:
+                break
+            print(f"    updated {updated} rows...")
+
+        print("  Updating mean (batched)...")
+        cur.execute("""
+            UPDATE trace_scores SET
+                mean = NULL
+            WHERE COALESCE(count_1,0) + COALESCE(count_2,0) + COALESCE(count_3,0) + COALESCE(count_4,0) + COALESCE(count_5,0) = 0
+              AND mean IS NOT NULL
+        """)
+        conn.commit()
+        while True:
+            cur.execute("""
+                UPDATE trace_scores SET
+                    mean = (1.0*COALESCE(count_1,0) + 2.0*COALESCE(count_2,0) + 3.0*COALESCE(count_3,0) + 4.0*COALESCE(count_4,0) + 5.0*COALESCE(count_5,0))
+                         / (COALESCE(count_1,0) + COALESCE(count_2,0) + COALESCE(count_3,0) + COALESCE(count_4,0) + COALESCE(count_5,0))
+                WHERE total_responses > 0
+                  AND mean IS NULL
+                LIMIT %s
+            """, (BATCH_SIZE,))
+            updated = cur.rowcount
+            conn.commit()
+            if updated == 0:
+                break
+            print(f"    updated {updated} rows...")
+
+        try:
+            cur.execute("CREATE INDEX idx_ts_ids ON trace_scores (course_id, instructor_id, term_id)")
+            conn.commit()
+        except Exception:
             conn.rollback()
             cur = conn.cursor()
-            if "restart transaction" in str(e).lower() or "serialization" in str(e).lower():
-                print(f"    retry (serialization conflict)...")
-                continue
-            raise
-        if updated == 0:
-            break
-        print(f"    updated {updated} rows...")
+        print("  Done")
+    else:
+        print("Skipping trace_scores mean/total_responses backfill (REFRESH_TRACE=false)")
 
-    cur.execute("DROP TABLE _url_ids")
-    conn.commit()
-
-    try:
-        cur.execute("CREATE INDEX idx_tc_comment_ids ON trace_comments (tc_course_id, tc_instructor_id, tc_term_id)")
-        conn.commit()
-    except Exception:
-        conn.rollback()
+    # 7. Add parsed course_id, instructor_id, term_id columns to trace_comments
+    if do_trace:
+        print("Adding parsed ID columns to trace_comments...")
+        conn.close()
+        conn = _connect()
         cur = conn.cursor()
-    print("  Done")
+        for col in ["tc_course_id", "tc_instructor_id", "tc_term_id"]:
+            try:
+                cur.execute(f"ALTER TABLE trace_comments ADD COLUMN {col} INT")
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                cur = conn.cursor()
+
+        # Parse URLs from the CSV we already loaded, build a url→ids mapping
+        url_map = {}
+        for url in tcomments["course_url"].dropna().unique():
+            sp_matches = re.findall(r"sp=(\d+)", str(url))
+            if len(sp_matches) >= 3:
+                url_map[str(url)] = (int(sp_matches[0]), int(sp_matches[1]), int(sp_matches[2]))
+
+        # Create helper table with url→ids mapping
+        cur.execute("SET experimental_enable_temp_tables = 'on'")
+        cur.execute("CREATE TEMP TABLE _url_ids (course_url TEXT, cid INT, iid INT, tid INT)")
+        mapping_rows = [(url, cid, iid, tid) for url, (cid, iid, tid) in url_map.items()]
+        chunk_insert(cur, "INSERT INTO _url_ids (course_url, cid, iid, tid) VALUES %s", mapping_rows)
+        print(f"  Parsed {len(mapping_rows)} unique URLs")
+
+        # Batch join-update (smaller batches to avoid CockroachDB serialization failures)
+        COMMENT_BATCH = 5000
+        while True:
+            try:
+                cur.execute("""
+                    UPDATE trace_comments tc SET
+                        tc_course_id = m.cid,
+                        tc_instructor_id = m.iid,
+                        tc_term_id = m.tid
+                    FROM _url_ids m
+                    WHERE tc.course_url = m.course_url
+                      AND tc.tc_course_id IS NULL
+                    LIMIT %s
+                """, (COMMENT_BATCH,))
+                updated = cur.rowcount
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                cur = conn.cursor()
+                if "restart transaction" in str(e).lower() or "serialization" in str(e).lower():
+                    print(f"    retry (serialization conflict)...")
+                    continue
+                raise
+            if updated == 0:
+                break
+            print(f"    updated {updated} rows...")
+
+        cur.execute("DROP TABLE _url_ids")
+        conn.commit()
+
+        try:
+            cur.execute("CREATE INDEX idx_tc_comment_ids ON trace_comments (tc_course_id, tc_instructor_id, tc_term_id)")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            cur = conn.cursor()
+        print("  Done")
+    else:
+        print("Skipping trace_comments ID-column backfill (REFRESH_TRACE=false)")
 
     # 8. Precompute course_catalog avg_rating (overall-question weighted mean).
     # Depends on trace_courses.course_code (step 4b) and trace_scores.total_responses (step 6).
-    print("Precomputing course_catalog avg_rating...")
-    conn.close()
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute("""
-        UPDATE course_catalog cc SET
-            avg_rating = agg.avg_rating,
-            num_responses = agg.total_responses
-        FROM (
-            SELECT
-                tc.course_code,
-                SUM(CAST(ts.mean AS FLOAT) * CAST(ts.total_responses AS FLOAT))
-                    / NULLIF(SUM(CAST(ts.total_responses AS FLOAT)), 0) AS avg_rating,
-                SUM(ts.total_responses) AS total_responses
-            FROM trace_courses tc
-            JOIN trace_scores ts
-                ON tc.course_id = ts.course_id
-                AND tc.instructor_id = ts.instructor_id
-                AND tc.term_id = ts.term_id
-            WHERE LOWER(ts.question) LIKE '%%overall%%'
-              AND LOWER(ts.question) != 'overall effectiveness'
-              AND tc.course_code IS NOT NULL
-            GROUP BY tc.course_code
-        ) agg
-        WHERE cc.code = agg.course_code
-    """)
-    conn.commit()
-    try:
-        cur.execute("CREATE INDEX idx_cc_rating ON course_catalog (avg_rating)")
-        conn.commit()
-    except Exception:
-        conn.rollback()
+    if do_trace:
+        print("Precomputing course_catalog avg_rating...")
+        conn.close()
+        conn = _connect()
         cur = conn.cursor()
-    print("  Done")
+        cur.execute("""
+            UPDATE course_catalog cc SET
+                avg_rating = agg.avg_rating,
+                num_responses = agg.total_responses
+            FROM (
+                SELECT
+                    tc.course_code,
+                    SUM(CAST(ts.mean AS FLOAT) * CAST(ts.total_responses AS FLOAT))
+                        / NULLIF(SUM(CAST(ts.total_responses AS FLOAT)), 0) AS avg_rating,
+                    SUM(ts.total_responses) AS total_responses
+                FROM trace_courses tc
+                JOIN trace_scores ts
+                    ON tc.course_id = ts.course_id
+                    AND tc.instructor_id = ts.instructor_id
+                    AND tc.term_id = ts.term_id
+                WHERE LOWER(ts.question) LIKE '%%overall%%'
+                  AND LOWER(ts.question) != 'overall effectiveness'
+                  AND tc.course_code IS NOT NULL
+                GROUP BY tc.course_code
+            ) agg
+            WHERE cc.code = agg.course_code
+        """)
+        conn.commit()
+        try:
+            cur.execute("CREATE INDEX idx_cc_rating ON course_catalog (avg_rating)")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            cur = conn.cursor()
+        print("  Done")
+    else:
+        print("Skipping course_catalog avg_rating precompute (REFRESH_TRACE=false)")
 
     conn.close()
     print(f"\nPrecompute complete!")
