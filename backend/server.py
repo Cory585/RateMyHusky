@@ -855,6 +855,7 @@ def professor_profile(slug):
     if not prof:
         # Try resolving slug to name_key
         name_key = slug.strip().lower().replace("-", " ")
+        name_key = ALIAS_MAP.get(name_key, name_key)
         prof = query_one("SELECT * FROM professors_catalog WHERE name_key = %s", (name_key,))
 
     if not prof:
@@ -1260,6 +1261,7 @@ def professor_reviews(slug):
     prof = query_one("SELECT name_key FROM professors_catalog WHERE slug = %s", (slug,))
     if not prof:
         name_key = slug.strip().lower().replace("-", " ")
+        name_key = ALIAS_MAP.get(name_key, name_key)
         prof = query_one("SELECT name_key FROM professors_catalog WHERE name_key = %s", (name_key,))
     if not prof:
         return jsonify({"error": "Professor not found"}), 404

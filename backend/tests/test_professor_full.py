@@ -6,7 +6,7 @@ guard the unauthenticated response shape. server.py can't be imported in tests
 injectable-`query` pattern as chat_retrieve.py.
 """
 
-from professor_full import build_full
+from professor_full import build_full, _resolve_professor
 
 
 class RecordingQuery:
@@ -203,3 +203,19 @@ def test_full_404_when_professor_missing():
     result = build_full("nobody", rq.query, rq.query_one, sanitize=lambda t: t,
                         is_authed=False)
     assert result is None  # caller turns None into a 404
+
+
+def test_resolve_professor_applies_alias_map_to_slug_fallback():
+    # /professor/chris-bosso was live before "Chris Bosso" -> "Christopher Bosso"
+    # was added to ALIAS_MAP; the slug->name_key fallback must apply the alias so
+    # the old link still resolves instead of 404ing on the stale "chris bosso" key.
+    calls = []
+
+    def fake_query_one(sql, params=None):
+        calls.append(params)
+        if "where slug" in sql.lower():
+            return None  # force the name_key fallback
+        return {"name_key": "christopher bosso"}
+
+    _resolve_professor("chris-bosso", fake_query_one)
+    assert calls[-1] == ("christopher bosso",), calls

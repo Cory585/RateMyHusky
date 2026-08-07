@@ -144,6 +144,68 @@ def chunk_insert(cur, sql, rows, page_size=5000):
         execute_values(cur, sql, rows[i:i + page_size])
 
 
+def swap_in(conn, table):
+    """Replace <table> with the freshly-built <table>_new without a
+    missing-table window.
+
+    CRDB v25.1+ autocommits before every DDL (autocommit_before_ddl=on), so a
+    DROP+CREATE+INSERT rebuild exposes live readers to a missing/empty table and
+    a crash mid-rebuild leaves no table at all. Instead: build into _new, then
+    swap via two renames committed together (renames are metadata-only and
+    allowed transactionally once the DDL autocommit is off for the session).
+    A stray _old/_new from a crashed run is cleaned by the next run's DROPs.
+    """
+    cur = conn.cursor()
+    cur.execute(f"DROP TABLE IF EXISTS {table}_old")
+    conn.commit()
+    try:
+        cur.execute("SET autocommit_before_ddl = off")
+        conn.commit()
+        cur.execute(
+            "SELECT 1 FROM information_schema.tables WHERE table_name = %s", (table,)
+        )
+        if cur.fetchone():
+            cur.execute(f"ALTER TABLE {table} RENAME TO {table}_old")
+        cur.execute(f"ALTER TABLE {table}_new RENAME TO {table}")
+        conn.commit()  # both renames land together — no missing-table window
+    except Exception as e:
+        conn.rollback()
+        cur = conn.cursor()
+        # Fallback: per-statement renames (millisecond window, still crash-safe
+        # — worst case is a stray _old plus one rename to redo, never a
+        # missing table for more than an instant).
+        print(f"  swap_in: transactional swap failed for {table} ({e}); using per-statement renames")
+        cur.execute(
+            "SELECT 1 FROM information_schema.tables WHERE table_name = %s", (table,)
+        )
+        if cur.fetchone():
+            cur.execute(f"ALTER TABLE {table} RENAME TO {table}_old")
+            conn.commit()
+        cur.execute(f"ALTER TABLE {table}_new RENAME TO {table}")
+        conn.commit()
+    finally:
+        try:
+            cur.execute("RESET autocommit_before_ddl")
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"  swap_in: RESET autocommit_before_ddl failed for {table} ({e}); "
+                  "later DDL in this run may fail")
+    cur.execute(f"DROP TABLE IF EXISTS {table}_old")
+    conn.commit()
+    cur.close()
+
+
+# (table, column) pairs whose NULLs mean migrate-inserted rows the TRACE
+# maintenance backfills haven't processed.
+TRACE_BACKFILL_PROBES = (
+    ("trace_courses", "name_key"),
+    ("trace_courses", "course_code"),
+    ("trace_scores", "total_responses"),
+    ("trace_comments", "tc_course_id"),
+)
+
+
 def trace_needs_maintenance(conn):
     """Safety net for REFRESH_TRACE=false: detect un-processed TRACE rows.
 
@@ -153,12 +215,7 @@ def trace_needs_maintenance(conn):
     doesn't exist yet (first run), maintenance is obviously needed. Cheap: a few
     EXISTS probes, run only when the flag would otherwise skip.
     """
-    for table, col in (
-        ("trace_courses", "name_key"),
-        ("trace_courses", "course_code"),
-        ("trace_scores", "total_responses"),
-        ("trace_comments", "tc_course_id"),
-    ):
+    for table, col in TRACE_BACKFILL_PROBES:
         cur = conn.cursor()
         try:
             cur.execute(f"SELECT EXISTS(SELECT 1 FROM {table} WHERE {col} IS NULL)")
@@ -172,6 +229,31 @@ def trace_needs_maintenance(conn):
         finally:
             cur.close()
     return False
+
+
+def trace_maintenance_leftovers(conn, cap=1000):
+    """NULL counts that survived a full maintenance pass. Such rows are
+    unprocessable by the backfills (e.g. comments with unparseable URLs) and
+    re-trigger the safety net — and the heavy TRACE path — on every weekly
+    run. Counts are capped so the probe stays cheap on multi-million-row
+    tables."""
+    leftovers = []
+    for table, col in TRACE_BACKFILL_PROBES:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                f"SELECT count(*) FROM (SELECT 1 FROM {table} WHERE {col} IS NULL LIMIT {cap + 1}) AS probe"
+            )
+            n = cur.fetchone()[0]
+            if n:
+                leftovers.append((table, col, n))
+        except Exception as e:
+            conn.rollback()
+            print(f"::warning::{table}.{col}: leftover probe failed ({e}); "
+                  "could not verify the maintenance pass cleared the NULLs.")
+        finally:
+            cur.close()
+    return leftovers
 
 
 def main():
@@ -483,8 +565,10 @@ def main():
 
         display_name = trace_name_lookup.get(row["_name_key"], row["name"])
         slug = name_to_slug(row["_name_key"])
-        if slug in seen_slugs:
-            slug = slug + "-2"
+        _base, _n = slug, 2
+        while slug in seen_slugs:
+            slug = f"{_base}-{_n}"
+            _n += 1
         seen_slugs.add(slug)
 
         avg_hours = None
@@ -498,7 +582,7 @@ def main():
             round(float(row["trace_overall"]), 2) if has_trace else None,
             int(row["num_ratings"]), int(row["trace_reviews"]), int(row["total_reviews"]),
             wta, difficulty,
-            row.get("professor_url", None) or None,
+            (row["professor_url"] if isinstance(row.get("professor_url"), str) and row["professor_url"] else None),
             photo_lookup.get(row["_name_key"], None),
             float(focus_x_lookup.get(row["_name_key"], 50.0)),
             float(focus_y_lookup.get(row["_name_key"], 30.0)),
@@ -519,8 +603,10 @@ def main():
         avg = round(float(trace_rat), 2) if has_trace else None
         t_rev = int(trace_reviews_lookup.get(nk, 0))
         slug = name_to_slug(nk)
-        if slug in seen_slugs:
-            slug = slug + "-2"
+        _base, _n = slug, 2
+        while slug in seen_slugs:
+            slug = f"{_base}-{_n}"
+            _n += 1
         seen_slugs.add(slug)
         avg_hours_t = round(float(hours_lookup[nk]), 2) if nk in hours_lookup and pd.notna(hours_lookup[nk]) else None
         catalog_rows.append((
@@ -567,9 +653,9 @@ def main():
 
     # 1. professors_catalog
     print("Creating professors_catalog...")
-    cur.execute("DROP TABLE IF EXISTS professors_catalog")
+    cur.execute("DROP TABLE IF EXISTS professors_catalog_new")
     cur.execute("""
-        CREATE TABLE professors_catalog (
+        CREATE TABLE professors_catalog_new (
             slug TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             name_key TEXT NOT NULL,
@@ -592,24 +678,25 @@ def main():
         )
     """)
     chunk_insert(cur, """
-        INSERT INTO professors_catalog
+        INSERT INTO professors_catalog_new
         (slug, name, name_key, department, college, avg_rating, rmp_rating, trace_rating,
          num_ratings, trace_reviews, total_reviews, would_take_again_pct, difficulty,
          professor_url, image_url, focus_x, focus_y, avg_hours, total_comments)
         VALUES %s
     """, catalog_rows)
-    cur.execute("CREATE INDEX idx_pc_name_key ON professors_catalog (name_key)")
-    cur.execute("CREATE INDEX idx_pc_college ON professors_catalog (college)")
-    cur.execute("CREATE INDEX idx_pc_dept ON professors_catalog (department)")
+    cur.execute("CREATE INDEX idx_pc_name_key ON professors_catalog_new (name_key)")
+    cur.execute("CREATE INDEX idx_pc_college ON professors_catalog_new (college)")
+    cur.execute("CREATE INDEX idx_pc_dept ON professors_catalog_new (department)")
     conn.commit()
+    swap_in(conn, "professors_catalog")
     print(f"  Inserted {len(catalog_rows)} rows")
 
     # 2. course_catalog (TRACE-derived — only rebuild when TRACE changed)
     if do_trace:
         print("Creating course_catalog...")
-        cur.execute("DROP TABLE IF EXISTS course_catalog")
+        cur.execute("DROP TABLE IF EXISTS course_catalog_new")
         cur.execute("""
-            CREATE TABLE course_catalog (
+            CREATE TABLE course_catalog_new (
                 code TEXT PRIMARY KEY,
                 name TEXT,
                 department TEXT,
@@ -618,19 +705,19 @@ def main():
                 num_responses INT
             )
         """)
-        chunk_insert(cur, "INSERT INTO course_catalog (code, name, department, search_text) VALUES %s", course_rows)
-        cur.execute("CREATE INDEX idx_cc_dept ON course_catalog (department)")
+        chunk_insert(cur, "INSERT INTO course_catalog_new (code, name, department, search_text) VALUES %s", course_rows)
+        cur.execute("CREATE INDEX idx_cc_dept ON course_catalog_new (department)")
         conn.commit()
+        swap_in(conn, "course_catalog")
         print(f"  Inserted {len(course_rows)} courses")
     else:
         print("Skipping course_catalog rebuild (REFRESH_TRACE=false)")
 
     # 3. stats_cache
-    print("Creating stats_cache...")
-    cur.execute("DROP TABLE IF EXISTS stats_cache")
-    cur.execute("CREATE TABLE stats_cache (key TEXT PRIMARY KEY, value INT)")
+    print("Updating stats_cache...")
+    cur.execute("CREATE TABLE IF NOT EXISTS stats_cache (key TEXT PRIMARY KEY, value INT)")
     cur.execute(
-        "INSERT INTO stats_cache VALUES ('professors', %s), ('courses', %s), ('comments', %s), ('departments', %s)",
+        "UPSERT INTO stats_cache VALUES ('professors', %s), ('courses', %s), ('comments', %s), ('departments', %s)",
         (stat_professors, stat_courses, stat_comments, stat_departments)
     )
     conn.commit()
@@ -805,6 +892,19 @@ def main():
         except Exception:
             conn.rollback()
             cur = conn.cursor()
+
+        # Near-empty once backfilled; trace_needs_maintenance's IS NULL probe
+        # matches this predicate exactly, making the weekly probe O(1).
+        try:
+            cur.execute(
+                "CREATE INDEX idx_ts_total_resp_null ON trace_scores (total_responses) "
+                "WHERE total_responses IS NULL"
+            )
+            conn.commit()
+            print("  Created idx_ts_total_resp_null")
+        except Exception:
+            conn.rollback()
+            cur = conn.cursor()
         print("  Done")
     else:
         print("Skipping trace_scores mean/total_responses backfill (REFRESH_TRACE=false)")
@@ -917,10 +1017,20 @@ def main():
     else:
         print("Skipping course_catalog avg_rating precompute (REFRESH_TRACE=false)")
 
+    # If the safety net forced this pass, verify it actually cleared the NULLs.
+    # Anything left is unprocessable and will re-force the heavy TRACE path on
+    # every weekly run — surface it as a GitHub Actions warning annotation.
+    if do_trace and not REFRESH_TRACE:
+        for table, col, n in trace_maintenance_leftovers(conn):
+            shown = "1000+" if n > 1000 else str(n)
+            print(f"::warning::{table}.{col}: {shown} NULL rows survived full TRACE "
+                  "maintenance; the safety net will re-force this heavy path every run until they are fixed.")
+
     conn.close()
     print(f"\nPrecompute complete!")
     print(f"  {len(catalog_rows)} professors in catalog")
-    print(f"  {len(course_rows)} courses in catalog")
+    if do_trace:
+        print(f"  {len(course_rows)} courses in catalog")
     print(f"  Stats: {stat_professors} professors, {stat_courses} courses, {stat_comments} comments, {stat_departments} departments")
 
 
