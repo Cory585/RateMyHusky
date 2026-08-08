@@ -15,12 +15,15 @@ path (full scores + radar) stays in server.py.
 
 import re
 
+from prof_aliases import ALIAS_MAP
+
 
 def _resolve_professor(slug, query_one):
     """One catalog lookup, slug then name_key fallback. Returns the row or None."""
     prof = query_one("SELECT * FROM professors_catalog WHERE slug = %s", (slug,))
     if not prof:
         name_key = slug.strip().lower().replace("-", " ")
+        name_key = ALIAS_MAP.get(name_key, name_key)
         prof = query_one("SELECT * FROM professors_catalog WHERE name_key = %s", (name_key,))
     return prof
 

@@ -40,8 +40,11 @@ MAX_REVIEW_PAGES: int = 50   # safety limit: stop after 50 review pages (~5k rev
 logging.basicConfig(level=logging.WARNING)
 logger: logging.Logger = logging.getLogger(__name__)
 
-RATE_LIMIT_REQ_PER_SEC: float = 0.0  # 0 = disabled (no rate limiting from residential IP; probe showed zero 429s at 5,555 req/min)
-RATE_LIMIT_BURST: int = 0
+# 0 = disabled (probe showed zero 429s at 5,555 req/min from a residential IP).
+# GitHub runners use datacenter IPs that RMP may throttle — set RMP_RATE_LIMIT_RPS
+# (e.g. "5") to enable the bucket without a code change.
+RATE_LIMIT_REQ_PER_SEC: float = float(os.getenv("RMP_RATE_LIMIT_RPS", "0"))
+RATE_LIMIT_BURST: int = int(os.getenv("RMP_RATE_LIMIT_BURST", "10"))
 
 # ---------------------------------------------------------------------------
 # Token bucket rate limiter
@@ -200,6 +203,7 @@ class RMPSchool:
         self, payload: Dict[str, Any], retries: int = 2
     ) -> Optional[Dict[str, Any]]:
         """Make a GraphQL POST request with rate limiting and fail-fast retries."""
+        drop_auth: bool = False
         for attempt in range(retries):
             _bucket.acquire()
             try:
@@ -207,11 +211,15 @@ class RMPSchool:
                     RMP_GRAPHQL_URL,
                     json=payload,
                     timeout=30,
+                    # requests removes a header whose per-request value is None
+                    headers={"Authorization": None} if drop_auth else None,
                 )
                 if resp.status_code == 403:
                     if attempt == 0:
-                        print(f"  ⚠ Got 403 — retrying with different headers...")
-                    self._session.headers.pop("Authorization", None)
+                        print(f"  ⚠ Got 403 — retrying this request without auth header...")
+                    # Never mutate the shared session: popping the header would
+                    # permanently un-auth all 15 worker threads for the whole run.
+                    drop_auth = True
                     time.sleep(2)
                     continue
                 if resp.status_code == 429:
@@ -265,7 +273,7 @@ class RMPSchool:
                 break
 
             search_data: Optional[Dict[str, Any]] = (
-                data.get("data", {}).get("search", {}).get("teachers", {})
+                ((data.get("data") or {}).get("search") or {}).get("teachers") or {}
             )
             if not search_data:
                 print(f"\n  ✗ Unexpected response: {json.dumps(data)[:200]}")
@@ -273,6 +281,14 @@ class RMPSchool:
 
             edges: List[Dict[str, Any]] = search_data.get("edges", [])
             page_info: Dict[str, Any] = search_data.get("pageInfo", {})
+
+            if search_data.get("didFallback"):
+                pbar.close()
+                sys.exit(
+                    "✗ Scrape aborted: RMP search fell back to a cross-school query "
+                    "(didFallback=true) — results are not school-filtered. "
+                    "Aborting without writing output."
+                )
 
             for edge in edges:
                 node: Dict[str, Any] = edge.get("node", {})
@@ -320,7 +336,7 @@ class RMPSchool:
         self, data: Dict[str, Any]
     ) -> Tuple[List[Review], bool, Optional[str]]:
         reviews: List[Review] = []
-        teacher_node: Optional[Dict[str, Any]] = data.get("data", {}).get("node")
+        teacher_node: Optional[Dict[str, Any]] = (data.get("data") or {}).get("node")
         if not teacher_node:
             return reviews, False, None
 
@@ -419,7 +435,6 @@ class RMPSchool:
 
         total: int = len(profs_with_ratings)
         total_reviews: int = 0
-        failed: int = 0
 
         pbar: tqdm = tqdm(total=total, desc="Fetching reviews", unit=" prof")
 
@@ -436,7 +451,7 @@ class RMPSchool:
                     prof.reviews = reviews
                     total_reviews += len(reviews)
                 except Exception:
-                    failed += 1
+                    pass
                 pbar.update(1)
 
         pbar.close()
@@ -445,7 +460,6 @@ class RMPSchool:
         failed_profs = [p for p in profs_with_ratings if not p.reviews]
         if failed_profs:
             print(f"  Retrying {len(failed_profs)} failed professors...")
-            recovered = 0
             with ThreadPoolExecutor(max_workers=5) as retry_executor:
                 retry_futures: Dict[Future, Professor] = {
                     retry_executor.submit(self._fetch_reviews_for_professor, prof): prof
@@ -457,9 +471,10 @@ class RMPSchool:
                         reviews: List[Review] = future.result()
                         prof.reviews = reviews
                         total_reviews += len(reviews)
-                        recovered += 1
                     except Exception:
                         pass
+            recovered = sum(1 for p in failed_profs if p.reviews)
+            print(f"  Retry recovered {recovered}/{len(failed_profs)} professors")
 
         profs_done: int = sum(1 for p in profs_with_ratings if p.reviews)
         print(
@@ -528,6 +543,12 @@ def main() -> None:
     parser.add_argument("-f", "--file_path", help="Output CSV path", type=str)
     parser.add_argument("--json", help="Also export JSON", action="store_true")
     parser.add_argument("--no-reviews", help="Skip reviews", action="store_true")
+    parser.add_argument(
+        "--expect_school",
+        help='Abort if the scraped school name differs (default "Northeastern University"; pass "" to disable)',
+        type=str,
+        default="Northeastern University",
+    )
 
     args: argparse.Namespace = parser.parse_args()
 
@@ -543,6 +564,14 @@ def main() -> None:
             f"✗ Scrape failed: 0 professors collected for school {args.sid}. "
             "Likely a 403/429 block or an RMP API change (see logs above). "
             "Aborting without writing output to preserve existing data."
+        )
+
+    if args.expect_school and school.school_name != args.expect_school:
+        school.close()
+        sys.exit(
+            f"✗ Scrape failed: school name {school.school_name!r} != expected "
+            f"{args.expect_school!r} (wrong-school fallback or RMP API change). "
+            "Aborting without writing output."
         )
 
     school_name_fp: str = school.school_name.replace(" ", "").replace("-", "_").lower()
