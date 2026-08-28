@@ -24,7 +24,7 @@ TRACE evaluations, RateMyProfessors ratings, and Reddit chatter for 9,300+ North
 
 ## Why RateMyHusky?
 
-Choosing classes at Northeastern means juggling TRACE PDFs, RateMyProfessors tabs, and Reddit threads — each with a fragment of the picture. RateMyHusky unifies all three sources into a single profile per professor, then layers search, comparison, and an AI question-answering mode on top.
+Choosing classes at Northeastern means juggling TRACE PDFs, RateMyProfessors tabs, and Reddit threads —> each with a fragment of the picture. RateMyHusky unifies all three sources into a single profile per professor, then layers search, comparison, and an AI question-answering mode on top.
 
 | Source | Scale |
 |---|---|
@@ -36,22 +36,22 @@ Choosing classes at Northeastern means juggling TRACE PDFs, RateMyProfessors tab
 ## Features
 
 ### Explore
-- **Professor catalog** — filter by college, department, rating, and review volume
-- **Rich profile pages** — RMP ratings, TRACE in-depth scores, rating history, grade distributions, review feeds from all three sources, and related courses
-- **Course catalog** — course detail pages with sections, ratings, and linked professors
-- **Side-by-side compare** — stack any professors against each other
-- **GOATED leaderboard** — top-rated professors by college
-- **Search that keeps up** — instant autocomplete across professors and courses, plus a shuffle wheel for serendipity
+- **Professor catalog** —> filter by college, department, rating, and review volume
+- **Rich profile pages** —> RMP ratings, TRACE in-depth scores, rating history, grade distributions, review feeds from all three sources, and related courses
+- **Course catalog** —> course detail pages with sections, ratings, and linked professors
+- **Side-by-side compare** —> stack any professors against each other
+- **GOATED leaderboard** —> top-rated professors by college
+- **Search that keeps up** —> instant autocomplete across professors and courses, plus a shuffle wheel for serendipity
 
 ### Ask (AI)
-- **Ask a real question** — *"Is Rachlin a fair grader?"* — and get a cited, single-shot answer grounded in actual student reviews
-- **Hybrid retrieval** — full-text search + 384-dim [BGE-small](https://huggingface.co/BAAI/bge-small-en-v1.5) embeddings fused with Reciprocal Rank Fusion over 1.5M+ review excerpts from RMP, TRACE, and Reddit
-- **Citations that jump** — every cited snippet pins, scrolls to, and highlights its source on the professor page
-- **Guardrailed** — prompt-injection gate, topic classifier, output validation, per-user abuse strikes, adaptive rate limiting, and answer caching
+- **Ask a real question** —> *"Is Rachlin a fair grader?"* — and get a cited, single-shot answer grounded in actual student reviews
+- **Hybrid retrieval** —> full-text search + 384-dim [BGE-small](https://huggingface.co/BAAI/bge-small-en-v1.5) embeddings fused with Reciprocal Rank Fusion over 1.5M+ review excerpts from RMP, TRACE, and Reddit
+- **Citations that jump** —> every cited snippet pins, scrolls to, and highlights its source on the professor page
+- **Guardrailed** —> prompt-injection gate, topic classifier, output validation, per-user abuse strikes, adaptive rate limiting, and answer caching
 
 ### Account
-- **Bookmarks** — one-click bookmark toggle on professor and course cards/profiles, backed by a global bookmarks context for instant, optimistic updates
-- **Bookmarks tab** — a dedicated view under Account listing all bookmarked professors and courses, reusing the catalog's card layout
+- **Bookmarks** —> one-click bookmark toggle on professor and course cards/profiles, backed by a global bookmarks context for instant, optimistic updates
+- **Bookmarks tab** —> a dedicated view under Account listing all bookmarked professors and courses, reusing the catalog's card layout
 - Signed-out bookmark clicks prompt Google sign-in instead of failing silently
 - Profile/Bookmarks tabs share an animated sliding underline indicator
 
@@ -89,7 +89,7 @@ Choosing classes at Northeastern means juggling TRACE PDFs, RateMyProfessors tab
      sentiment scoring → evidence build & dedupe → ONNX embedding backfill
 ```
 
-**AI stack:** Groq-hosted Llama 3.1 8B as the input gate/classifier, GPT-OSS-120B for answer synthesis, and BGE-small-en-v1.5 (INT8 ONNX, pure `onnxruntime` — no torch) for query/document embeddings.
+**AI stack:** Groq-hosted Llama 3.1 8B as the input gate/classifier, GPT-OSS-120B for answer synthesis, and BGE-small-en-v1.5 (INT8 ONNX, pure `onnxruntime` no torch) for query/document embeddings.
 
 ## Tech Stack
 
