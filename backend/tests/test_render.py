@@ -31,7 +31,8 @@ def test_professor_html_has_title_canonical_and_h1():
     profile = {
         "name": "Francis Georges", "department": "Economics",
         "avgRating": 4.25, "totalRatings": 2686, "wouldTakeAgainPct": 83,
-        "difficulty": 2.9, "rmpRating": 4.3, "traceRating": 4.2,
+        "difficulty": 2.9, "rmpRating": 4.25, "rmpNumRatings": 2686,
+        "rmpDifficulty": 2.9, "traceRating": 4.2,
         "imageUrl": "https://img/x.jpg", "professorUrl": None,
         "traceCourses": [{"displayName": "ECON1115: Macro"}],
     }
@@ -49,8 +50,8 @@ def test_professor_meta_description_leads_with_reviews_and_ratings_phrase():
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
     desc = _meta_description(html)
     assert desc.startswith(
-        "Francis Georges professor reviews and ratings: 4.25/5 from 2686 student "
-        "reviews at Northeastern (83% would take again). TRACE + RateMyProfessor + Reddit."
+        "Francis Georges professor reviews and ratings: 4.25/5 from 2686 RMP ratings "
+        "at Northeastern (83% would take again). TRACE + RateMyProfessor + Reddit."
     )
 
 
@@ -60,8 +61,8 @@ def test_professor_meta_description_omits_would_take_again_clause_when_absent():
     desc = _meta_description(html)
     assert "would take again" not in desc
     assert desc.startswith(
-        "Francis Georges professor reviews and ratings: 4.25/5 from 2686 student "
-        "reviews at Northeastern. TRACE + RateMyProfessor + Reddit."
+        "Francis Georges professor reviews and ratings: 4.25/5 from 2686 RMP ratings "
+        "at Northeastern. TRACE + RateMyProfessor + Reddit."
     )
 
 
@@ -93,12 +94,13 @@ def test_professor_html_says_no_ratings_rather_than_rating_them_zero():
     have always handled being absent.
     """
     profile = _base_profile(avgRating=None, totalRatings=0, wouldTakeAgainPct=None,
-                            difficulty=None, rmpRating=None, traceRating=None)
+                            difficulty=None, rmpRating=None, rmpNumRatings=0,
+                            rmpDifficulty=None, traceRating=None)
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
     assert "0/5" not in html
-    assert "Average rating" not in html
+    assert "<dt>Rate My Professors rating</dt>" not in html
     desc = _meta_description(html)
-    assert "no student ratings yet" in desc.lower()
+    assert "no rate my professors ratings yet" in desc.lower()
 
 
 def test_professor_html_omits_aggregate_rating_when_no_ratings():
@@ -339,7 +341,8 @@ def _base_profile(**over):
     p = {
         "name": "Francis Georges", "department": "Economics", "avgRating": 4.25,
         "totalRatings": 2686, "wouldTakeAgainPct": 83, "difficulty": 2.9,
-        "rmpRating": None, "traceRating": None, "imageUrl": None,
+        "rmpRating": 4.25, "rmpNumRatings": 2686, "rmpDifficulty": 2.9,
+        "traceRating": None, "imageUrl": None,
         "professorUrl": None, "traceCourses": [],
     }
     p.update(over)
@@ -667,19 +670,21 @@ def test_professor_html_verdict_sentence_all_clauses():
     month_year = date.today().strftime("%B %Y")
     expected = (
         "Francis Georges is an Economics professor at Northeastern University "
-        "rated 4.25/5 by 2686 students, with 2.9/5 difficulty and 83% who would "
-        f"take them again (TRACE + RateMyProfessors + Reddit, updated {month_year})."
+        "rated 4.25/5 on Rate My Professors by 2686 students, with 2.9/5 RMP "
+        "difficulty and 83% who would take them again "
+        f"(TRACE + RateMyProfessors + Reddit, updated {month_year})."
     )
     assert expected in html
 
 
 def test_professor_html_verdict_sentence_omits_missing_clauses():
-    profile = _base_profile(wouldTakeAgainPct=None, difficulty=None)
+    profile = _base_profile(wouldTakeAgainPct=None, rmpDifficulty=None)
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
     month_year = date.today().strftime("%B %Y")
     expected = (
         "Francis Georges is an Economics professor at Northeastern University "
-        f"rated 4.25/5 by 2686 students (TRACE + RateMyProfessors + Reddit, updated {month_year})."
+        "rated 4.25/5 on Rate My Professors by 2686 students "
+        f"(TRACE + RateMyProfessors + Reddit, updated {month_year})."
     )
     assert expected in html
 
@@ -744,7 +749,7 @@ def test_professor_html_faq_has_no_faqpage_jsonld():
 
 
 def test_professor_html_faq_omits_difficulty_qa_when_absent():
-    profile = _base_profile(difficulty=None)
+    profile = _base_profile(rmpDifficulty=None)
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
     assert "<h3>How hard are Francis Georges&#x27;s classes?</h3>" not in html
 
@@ -756,7 +761,8 @@ def test_professor_html_faq_omits_courses_qa_when_no_courses():
 
 def test_professor_html_faq_omits_entirely_when_no_ratings():
     profile = _base_profile(totalRatings=0, avgRating=0.0, wouldTakeAgainPct=None,
-                            difficulty=None, traceCourses=[])
+                            difficulty=None, rmpRating=None, rmpNumRatings=0,
+                            rmpDifficulty=None, traceCourses=[])
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
     assert "<h2>Frequently asked questions</h2>" not in html
 

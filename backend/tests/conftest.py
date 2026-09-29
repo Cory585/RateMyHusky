@@ -44,6 +44,7 @@ def render_client(monkeypatch):
             "name": "Francis Georges", "department": "Economics",
             "avgRating": 4.25, "totalRatings": 2686, "wouldTakeAgainPct": 83,
             "difficulty": 2.9, "rmpRating": 4.3, "traceRating": 4.2,
+            "rmpNumRatings": 2686, "rmpDifficulty": 2.9,
             "imageUrl": None, "professorUrl": None, "traceCourses": [],
         })
 

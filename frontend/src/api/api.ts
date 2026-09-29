@@ -90,6 +90,63 @@ export interface ProfessorReviews {
   redditMentions: RedditMention[];
 }
 
+/* ---- Professor page v2: RMP in its own section ----
+   /full?v=2 splits the page payload by source. `identity` is who the
+   professor is and nothing measured; `sources.rmp` is only what Rate My
+   Professors reported (backend/rmp.py). No field in either is a blend, so
+   RMP values stay in RmpData rather than being mixed into shared fields. */
+
+export interface ProfessorIdentity {
+  slug: string;
+  name: string;
+  department: string;
+  college: string | null;
+  imageUrl: string | null;
+  focusX: number;
+  focusY: number;
+}
+
+export type RmpMatchMethod = 'exact' | 'alias' | 'fuzzy' | 'manual';
+
+export interface RmpData {
+  /** False for a professor with no RMP page, or an RMP page with no ratings.
+   *  Every number below is null then — never filled in from another source. */
+  available: boolean;
+  reason: 'no_rmp_record' | 'no_ratings' | null;
+  rating: number | null;
+  difficulty: number | null;
+  wouldTakeAgainPct: number | null;
+  numRatings: number;
+  /** Fewer ratings than the backend's FEW_RATINGS threshold. */
+  fewRatings: boolean;
+  ratingDistribution: Record<'1' | '2' | '3' | '4' | '5', number>;
+  gradeDistribution: Record<string, number>;
+  topTags: { tag: string; count: number }[];
+  reviews: ProfessorReview[];
+  professorUrl: string | null;
+  /** ISO 8601; null before the RMP tables are built. */
+  scrapedAt: string | null;
+  matchMethod: RmpMatchMethod | null;
+  rmpPages: number | null;
+}
+
+export interface ProfessorPage {
+  version: 2;
+  identity: ProfessorIdentity;
+  sources: { rmp: RmpData };
+  /* TRACE and Reddit, as v1 served them. */
+  traceRating: number | null;
+  /** TRACE's own difficulty — v1 averaged this into `difficulty`. */
+  traceDifficulty: number | null;
+  traceRatingCounts?: Record<string, TraceRatingCounts>;
+  traceCourses: TraceCourse[];
+  hoursPerWeek: number | null;
+  radarData?: RadarDataPoint[] | null;
+  radarTermTitle?: string | null;
+  traceComments: TraceComment[];
+  redditMentions: RedditMention[];
+}
+
 export interface ProfessorReview {
   course: string;
   quality: number;
@@ -125,8 +182,7 @@ const _profCache = new Map<string, ProfessorProfile>();
 const _profReviewsCache = new Map<string, ProfessorReviews>();
 const _courseCache = new Map<string, CourseDetail>();
 
-type ProfessorFull = ProfessorProfile & ProfessorReviews;
-const _profFullCache = new Map<string, ProfessorFull>();
+const _profPageCache = new Map<string, ProfessorPage>();
 
 /* ---- Maintenance detection ----
    While maintenance mode is on, Vercel 307-redirects /api/* to
@@ -163,15 +219,16 @@ export const fetchGoatProfessors = (college: string, limit = 10) =>
 export const fetchRandomProfessor = () => get<RandomProfessor>("/api/random-professor");
 
 /* ---- Professor page fetchers ---- */
-export async function fetchProfessorFull(slug: string): Promise<ProfessorFull | null> {
+/* The Professor page's single round-trip. v2, so it no longer seeds the v1
+   profile/reviews caches the way the v1 /full did: Compare reads those, and a
+   v2 payload in them would be the wrong shape. */
+export async function fetchProfessorFull(slug: string): Promise<ProfessorPage | null> {
   const token = localStorage.getItem('auth_token');
-  const reviewsKey = `${slug}:${token ?? 'u'}`;
-  if (_profFullCache.has(reviewsKey)) return _profFullCache.get(reviewsKey)!;
+  const key = `${slug}:${token ?? 'u'}`;
+  if (_profPageCache.has(key)) return _profPageCache.get(key)!;
   try {
-    const data = await get<ProfessorFull>(`/api/professors/${encodeURIComponent(slug)}/full`);
-    _profFullCache.set(reviewsKey, data);
-    _profCache.set(reviewsKey, data);
-    _profReviewsCache.set(reviewsKey, data);
+    const data = await get<ProfessorPage>(`/api/professors/${encodeURIComponent(slug)}/full?v=2`);
+    _profPageCache.set(key, data);
     return data;
   } catch {
     return null;
