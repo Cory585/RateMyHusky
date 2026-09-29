@@ -253,3 +253,105 @@ def test_old_trace_spelling_slug_resolves_to_the_merged_row():
 def test_resolver_without_trace_lookup_is_unchanged():
     from professor_full import _resolve_professor
     assert _resolve_professor("nobody", lambda sql, params: None) is None
+
+
+# ── v2: RMP in its own section ──────────────────────────────────────────────
+# The same fake DB as above: RMP difficulty 3.5 on the catalog row, TRACE
+# challenge 3.6 in trace_scores, and a blended avg_rating 4.2 / total_reviews 31.
+
+from professor_full import build_full_v2  # noqa: E402
+
+RMP_LINK = {"rmp_legacy_id": 999, "match_method": "exact", "needs_review": False,
+            "link_url": "https://www.ratemyprofessors.com/professor/999",
+            "rating": 4.1, "difficulty": 3.5, "would_take_again_pct": 88.0,
+            "num_ratings": 1, "professor_url": "https://www.ratemyprofessors.com/professor/999",
+            "scraped_at": None}
+
+
+def _build_v2(fetch_rmp_links=None, catalog=None):
+    rq = RecordingQuery(catalog)
+    if fetch_rmp_links is None:
+        def fetch_rmp_links(slug):
+            # A real round-trip, so the count below stays honest.
+            rq.query("SELECT 1 FROM prof_rmp_link l LEFT JOIN prof_rmp_summary s "
+                     "ON s.slug = l.slug WHERE l.slug = %s", (slug,))
+            return [RMP_LINK]
+    data = build_full_v2("olin-guha", rq.query, rq.query_one, sanitize=lambda t: t,
+                         fetch_rmp_links=fetch_rmp_links,
+                         fetch_reddit_mentions=_fake_fetch_reddit_mentions,
+                         is_authed=False)
+    return data, rq
+
+
+def test_v2_splits_identity_from_rmp():
+    data, _ = _build_v2()
+    assert data["version"] == 2
+    assert data["identity"] == {"slug": "olin-guha", "name": "Olin Guha",
+                                "department": "Khoury", "college": None,
+                                "imageUrl": None, "focusX": 50.0, "focusY": 30.0}
+    assert data["sources"]["rmp"]["rating"] == 4.1
+    assert data["sources"]["rmp"]["reviews"][0]["course"] == "CS3500"
+
+
+def test_v2_serves_no_blended_field():
+    """Every v1 field that pools RMP with TRACE is gone, not relabelled."""
+    data, _ = _build_v2()
+    for blended in ("avgRating", "totalRatings", "totalComments", "difficulty"):
+        assert blended not in data
+    # ...and RMP fields live only under sources.rmp.
+    for rmp_field in ("rmpRating", "wouldTakeAgainPct", "professorUrl", "reviews"):
+        assert rmp_field not in data
+
+
+def test_v2_rmp_difficulty_is_not_averaged_with_trace():
+    """v1 serves (3.5 + 3.6) / 2 = 3.55. v2 serves RMP's 3.5 under sources.rmp
+    and TRACE's 3.6 as traceDifficulty, each on its own."""
+    data, _ = _build_v2()
+    assert data["sources"]["rmp"]["difficulty"] == 3.5
+    assert data["traceDifficulty"] == 3.6
+
+
+def test_v2_keeps_the_other_sources_untouched():
+    v1, _ = _build()
+    v2, _ = _build_v2()
+    for field in ("traceCourses", "traceRatingCounts", "traceComments",
+                  "redditMentions", "traceRating", "hoursPerWeek"):
+        assert v2[field] == v1[field], field
+
+
+def test_v2_costs_one_round_trip_more_than_v1():
+    """The RMP link/summary lookup. Reviews are v1's, not fetched twice."""
+    _, rq = _build_v2()
+    assert len(rq.calls) <= 7, rq.calls
+    assert rq.count_hitting("from rmp_reviews") == 1
+
+
+def test_v2_without_an_rmp_record_says_so():
+    data, _ = _build_v2(fetch_rmp_links=lambda slug: [])
+    rmp_section = data["sources"]["rmp"]
+    assert rmp_section["available"] is False
+    assert rmp_section["reason"] == "no_rmp_record"
+    assert rmp_section["rating"] is None
+    # TRACE is still served beside it, labelled as TRACE.
+    assert data["traceRating"] == 4.3
+
+
+def test_v2_before_the_rmp_tables_exist_uses_the_catalogs_rmp_columns():
+    data, _ = _build_v2(fetch_rmp_links=lambda slug: None, catalog={"num_ratings": 12})
+    assert data["sources"]["rmp"]["rating"] == 4.1        # rmp_rating, not avg_rating 4.2
+    assert data["sources"]["rmp"]["numRatings"] == 12     # num_ratings, not total_reviews 31
+    assert data["sources"]["rmp"]["difficulty"] == 3.5    # RMP's, not the 3.55 blend
+
+
+def test_v2_404_when_professor_missing():
+    rq = RecordingQuery()
+    rq._rows_for = lambda sql: []
+    assert build_full_v2("nobody", rq.query, rq.query_one, sanitize=lambda t: t,
+                         fetch_rmp_links=lambda slug: []) is None
+
+
+def test_v1_is_unchanged_by_v2():
+    """v1 is still the default response; it keeps its blend until Milestone 3."""
+    data, _ = _build()
+    assert data["difficulty"] == 3.55
+    assert data["avgRating"] == 4.2

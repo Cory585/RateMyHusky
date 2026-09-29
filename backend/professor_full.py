@@ -16,6 +16,7 @@ path (full scores + radar) stays in server.py.
 import re
 
 import moderation
+import rmp
 from prof_aliases import ALIAS_MAP
 
 
@@ -158,6 +159,10 @@ def build_profile_unauthed(prof, trace_course_rows, query):
         "focusX": prof.get("focus_x") if prof.get("focus_x") is not None else 50.0,
         "focusY": prof.get("focus_y") if prof.get("focus_y") is not None else 30.0,
         "hoursPerWeek": round(prof["avg_hours"], 1) if prof["avg_hours"] else None,
+        # Source-labeled halves of the blended fields above, for readers that
+        # must say where a number came from (render.py's SEO text).
+        "rmpNumRatings": int(prof.get("num_ratings") or 0),
+        "rmpDifficulty": round(prof["difficulty"], 2) if prof["difficulty"] else None,
     }
 
     # TRACE scores are filed under the TRACE spelling of the name, which is not
@@ -166,6 +171,7 @@ def build_profile_unauthed(prof, trace_course_rows, query):
      challeng_sum, challeng_weight) = _scan_trace_scores(trace_key(prof), query)
 
     trace_avg_difficulty = round(challeng_sum / challeng_weight, 2) if challeng_weight > 0 else None
+    profile["traceDifficulty"] = trace_avg_difficulty
     profile["traceRatingCounts"] = rating_dist_by_course
     profile["radarData"] = None
 
@@ -203,27 +209,8 @@ def build_reviews(slug, prof, trace_course_rows, query, sanitize,
     `trace_course_rows` are the same rows used by the profile build, so no
     second trace_courses fetch happens.
     """
-    name_key = prof["name_key"]
-
-    review_rows = query(f"""
-        SELECT course, quality, difficulty, date, tags, attendance, grade,
-               textbook, online_class, comment
-        FROM rmp_reviews WHERE name_key = %s{moderation.sql_filter()}
-    """, (name_key,))
-    reviews = []
-    for r in review_rows:
-        reviews.append({
-            "course": str(r["course"] or ""),
-            "quality": int(r["quality"]) if r["quality"] else 0,
-            "difficulty": int(r["difficulty"]) if r["difficulty"] else 0,
-            "date": str(r["date"] or ""),
-            "tags": str(r["tags"] or ""),
-            "attendance": str(r["attendance"] or ""),
-            "grade": str(r["grade"] or ""),
-            "textbook": str(r["textbook"] or ""),
-            "online_class": str(r["online_class"] or ""),
-            "comment": sanitize(r["comment"]) if r["comment"] else "",
-        })
+    # RMP-side lookups key on the RMP spelling, prof["name_key"].
+    reviews = rmp.fetch_reviews(prof["name_key"], query, sanitize)
 
     comments = []
     if trace_course_rows:
@@ -291,20 +278,16 @@ def build_trace_course_rows(name_key, query):
     """, (name_key,))
 
 
-def build_full(slug, query, query_one, sanitize,
-               fetch_reddit_mentions=None, is_authed=False, by_trace_keys=None):
-    """Orchestrate the unauthenticated /full payload with shared lookups.
-
-    Returns the combined profile+reviews dict, or None if the professor does
-    not exist (caller maps None to a 404).
-    """
+def _build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions,
+                   is_authed, by_trace_keys):
+    """(catalog row, v1 payload) for the unauthenticated path, or (None, None)."""
     if fetch_reddit_mentions is None:
         def fetch_reddit_mentions(_slug, _q, _mod_filter=""):
             return []
 
     prof = _resolve_professor(slug, query_one, by_trace_keys)
     if not prof:
-        return None
+        return None, None
 
     # trace_key, not name_key: these rows are the professor's course list and the
     # (course, instructor, term) keys every TRACE comment is looked up through, so
@@ -318,4 +301,78 @@ def build_full(slug, query, query_one, sanitize,
     profile["reviews"] = reviews["reviews"]
     profile["traceComments"] = reviews["traceComments"]
     profile["redditMentions"] = reviews["redditMentions"]
+    return prof, profile
+
+
+def build_full(slug, query, query_one, sanitize,
+               fetch_reddit_mentions=None, is_authed=False, by_trace_keys=None):
+    """Orchestrate the unauthenticated /full payload with shared lookups.
+
+    Returns the combined profile+reviews dict, or None if the professor does
+    not exist (caller maps None to a 404).
+    """
+    _, profile = _build_payload(slug, query, query_one, sanitize,
+                                fetch_reddit_mentions, is_authed, by_trace_keys)
     return profile
+
+
+# ── v2: RMP in its own section ───────────────────────────────────────────────
+#
+# v1 hands the page RMP numbers mixed with everything else: avgRating and
+# totalRatings pool RMP with TRACE, and `difficulty` is RMP's averaged with
+# TRACE's. v2 drops every field that is a blend or that belongs to RMP, and
+# serves them instead as `identity` (who the professor is, nothing measured)
+# and `sources.rmp` (only what RMP reported). The TRACE and Reddit fields pass
+# through untouched — the redesign of those is out of scope — with
+# traceDifficulty added so TRACE's own difficulty survives the blend's removal.
+
+# v1 fields that are a cross-source blend, RMP data now under sources.rmp, or
+# identity now under `identity`. colleagues is dropped too: its avgRating is
+# the blend, and the page does not render it (render.py reads v1).
+_V1_ONLY = frozenset({
+    "name", "department", "imageUrl", "focusX", "focusY",
+    "avgRating", "totalRatings", "totalComments", "difficulty",
+    "rmpRating", "rmpNumRatings", "rmpDifficulty", "wouldTakeAgainPct",
+    "professorUrl", "reviews", "colleagues",
+})
+
+
+def build_identity(prof):
+    return {
+        "slug": prof["slug"],
+        "name": prof["name"],
+        "department": prof["department"],
+        "college": prof.get("college"),
+        "imageUrl": prof.get("image_url"),
+        "focusX": prof.get("focus_x") if prof.get("focus_x") is not None else 50.0,
+        "focusY": prof.get("focus_y") if prof.get("focus_y") is not None else 30.0,
+    }
+
+
+def to_v2(payload, prof, rmp_section):
+    """Reshape a v1 payload (either path's) into v2. Pure, so both the
+    unauthenticated builder and server.py's authenticated branch share it."""
+    rest = {k: v for k, v in payload.items() if k not in _V1_ONLY}
+    return {
+        "version": 2,
+        "identity": build_identity(prof),
+        "sources": {"rmp": rmp_section},
+        **rest,
+    }
+
+
+def build_full_v2(slug, query, query_one, sanitize, fetch_rmp_links,
+                  fetch_reddit_mentions=None, is_authed=False, by_trace_keys=None):
+    """The v2 /full payload, or None for a 404.
+
+    `fetch_rmp_links(slug)` returns rmp.fetch_link_rows' rows, or None when the
+    RMP tables are not built yet (server.py catches the missing table). One
+    round-trip on top of v1: the reviews it summarises are the ones v1 already
+    fetched, not a second rmp_reviews scan.
+    """
+    prof, payload = _build_payload(slug, query, query_one, sanitize,
+                                   fetch_reddit_mentions, is_authed, by_trace_keys)
+    if prof is None:
+        return None
+    section = rmp.build_section(prof, fetch_rmp_links(prof["slug"]), payload["reviews"])
+    return to_v2(payload, prof, section)

@@ -157,6 +157,24 @@ FUZZY_DENY = {
 }
 
 
+# Hand-reviewed corrections to how an RMP listing links to a professor, keyed
+# by RMP's spelling of the name. Recorded in prof_rmp_link.match_method as
+# "manual", which is what separates a reviewer's decision from the ALIAS_MAP
+# spellings ("alias") and a plain normalized-name match ("exact").
+#
+# Keyed by name rather than RMP's legacy id because rmp_reviews carries no id:
+# reviews reach a professor through their professor_name, so an override keyed
+# any other way would move the summary and leave its ratings behind — the
+# recount in precompute would then publish 0 ratings under the new key.
+# rmp_link_key() is the single place both sides resolve through.
+#
+# Fill this from the rmp_link_review.csv report precompute writes each run.
+RMP_MANUAL_LINKS = {
+}
+
+RMP_MATCH_METHODS = ("exact", "alias", "fuzzy", "manual")
+
+
 def _normalize_name(name: str) -> str:
     import re, unicodedata
     s = str(name).strip().lower()
@@ -167,3 +185,19 @@ def _normalize_name(name: str) -> str:
 # Ensure keys/values match normalize_name() used by server.py/precompute.py.
 ALIAS_MAP = {_normalize_name(k): _normalize_name(v) for k, v in ALIAS_MAP.items()}
 FUZZY_DENY = {(_normalize_name(a), _normalize_name(b)) for a, b in FUZZY_DENY}
+RMP_MANUAL_LINKS = {_normalize_name(k): _normalize_name(v) for k, v in RMP_MANUAL_LINKS.items()}
+
+
+def rmp_link_key(name):
+    """(name_key, match_method) for an RMP listing or review's professor_name.
+
+    Manual links win over aliases, which win over the name as written. There is
+    no "fuzzy" branch: RMP listings link to a professor only by name, and the
+    surname fuzzy match in precompute.attach_fuzzy_trace joins TRACE, not RMP.
+    """
+    key = _normalize_name(name)
+    if key in RMP_MANUAL_LINKS:
+        return RMP_MANUAL_LINKS[key], "manual"
+    if key in ALIAS_MAP:
+        return ALIAS_MAP[key], "alias"
+    return key, "exact"

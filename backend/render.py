@@ -192,41 +192,55 @@ def professor_html(profile: dict, reviews: list, canonical: str,
     # outside the 1-5 scale either way, so there is no reading of it as a score:
     # "rated 0/5 by 0 students" is the sentence Google would have indexed for
     # the ~2,083 unrated professors who still carry a course list.
-    avg = profile.get("avgRating") or None
+    # Every number here is labeled with its source, and none is a blend: the
+    # rating, count and difficulty are RMP's own (rmpRating / rmpNumRatings /
+    # rmpDifficulty), not avgRating / totalRatings / difficulty, which pool RMP
+    # with TRACE. "RMP ratings" rather than the name spelled out keeps the
+    # description inside MAX_DESCRIPTION, where the old "student reviews" sat,
+    # so the source credit at its end survives the clip. It mirrors Professor.tsx's seoDescription
+    # character for character, so the crawler copy and the page agree. Two
+    # decimals, not one: the value is stored rounded to two, so .2f and JS
+    # toFixed(2) reproduce it exactly, where one decimal would round an exact
+    # half differently in each (Python 4.25 -> "4.2", JS -> "4.3").
+    rmp_rating = profile.get("rmpRating") or None
+    rmp_n = profile.get("rmpNumRatings") or 0
+    has_rmp = rmp_rating is not None and rmp_n > 0
+    rmp_txt = f"{rmp_rating:.2f}" if has_rmp else None
+    # Blended count, used only to decide noindex below — never displayed.
     total = profile.get("totalRatings") or 0
-    wta = profile.get("wouldTakeAgainPct")
-    diff = profile.get("difficulty")
+    wta = profile.get("wouldTakeAgainPct") if has_rmp else None
+    wta_txt_n = f"{wta:g}" if wta is not None else None
+    diff = profile.get("rmpDifficulty") if has_rmp else None
     rmp_count = len(reviews)
 
     title = f"{name} Reviews & Ratings — Northeastern {dept}"
-    wta_txt = f" ({wta}% would take again)" if wta is not None else ""
+    wta_txt = f" ({wta_txt_n}% would take again)" if wta is not None else ""
     summary = (
-        f"{name} professor reviews and ratings: {avg}/5 from {total} student "
-        f"reviews at Northeastern{wta_txt}. TRACE + RateMyProfessor + Reddit."
-        if avg is not None else
-        f"{name}, Northeastern {dept} professor: no student ratings yet. "
+        f"{name} professor reviews and ratings: {rmp_txt}/5 from {rmp_n} RMP ratings "
+        f"at Northeastern{wta_txt}. TRACE + RateMyProfessor + Reddit."
+        if has_rmp else
+        f"{name}, Northeastern {dept} professor: no Rate My Professors ratings yet. "
         "TRACE + RateMyProfessor + Reddit."
     )
     month_year = _month_year(date.today())
 
-    diff_clause = f", with {diff}/5 difficulty" if diff is not None else ""
-    wta_clause = f" and {wta}% who would take them again" if wta is not None else ""
+    diff_clause = f", with {diff}/5 RMP difficulty" if diff is not None else ""
+    wta_clause = f" and {wta_txt_n}% who would take them again" if wta is not None else ""
     verdict = (
         f"{name} is {_article(dept)} {dept} professor at Northeastern University rated "
-        f"{avg}/5 by {total} students{diff_clause}{wta_clause} "
+        f"{rmp_txt}/5 on Rate My Professors by {rmp_n} students{diff_clause}{wta_clause} "
         f"(TRACE + RateMyProfessors + Reddit, updated {month_year})."
-        if avg is not None else
+        if has_rmp else
         f"{name} is {_article(dept)} {dept} professor at Northeastern University "
-        f"with no student ratings yet "
+        f"with no Rate My Professors ratings yet "
         f"(TRACE + RateMyProfessors + Reddit, updated {month_year})."
     )
 
     stats = _stat_rows([
-        ("Average rating", f"{avg}/5" if avg is not None else None),
-        ("Total ratings", total),
-        ("Would take again", f"{wta}%" if wta is not None else None),
-        ("Difficulty", f"{diff}/5" if diff is not None else None),
-        ("RateMyProfessor rating", profile.get("rmpRating")),
+        ("Rate My Professors rating", f"{rmp_txt}/5" if has_rmp else None),
+        ("Rate My Professors ratings", rmp_n if has_rmp else None),
+        ("Would take again (RMP)", f"{wta_txt_n}%" if wta is not None else None),
+        ("Difficulty (RMP)", f"{diff}/5" if diff is not None else None),
         ("TRACE rating", profile.get("traceRating")),
         # Count of TRACE evaluations only — the comment text stays gated.
         ("TRACE reviews", trace_count if trace_count else None),
@@ -264,16 +278,17 @@ def professor_html(profile: dict, reviews: list, canonical: str,
     # ── FAQ: plain HTML only, no FAQPage JSON-LD (Google restricted that rich
     # result; the extractable text is the value for LLM answer engines). ──
     faq_items = []
-    if total:
-        wta_faq = f" {wta}% of students said they would take them again." if wta is not None else ""
+    if has_rmp:
+        wta_faq = (f" {wta_txt_n}% of RMP reviewers said they would take them again."
+                   if wta is not None else "")
         faq_items.append((
             f"Is {name} a good professor?",
-            f"{name} has an average rating of {avg}/5 from {total} student reviews.{wta_faq}",
+            f"{name} is rated {rmp_txt}/5 on Rate My Professors from {rmp_n} ratings.{wta_faq}",
         ))
     if diff is not None:
         faq_items.append((
             f"How hard are {name}'s classes?",
-            f"{name}'s classes have a difficulty rating of {diff}/5 based on student reviews.",
+            f"{name}'s classes have a difficulty rating of {diff}/5 on Rate My Professors.",
         ))
     if course_codes:
         faq_items.append((

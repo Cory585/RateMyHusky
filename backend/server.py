@@ -34,7 +34,9 @@ from rag.chat_gate import gate
 from rag.chat_retrieve import retrieve, fetch_reddit_mentions
 from rag.query_embedder import embed_query
 from rag.chat_answer import generate, generate_course_list, generate_course_ranking
-from professor_full import build_full, trace_key
+from professor_full import (build_full, build_full_v2, to_v2, trace_key,
+                            _resolve_professor)
+import rmp
 import bookmarks
 import moderation
 import usage_alert
@@ -378,6 +380,17 @@ def catalog_rows_by_trace_keys(trace_keys):
     except psycopg2.errors.UndefinedColumn:
         get_db().rollback()
         return []
+
+
+def rmp_link_rows_or_none(slug):
+    """rmp.fetch_link_rows, or None on a database precompute has not yet built
+    the RMP tables in — rmp.build_section then falls back to the catalog's
+    RMP-only columns. Rolls back so the caller's next query is not aborted."""
+    try:
+        return rmp.fetch_link_rows(slug, query)
+    except psycopg2.errors.UndefinedTable:
+        get_db().rollback()
+        return None
 
 def _chat_write(sql, params=None):
     """Write helper for the question path (ask_log INSERTs): execute + commit, never fetch.
@@ -1032,6 +1045,9 @@ def professor_profile(slug):
         "focusX": prof.get("focus_x") if prof.get("focus_x") is not None else 50.0,
         "focusY": prof.get("focus_y") if prof.get("focus_y") is not None else 30.0,
         "hoursPerWeek": round(prof["avg_hours"], 1) if prof["avg_hours"] else None,
+        # Source-labeled halves of the blends above; see professor_full.
+        "rmpNumRatings": int(prof.get("num_ratings") or 0),
+        "rmpDifficulty": round(prof["difficulty"], 2) if prof["difficulty"] else None,
     }
 
     # ── TRACE courses + scores ──
@@ -1376,6 +1392,9 @@ def professor_profile(slug):
                 "challengeResponses": ch["weight"] if ch and ch["weight"] > 0 else None,
             })
 
+    # TRACE's own difficulty, unblended, for v2's TRACE panel.
+    profile["traceDifficulty"] = trace_avg_difficulty
+
     # Blend RMP difficulty with TRACE challenging avg into a single difficulty value
     rmp_diff = round(prof["difficulty"], 2) if prof["difficulty"] else None
     if rmp_diff is not None and trace_avg_difficulty is not None:
@@ -1541,7 +1560,10 @@ def professor_full(slug):
         except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
             pass
 
-    cache_key = f"prof_full:{slug}:{'a' if is_authed else 'u'}"
+    # ?v=2 serves RMP as its own section (professor_full.to_v2). v1 stays the
+    # default until every reader has moved; the cache key keeps them apart.
+    v2 = request.args.get("v") == "2"
+    cache_key = f"prof_full:{slug}:{'a' if is_authed else 'u'}{':v2' if v2 else ''}"
     cached = cache_get(cache_key)
     if cached:
         resp = jsonify(cached)
@@ -1549,7 +1571,15 @@ def professor_full(slug):
         resp.headers["Vary"] = "Authorization"
         return resp
 
-    if not is_authed:
+    if v2 and not is_authed:
+        profile_data = build_full_v2(slug, query, query_one, sanitize,
+                                     fetch_rmp_links=rmp_link_rows_or_none,
+                                     fetch_reddit_mentions=fetch_reddit_mentions,
+                                     is_authed=False,
+                                     by_trace_keys=catalog_rows_by_trace_keys)
+        if profile_data is None:
+            return jsonify({"error": "Professor not found"}), 404
+    elif not is_authed:
         profile_data = build_full(slug, query, query_one, sanitize,
                                   fetch_reddit_mentions=fetch_reddit_mentions,
                                   is_authed=False,
@@ -1574,6 +1604,16 @@ def professor_full(slug):
         profile_data["reviews"] = reviews_data.get("reviews", [])
         profile_data["traceComments"] = reviews_data.get("traceComments", [])
         profile_data["redditMentions"] = reviews_data.get("redditMentions", [])
+
+        if v2:
+            # The sub-endpoints resolved the row internally; resolve it again
+            # for identity + the RMP lookup. Authed only, and cached below.
+            prof = _resolve_professor(slug, query_one, catalog_rows_by_trace_keys)
+            if not prof:
+                return jsonify({"error": "Professor not found"}), 404
+            section = rmp.build_section(prof, rmp_link_rows_or_none(prof["slug"]),
+                                        profile_data["reviews"])
+            profile_data = to_v2(profile_data, prof, section)
 
     cache_set(cache_key, profile_data)
     resp = jsonify(profile_data)
