@@ -12,6 +12,12 @@ export interface Professor {
   rmpRating: number | null;
   traceRating: number | null;
   avgRating: number;
+  /** Ratings: RMP ratings + TRACE overall-question responses. What the
+   *  leaderboard's floor gates on, and what the ranking weights by. */
+  totalReviews?: number;
+  /** Rows of written text: RMP comments + TRACE comment rows. Not a subset of
+   *  totalReviews and usually 2-3x larger, because TRACE stores one row per
+   *  open-ended question per student. Unused by the leaderboard. */
   totalComments?: number;
 }
 
@@ -56,7 +62,12 @@ export interface ProfessorProfile {
   department: string;
   rmpRating: number | null;
   traceRating: number | null;
-  avgRating: number;
+  /* Null for a professor with no RMP ratings and no responses to TRACE's
+     overall question — the catalog holds NULL and the API no longer coalesces
+     it to 0, since 0 is off the bottom of the 1-5 scale and rendered as a real
+     score. Every display of it needs the null branch; "—" is the house style,
+     matching what totalRatings already showed for the same professors. */
+  avgRating: number | null;
   wouldTakeAgainPct: number | null;
   difficulty: number | null;
   totalRatings: number;
@@ -305,6 +316,9 @@ export interface CourseSummary {
   avgEnrollment: number | null;
   latestTermTitle: string;
   ratingCount: number | null;
+  /** A code that runs as several unrelated classes in one term, so it has no
+   *  single course rating. avgRating and ratingCount are null when set. */
+  isTopics?: boolean;
 }
 
 export interface CourseInstructorBreakdown {

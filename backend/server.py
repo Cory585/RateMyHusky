@@ -9,6 +9,7 @@ Run:           python server.py
 import os, re, unicodedata, json, hashlib, random
 import html as _html
 import psycopg2
+import psycopg2.errors
 from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.extras import RealDictCursor
 from functools import lru_cache
@@ -33,7 +34,7 @@ from rag.chat_gate import gate
 from rag.chat_retrieve import retrieve, fetch_reddit_mentions
 from rag.query_embedder import embed_query
 from rag.chat_answer import generate, generate_course_list, generate_course_ranking
-from professor_full import build_full
+from professor_full import build_full, trace_key
 import bookmarks
 import usage_alert
 
@@ -53,34 +54,10 @@ def _hash_ip(ip):
 # ──────────────────────────────────────────────
 #  Helpers
 # ──────────────────────────────────────────────
-def term_sort_key(title: str) -> int:
-    """Returns a numeric sort key where higher = more recent term.
-    Order within a year: Fall(7) > Fall A(6) > Full Summer(5) > Summer 2(4) > Summer 1(3) > Spring(2) > Spring A(1)
-    """
-    if not title:
-        return 0
-    lower = title.lower()
-    # Try word-bounded year first, then 4-digit prefix of 6-digit code (e.g. "202510")
-    m = re.search(r'\b(20\d{2})\b', lower) or re.search(r'(20\d{2})\d{2}', lower)
-    if not m:
-        return 0
-    year = int(m.group(1))
-    if re.search(r'\bfall\b', lower):
-        sub = 6 if re.search(r'\bfall\s+a\b', lower) else 7
-    elif re.search(r'\bfull\s+summer\b', lower):
-        sub = 5
-    elif re.search(r'\bsummer\b', lower):
-        if re.search(r'\bsummer\s+2\b', lower):
-            sub = 4
-        elif re.search(r'\bsummer\s+1\b', lower):
-            sub = 3
-        else:
-            sub = 4
-    elif re.search(r'\bspring\b', lower):
-        sub = 1 if re.search(r'\bspring\s+a\b', lower) else 2
-    else:
-        sub = 0
-    return year * 10 + sub
+# Shared with precompute.py, which needs the same ordering to pick a course's
+# current title (most recent term wins). Two copies of a parser this fiddly
+# would drift, so it lives in one module both import.
+from term_order import term_sort_key  # noqa: E402
 
 
 def normalize_name(name):
@@ -379,6 +356,28 @@ def query_one(sql, params=None):
     rows = query(sql, params)
     return rows[0] if rows else None
 
+
+def catalog_rows_by_trace_keys(trace_keys):
+    """Catalog rows whose TRACE spelling (trace_name_key) is one of `trace_keys`.
+
+    These are fuzzy-matched professors: TRACE files their courses under a name
+    that differs from the catalog row's name_key, so a name_key lookup by the
+    TRACE spelling misses them. A catalog built before the column existed has
+    no such rows, and naming the column there raises, so that returns [] after
+    rolling back the aborted transaction for the caller's next query.
+    """
+    if not trace_keys:
+        return []
+    placeholders = ",".join(["%s"] * len(trace_keys))
+    try:
+        return query(
+            f"SELECT * FROM professors_catalog WHERE trace_name_key IN ({placeholders})",
+            list(trace_keys),
+        )
+    except psycopg2.errors.UndefinedColumn:
+        get_db().rollback()
+        return []
+
 def _chat_write(sql, params=None):
     """Write helper for the question path (ask_log INSERTs): execute + commit, never fetch.
     The read-only query()/query_one() call fetchall(), which raises on a non-RETURNING INSERT;
@@ -555,59 +554,187 @@ def colleges():
     return jsonify(result)
 
 
-NO_MIN_COLLEGES = {"Law", "Professional Studies"}
+# ── Leaderboard ranking ──────────────────────────────────────────────
+# Ranking by raw avg_rating lets a 5.00 built on 3 reviews outrank a 4.9 built on
+# 500. 276 professors sit at exactly 5.00 and 95% of them have under 15 reviews,
+# which is why the Law and Professional Studies boards (which used to carry a
+# review floor of 5 rather than 100) filled up with them.
+#
+# So rank on a Bayesian posterior mean instead — the IMDb Top 250 formula —
+# blending each professor toward the global mean with a prior worth SHRINKAGE_M
+# reviews:   (n*R + m*C) / (n + m)
+#
+# A professor with 3 reviews is dragged to C; one with 500 barely moves. m=50 is
+# small enough that the correlation between score and review count only rises to
+# ~0.26 (it saturates around 0.30, so a larger m buys nothing but distortion).
+# C is read from the data rather than hardcoded so it tracks re-scrapes.
+#
+# This is the *sort key only* — the displayed number stays avg_rating. Shrinkage
+# is mathematically a contraction, so it cannot spread the top of the board; the
+# clustering near 4.9 is a real property of the ratings, not something a formula
+# should paper over.
+SHRINKAGE_M = 50
+
+# What C is measured over. It was avg(avg_rating) across the entire catalog,
+# which is mostly professors carrying a handful of responses: their ratings are
+# sampling noise, so averaging them describes the noise rather than the
+# professors, and the prior the whole board shrinks toward came out of it.
+#
+# The prior of a ranking should be the mean of the quantity being ranked, so it
+# is measured over professors whose rating is actually pinned down. At 30
+# responses the standard error of a TRACE mean is ~0.13; at 5 it is ~0.33, which
+# is wider than the entire top of the board.
+#
+# Deliberately global rather than per-college: a per-college prior ranks each
+# professor against their own college, which is department-relative ranking under
+# another name. That was built once and rejected — this board is a class-picking
+# tool, not a per-department award.
+RANKING_PRIOR_MIN_REVIEWS = 30
+FALLBACK_PRIOR = 4.2   # only for an empty or brand-new catalog
+
+# The board's evidence floor, and deliberately the same 30 as the prior's: a
+# threshold for "well enough measured to be ranked" cannot sensibly be looser
+# than the one for "well enough measured to inform the prior". The standard-error
+# argument above is the whole reason for both.
+#
+# It replaced a floor of 100 with a per-college exception dropping Law and
+# Professional Studies to 5. Both halves of that were wrong in opposite
+# directions, and shrinkage is what makes a single number workable:
+#
+#   - 100 was doing almost no work. Reaching Khoury's rank-10 score needs ~57
+#     reviews even at a perfect 5.00, so the shrunk score already excludes
+#     nearly everyone the floor was excluding. Re-measured after the
+#     total_reviews rebuild, going 100 -> 30 changes one row across every
+#     100-floor board: Business rank 10, Peggy O'Kelly -> Laura Huang. (Before
+#     the rebuild it changed nothing at all, so expect this to keep drifting
+#     with the corpus — the argument is that the floor is near-redundant, not
+#     that it is exactly redundant.)
+#   - 5 was the actual bug. Law survives it on population (232 eligible), but
+#     Professional Studies had 15, so a "top 10" showed two thirds of the
+#     department including professors with 7 ratings, scoring within 0.04 of each
+#     other and of the prior — an ordering that reflects the prior, not the
+#     professors. At 30 that board is 5 professors long, which is the honest
+#     answer: the department does not have ten well-measured ones.
+#
+# So a short board is a feature. Do not backfill it to reach `limit`.
+BOARD_MIN_REVIEWS = 30
+
+# CockroachDB has no implicit int/float coercion, so total_reviews (INT) needs an
+# explicit cast against avg_rating (FLOAT) or the query fails with
+# "unsupported binary operator: <int> * <float>".
+# float(m), not "{m}.0" — the latter renders "0.9.0" and is a syntax error if
+# SHRINKAGE_M is ever tuned to a non-integer.
+# The prior arrives as a bound parameter rather than a subquery, so the sort does
+# not carry a full-table aggregate and the value can be measured under its own
+# filter.
+# The prior is cast explicitly: CockroachDB infers placeholder types from
+# context, and a bare %s inside an ORDER BY arithmetic expression is the kind of
+# position where it gives up with "could not determine data type of placeholder".
+RANKING_SCORE_SQL = """
+    ((total_reviews::float * avg_rating + {m} * %s::float)
+     / (total_reviews::float + {m}))
+""".format(m=float(SHRINKAGE_M))
+
+
+def ranking_prior(query_one):
+    """Mean rating of professors well-enough measured to have one.
+
+    Falls back to a constant only when nothing clears the floor, which means an
+    empty catalog — ranking on None would order the whole board by review count.
+    """
+    row = query_one("""
+        SELECT avg(avg_rating) AS prior FROM professors_catalog
+        WHERE avg_rating IS NOT NULL AND total_reviews >= %s
+    """, (RANKING_PRIOR_MIN_REVIEWS,))
+    prior = row.get("prior") if row else None
+    return float(prior) if prior is not None else FALLBACK_PRIOR
+
+
+def shrunk_score(avg_rating, total_reviews, prior_mean, m=SHRINKAGE_M):
+    """Python mirror of RANKING_SCORE_SQL (for tests and any Python-side ranking)."""
+    if avg_rating is None:
+        return None
+    n = total_reviews or 0
+    return (n * avg_rating + m * prior_mean) / (n + m)
 
 
 @app.route("/api/goat-professors")
 def goat_professors():
     college = request.args.get("college", "Khoury")
     limit = min(int(request.args.get("limit", "10")), 50)
-    min_reviews = int(request.args.get("min_reviews", "100"))
+    min_reviews = int(request.args.get("min_reviews", str(BOARD_MIN_REVIEWS)))
 
-    cache_key = f"goat:{college}:{limit}:{min_reviews}"
+    # v5: the ordering has changed three times — to the shrunk score, again when
+    # the prior stopped being the whole-catalog average, and again when the
+    # per-college review floor collapsed to a single BOARD_MIN_REVIEWS and the
+    # sort gained a name tiebreak. An unbumped key serves the previous version
+    # from the cache after deploy, which looks exactly like the fix not working.
+    cache_key = f"goat:v5:{college}:{limit}:{min_reviews}"
     cached = cache_get(cache_key)
     if cached:
         return jsonify(cached)
 
-    if college in NO_MIN_COLLEGES:
-        rows = query("""
-            SELECT * FROM professors_catalog
-            WHERE college = %s AND total_reviews >= 5
-            ORDER BY avg_rating DESC NULLS LAST, total_reviews DESC
-            LIMIT %s
-        """, (college, limit))
-    else:
-        rows = query("""
-            SELECT * FROM professors_catalog
-            WHERE college = %s AND total_reviews >= %s
-            ORDER BY avg_rating DESC NULLS LAST, total_reviews DESC
-            LIMIT %s
-        """, (college, min_reviews, limit))
+    prior = ranking_prior(query_one)
+    # `name` breaks ties last. Without it, professors equal on both score and
+    # review count come back in whatever order the scan produces, so the board
+    # could reshuffle between requests. Measured on the current corpus:
+    # 64 such groups across the catalog, covering 137 professors, and none
+    # reaching a top 10. So this closes the door rather than fixing a visible bug.
+    #
+    # Which colleges hold them is not worth stating: an earlier version of this
+    # comment said "none in Law", Law acquired one on the next refresh, and the
+    # test guarding the claim went red on data drift alone. Tie groups move
+    # whenever total_reviews is recomputed. The durable property is the one
+    # test_measured_claims checks — that no tie reaches a board's top 10, which
+    # is the only place the ordering is visible.
+    rows = query(f"""
+        SELECT * FROM professors_catalog
+        WHERE college = %s AND total_reviews >= %s
+        ORDER BY {RANKING_SCORE_SQL} DESC NULLS LAST, total_reviews DESC, name
+        LIMIT %s
+    """, (college, min_reviews, prior, limit))
 
-    # Batch-count RMP + TRACE comments
+    # Batch-count RMP + TRACE comments.
+    #
+    # The two sides are keyed differently: RMP comments live under the professor's
+    # RMP name_key, TRACE comments under trace_key(row), and those differ for
+    # fuzzy-matched professors. They used to be summed in one UNION ALL keyed on
+    # name_key alone, which silently returned zero TRACE comments for exactly the
+    # professors whose profile page resolves them correctly.
+    #
+    # So each side is counted under its own key and the two are added per row.
+    # Summing in SQL instead would mean carrying the trace_name_key -> name_key
+    # mapping into the query, which is more machinery than one extra round trip on
+    # a cached endpoint that reads at most 50 rows.
     comment_counts = {}
     if rows:
         name_keys = [row["name_key"] for row in rows]
-        placeholders = ",".join(["%s"] * len(name_keys))
-        combined_counts = query(
-            f"SELECT name_key, SUM(cnt) as cnt FROM ("
-            f"  SELECT name_key, COUNT(*) as cnt FROM rmp_reviews "
-            f"  WHERE name_key IN ({placeholders}) AND comment IS NOT NULL AND comment != '' "
-            f"  GROUP BY name_key"
-            f"  UNION ALL "
-            f"  SELECT tc2.name_key, COUNT(*) as cnt "
-            f"  FROM trace_comments tc "
-            f"  JOIN trace_courses tc2 ON tc.tc_course_id = tc2.course_id "
-            f"    AND tc.tc_instructor_id = tc2.instructor_id "
-            f"    AND tc.tc_term_id = tc2.term_id "
-            f"  WHERE tc2.name_key IN ({placeholders}) "
-            f"  AND tc.comment IS NOT NULL AND tc.comment != '' "
-            f"  GROUP BY tc2.name_key"
-            f") sub GROUP BY name_key",
-            name_keys + name_keys
-        )
-        for r in combined_counts:
-            comment_counts[r["name_key"]] = int(r["cnt"])
+        trace_keys = list({trace_key(row) for row in rows})
+        rmp_counts, trace_counts = {}, {}
+        for r in query(
+            "SELECT name_key, COUNT(*) AS cnt FROM rmp_reviews "
+            f"WHERE name_key IN ({','.join(['%s'] * len(name_keys))}) "
+            "AND comment IS NOT NULL AND comment != '' "
+            "GROUP BY name_key",
+            name_keys,
+        ):
+            rmp_counts[r["name_key"]] = int(r["cnt"])
+        for r in query(
+            "SELECT tc2.name_key, COUNT(*) AS cnt "
+            "FROM trace_comments tc "
+            "JOIN trace_courses tc2 ON tc.tc_course_id = tc2.course_id "
+            "  AND tc.tc_instructor_id = tc2.instructor_id "
+            "  AND tc.tc_term_id = tc2.term_id "
+            f"WHERE tc2.name_key IN ({','.join(['%s'] * len(trace_keys))}) "
+            "  AND tc.comment IS NOT NULL AND tc.comment != '' "
+            "GROUP BY tc2.name_key",
+            trace_keys,
+        ):
+            trace_counts[r["name_key"]] = int(r["cnt"])
+        for row in rows:
+            comment_counts[row["name_key"]] = (
+                rmp_counts.get(row["name_key"], 0)
+                + trace_counts.get(trace_key(row), 0))
 
     result = []
     for row in rows:
@@ -617,6 +744,24 @@ def goat_professors():
             "rmpRating": round(row["rmp_rating"], 2) if row["rmp_rating"] else None,
             "traceRating": round(row["trace_rating"], 2) if row["trace_rating"] else None,
             "avgRating": round(row["avg_rating"], 2) if row["avg_rating"] else None,
+            # The board displays this as "Ratings", because it is the quantity
+            # every decision here is made on: the floor above gates on it, and
+            # RANKING_SCORE_SQL weights by it. It is RMP ratings + TRACE
+            # overall-question responses, ~95% the latter — the denominator of
+            # avgRating beside it (see precompute.trace_review_counts), and the
+            # same field the profile page's "Total Ratings" card displays, so the
+            # two pages cannot drift apart the way they used to.
+            #
+            # It replaced totalComments in that column, but NOT because comments
+            # are a smaller number — measured across all ten boards, comments
+            # exceed ratings on every single row, median 2.4x and ranging 1.3-3.3x
+            # (Matherne: 2,780 comments vs 1,104 ratings), since TRACE files one
+            # comment row per open-ended question per student. That spread is the
+            # point: the multiple tracks how many open-ended items a professor's
+            # course surveys happened to carry, so it is not an inflation a reader
+            # could mentally divide out. The reason is that a comment count
+            # explains neither who is on this list nor in what order.
+            "totalReviews": row["total_reviews"] or 0,
             "totalComments": comment_counts.get(row["name_key"], 0),
         })
     cache_set(cache_key, result)
@@ -857,11 +1002,19 @@ def professor_profile(slug):
         name_key = slug.strip().lower().replace("-", " ")
         name_key = ALIAS_MAP.get(name_key, name_key)
         prof = query_one("SELECT * FROM professors_catalog WHERE name_key = %s", (name_key,))
+        if not prof:
+            rows = catalog_rows_by_trace_keys([name_key])
+            prof = rows[0] if rows else None
 
     if not prof:
         return jsonify({"error": "Professor not found"}), 404
 
-    name_key = prof["name_key"]
+    # Every lookup in this route is TRACE-side, so it keys on the TRACE spelling
+    # of the name rather than prof["name_key"] — they differ for a fuzzy-matched
+    # professor, whose scores are filed under the name TRACE uses. The reviews
+    # route below has RMP-side lookups too and keeps both keys apart. See
+    # professor_full.trace_key.
+    trace_name = trace_key(prof)
 
     profile = {
         "name": prof["name"],
@@ -887,7 +1040,7 @@ def professor_profile(slug):
                section, enrollment, instructor_id
         FROM trace_courses WHERE name_key = %s
         ORDER BY term_id DESC
-    """, (name_key,))
+    """, (trace_name,))
 
     if is_authed:
         if trace_course_rows:
@@ -948,7 +1101,7 @@ def professor_profile(slug):
                 WHERE tc.name_key = %s AND LOWER(ts.question) LIKE '%%overall%%'
                   AND LOWER(ts.question) != 'overall effectiveness'
                 GROUP BY tc.display_name
-            """, (name_key,))
+            """, (trace_name,))
             rating_dist_by_course = {}
             for r in rating_dist_rows:
                 dn = str(r["display_name"] or "")
@@ -1124,7 +1277,7 @@ def professor_profile(slug):
              AND ts.instructor_id = tc.instructor_id
              AND ts.term_id = tc.term_id
             WHERE tc.name_key = %s AND lower(ts.question) LIKE '%%challeng%%'
-        """, (name_key,))
+        """, (trace_name,))
 
         challeng_sum, challeng_weight = 0.0, 0
         challeng_by_ct = {}
@@ -1162,7 +1315,7 @@ def professor_profile(slug):
              AND ts.term_id = tc.term_id
             WHERE tc.name_key = %s AND lower(ts.question) LIKE '%%overall%%'
               AND lower(ts.question) != 'overall effectiveness'
-        """, (name_key,))
+        """, (trace_name,))
         rating_dist_by_course = {}
         for s in overall_rows:
             dn = str(s["display_name"] or "")
@@ -1188,7 +1341,7 @@ def professor_profile(slug):
              AND ts.instructor_id = tc.instructor_id
              AND ts.term_id = tc.term_id
             WHERE tc.name_key = %s AND lower(ts.question) LIKE '%%hours%%'
-        """, (name_key,))
+        """, (trace_name,))
         hours_by_ct = {}
         for s in hours_rows:
             key = (int(s["course_id"]), int(s["term_id"] or 0))
@@ -1258,15 +1411,24 @@ def professor_reviews(slug):
         resp.headers["Vary"] = "Authorization"
         return resp
 
-    prof = query_one("SELECT name_key FROM professors_catalog WHERE slug = %s", (slug,))
+    # SELECT *, not an explicit column list: trace_key needs trace_name_key, and
+    # naming it here would 500 this route against a catalog built before the
+    # column existed. Same reason course_profile and _resolve_professor do.
+    prof = query_one("SELECT * FROM professors_catalog WHERE slug = %s", (slug,))
     if not prof:
         name_key = slug.strip().lower().replace("-", " ")
         name_key = ALIAS_MAP.get(name_key, name_key)
-        prof = query_one("SELECT name_key FROM professors_catalog WHERE name_key = %s", (name_key,))
+        prof = query_one("SELECT * FROM professors_catalog WHERE name_key = %s", (name_key,))
+        if not prof:
+            rows = catalog_rows_by_trace_keys([name_key])
+            prof = rows[0] if rows else None
     if not prof:
         return jsonify({"error": "Professor not found"}), 404
 
+    # Two keys, deliberately: RMP reviews are stored under the RMP spelling and
+    # TRACE courses under TRACE's, and they differ for a fuzzy-matched professor.
     name_key = prof["name_key"]
+    trace_name = trace_key(prof)
 
     # ── RMP reviews ──
     review_rows = query("""
@@ -1293,7 +1455,7 @@ def professor_reviews(slug):
     # ── TRACE comments ──
     trace_course_rows = query(
         "SELECT course_id, term_id, instructor_id FROM trace_courses WHERE name_key = %s",
-        (name_key,)
+        (trace_name,)
     )
 
     comments = []
@@ -1388,7 +1550,8 @@ def professor_full(slug):
     if not is_authed:
         profile_data = build_full(slug, query, query_one, sanitize,
                                   fetch_reddit_mentions=fetch_reddit_mentions,
-                                  is_authed=False)
+                                  is_authed=False,
+                                  by_trace_keys=catalog_rows_by_trace_keys)
         if profile_data is None:
             return jsonify({"error": "Professor not found"}), 404
         # Same colleagues field the authed branch gets via professor_profile —
@@ -1824,7 +1987,9 @@ def course_profile(code):
         return resp
 
     # Look up course in catalog
-    course = query_one("SELECT code, name, department FROM course_catalog WHERE code = %s", (code_norm,))
+    # SELECT * so a catalog built before is_topics existed still serves (the
+    # column reads as absent, i.e. not a topics code).
+    course = query_one("SELECT * FROM course_catalog WHERE code = %s", (code_norm,))
     if not course:
         return jsonify({"error": "Course not found"}), 404
 
@@ -1910,16 +2075,22 @@ def course_profile(code):
 
     avg_rating = (total_weighted / total_responses) if total_responses > 0 else None
 
+    # A topics code (e.g. HONR3310 running as "Election 2024" and "Language and
+    # Power" in the same term) is a container for unrelated classes, so a single
+    # course-level average would blend them. Its sections keep their own ratings.
+    is_topics = bool(course.get("is_topics"))
+
     summary = {
         "code": course["code"],
         "name": course["name"],
         "department": course["department"] or "",
-        "avgRating": round(avg_rating, 2) if avg_rating is not None else None,
+        "isTopics": is_topics,
+        "avgRating": round(avg_rating, 2) if avg_rating is not None and not is_topics else None,
         "avgEnrollment": round(total_enrollment / total_sections_with_enrollment) if total_sections_with_enrollment > 0 else None,
         "latestTermTitle": latest_term_title,
         # Count of TRACE "overall" question responses backing avgRating, for
         # AggregateRating JSON-LD (schema.org requires ratingCount alongside ratingValue).
-        "ratingCount": total_responses if total_responses > 0 else None,
+        "ratingCount": total_responses if total_responses > 0 and not is_topics else None,
     }
 
     # Build instructor aggregates
@@ -1961,6 +2132,7 @@ def course_profile(code):
     prof_map = {}
     comment_counts = {}
     rmp_course_diff_map = {}
+    rmp_key_of = {}
     if name_keys:
         placeholders = ",".join(["%s"] * len(name_keys))
         prof_rows = query(
@@ -1968,37 +2140,50 @@ def course_profile(code):
             f"FROM professors_catalog WHERE name_key IN ({placeholders})", name_keys
         )
         prof_map = {r["name_key"]: r for r in prof_rows}
+        # These instructor names are TRACE's spelling. A fuzzy-matched professor's
+        # catalog row is keyed by the RMP spelling and records TRACE's in
+        # trace_name_key, so without this second lookup their card here has no
+        # profile link, photo or review counts. An exact name_key match wins.
+        for r in catalog_rows_by_trace_keys([k for k in name_keys if k not in prof_map]):
+            prof_map.setdefault(r["trace_name_key"], r)
+        # RMP rows (difficulty, comments) are stored under the catalog's RMP key.
+        rmp_key_of = {nk: (prof_map[nk]["name_key"] if nk in prof_map else nk)
+                      for nk in name_keys}
+        rmp_keys = list(set(rmp_key_of.values()))
+        rmp_placeholders = ",".join(["%s"] * len(rmp_keys))
         # Fuzzy match RMP course: exact normalized match, or match on numeric portion
         # (RMP course names are often misspelled, e.g. "C1100" instead of "CS1100")
         code_num = re.sub(r"[^0-9]", "", code_norm)
         rmp_course_diff_rows = query(
             f"SELECT name_key, AVG(CAST(difficulty AS FLOAT)) as avg_diff "
             f"FROM rmp_reviews "
-            f"WHERE name_key IN ({placeholders}) AND difficulty IS NOT NULL "
+            f"WHERE name_key IN ({rmp_placeholders}) AND difficulty IS NOT NULL "
             f"AND (UPPER(REPLACE(course, ' ', '')) = %s OR REGEXP_REPLACE(course, '[^0-9]', '', 'g') = %s) "
             f"GROUP BY name_key",
-            name_keys + [code_norm, code_num]
+            rmp_keys + [code_norm, code_num]
         )
         rmp_course_diff_map = {r["name_key"]: round(float(r["avg_diff"]), 2) for r in rmp_course_diff_rows if r["avg_diff"] is not None}
-        combined_counts = query(
-            f"SELECT name_key, SUM(cnt) as cnt FROM ("
-            f"  SELECT name_key, COUNT(*) as cnt FROM rmp_reviews "
-            f"  WHERE name_key IN ({placeholders}) AND comment IS NOT NULL AND comment != '' "
-            f"  GROUP BY name_key"
-            f"  UNION ALL "
-            f"  SELECT tc2.name_key, COUNT(*) as cnt "
-            f"  FROM trace_comments tc "
-            f"  JOIN trace_courses tc2 ON tc.tc_course_id = tc2.course_id "
-            f"    AND tc.tc_instructor_id = tc2.instructor_id "
-            f"    AND tc.tc_term_id = tc2.term_id "
-            f"  WHERE tc2.name_key IN ({placeholders}) "
-            f"  AND tc.comment IS NOT NULL AND tc.comment != '' "
-            f"  GROUP BY tc2.name_key"
-            f") sub GROUP BY name_key",
-            name_keys + name_keys
-        )
-        for r in combined_counts:
-            comment_counts[r["name_key"]] = int(r["cnt"])
+        # Each side counted under its own key, then added per instructor: RMP
+        # comments live under the RMP spelling, TRACE comments under TRACE's.
+        rmp_counts = {r["name_key"]: int(r["cnt"]) for r in query(
+            f"SELECT name_key, COUNT(*) as cnt FROM rmp_reviews "
+            f"WHERE name_key IN ({rmp_placeholders}) AND comment IS NOT NULL AND comment != '' "
+            f"GROUP BY name_key",
+            rmp_keys
+        )}
+        trace_counts = {r["name_key"]: int(r["cnt"]) for r in query(
+            f"SELECT tc2.name_key, COUNT(*) as cnt "
+            f"FROM trace_comments tc "
+            f"JOIN trace_courses tc2 ON tc.tc_course_id = tc2.course_id "
+            f"  AND tc.tc_instructor_id = tc2.instructor_id "
+            f"  AND tc.tc_term_id = tc2.term_id "
+            f"WHERE tc2.name_key IN ({placeholders}) "
+            f"AND tc.comment IS NOT NULL AND tc.comment != '' "
+            f"GROUP BY tc2.name_key",
+            name_keys
+        )}
+        for nk in name_keys:
+            comment_counts[nk] = rmp_counts.get(rmp_key_of[nk], 0) + trace_counts.get(nk, 0)
 
     instructor_rows = []
     for name, data in instructor_data.items():
@@ -2015,7 +2200,7 @@ def course_profile(code):
         challeng_resp = data["challeng_responses"]
         hours_resp = data["hours_responses"]
         trace_diff = round(data["challeng_weighted"] / challeng_resp, 2) if challeng_resp > 0 else None
-        rmp_course_diff = rmp_course_diff_map.get(nk)
+        rmp_course_diff = rmp_course_diff_map.get(rmp_key_of.get(nk, nk))
         if trace_diff is not None and rmp_course_diff is not None:
             course_diff = round((trace_diff + rmp_course_diff) / 2, 2)
         elif trace_diff is not None:
