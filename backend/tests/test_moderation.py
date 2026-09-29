@@ -128,6 +128,44 @@ def test_result_count_mismatch_raises():
         moderation.score_texts(["a", "b"], client=Short())
 
 
+def test_slashed_categories_survive_the_sdk_model():
+    """The SDK hands back a pydantic model whose field names are underscored
+    (harassment_threatening), while our thresholds use the API's slashed names.
+    Dump it without the aliases and every severe category silently reads 0.0.
+
+    Every 0.99 below is a slashed or hyphenated category; everything plain is
+    0.01. So this only passes if the aliases survive the round trip.
+    """
+    from openai.types.moderation import CategoryScores
+
+    api_shaped = {
+        "harassment": 0.01, "harassment/threatening": 0.99,
+        "hate": 0.01, "hate/threatening": 0.99,
+        "illicit": 0.01, "illicit/violent": 0.99,
+        "self-harm": 0.01, "self-harm/intent": 0.01, "self-harm/instructions": 0.99,
+        "sexual": 0.01, "sexual/minors": 0.99,
+        "violence": 0.01, "violence/graphic": 0.99,
+    }
+
+    class SdkShaped:
+        class _M:
+            def create(self, model, input):
+                scores = CategoryScores.model_validate(api_shaped)
+                results = [type("Res", (), {"category_scores": scores})() for _ in input]
+                return type("Resp", (), {"results": results})()
+
+        @property
+        def moderations(self):
+            return SdkShaped._M()
+
+    verdict = moderation.score_texts(["anything"], client=SdkShaped())[0]
+    assert verdict.action == "block"
+
+    for category in ("harassment/threatening", "hate/threatening", "sexual/minors",
+                     "self-harm/instructions", "violence/graphic", "illicit/violent"):
+        assert category in verdict.reason, f"{category} never fired"
+
+
 # ── SQL predicate ──
 
 @pytest.fixture
@@ -223,3 +261,46 @@ def test_reviews_route_unfiltered_when_not_enforcing(reviews_client, not_enforci
     rmp_sql = [s for s in seen["sql"] if "FROM rmp_reviews" in s]
     assert rmp_sql
     assert "mod_action" not in rmp_sql[0]
+
+
+# ── Route wiring:  /api/chat?mode=keyword ──
+#
+# Keyword is the default mode and is not sign-in gated, so it is the most
+# exposed read path in the app. It reached production filtering only on
+# t.flagged, which let blocked Reddit text stay searchable.
+
+@pytest.fixture
+def chat_client(monkeypatch):
+    os.environ.setdefault("CRDB_DATABASE_URL", "postgresql://stub")
+    os.environ.setdefault("JWT_SECRET", "test-secret")
+    import server
+
+    monkeypatch.setattr(server, "_get_pool",
+                        lambda: (_ for _ in ()).throw(AssertionError("no DB in test")),
+                        raising=False)
+
+    seen = {"sql": []}
+
+    def fake_query(sql, params=()):
+        seen["sql"].append(sql)
+        return []
+
+    monkeypatch.setattr(server, "query", fake_query, raising=False)
+    monkeypatch.setattr(server, "_professor_search", lambda q, limit=5: [], raising=False)
+    return server.app.test_client(), seen
+
+
+def test_keyword_search_applies_filter_when_enforcing(chat_client, enforcing):
+    client, seen = chat_client
+    assert client.get("/api/chat?q=guha&mode=keyword").status_code == 200
+    reddit_sql = [s for s in seen["sql"] if "FROM reddit_text" in s]
+    assert reddit_sql, "keyword search never queried reddit_text"
+    assert "mod_action" in reddit_sql[0]
+
+
+def test_keyword_search_unfiltered_when_not_enforcing(chat_client, not_enforcing):
+    client, seen = chat_client
+    client.get("/api/chat?q=guha&mode=keyword")
+    reddit_sql = [s for s in seen["sql"] if "FROM reddit_text" in s]
+    assert reddit_sql
+    assert "mod_action" not in reddit_sql[0]

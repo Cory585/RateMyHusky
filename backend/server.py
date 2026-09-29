@@ -726,7 +726,8 @@ def chat():
             limit = min(int(request.args.get("limit", "20")), 50)
         except (TypeError, ValueError):
             limit = 20
-        data = keyword_search(q, query, _professor_search, limit=limit)
+        data = keyword_search(q, query, _professor_search, limit=limit,
+                              mod_filter=moderation.sql_filter("t"))
         return jsonify({"mode": "keyword", "results": data["comments"], "professors": data["professors"]})
     # 'question' mode is account-gated: identity comes from the verified JWT (not a spoofable
     # header), so the abuse ladder keys on a server-trusted user id that can't be forged or omitted.

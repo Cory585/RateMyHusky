@@ -119,8 +119,12 @@ def score_texts(texts, client=None):
 
         for r in results:
             raw = getattr(r, "category_scores", None) or {}
-            # SDK hands back a pydantic model, tests hand back a dict
-            scores = raw if isinstance(raw, dict) else raw.model_dump()
+            # SDK hands back a pydantic model, tests hand back a dict.
+            # by_alias is load-bearing: the model's field names are underscored
+            # (harassment_threatening) and the thresholds below use the API's
+            # slashed names, so dumping without it silently zeroes every
+            # severe category.
+            scores = raw if isinstance(raw, dict) else raw.model_dump(by_alias=True)
             verdicts.append(classify(scores))
 
     return verdicts
