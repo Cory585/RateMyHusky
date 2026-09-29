@@ -36,6 +36,7 @@ from rag.query_embedder import embed_query
 from rag.chat_answer import generate, generate_course_list, generate_course_ranking
 from professor_full import build_full, trace_key
 import bookmarks
+import moderation
 import usage_alert
 
 load_dotenv()
@@ -870,7 +871,8 @@ def chat():
             limit = min(int(request.args.get("limit", "20")), 50)
         except (TypeError, ValueError):
             limit = 20
-        data = keyword_search(q, query, _professor_search, limit=limit)
+        data = keyword_search(q, query, _professor_search, limit=limit,
+                              mod_filter=moderation.sql_filter("t"))
         return jsonify({"mode": "keyword", "results": data["comments"], "professors": data["professors"]})
     # 'question' mode is account-gated: identity comes from the verified JWT (not a spoofable
     # header), so the abuse ladder keys on a server-trusted user id that can't be forged or omitted.
@@ -1431,10 +1433,10 @@ def professor_reviews(slug):
     trace_name = trace_key(prof)
 
     # ── RMP reviews ──
-    review_rows = query("""
+    review_rows = query(f"""
         SELECT course, quality, difficulty, date, tags, attendance, grade,
                textbook, online_class, comment
-        FROM rmp_reviews WHERE name_key = %s
+        FROM rmp_reviews WHERE name_key = %s{moderation.sql_filter()}
     """, (name_key,))
 
     reviews = []
@@ -1509,7 +1511,7 @@ def professor_reviews(slug):
                         "courseId": item["courseId"],
                     })
 
-    reddit_mentions = fetch_reddit_mentions(slug, query)
+    reddit_mentions = fetch_reddit_mentions(slug, query, moderation.sql_filter("t"))
     for m in reddit_mentions:
         m["body"] = sanitize(m["body"]) if m["body"] else ""
 
