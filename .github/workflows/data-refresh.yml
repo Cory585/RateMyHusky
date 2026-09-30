@@ -1,8 +1,6 @@
 name: Data Refresh
 
 on:
-  schedule:
-    - cron: "0 10 * * 0"  # 10:00 UTC every Sunday
   workflow_dispatch:
     inputs:
       dry_run:
@@ -146,19 +144,6 @@ jobs:
           CRDB_DATABASE_URL: ${{ secrets.CRDB_DATABASE_URL }}
           REFRESH_TRACE: "false"
         run: python precompute.py
-
-      # Every RMP link a person should check: pages merged onto one professor,
-      # and the TRACE surname fuzzy matches. Fixed by hand in prof_aliases.py
-      # (RMP_MANUAL_LINKS / FUZZY_DENY). always(): a failed DB write still
-      # leaves the report, which is written before the write phase.
-      - name: Upload RMP link review report
-        if: ${{ always() && !inputs.dry_run }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: rmp-link-review
-          path: backend/reports/rmp_link_review.csv
-          if-no-files-found: ignore
-          retention-days: 30
 
       # Post-write verification: the pre-scrape floors validate the input CSVs;
       # this validates what actually landed in the DB. Runs BEFORE the store
