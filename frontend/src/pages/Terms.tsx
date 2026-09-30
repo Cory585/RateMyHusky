@@ -8,7 +8,7 @@ const Terms = () => {
         <div className="terms-shell">
           <header className="terms-header">
             <h1>Terms &amp; Conditions</h1>
-            <p className="terms-meta">Effective August 12, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective October 1, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -23,11 +23,10 @@ const Terms = () => {
               <p>
                 RateMyHusky is a read-only aggregator of professor and course information for
                 Northeastern University students. Data displayed on this platform is sourced from
-                RateMyProfessors, Northeastern University's TRACE course evaluation system,
-                Northeastern's public faculty directory pages, and publicly available discussion
-                on Reddit; it is not submitted by users of this site. Alongside that source data
-                we show figures we compute from it — averages, blended ratings, per-term
-                histories, department comparisons, and sentiment labels derived from Reddit text.
+                RateMyProfessors, Northeastern's public faculty directory pages, and publicly
+                available discussion on Reddit; it is not submitted by users of this site.
+                Alongside that source data we show figures we compute from it — averages, blended
+                ratings, department comparisons, and sentiment labels derived from Reddit text.
                 Those are our estimates, not numbers published by any source.
               </p>
               <p>
@@ -42,9 +41,8 @@ const Terms = () => {
               <h2>2. Eligibility &amp; Access</h2>
               <p>
                 Most content on RateMyHusky is publicly accessible without an account. However,
-                access to TRACE course evaluation comments and to the bookmarks feature requires
-                signing in with a valid Northeastern University Google account
-                (<code>@husky.neu.edu</code>).
+                access to the bookmarks feature requires signing in with a valid Northeastern
+                University Google account (<code>@husky.neu.edu</code>).
               </p>
               <p>
                 By signing in, you confirm that you are at least 18 years of age and that you
@@ -168,10 +166,6 @@ const Terms = () => {
                   own terms and usage policies.
                 </li>
                 <li>
-                  <strong>Northeastern TRACE</strong>: course evaluation scores and comments
-                  are sourced from Northeastern University's TRACE system.
-                </li>
-                <li>
                   <strong>Northeastern faculty directory pages</strong>: professor photos are
                   sourced from the public college and department directory pages that publish them.
                 </li>
@@ -186,10 +180,10 @@ const Terms = () => {
               <h2>7. Intellectual Property &amp; Data Sources</h2>
               <p>
                 Review content and ratings sourced from RateMyProfessors remain subject to
-                RateMyProfessors' intellectual property rights and terms of use. TRACE evaluation
-                data is the property of Northeastern University, as are the faculty photos
-                published on its directory pages, which we display as they are published there.
-                Reddit content remains the property of its authors and of Reddit.
+                RateMyProfessors' intellectual property rights and terms of use. The faculty
+                photos published on Northeastern University's directory pages remain its
+                property, and we display them as they are published there. Reddit content
+                remains the property of its authors and of Reddit.
               </p>
               <p>
                 You may not scrape, bulk-download, reproduce, or redistribute the aggregated
@@ -239,7 +233,7 @@ const Terms = () => {
                 feedback form. We honor these requests: your page, ratings, comments, and Reddit
                 mentions are deleted, and your name is added to a removal list that every data
                 loader checks, so a later refresh does not bring them back. We cannot remove your
-                data from RateMyProfessors, TRACE, or Reddit themselves — contact those sources
+                data from RateMyProfessors or Reddit themselves — contact those sources
                 directly. Our <a href="/privacy">Privacy Policy</a> describes what we publish and
                 the limits of what removal covers.
               </p>
@@ -248,9 +242,9 @@ const Terms = () => {
             <section className="terms-section">
               <h2>11. No Warranties &amp; Data Accuracy</h2>
               <p>
-                Professor ratings, review comments, and TRACE scores are sourced from external
-                systems and may be incomplete, outdated, or inaccurate. Figures we compute —
-                blended ratings, averages, per-term trends, and Reddit sentiment labels — depend
+                Professor ratings and review comments are sourced from external systems and may
+                be incomplete, outdated, or inaccurate. Figures we compute — blended ratings,
+                averages, and Reddit sentiment labels — depend
                 on that source data and on matching a professor's name across systems that spell
                 it differently, so they can be wrong even when the sources are right. RateMyHusky
                 makes no guarantees about the accuracy, completeness, or timeliness of anything

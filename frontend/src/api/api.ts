@@ -285,50 +285,32 @@ export interface CourseCatalogResponse {
 }
 
 export interface CourseSummary {
-  code: string;
-  name: string;
-  department: string;
-  avgRating: number | null;
-  avgEnrollment: number | null;
-  latestTermTitle: string;
-  ratingCount: number | null;
-  /** A code that runs as several unrelated classes in one term, so it has no
-   *  single course rating. avgRating and ratingCount are null when set. */
-  isTopics?: boolean;
-}
-
-export interface CourseInstructorBreakdown {
-  name: string;
-  slug: string;
-  imageUrl: string | null;
+  rating: number | null;
   difficulty: number | null;
-  wouldTakeAgainPct: number | null;
-  totalReviews: number;
-  totalComments: number;
-  latestTermTitle: string;
-  avgRating: number | null;
-  courseAvgDifficulty: number | null;
-  courseAvgHoursPerWeek: number | null;
+  numRatings: number;
+  hoursPerWeek: number | null;
+  bySource: Record<string, SourceSummary>;
 }
 
-export interface CourseSection {
-  termId: number;
-  termTitle: string;
-  instructor: string;
-  overallRating: number | null;
-  rmpRating: number | null;
-}
-
-export interface CourseQuestionScore {
-  question: string;
-  avgRating: number | null;
+export interface CourseProfessor {
+  slug: string;
+  name: string;
+  imageUrl: string | null;
+  focusX: number;
+  focusY: number;
+  /** This professor's ratings for this course only. */
+  rating: number | null;
+  difficulty: number | null;
+  numRatings: number;
 }
 
 export interface CourseDetail {
+  code: string;
+  name: string;
+  department: string;
+  catalog: null;
   summary: CourseSummary;
-  instructors: CourseInstructorBreakdown[];
-  sections: CourseSection[];
-  questionScores: CourseQuestionScore[];
+  professors: CourseProfessor[];
 }
 
 export function fetchProfessorsCatalog(params: {
@@ -486,15 +468,11 @@ export async function fetchDepartmentDetail(slug: string): Promise<DepartmentDet
   }
 }
 
-export async function fetchCourseData(code: string): Promise<CourseDetail | null> {
-  const token = localStorage.getItem('auth_token');
-  const key = `${code}:${token ?? 'u'}`;
-  if (_courseCache.has(key)) return _courseCache.get(key)!;
-  try {
-    const data = await get<CourseDetail>(`/api/courses/${encodeURIComponent(code)}`);
-    _courseCache.set(key, data);
-    return data;
-  } catch {
-    return null;
-  }
+/* Same payload for every visitor, so cached by code alone; failures are not cached. */
+export async function fetchCourseData(code: string): Promise<Fetched<CourseDetail>> {
+  const cached = _courseCache.get(code);
+  if (cached) return { ok: true, data: cached };
+  const res = await fetchWithStatus<CourseDetail>(`/api/courses/${encodeURIComponent(code)}`);
+  if (res.ok) _courseCache.set(code, res.data);
+  return res;
 }
