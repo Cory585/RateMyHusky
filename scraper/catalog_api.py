@@ -1,7 +1,7 @@
 """Parsing catalog.northeastern.edu — no transport, no I/O.
 
-Split from catalog_scrape.py for the same reason banner_api.py is split from
-banner_client.py: every rule here is testable against a saved page, and the
+Split from catalog_scrape.py for the same reason the Banner parsing is split
+from its transport: every rule here is testable against a saved page, and the
 rules are where the failures live.
 
 The catalog is static HTML with no auth and no session state, which makes it

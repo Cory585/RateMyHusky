@@ -1,7 +1,7 @@
 """Catalog loader behaviour against a real sqlite database.
 
 The logic under test is SQL, so a fake cursor would assert nothing — same
-reasoning as test_banner_load.py.
+reasoning as the Banner load tests.
 
 The load is a wholesale replacement of one edition by the next, which makes
 deletion a first-class case rather than an afterthought: a course really does

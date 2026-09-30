@@ -37,21 +37,19 @@ def plan_seed(pages, catalog_rows, is_denied=is_denied_key):
     counts = dict.fromkeys(("pages", "links", "professors", "unmatched", "no_rmp_id",
                             "duplicate_rmp_id", "denied", "ambiguous"), 0)
     counts["pages"] = len(pages)
+    denied_ids = {rmp_id(p["professor_url"]) for p in pages
+                  if is_denied(rmp_link_key(p["name"])[0])} - {None}
     links, professors, detail, seen = [], {}, [], set()
     for page in pages:
         key, _ = rmp_link_key(page["name"])
-        if is_denied(key):
+        pid = rmp_id(page["professor_url"])
+        if is_denied(key) or pid in denied_ids:
             counts["denied"] += 1
             continue
-        pid = rmp_id(page["professor_url"])
         if pid is None:
             counts["no_rmp_id"] += 1
             detail.append((page["name"], "no_rmp_id"))
             continue
-        if pid in seen:
-            counts["duplicate_rmp_id"] += 1
-            continue
-        seen.add(pid)
         if key in ambiguous:
             counts["ambiguous"] += 1
             detail.append((page["name"], "ambiguous"))
@@ -61,6 +59,10 @@ def plan_seed(pages, catalog_rows, is_denied=is_denied_key):
             counts["unmatched"] += 1
             detail.append((page["name"], "unmatched"))
             continue
+        if pid in seen:
+            counts["duplicate_rmp_id"] += 1
+            continue
+        seen.add(pid)
         links.append({"rmp_id": pid, "rmp_name": page["name"], "rmp_department": page["department"],
                       "professor_url": page["professor_url"], "slug": row["slug"],
                       "match_method": "frozen"})
@@ -82,7 +84,8 @@ def main(argv=None):
         sys.exit("--detail-out must be outside the repository")
 
     conn = connect()
-    pages = fetch_all(conn, "SELECT name, department, professor_url FROM rmp_professors")
+    pages = fetch_all(conn, "SELECT name, department, professor_url FROM rmp_professors "
+                                 "ORDER BY name, department")
     catalog = fetch_all(conn, "SELECT slug, name, name_key, department, college, image_url, "
                               "focus_x, focus_y, professor_url FROM professors_catalog")
     links, professors, counts, detail = plan_seed(pages, catalog)

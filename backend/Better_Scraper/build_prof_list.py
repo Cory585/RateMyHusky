@@ -1,7 +1,7 @@
 """Build the per-college master professor list for the photo re-scrape.
 
 Merges rmp_professors.csv + trace_courses.csv, dedups by normalized name,
-attaches college (precompute.COLLEGE_MAP), aliases, and any existing photo URL.
+attaches college (pipeline.names.COLLEGE_MAP), aliases, and any existing photo URL.
 Writes output_data/prof_list.json.
 """
 import os

@@ -9,7 +9,7 @@ those into a refusal.
 
 Writes JSON and nothing else — this module imports no database driver, so it
 cannot reach CRDB even by accident. Loading is a separate step, the same split
-banner_scrape.py uses.
+the Banner scraper uses.
 
 Usage
 -----
@@ -31,7 +31,7 @@ from catalog_api import (BASE, INDEX_PATH, TIMEOUT, USER_AGENT, CatalogParseErro
 
 MIN_SUBJECTS = 180              # 232 live on 2026-08-13; a fifth could retire before this is wrong
 MAX_NOT_FOUND_RATIO = 0.1       # slugs in the index that 404 as pages — index/page disagreement
-MIN_COURSE_RATIO = 0.9          # >10% fewer courses than the last run aborts, per docs/course-data-scope.md
+MIN_COURSE_RATIO = 0.9          # >10% fewer courses than the last run aborts
 REQUEST_DELAY = 0.25            # ~1 request every 250ms; the whole sweep is ~1 minute
 RETRY_STATUSES = (429, 500, 502, 503, 504)
 TRANSPORT_ERRORS = (requests.ConnectionError, requests.Timeout,

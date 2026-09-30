@@ -3,7 +3,7 @@
 The failure this guards is silence. `catalog.northeastern.edu` swaps every
 course description for a new academic year on a date that has landed anywhere
 between mid-July and late August across the last three rollovers (measured
-2026-08-13 against Wayback snapshots — see docs/course-data-scope.md), and
+2026-08-13 against Wayback snapshots), and
 nothing announces it. A watcher that returns "unchanged" when it can no longer
 find the label is worse than no watcher, so every unreadable case raises rather
 than reporting no change.

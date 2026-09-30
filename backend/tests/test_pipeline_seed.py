@@ -68,3 +68,37 @@ def test_denied_page_without_rmp_id_counts_as_denied_not_detail():
                                      is_denied=lambda k: k == "olin guha")
     assert counts["denied"] == 1 and counts["no_rmp_id"] == 0
     assert detail == []
+
+
+def _same_id(first, second):
+    # "Olin Old" is not in the catalog; "Olin Guha" is. Both pages carry RMP id 1.
+    return plan_seed([page(first, 1), page(second, 1)], [cat("olin-guha", "olin guha")],
+                     is_denied=lambda k: False)
+
+
+def test_unmatched_then_matched_same_id_links_the_matched_page():
+    links, _, counts, detail = _same_id("Olin Old", "Olin Guha")
+    assert [l["slug"] for l in links] == ["olin-guha"]
+    assert counts["unmatched"] == 1 and counts["duplicate_rmp_id"] == 0
+    assert detail == [("Olin Old", "unmatched")]
+
+
+def test_matched_then_unmatched_same_id_is_order_independent():
+    links, _, counts, detail = _same_id("Olin Guha", "Olin Old")
+    assert [l["slug"] for l in links] == ["olin-guha"]
+    assert counts["unmatched"] == 1 and counts["duplicate_rmp_id"] == 0
+    assert detail == [("Olin Old", "unmatched")]
+
+
+def test_denied_then_clean_same_id_links_nothing():
+    links, _, counts, detail = plan_seed([page("Denied Name", 1), page("Olin Guha", 1)],
+                                         [cat("olin-guha", "olin guha")],
+                                         is_denied=lambda k: k == "denied name")
+    assert links == [] and counts["denied"] == 2 and detail == []
+
+
+def test_clean_then_denied_same_id_links_nothing():
+    links, _, counts, detail = plan_seed([page("Olin Guha", 1), page("Denied Name", 1)],
+                                         [cat("olin-guha", "olin guha")],
+                                         is_denied=lambda k: k == "denied name")
+    assert links == [] and counts["denied"] == 2 and detail == []

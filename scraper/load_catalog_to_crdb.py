@@ -1,7 +1,7 @@
 """Load the NEU academic catalog scrape to CockroachDB.
 
-Own tables, disjoint from the read models the pipeline rebuilds — the same
-separation load_banner_to_crdb.py keeps, and here it is not optional. The
+Own tables, disjoint from the read models the pipeline rebuilds — a separation
+the Banner section loader also keeps, and here it is not optional. The
 pipeline rebuilds `course_catalog` wholesale (build into `_new`, then swap), so
 any column written onto that table is destroyed by the next rebuild. Catalog
 fields therefore live in `catalog_courses`, and merging them into the course
@@ -12,8 +12,9 @@ payoff query is "every NCAD course ranked by rating", which wants an
 index on the attribute, and the tests run on sqlite, which has no arrays.
 
 `connect()` overrides the DSN's `sslmode=verify-full` with `sslmode="require"`,
-matching load_banner_to_crdb.py:78 and load_reddit_to_crdb.py:134 — the deployment distributes no root cert, so verify-full
-fails before any query runs. Do not "fix" it back to the bare DSN.
+matching the other loaders (Banner sections, Reddit) — the deployment
+distributes no root cert, so verify-full fails before any query runs. Do not
+"fix" it back to the bare DSN.
 
 Usage
 -----
@@ -185,10 +186,10 @@ def build_rows(scraped, catalog_year):
     rows, nupath = [], []
     for course in scraped["courses"]:
         code = course["code"]
-        # search_text: lowercase, space
-        # joined, code first. The description and the NUpath labels are the new
-        # part — "management" has never matched "Financial Mngmnt", and nothing
-        # has ever made a course findable by the requirement it satisfies.
+        # search_text: lowercase, space joined, code first. The description and
+        # the NUpath labels are the new part — "management" has never matched
+        # "Financial Mngmnt", and nothing has ever made a course findable by
+        # the requirement it satisfies.
         rows.append({
             "code": code,
             "subject": course["subject"],
@@ -298,7 +299,7 @@ def prune_stale(cur, seen_codes, batch=PRUNE_BATCH):
     Deleting here is safe in a way it would not be against course_catalog —
     this table is only ever the catalog's own contents, so a course that leaves
     the catalog (ENGL 3467 did, mid-edition) loses its catalog fields while its
-    its ratings and its page are untouched.
+    ratings and its page are untouched.
     """
     ph = _placeholder(cur)
     cur.execute("SELECT code FROM catalog_courses")

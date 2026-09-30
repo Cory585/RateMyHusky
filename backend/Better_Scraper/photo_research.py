@@ -1,7 +1,8 @@
 """Pure helpers for the agent-driven professor photo re-scrape.
 
-Reuses normalization, alias, and college constants from precompute.py so the
-photo pipeline groups and matches professors exactly like the app does.
+Reuses normalization and college constants from pipeline.names (aliases from
+prof_aliases) so the photo pipeline groups and matches professors exactly
+like the app does.
 """
 import os
 import sys
