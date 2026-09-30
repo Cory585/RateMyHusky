@@ -75,6 +75,8 @@ export interface ProfessorCourse {
   difficulty: number | null;
   numRatings: number;
   ratingDistribution: RatingDistribution;
+  /** Terms taught. Not sent yet: it arrives with student-submitted data, and no term tags show until then. */
+  terms?: string[];
 }
 
 export interface ProfessorPage {

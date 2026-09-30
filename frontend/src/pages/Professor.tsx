@@ -11,6 +11,7 @@ import Seo from '../components/Seo';
 import { fetchProfessorFull } from '../api/api';
 import type { ProfessorPage, ProfessorCourse, RatingDistribution, RedditMention } from '../api/api';
 import { SHOW_SURVEY_STATS } from '../config';
+import { termSortKey } from '../utils/termUtils';
 import { isPinned, pinnedFirst } from '../utils/askPinMatch';
 import BookmarkButton from '../components/BookmarkButton';
 import neuIcon from '../assets/neu-circle-icon.png';
@@ -68,6 +69,41 @@ const AnimatedNumber = ({
   return <span ref={ref}>{display}</span>;
 };
 
+/* ───────── term collapse chevron ───────── */
+const TermCollapseChevron = () => {
+  const ref = useRef<SVGSVGElement>(null);
+  const [hasLeftSibling, setHasLeftSibling] = useState(false);
+
+  useLayoutEffect(() => {
+    const svg = ref.current;
+    if (!svg) return;
+    const wrapper = svg.parentElement;
+    if (!wrapper) return;
+    const check = () => {
+      const prev = wrapper.previousElementSibling as HTMLElement | null;
+      if (prev) {
+        const wTop = wrapper.getBoundingClientRect().top;
+        const prevTop = prev.getBoundingClientRect().top;
+        setHasLeftSibling(Math.abs(prevTop - wTop) < 5);
+      } else {
+        setHasLeftSibling(false);
+      }
+    };
+    check();
+    const frame = requestAnimationFrame(check);
+    const container = wrapper.parentElement;
+    const ro = container ? new ResizeObserver(check) : null;
+    if (container && ro) ro.observe(container);
+    return () => { ro?.disconnect(); cancelAnimationFrame(frame); };
+  });
+
+  return hasLeftSibling ? (
+    <svg ref={ref} className="prof-term-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+  ) : (
+    <svg ref={ref} className="prof-term-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15" /></svg>
+  );
+};
+
 /* ───────── sort / filter options ───────── */
 const sortOptions = [
   { value: 'newest', label: 'Newest First' },
@@ -82,6 +118,25 @@ const redditSentimentOptions = [
   { value: 'neutral', label: 'Neutral' },
   { value: 'negative', label: 'Negative' },
 ];
+
+// Strictly extract "Season Year" from messy term titles
+const cleanTerm = (t: string): string => {
+  // Match terms like "Fall 2025", "Fall A 2025", "Summer 2 2025"
+  const fullMatch = t.match(/(Spring|Fall|Summer|Winter)\s*([A-Z]|\d)?\s*(20\d{2})/i);
+  if (fullMatch) {
+    const season = fullMatch[1].charAt(0).toUpperCase() + fullMatch[1].slice(1).toLowerCase();
+    const modifier = (fullMatch[2] ?? '').trim();
+    const year = fullMatch[3];
+    return modifier ? `${season} ${modifier} ${year}` : `${season} ${year}`;
+  }
+  const seasonMatch = t.match(/(Spring|Fall|Summer|Winter)/i);
+  if (!seasonMatch) return t.trim();
+  const season = seasonMatch[1].charAt(0).toUpperCase() + seasonMatch[1].slice(1).toLowerCase();
+  // Fallback: extract year from 6-digit term codes like "202130" → "2021"
+  const termCodeMatch = t.match(/(20\d{2})\d{2}/);
+  if (termCodeMatch) return `${season} ${termCodeMatch[1]}`;
+  return season;
+};
 
 const formatReviewDate = (dateStr: string) => {
   if (!dateStr) return '';
@@ -157,6 +212,7 @@ const difficultyColor = (d: number) => {
 };
 
 const COURSES_COLLAPSED_LIMIT = 5;
+const MAX_VISIBLE_TERMS = 3;
 
 const Professor = () => {
   const { slug } = useParams<{ slug: string }>();
@@ -180,6 +236,8 @@ const Professor = () => {
   const [reviewPillStyle, setReviewPillStyle] = useState({ left: 0, width: 0, opacity: 0 });
   const [isReviewPillReady, setIsReviewPillReady] = useState(false);
   const [showAllCourses, setShowAllCourses] = useState(false);
+  const [expandedTerms, setExpandedTerms] = useState<Set<string>>(new Set());
+  const [closingTerms, setClosingTerms] = useState<Set<string>>(new Set());
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('prof_course_tip_dismissed') !== '1');
 
@@ -530,7 +588,12 @@ const Professor = () => {
     ],
   };
 
-  const renderCourseRow = (c: ProfessorCourse) => (
+  const renderCourseRow = (c: ProfessorCourse) => {
+    const code = c.code;
+    const terms = [...new Set((c.terms ?? []).map(cleanTerm))].filter(t => /\b20\d{2}\b/.test(t)).sort((a, b) => termSortKey(b) - termSortKey(a));
+    const termsExpanded = expandedTerms.has(code);
+    const hiddenTermCount = terms.length - MAX_VISIBLE_TERMS;
+    return (
     <div
       key={c.code}
       className={`prof-course-row ${selectedCourses.has(c.code) ? 'selected' : ''}`}
@@ -541,8 +604,43 @@ const Professor = () => {
         <span className="prof-course-title">{c.name ?? ''}</span>
         <span className="prof-course-terms">{c.numRatings.toLocaleString()} rating{c.numRatings === 1 ? '' : 's'}</span>
       </div>
-      {c.name && (
+      {(c.name || terms.length > 0) && (
         <div className="prof-course-lower">
+          {terms.length > 0 && (
+            <div className="prof-course-term-tags">
+              {terms.slice(0, MAX_VISIBLE_TERMS).map(t => <span key={t} className="prof-course-term-tag">{t}</span>)}
+              {hiddenTermCount > 0 && !termsExpanded && !closingTerms.has(code) && (
+                <span
+                  className="prof-course-term-tag prof-course-term-more"
+                  onClick={(e) => { e.stopPropagation(); setExpandedTerms(prev => { const next = new Set(prev); next.add(code); return next; }); }}
+                >
+                  +{hiddenTermCount} more
+                </span>
+              )}
+              {terms.slice(MAX_VISIBLE_TERMS).map((t, i) => {
+                const isClosing = closingTerms.has(code);
+                const reverseI = hiddenTermCount - 1 - i;
+                return <span key={t} className={`prof-course-term-tag prof-course-term-hidden ${termsExpanded || isClosing ? 'visible' : ''} ${isClosing ? 'closing' : ''}`} style={isClosing ? { animationDelay: `${reverseI * 0.04}s` } : termsExpanded ? { animationDelay: `${i * 0.04}s` } : undefined}>{t}</span>;
+              })}
+              {hiddenTermCount > 0 && (termsExpanded || closingTerms.has(code)) && (
+                <span
+                  className={`prof-course-term-tag prof-course-term-more ${closingTerms.has(code) ? 'closing' : ''}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (closingTerms.has(code)) return;
+                    setClosingTerms(prev => { const next = new Set(prev); next.add(code); return next; });
+                    setTimeout(() => {
+                      setExpandedTerms(prev => { const next = new Set(prev); next.delete(code); return next; });
+                      setClosingTerms(prev => { const next = new Set(prev); next.delete(code); return next; });
+                    }, hiddenTermCount * 40 + 200);
+                  }}
+                >
+                  <TermCollapseChevron />
+                </span>
+              )}
+            </div>
+          )}
+          {c.name && (
           <div className="prof-course-view">
             <Link
               to={`/courses/${c.code.toLowerCase()}`}
@@ -553,10 +651,12 @@ const Professor = () => {
               View Course
             </Link>
           </div>
+          )}
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   return (
     <div className="prof-page">
