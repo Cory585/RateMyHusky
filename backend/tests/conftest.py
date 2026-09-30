@@ -43,21 +43,15 @@ def render_client(monkeypatch):
         return FakeResp({
             "name": "Francis Georges", "department": "Economics",
             "avgRating": 4.25, "totalRatings": 2686, "wouldTakeAgainPct": 83,
-            "difficulty": 2.9, "rmpRating": 4.3, "traceRating": 4.2,
-            "imageUrl": None, "professorUrl": None, "traceCourses": [],
+            "difficulty": 2.9, "rmpRating": 4.3,
+            "imageUrl": None, "professorUrl": None, "courses": [],
         })
 
     def fake_professor_reviews(slug):
-        # Unauthenticated shape: RMP reviews carry text; TRACE comments are
-        # present (so their count is known) but their text is gated to "".
         return FakeResp({"reviews": [
             {"course": "ECON1115", "quality": 5, "difficulty": 3,
              "date": "2024", "comment": "Excellent lecturer."}
-        ], "traceComments": [
-            {"question": "Comments", "comment": "", "termId": 901, "courseId": 1},
-            {"question": "Comments", "comment": "", "termId": 902, "courseId": 1},
-            {"question": "Comments", "comment": "", "termId": 903, "courseId": 1},
-        ]})
+        ], "redditMentions": []})
 
     def fake_course_detail(code):
         if code == "missing":
@@ -65,9 +59,8 @@ def render_client(monkeypatch):
         return FakeResp({
             "summary": {"code": "ECON1115", "name": "Macroeconomics",
                         "department": "Economics", "avgRating": 4.1,
-                        "avgEnrollment": 120, "latestTermTitle": "Fall 2025"},
+                        "numRatings": 120, "latestDate": "2025-11-02"},
             "instructors": [{"name": "Francis Georges", "slug": "francis-georges"}],
-            "sections": [], "questionScores": [],
         })
 
     def fake_stats():

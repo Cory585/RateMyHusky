@@ -19,42 +19,27 @@ class RecordingQuery:
 
     def _rows_for(self, sql):
         s = sql.lower()
-        # Order matters: trace_comments/reddit before the generic trace_courses.
         if "from professors_catalog" in s:
             return [{"name": "Olin Guha", "slug": "olin-guha", "name_key": "olin guha",
-                     "department": "Khoury", "rmp_rating": 4.1, "trace_rating": 4.3,
-                     "avg_rating": 4.2, "difficulty": 3.5, "would_take_again_pct": 88.0,
+                     "department": "Khoury", "rmp_rating": 4.1,
+                     "avg_rating": 4.1, "difficulty": 3.5, "would_take_again_pct": 88.0,
                      "total_reviews": 31, "professor_url": None, "image_url": None,
-                     "avg_hours": 6.0, **self.catalog}]
+                     **self.catalog}]
+        if "group by rr.course_code" in s:
+            return [
+                {"code": "CS3500", "name": "Object-Oriented Design", "num_reviews": 5,
+                 "avg_rating": 4.4, "avg_difficulty": 3.6, "latest_date": "2024-03-01"},
+                {"code": "CS2510", "name": None, "num_reviews": 2,
+                 "avg_rating": None, "avg_difficulty": None, "latest_date": None},
+            ]
         if "from rmp_reviews" in s:
             return [{"course": "CS3500", "quality": 5, "difficulty": 3, "date": "2024",
                      "tags": "", "attendance": "", "grade": "A", "textbook": "",
                      "online_class": "", "comment": "Great teacher."}]
-        if "from trace_comments" in s:
-            return [{"tc_term_id": 901, "tc_course_id": 1, "question": "Comments",
-                     "comment": "Tough but fair."}]
         if "from reddit_mentions" in s:
             return [{"body": "guha is hard", "subreddit": "NEU", "permalink": "/r/x",
                      "created_utc": None, "reddit_score": 12, "sentiment": "negative",
                      "sentiment_score": -0.4}]
-        if "from trace_scores" in s:
-            # One overall + one challenge + one hours row for the same course/term.
-            base = {"course_id": 1, "term_id": 901, "display_name": "CS3500: OOD"}
-            return [
-                {**base, "question": "Overall rating", "mean": 4.5,
-                 "count_1": 0, "count_2": 0, "count_3": 1, "count_4": 2,
-                 "count_5": 7, "completed": 10},
-                {**base, "question": "How challenging", "mean": 3.5,
-                 "count_1": 0, "count_2": 1, "count_3": 4, "count_4": 3,
-                 "count_5": 2, "completed": 10},
-                {**base, "question": "Hours per week", "mean": 6.0,
-                 "count_1": 1, "count_2": 2, "count_3": 4, "count_4": 2,
-                 "count_5": 1, "completed": 10},
-            ]
-        if "from trace_courses" in s:
-            return [{"course_id": 1, "term_id": 901, "term_title": "Fall 2023",
-                     "department_name": "Khoury", "display_name": "CS3500: OOD",
-                     "section": "1", "enrollment": 40, "instructor_id": 7}]
         return []
 
     def query(self, sql, params=None):
@@ -85,16 +70,15 @@ def _fake_fetch_reddit_mentions(slug, query_fn):
 def _build(slug="olin-guha", catalog=None):
     rq = RecordingQuery(catalog)
     data = build_full(slug, rq.query, rq.query_one, sanitize=lambda t: t,
-                      fetch_reddit_mentions=_fake_fetch_reddit_mentions,
-                      is_authed=False)
+                      fetch_reddit_mentions=_fake_fetch_reddit_mentions)
     return data, rq
 
 
 # ── Round-trip reduction (the whole point) ──
 
-def test_full_unauthed_makes_at_most_six_round_trips():
+def test_full_makes_at_most_four_round_trips():
     _, rq = _build()
-    assert len(rq.calls) <= 6, f"expected <=6 round-trips, got {len(rq.calls)}: {rq.calls}"
+    assert len(rq.calls) <= 4, f"expected <=4 round-trips, got {len(rq.calls)}: {rq.calls}"
 
 
 def test_catalog_looked_up_only_once():
@@ -103,16 +87,9 @@ def test_catalog_looked_up_only_once():
     assert rq.count_hitting("from professors_catalog") == 1
 
 
-def test_trace_courses_fetched_only_once():
-    # Both old functions fetched trace_courses by name_key separately.
+def test_no_query_touches_removed_tables():
     _, rq = _build()
-    assert rq.count_hitting("from trace_courses") == 1
-
-
-def test_trace_scores_scanned_only_once():
-    # Old unauthed path ran 3 separate scans (challenge / overall / hours).
-    _, rq = _build()
-    assert rq.count_hitting("from trace_scores") == 1
+    assert not any("trace" in c.lower() for c in rq.calls)
 
 
 # ── Response shape is preserved ──
@@ -121,7 +98,7 @@ def test_full_returns_profile_fields():
     data, _ = _build()
     assert data["name"] == "Olin Guha"
     assert data["department"] == "Khoury"
-    assert data["avgRating"] == 4.2
+    assert data["avgRating"] == 4.1
     assert data["totalRatings"] == 31
     assert data["wouldTakeAgainPct"] == 88.0
 
@@ -129,96 +106,46 @@ def test_full_returns_profile_fields():
 def test_unrated_professor_serves_null_avg_rating_rather_than_zero():
     """NULL avg_rating must stay null across the wire, not become 0.0.
 
-    precompute writes NULL for a professor with no RMP ratings and no responses
-    to TRACE's overall question — 2,327 rows of the catalog, ~2,083 of which
-    still carry a course list and so render a stats card. Coalescing to 0.0 made
-    that card read "0.00" under five empty stars, while Total Ratings beside it
-    read "—", because that one treats 0 as absent. 0 is not a rating: the scale
+    precompute writes NULL for a professor with no RMP ratings, who still
+    renders a stats card. Coalescing to 0.0 made that card read "0.00" under
+    five empty stars, while Total Ratings beside it read "—", because that one treats 0 as absent. 0 is not a rating: the scale
     starts at 1. Every other producer of this field (server.py's leaderboard and
     catalog rows, bookmarks.py) already serves None; this was the odd one out.
     """
     data, _ = _build(catalog={"avg_rating": None, "rmp_rating": None,
-                              "trace_rating": None, "total_reviews": 0})
+                              "total_reviews": 0})
     assert data["avgRating"] is None
 
 
-def test_full_includes_reviews_trace_comments_and_reddit():
+def test_full_includes_reviews_and_reddit():
     data, _ = _build()
-    assert "reviews" in data and "traceComments" in data and "redditMentions" in data
+    assert "reviews" in data and "redditMentions" in data
+    assert "traceComments" not in data
     assert data["reviews"][0]["course"] == "CS3500"
-    # Unauthed: TRACE comment text is gated to "".
-    assert data["traceComments"][0]["comment"] == ""
     assert data["redditMentions"][0]["sentiment"] == "negative"
 
 
-def test_full_builds_trace_courses_with_hours_and_overall():
+def test_full_serves_courses_from_rmp_reviews():
     data, _ = _build()
-    courses = data["traceCourses"]
-    assert len(courses) == 1
-    c = courses[0]
-    assert c["displayName"] == "CS3500: OOD"
-    # hours weighted mean: (1*1+3.5*2+6*4+9*2+12*1)/(1+2+4+2+1)=62/10=6.2
-    assert c["hoursPerWeek"] == 6.2
+    assert data["courses"] == [
+        {"code": "CS3500", "name": "Object-Oriented Design", "numReviews": 5,
+         "avgRating": 4.4, "avgDifficulty": 3.6, "latestDate": "2024-03-01"},
+        {"code": "CS2510", "name": None, "numReviews": 2,
+         "avgRating": None, "avgDifficulty": None, "latestDate": None},
+    ]
 
 
-def test_full_rating_distribution_bucketed_by_course_code():
+def test_full_difficulty_is_rmp_only_and_drops_removed_fields():
     data, _ = _build()
-    dist = data["traceRatingCounts"]
-    assert "CS3500" in dist
-    assert dist["CS3500"]["count5"] == 7
-    assert dist["CS3500"]["completed"] == 10
-
-
-def test_full_blends_difficulty_from_rmp_and_trace():
-    # rmp difficulty 3.5; trace challenge weighted mean:
-    # (1*0+2*1+3*4+4*3+5*2)/(0+1+4+3+2)=36/10=3.6 → blended (3.5+3.6)/2=3.55→3.55
-    data, _ = _build()
-    assert data["difficulty"] == 3.55
-
-
-def test_full_ratings_use_overall_course_not_law_overall_effectiveness():
-    # Law sections carry TWO overall questions: 'Overall Course' and 'Overall
-    # Effectiveness'. Ratings must count only 'Overall Course' — but the exclusion
-    # must be exact, because the Bluera-era label ("What is your overall rating of
-    # this instructor teaching effectiveness?") also contains "effectiveness" and
-    # must keep counting.
-    class LawQuery(RecordingQuery):
-        def _rows_for(self, sql):
-            s = sql.lower()
-            if "from trace_scores" in s:
-                base = {"course_id": 2, "term_id": 159, "display_name": "LAW6101: Con Law"}
-                return [
-                    {**base, "question": "Overall Course", "mean": 2.5,
-                     "count_1": 1, "count_2": 0, "count_3": 0, "count_4": 1,
-                     "count_5": 0, "completed": 2},
-                    {**base, "question": "Overall Effectiveness", "mean": 3.0,
-                     "count_1": 0, "count_2": 1, "count_3": 0, "count_4": 1,
-                     "count_5": 0, "completed": 2},
-                    {**base, "question": "What is your overall rating of this "
-                     "instructor teaching effectiveness?", "mean": 4.5,
-                     "count_1": 0, "count_2": 0, "count_3": 0, "count_4": 1,
-                     "count_5": 1, "completed": 2},
-                ]
-            if "from trace_courses" in s:
-                return [{"course_id": 2, "term_id": 159, "term_title": "Fall 2022 Law",
-                         "department_name": "Law", "display_name": "LAW6101: Con Law",
-                         "section": "1", "enrollment": 20, "instructor_id": 8}]
-            return super()._rows_for(sql)
-
-    rq = LawQuery()
-    data = build_full("olin-guha", rq.query, rq.query_one, sanitize=lambda t: t,
-                      fetch_reddit_mentions=_fake_fetch_reddit_mentions, is_authed=False)
-    dist = data["traceRatingCounts"]["LAW6101"]
-    assert dist["count4"] == 2, "Overall Course + Bluera overall only"
-    assert dist["count2"] == 0, "Overall Effectiveness counts must not leak into ratings"
-    assert dist["completed"] == 4
+    assert data["difficulty"] == 3.5
+    for gone in ("traceRating", "traceCourses", "traceRatingCounts", "hoursPerWeek"):
+        assert gone not in data
 
 
 def test_full_404_when_professor_missing():
     rq = RecordingQuery()
     rq._rows_for = lambda sql: []  # nothing found
-    result = build_full("nobody", rq.query, rq.query_one, sanitize=lambda t: t,
-                        is_authed=False)
+    result = build_full("nobody", rq.query, rq.query_one, sanitize=lambda t: t)
     assert result is None  # caller turns None into a 404
 
 
