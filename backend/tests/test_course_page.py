@@ -114,4 +114,4 @@ def test_courses_catalog_sends_no_rating_filter_unless_asked(monkeypatch):
     assert resp.status_code == 200
     assert resp.get_json()["courses"][0]["avgRating"] is None
     assert not any("avg_rating >=" in s for s in seen)
-    assert any("avg_rating DESC NULLS LAST" in s for s in seen)
+    assert any("avg_rating DESC NULLS LAST, lower(code) ASC" in s for s in seen)

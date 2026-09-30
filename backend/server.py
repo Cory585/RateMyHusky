@@ -1254,7 +1254,7 @@ def courses_catalog():
     where_str = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     if sort == "rating":
-        order = "avg_rating DESC NULLS LAST"
+        order = "avg_rating DESC NULLS LAST, lower(code) ASC"
     else:
         order = "lower(code) ASC"
 

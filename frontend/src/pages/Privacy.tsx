@@ -334,7 +334,7 @@ const Privacy = () => {
               </ul>
               <p>
                 We publish no contact details, no course rosters, and nothing that is not already
-                public in the sources above. Data is refreshed on a weekly schedule.
+                public in the sources above.
               </p>
               <p>
                 <strong>Removal requests.</strong> If you are a professor or instructor and want
