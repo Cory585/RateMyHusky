@@ -196,6 +196,26 @@ def set_security_headers(response):
     return response
 
 
+# TEMPORARY: per-request server time for the backend refactor's latency targets.
+# Remove once the targets are measured.
+_TIMED_PREFIXES = ("/api/professors/", "/api/courses/", "/api/professors-catalog",
+                   "/api/courses-catalog")
+
+
+@app.before_request
+def _timing_start():
+    g.t0 = time.perf_counter()
+
+
+@app.after_request
+def _timing_log(response):
+    t0 = g.pop("t0", None)
+    if t0 is not None and request.path.startswith(_TIMED_PREFIXES):
+        print(f"[timing] {request.path} {response.status_code} "
+              f"{(time.perf_counter() - t0) * 1000:.1f}ms", flush=True)
+    return response
+
+
 @app.errorhandler(HTTPException)
 def _http_error(e):
     """404/405/429 and every other HTTP error as JSON; the frontend reads the status."""
