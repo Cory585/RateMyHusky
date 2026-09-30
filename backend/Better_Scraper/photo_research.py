@@ -11,7 +11,8 @@ _BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 
-from precompute import normalize_name, upgrade_image_url, COLLEGE_MAP, ALIAS_MAP  # noqa: E402
+from pipeline.names import normalize_name, upgrade_image_url, COLLEGE_MAP  # noqa: E402
+from prof_aliases import ALIAS_MAP  # noqa: E402
 
 
 def build_alias_index():

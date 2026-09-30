@@ -12,7 +12,7 @@ import re
 import argparse
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from precompute import normalize_name  # noqa: E402
+from pipeline.names import normalize_name  # noqa: E402
 import photo_research as pr  # noqa: E402
 
 
