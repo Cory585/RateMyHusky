@@ -6,7 +6,6 @@ the existing API data functions.
 """
 
 import json
-import re
 from datetime import date
 from html import escape as _html_escape
 from flask import Blueprint  # noqa: F401  (used by the route task)
@@ -318,39 +317,38 @@ def professor_html(profile: dict, reviews: list, canonical: str) -> str:
 
 
 def course_html(detail: dict, canonical: str) -> str:
+    code = detail.get("code") or ""
+    cname = detail.get("name") or ""
     s = detail.get("summary") or {}
-    code = s.get("code") or ""
-    cname = s.get("name") or ""
-    avg = s.get("avgRating")
-    last = s.get("latestTermTitle") or ""
+    avg = s.get("rating")
+    diff = s.get("difficulty")
+    n = s.get("numRatings") or 0
 
     title = f"{code} Reviews — {cname} at Northeastern"
-    avg_txt = f"Average rating {avg}/5. " if avg is not None else ""
-    last_txt = f"Last taught {last}. " if last else ""
+    avg_txt = f"Average rating {avg:.1f}/5. " if avg is not None else ""
     summary = (
         f"{code} ({cname}) course reviews and ratings at Northeastern (NEU). "
-        f"{avg_txt}{last_txt}"
-        f"Compare instructors with TRACE + RateMyProfessor reviews."
+        f"{avg_txt}Compare professors with RateMyProfessor reviews."
     )
 
     stats = _stat_rows([
-        ("Average rating", f"{avg}/5" if avg is not None else None),
-        ("Average enrollment", s.get("avgEnrollment")),
-        ("Last taught", last),
+        ("Average rating", f"{avg:.1f}/5" if avg is not None else None),
+        ("Difficulty", f"{diff:.1f}/5" if diff is not None else None),
+        ("Ratings", n or None),
     ])
 
-    instructors = detail.get("instructors") or []
-    inst_items = "".join(
-        f'<li><a href="{SITE}/professors/{_esc(i.get("slug"))}">{_esc(i.get("name"))}</a></li>'
-        for i in instructors if i.get("slug")
+    professors = detail.get("professors") or []
+    prof_items = "".join(
+        f'<li><a href="{SITE}/professors/{_esc(p.get("slug"))}">{_esc(p.get("name"))}</a></li>'
+        for p in professors if p.get("slug")
     )
-    inst_block = f"<h2>Instructors</h2><ul>{inst_items}</ul>" if inst_items else ""
+    prof_block = f"<h2>Professors</h2><ul>{prof_items}</ul>" if prof_items else ""
     freshness = f"<p>Data updated {_esc(_month_year(date.today()))}.</p>"
 
     body = (
         f"<h1>{_esc(code)} — {_esc(cname)}: Reviews & Ratings</h1>"
         f"<p>{_esc(summary)}</p>"
-        f"{stats}{inst_block}{freshness}"
+        f"{stats}{prof_block}{freshness}"
         f'<p><a href="{_esc(canonical)}">View on RateMyHusky</a></p>'
     )
 
@@ -361,13 +359,9 @@ def course_html(detail: dict, canonical: str) -> str:
         "courseCode": code,
         "provider": {"@type": "CollegeOrUniversity", "name": "Northeastern University"},
     }
-    rating_count = s.get("ratingCount")
-    if avg is not None and rating_count:
+    if avg is not None and n:
         jsonld["aggregateRating"] = {
-            "@type": "AggregateRating",
-            "ratingValue": avg,
-            "ratingCount": rating_count,
-            "bestRating": 5,
+            "@type": "AggregateRating", "ratingValue": avg, "ratingCount": n, "bestRating": 5,
         }
     breadcrumb = _breadcrumb_list("Courses", f"{SITE}/courses", code, canonical)
     return _page(title, summary, canonical, body, [jsonld, breadcrumb])
@@ -643,9 +637,9 @@ def _get_colleagues():
     return _department_colleagues
 
 
-def _get_course_view():
-    from server import course_profile  # the /api/courses/<code> view (server.py:1651)
-    return course_profile
+def _get_course_payload():
+    from server import course_payload
+    return course_payload
 
 
 def _json_or_404(resp):
@@ -675,9 +669,8 @@ def render_professor(slug):
 @render_bp.route("/render/courses/<code>")
 def render_course(code):
     from flask import Response
-    detail_resp = _get_course_view()(code)
-    data, err = _json_or_404(detail_resp)
-    if err:
+    data = _get_course_payload()(code)
+    if data is None:
         return Response(not_found_html("course"), status=404, mimetype="text/html")
 
     canonical = f"{SITE}/courses/{code}"

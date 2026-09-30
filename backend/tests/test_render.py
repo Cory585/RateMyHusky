@@ -173,12 +173,7 @@ def test_professor_html_has_breadcrumb_list():
 
 
 def test_course_html_has_breadcrumb_list():
-    detail = {
-        "summary": {"code": "ECON1115", "name": "Macroeconomics",
-                    "department": "Economics", "avgRating": 4.1,
-                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025"},
-        "instructors": [],
-    }
+    detail = _course()
     canonical = "https://ratemyhusky.com/courses/econ1115"
     html = course_html(detail, canonical)
     blocks = _extract_jsonld(html)
@@ -194,13 +189,7 @@ def test_course_html_has_breadcrumb_list():
 # ── Course AggregateRating (P1-2) ──
 
 def test_course_html_includes_aggregate_rating_when_avg_and_count_present():
-    detail = {
-        "summary": {"code": "ECON1115", "name": "Macroeconomics",
-                    "department": "Economics", "avgRating": 4.1,
-                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025",
-                    "ratingCount": 342},
-        "instructors": [],
-    }
+    detail = _course()
     html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
     course_block = next(b for b in _extract_jsonld(html) if b.get("@type") == "Course")
     assert course_block["aggregateRating"] == {
@@ -212,40 +201,15 @@ def test_course_html_includes_aggregate_rating_when_avg_and_count_present():
 
 
 def test_course_html_omits_aggregate_rating_when_no_rating_count():
-    detail = {
-        "summary": {"code": "ECON1115", "name": "Macroeconomics",
-                    "department": "Economics", "avgRating": 4.1,
-                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025",
-                    "ratingCount": None},
-        "instructors": [],
-    }
+    detail = _course(numRatings=0)
     html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
     course_block = next(b for b in _extract_jsonld(html) if b.get("@type") == "Course")
     assert "aggregateRating" not in course_block
 
 
 def test_course_html_omits_aggregate_rating_when_no_avg_rating():
-    detail = {
-        "summary": {"code": "NEW1000", "name": "Brand New Course",
-                    "department": "TBD", "avgRating": None,
-                    "avgEnrollment": None, "latestTermTitle": "",
-                    "ratingCount": 5},
-        "instructors": [],
-    }
+    detail = _course(rating=None)
     html = course_html(detail, "https://ratemyhusky.com/courses/new1000")
-    course_block = next(b for b in _extract_jsonld(html) if b.get("@type") == "Course")
-    assert "aggregateRating" not in course_block
-
-
-def test_course_html_omits_aggregate_rating_when_count_missing_key():
-    # No "ratingCount" key at all in summary (older payload shape) — must not fabricate.
-    detail = {
-        "summary": {"code": "ECON1115", "name": "Macroeconomics",
-                    "department": "Economics", "avgRating": 4.1,
-                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025"},
-        "instructors": [],
-    }
-    html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
     course_block = next(b for b in _extract_jsonld(html) if b.get("@type") == "Course")
     assert "aggregateRating" not in course_block
 
@@ -276,12 +240,7 @@ def test_professor_html_caps_reviews():
 
 
 def test_course_html_has_title_h1_and_jsonld():
-    detail = {
-        "summary": {"code": "ECON1115", "name": "Macroeconomics",
-                    "department": "Economics", "avgRating": 4.1,
-                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025"},
-        "instructors": [{"name": "Francis Georges", "slug": "francis-georges"}],
-    }
+    detail = _course()
     html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
     assert "<title>ECON1115 Reviews — Macroeconomics at Northeastern</title>" in html
     assert "<h1>ECON1115 — Macroeconomics: Reviews & Ratings</h1>" in html
@@ -291,18 +250,13 @@ def test_course_html_has_title_h1_and_jsonld():
 
 
 def test_course_meta_description_leads_with_reviews_and_ratings_phrase():
-    detail = {
-        "summary": {"code": "ECON1115", "name": "Macroeconomics",
-                    "department": "Economics", "avgRating": 4.1,
-                    "avgEnrollment": 120, "latestTermTitle": None},
-        "instructors": [],
-    }
+    detail = _course()
     html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
     desc = _meta_description(html)
     assert desc == (
         "ECON1115 (Macroeconomics) course reviews and ratings at Northeastern (NEU). "
         "Average rating 4.1/5. "
-        "Compare instructors with TRACE + RateMyProfessor reviews."
+        "Compare professors with RateMyProfessor reviews."
     )
 
 
@@ -333,6 +287,15 @@ def test_render_course_route_returns_html(render_client):
     body = resp.get_data(as_text=True)
     assert "<h1>ECON1115 — Macroeconomics: Reviews & Ratings</h1>" in body
     assert resp.headers["Cache-Control"] == "public, max-age=3600, s-maxage=86400"
+
+
+def _course(**summary_over):
+    summary = {"rating": 4.1, "difficulty": 2.5, "numRatings": 342, "hoursPerWeek": None,
+               "bySource": {"rmp": {"rating": 4.1, "numRatings": 342}}}
+    summary.update(summary_over)
+    return {"code": "ECON1115", "name": "Macroeconomics", "department": "Economics",
+            "catalog": None, "summary": summary,
+            "professors": [{"slug": "francis-georges", "name": "Francis Georges"}]}
 
 
 def _base_profile(**over):
@@ -386,12 +349,7 @@ def test_professor_html_twitter_summary_when_no_photo():
 
 
 def test_course_html_has_twitter_tags():
-    detail = {
-        "summary": {"code": "ECON1115", "name": "Macroeconomics",
-                    "department": "Economics", "avgRating": 4.1,
-                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025"},
-        "instructors": [],
-    }
+    detail = _course()
     html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
     assert '<meta name="twitter:card"' in html
     assert '<meta name="twitter:title" content="ECON1115 Reviews — Macroeconomics at Northeastern">' in html
@@ -558,15 +516,7 @@ def test_professor_meta_description_within_limit_even_with_long_name():
 
 
 def test_course_meta_description_within_limit_even_with_long_name():
-    detail = {
-        "summary": {
-            "code": "INPC9999",
-            "name": "Advanced Topics in Interdisciplinary Engineering and Public Policy",
-            "department": "Interdisciplinary Engineering and Public Policy",
-            "avgRating": 4.1, "avgEnrollment": 120, "latestTermTitle": "Fall 2025",
-        },
-        "instructors": [],
-    }
+    detail = {**_course(), "code": "INPC9999", "name": "Advanced Topics in Interdisciplinary Engineering and Public Policy"}
     html = course_html(detail, "https://ratemyhusky.com/courses/x")
     desc = _meta_description(html)
     assert len(desc) <= MAX_DESCRIPTION + 1
@@ -672,12 +622,7 @@ def test_professor_html_has_freshness_line():
 
 
 def test_course_html_has_freshness_line():
-    detail = {
-        "summary": {"code": "ECON1115", "name": "Macroeconomics",
-                    "department": "Economics", "avgRating": 4.1,
-                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025"},
-        "instructors": [],
-    }
+    detail = _course()
     html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
     month_year = date.today().strftime("%B %Y")
     assert f"<p>Data updated {month_year}.</p>" in html
@@ -981,3 +926,9 @@ def test_render_professor_route_uses_the_payload(render_client):
     assert 'href="https://ratemyhusky.com/courses/ECON1115"' in body
     assert "<h2>More Economics professors at Northeastern</h2>" in body
     assert "RateMyProfessor + Reddit." in body
+
+
+def test_course_html_lists_professors_with_links():
+    html = course_html(_course(), "https://ratemyhusky.com/courses/econ1115")
+    assert "<h2>Professors</h2>" in html
+    assert '<a href="https://ratemyhusky.com/professors/francis-georges">Francis Georges</a>' in html
