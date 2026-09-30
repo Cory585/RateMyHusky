@@ -1,4 +1,7 @@
-"""Canonical RMP-name-variant -> trace-name alias map (normalized keys).
+"""Canonical RMP-name-variant -> canonical-name alias map (normalized keys).
+
+Folds the different spellings RMP files one professor under ("dan kennedy",
+"daniel kennedy") onto one name_key, which also keeps their catalog slug stable.
 
 Single source of truth shared by precompute.py (build time) and server.py
 (runtime). These were previously two hand-synced copies that had drifted:
@@ -6,23 +9,20 @@ the server copy was missing 62 of the aliases the catalog was built with.
 """
 
 ALIAS_MAP = {
-    # ── Two different men in one department, both going by "Peter Xu". RMP knows
-    # them only as "Peter", TRACE only by their legal first names, so neither
-    # linked up and no automatic rule can separate them: same surname, same
-    # department, both teaching a 2301-level supply chain course. attach_fuzzy_trace
-    # needs one first name to be a prefix of the other, and neither pair is.
-    # Resolved by matching each RMP listing's course code to its TRACE sections.
+    # ── Two different men in one department, both going by "Peter Xu": RMP lists
+    # them as "Peter Xu" and "Peter (Xun) Xu". No automatic rule can separate
+    # them: same surname, same department, both teaching a 2301-level supply
+    # chain course. Each maps to its legal name, which is also the slug their
+    # catalog rows already use.
     #
     #   RMP "Peter Xu" (id 2875022, 11 reviews, MGSC2301, 2023-11..2026-03)
-    #     -> TRACE "peng xu" (15 sections incl. MGSC2301, Fall 2022..Fall 2025)
-    #     https://damore-mckim.northeastern.edu/people/pengpeter-xu/  ("Peng(Peter) Xu")
+    #     -> "peng xu"  ("Peng(Peter) Xu", https://damore-mckim.northeastern.edu/people/pengpeter-xu/)
     #
     #   RMP "Peter (Xun) Xu" (id 3161329, 4 reviews, "2301"/supply chain, 2026-04..05)
-    #     -> TRACE "xun xu" (SCHM2301 + MISM6401/6405, Spring 2025 onward)
-    #     https://damore-mckim.northeastern.edu/people/xun-xu/
+    #     -> "xun xu"  (https://damore-mckim.northeastern.edu/people/xun-xu/)
     #
     # Do not collapse these two into each other: the review dates alone rule it
-    # out (Peng's reviews start in 2023, Xun has no sections before Spring 2025).
+    # out (Peng's reviews start in 2023, Xun's in 2026).
     "peter xu": "peng xu",
     "peter (xun) xu": "xun xu",
     "laney strange": "elena strange",
@@ -126,7 +126,7 @@ ALIAS_MAP = {
     "Tim Brown": "Timothy Brown",
     "Tim Rupert": "Timothy Rupert",
     "A Zilleruelo": "Arturo Zilleruelo",
-    # TRACE spells both O'Malleys with an apostrophe; RMP has three variants.
+    # Both O'Malleys are spelled with an apostrophe; RMP has three variants.
     "don o'malley": "donald o'malley",
     "donald o' malley": "donald o'malley",
     "donica omalley": "donica o'malley",
@@ -134,26 +134,6 @@ ALIAS_MAP = {
     "R Cole Eidson": "Robert Eidson",
     "S. M Gupta": "Surendra Gupta",
     "sarthak gupta": "sarthak suhrid gupta",
-}
-
-
-# Distinct people the surname fuzzy match in precompute.attach_fuzzy_trace
-# would otherwise merge, because one first name is a prefix of the other the
-# same way a nickname is: "yan" of "yaning", "michael" of "michaela". ALIAS_MAP
-# cannot express this — it maps a name onto another name, and what is needed
-# here is the refusal to.
-#
-# Nothing lexical separates these from "dan" -> "daniel", and department does
-# not either: cross-college teaching is common, so a college mismatch flagged
-# three legitimate matches (Lungeanu, Koloski, Laverdiere) for every real
-# collision it caught. Entries are added by hand when someone spots one.
-#
-# michaela lewis is *also* caught by the trace_courses check in
-# attach_fuzzy_trace, which needs no list; she is here so the pair is recorded
-# in one place if her TRACE courses ever go away.
-FUZZY_DENY = {
-    ("yan li", "yaning li"),
-    ("michaela lewis", "michael lewis"),
 }
 
 
@@ -166,4 +146,3 @@ def _normalize_name(name: str) -> str:
 
 # Ensure keys/values match normalize_name() used by server.py/precompute.py.
 ALIAS_MAP = {_normalize_name(k): _normalize_name(v) for k, v in ALIAS_MAP.items()}
-FUZZY_DENY = {(_normalize_name(a), _normalize_name(b)) for a, b in FUZZY_DENY}

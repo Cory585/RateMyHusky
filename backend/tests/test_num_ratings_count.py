@@ -6,7 +6,7 @@ professors: 376 low (usually by 1-3, e.g. "juner zhu" claims 5 and serves 8) and
 denormalised aggregate RMP does not recalculate when a rating is added or removed.
 
 Every count downstream is derived from num_ratings — total_reviews, the GOATED
-review floor, the leaderboard's shrinkage weight, and n_rmp in the rating blend —
+review floor and the leaderboard's shrinkage weight —
 so the displayed number disagreed with the reviews actually listed on the page.
 Counting the rows we store makes the count and the cards the same measurement.
 
@@ -122,7 +122,7 @@ def test_an_empty_professor_frame_is_handled():
 # ── the mean must describe the same rows as the count ───────────────────────
 #
 # Recounting num_ratings while leaving `rating` as RMP's stale average left the
-# two describing different populations, and the blend consumes both: `rating` as
+# two describing different populations, and the rating display consumes both: `rating` as
 # the RMP measurement, num_ratings as its precision. The quality values are
 # already in hand for the variance measurement, so recompute the mean from them.
 
