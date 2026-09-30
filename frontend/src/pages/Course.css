@@ -69,22 +69,6 @@
 	animation: courseSlideUp 0.5s 0.2s ease both;
 }
 
-/* Shown for a container code (e.g. HONR3310) whose sections are unrelated
-   classes, explaining why the Overall Rating card reads "—". */
-.course-topics-notice {
-	margin: 0 0 16px;
-	padding: 12px 16px;
-	background: #fff;
-	border: 1px solid #e8e8e8;
-	border-left: 4px solid #1b6d5e;
-	border-radius: 12px;
-	color: #4a4a4a;
-	font-size: 0.88rem;
-	font-weight: 600;
-	line-height: 1.5;
-	animation: courseCardIn 0.5s ease both;
-}
-
 
 .course-stats-grid {
 	display: grid;
@@ -96,7 +80,7 @@
 }
 
 @media (min-width: 768px) {
-	.course-stats-grid { grid-template-columns: repeat(6, 1fr); }
+	.course-stats-grid { grid-template-columns: repeat(5, 1fr); }
 }
 
 .course-stat-card {
@@ -112,42 +96,6 @@
 	transition: transform 0.2s, box-shadow 0.2s;
 	animation: courseCardIn 0.5s ease both;
 	position: relative;
-}
-
-.course-stat-breakdown {
-	position: absolute;
-	bottom: 0;
-	left: 50%;
-	transform: translateX(-50%) translateY(100%);
-	background: #333;
-	color: #fff;
-	padding: 8px 12px;
-	border-radius: 6px;
-	font-size: 0.8rem;
-	display: flex;
-	gap: 12px;
-	opacity: 0;
-	pointer-events: none;
-	transition: opacity 0.2s, transform 0.2s;
-	white-space: nowrap;
-	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-	z-index: 10;
-}
-
-.course-stat-breakdown::before {
-	content: '';
-	position: absolute;
-	top: -4px;
-	left: 50%;
-	transform: translateX(-50%);
-	border-width: 0 5px 5px 5px;
-	border-style: solid;
-	border-color: transparent transparent #333 transparent;
-}
-
-.course-stat-card:hover .course-stat-breakdown {
-	opacity: 1;
-	transform: translateX(-50%) translateY(85%);
 }
 
 .course-stat-card:hover {
@@ -181,7 +129,7 @@
 	margin-top: auto;
 }
 
-.course-stat-last-taught .course-stat-value {
+.course-stat-last-reviewed .course-stat-value {
 	display: block;
 	width: 100%;
 	max-width: 100%;
@@ -192,7 +140,7 @@
 	font-size: clamp(1.6rem, 2.5vw, 2.3rem);
 }
 
-.course-stat-card.course-stat-last-taught {
+.course-stat-card.course-stat-last-reviewed {
 	padding-left: 10px;
 	padding-right: 10px;
 }
@@ -646,12 +594,12 @@
 		white-space: normal;
 	}
 
-	.course-stat-last-taught .course-stat-value {
+	.course-stat-last-reviewed .course-stat-value {
 		font-size: 1.5rem;
 		white-space: nowrap;
 	}
 
-	.course-stat-card.course-stat-last-taught {
+	.course-stat-card.course-stat-last-reviewed {
 		padding-left: 8px;
 		padding-right: 8px;
 	}
@@ -659,14 +607,6 @@
 	/* Top prof cards: 2 columns on small screens */
 	.course-top-prof-grid {
 		grid-template-columns: repeat(2, 1fr);
-	}
-
-	/* Tables: drop Enrollment & Responses columns */
-	.section-table th:nth-child(5),
-	.section-table td:nth-child(5),
-	.section-table th:nth-child(6),
-	.section-table td:nth-child(6) {
-		display: none;
 	}
 
 	/* Instructor table: horizontal scroll on small screens */
@@ -696,13 +636,6 @@
 .dark .course-panel {
 	background: #232323;
 	border-color: #333;
-}
-
-.dark .course-topics-notice {
-	background: #232323;
-	border-color: #333;
-	border-left-color: #2f9e86;
-	color: #b8b8b8;
 }
 
 .dark .course-stat-card {
@@ -768,16 +701,6 @@
 
 .dark .course-expand-btn:hover .course-expand-chevron {
 	border-color: #f06d7d;
-}
-
-.dark .course-stat-breakdown {
-	background: #444;
-	color: #e0e0e0;
-	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.dark .course-stat-breakdown::before {
-	border-color: transparent transparent #444 transparent;
 }
 
 .dark .course-question-card strong,
@@ -869,74 +792,4 @@
 	.course-top-prof-grid {
 		grid-template-columns: 1fr;
 	}
-}
-
-/* ── Rating History Paywall ── */
-.course-rating-history-paywall {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	text-align: center;
-	padding: 48px 24px;
-	background: #fff;
-	border-radius: 16px;
-	border: 1.5px dashed #e0e0e0;
-	margin-top: 8px;
-}
-
-.course-rating-history-paywall .paywall-lock-icon {
-	width: 40px;
-	height: 40px;
-	color: #d6394c;
-	margin-bottom: 16px;
-}
-
-.course-rating-history-paywall h3 {
-	font-size: 1.1rem;
-	font-weight: 800;
-	color: #1a1a1a;
-	margin-bottom: 8px;
-}
-
-.course-rating-history-paywall p {
-	font-size: 0.88rem;
-	color: #888;
-	line-height: 1.5;
-	max-width: 340px;
-	margin-bottom: 20px;
-}
-
-.course-rating-history-paywall p strong {
-	color: #d6394c;
-	font-weight: 800;
-}
-
-.course-rating-history-paywall .paywall-signin-btn {
-	background: #d6394c;
-	color: #fff;
-	border: none;
-	padding: 11px 32px;
-	border-radius: 12px;
-	font-size: 0.9rem;
-	font-weight: 700;
-	cursor: pointer;
-	transition: background 0.15s, transform 0.15s;
-}
-
-.course-rating-history-paywall .paywall-signin-btn:hover {
-	background: #b82e3f;
-	transform: scale(1.03);
-}
-
-.dark .course-rating-history-paywall {
-	background: #1e1e1e;
-	border-color: #333;
-}
-
-.dark .course-rating-history-paywall h3 {
-	color: #e0e0e0;
-}
-
-.dark .course-rating-history-paywall p {
-	color: #777;
 }

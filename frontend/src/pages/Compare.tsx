@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { fetchProfessorData, fetchProfessorsCatalog, fetchSearchSuggestions } from '../api/api';
-import { useAuth } from '../context/AuthContext';
-import { termSortKey } from '../utils/termUtils';
 import type { CatalogProfessor, ProfessorProfile, ProfessorSuggestion } from '../api/api';
 import StarRating from '../components/StarRating';
 import Footer from '../components/Footer';
@@ -10,12 +8,6 @@ import Footer from '../components/Footer';
 import './Compare.css';
 
 type Side = 'a' | 'b';
-
-interface TraceSnapshot {
-	term: string;
-	course: string;
-	score: number;
-}
 
 type WinnerSide = 'left' | 'right' | null;
 
@@ -77,32 +69,8 @@ const pickWinner = (
 	return l < r ? 'left' : 'right';
 };
 
-const cleanTermTitle = (t: string): string => t.replace(/^\d{6}:\s*/, '').replace(/\s*\d{6}/g, '').trim();
-
-const getRecentTraceSnapshot = (profile: ProfessorProfile | null): TraceSnapshot | null => {
-	if (!profile?.traceCourses?.length) return null;
-
-	const sorted = [...profile.traceCourses].sort((a, b) => {
-		const ka = termSortKey(a.termTitle);
-		const kb = termSortKey(b.termTitle);
-		if (ka !== kb) return kb - ka;
-		return b.courseId - a.courseId;
-	});
-
-	const mostRecent = sorted.find((c) => c.overallRating != null);
-	if (!mostRecent || mostRecent.overallRating == null) return null;
-
-	return {
-		term: cleanTermTitle(mostRecent.termTitle),
-		course: mostRecent.displayName,
-		score: mostRecent.overallRating,
-	};
-};
-
-
 function Compare() {
 	const [searchParams, setSearchParams] = useSearchParams();
-	const { user, loading: authLoading } = useAuth();
 
 	const [catalog, setCatalog] = useState<CatalogProfessor[]>([]);
 	const [, setCatalogLoading] = useState(true);
@@ -246,7 +214,7 @@ function Compare() {
 		return () => {
 			cancelled = true;
 		};
-	}, [leftSlug, user]);
+	}, [leftSlug]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -274,7 +242,7 @@ function Compare() {
 		return () => {
 			cancelled = true;
 		};
-	}, [rightSlug, user]);
+	}, [rightSlug]);
 
 	const updateSlugs = (updates: { a?: string; b?: string }) => {
 		const next = new URLSearchParams(searchParams);
@@ -442,13 +410,6 @@ function Compare() {
 		return () => document.removeEventListener('mousedown', handleOutsideClick);
 	}, []);
 
-	const leftSnapshot = getRecentTraceSnapshot(leftProfile);
-	const rightSnapshot = getRecentTraceSnapshot(rightProfile);
-
-	const leftRmp = leftProfile?.rmpRating ?? leftCatalogProfessor?.rmpRating ?? null;
-	const rightRmp = rightProfile?.rmpRating ?? rightCatalogProfessor?.rmpRating ?? null;
-	const leftTrace = leftProfile?.traceRating ?? leftCatalogProfessor?.traceRating ?? null;
-	const rightTrace = rightProfile?.traceRating ?? rightCatalogProfessor?.traceRating ?? null;
 
 	const leftDept = leftCatalogProfessor
 		? `${leftCatalogProfessor.department} (${leftCatalogProfessor.college})`
@@ -474,21 +435,7 @@ function Compare() {
 			left: formatMetric(leftProfile?.avgRating ?? leftCatalogProfessor?.avgRating),
 			right: formatMetric(rightProfile?.avgRating ?? rightCatalogProfessor?.avgRating),
 			winner: pickWinner(leftProfile?.avgRating ?? leftCatalogProfessor?.avgRating, rightProfile?.avgRating ?? rightCatalogProfessor?.avgRating),
-			weight: 3,
-		},
-		{
-			label: 'RMP Rating',
-			left: formatMetric(leftRmp),
-			right: formatMetric(rightRmp),
-			winner: pickWinner(leftRmp, rightRmp),
-			weight: 2,
-		},
-		{
-			label: 'Student Rating',
-			left: formatMetric(leftTrace),
-			right: formatMetric(rightTrace),
-			winner: pickWinner(leftTrace, rightTrace),
-			weight: 2,
+			weight: 5,
 		},
 		{
 			label: 'Difficulty',
@@ -518,23 +465,6 @@ function Compare() {
 					: `${rightProfile.wouldTakeAgainPct.toFixed(0)}%`,
 			winner: pickWinner(leftProfile?.wouldTakeAgainPct, rightProfile?.wouldTakeAgainPct, 'higher', 0),
 			weight: 2,
-		},
-		{
-			label: 'Recent Student Review Snapshot',
-			left: leftSnapshot
-				? `${leftSnapshot.score.toFixed(2)} (${leftSnapshot.term})`
-				: user
-					? '—'
-					: 'Sign in to view student reviews',
-			right: rightSnapshot
-				? `${rightSnapshot.score.toFixed(2)} (${rightSnapshot.term})`
-				: user
-					? '—'
-					: 'Sign in to view student reviews',
-			footnoteLeft: leftSnapshot?.course,
-			footnoteRight: rightSnapshot?.course,
-			winner: pickWinner(leftSnapshot?.score, rightSnapshot?.score),
-			weight: 1.5,
 		},
 	];
 
@@ -640,7 +570,7 @@ function Compare() {
 					<p className="compare-kicker">Professor Compare</p>
 					<h1>Side-by-side comparison</h1>
 					<p className="compare-subtitle">
-						Pick two professors and compare rating quality, difficulty, review volume, and recent student review performance.
+						Pick two professors and compare rating quality, difficulty, and review volume.
 					</p>
 				</div>
 			</section>
@@ -795,29 +725,13 @@ function Compare() {
 					{compareRows.map((row) => {
 						const showLeft = Boolean(leftSlug) && !leftLoading;
 						const showRight = Boolean(rightSlug) && !rightLoading;
-						const renderValue = (value: string, showValue: boolean) => {
-							if (!authLoading && showValue && row.label === 'Recent Student Review Snapshot' && value === 'Sign in to view student reviews') {
-								return (
-									<span className="compare-lock-prompt">
-										<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="compare-lock-icon">
-											<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-											<path d="M7 11V7a5 5 0 0 1 10 0v4" />
-										</svg>
-										<span>Sign in with your <span className="husky-email">husky.neu.edu</span> account to view</span>
-									</span>
-								);
-							}
-
-							return <span>{showValue ? value : '—'}</span>;
-						};
 						return (
 							<div className="compare-row" role="row" key={row.label}>
 								<div
 									className={`compare-cell compare-cell-left ${showLeft ? (row.leftClass ?? '') : ''} ${bothSelected && showLeft && row.winner === 'left' ? 'compare-cell-winner' : ''}`}
 									role="cell"
 								>
-									{renderValue(row.left, showLeft)}
-									{showLeft && row.footnoteLeft && <small>{row.footnoteLeft}</small>}
+									<span>{showLeft ? row.left : '—'}</span>
 								</div>
 								<div className="compare-cell compare-cell-label" role="columnheader">
 									{row.label}
@@ -826,8 +740,7 @@ function Compare() {
 									className={`compare-cell compare-cell-right ${showRight ? (row.rightClass ?? '') : ''} ${bothSelected && showRight && row.winner === 'right' ? 'compare-cell-winner' : ''}`}
 									role="cell"
 								>
-									{renderValue(row.right, showRight)}
-									{showRight && row.footnoteRight && <small>{row.footnoteRight}</small>}
+									<span>{showRight ? row.right : '—'}</span>
 								</div>
 							</div>
 						);

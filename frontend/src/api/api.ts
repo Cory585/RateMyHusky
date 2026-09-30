@@ -10,14 +10,12 @@ export interface Professor {
   name: string;
   dept: string;
   rmpRating: number | null;
-  traceRating: number | null;
   avgRating: number;
-  /** Ratings: RMP ratings + TRACE overall-question responses. What the
-   *  leaderboard's floor gates on, and what the ranking weights by. */
+  /** Ratings: RMP ratings. What the leaderboard's floor gates on, and what
+   *  the ranking weights by. */
   totalReviews?: number;
-  /** Rows of written text: RMP comments + TRACE comment rows. Not a subset of
-   *  totalReviews and usually 2-3x larger, because TRACE stores one row per
-   *  open-ended question per student. Unused by the leaderboard. */
+  /** RMP ratings that carry written text. Not every rating has a comment, so
+   *  this can be smaller than totalReviews. Unused by the leaderboard. */
   totalComments?: number;
 }
 
@@ -28,42 +26,27 @@ export interface RandomProfessor {
 }
 
 /* ---- Professor page types ---- */
-export interface RadarDataPoint {
-  metric: string;
-  professor: number;
-  department: number;
-  profMissing: boolean;
-  deptMissing: boolean;
+export interface ProfessorCourse {
+  code: string;
+  name: string | null;
+  numReviews: number;
+  avgRating: number | null;
+  avgDifficulty: number | null;
+  latestDate: string | null;
 }
 
-export interface TraceCourse {
-  courseId: number;
-  termId: number;
-  termTitle: string;
-  departmentName: string;
-  displayName: string;
-  hoursPerWeek?: number | null;
-  challengeWeightedSum?: number | null;
-  challengeResponses?: number | null;
-  overallRating?: number | null;
-}
-
-export interface TraceRatingCounts {
-  count1: number;
-  count2: number;
-  count3: number;
-  count4: number;
-  count5: number;
-  completed: number;
+export interface DeptAvg {
+  avgRating: number | null;
+  difficulty: number | null;
+  wouldTakeAgainPct: number | null;
+  numProfessors: number;
 }
 
 export interface ProfessorProfile {
   name: string;
   department: string;
   rmpRating: number | null;
-  traceRating: number | null;
-  /* Null for a professor with no RMP ratings and no responses to TRACE's
-     overall question — the catalog holds NULL and the API no longer coalesces
+  /* Null for a professor with no RMP ratings — the catalog holds NULL and the API no longer coalesces
      it to 0, since 0 is off the bottom of the 1-5 scale and rendered as a real
      score. Every display of it needs the null branch; "—" is the house style,
      matching what totalRatings already showed for the same professors. */
@@ -73,20 +56,15 @@ export interface ProfessorProfile {
   totalRatings: number;
   totalComments: number;
   professorUrl: string | null;
-  traceCourses: TraceCourse[];
+  courses: ProfessorCourse[];
   imageUrl: string | null;
   focusX: number;
   focusY: number;
-  hoursPerWeek: number | null;
-  traceRatingCounts?: Record<string, TraceRatingCounts>;
-  radarData?: RadarDataPoint[] | null;
-  radarTermTitle?: string | null;
   colleagues?: { name: string; slug: string; avgRating: number | null; totalRatings: number }[];
 }
 
 export interface ProfessorReviews {
   reviews: ProfessorReview[];
-  traceComments: TraceComment[];
   redditMentions: RedditMention[];
 }
 
@@ -101,13 +79,6 @@ export interface ProfessorReview {
   textbook: string;
   online_class: string;
   comment: string;
-}
-
-export interface TraceComment {
-  courseId: number;
-  question: string;
-  comment: string;
-  termId: number;
 }
 
 export interface RedditMention {
@@ -154,6 +125,9 @@ async function get<T>(path: string): Promise<T> {
 }
 
 export const fetchStats = () => get<Stat[]>("/api/stats");
+
+export const fetchDeptAvg = (department: string) =>
+  get<DeptAvg>(`/api/dept-avg?department=${encodeURIComponent(department)}`);
 
 export const fetchColleges = () => get<string[]>("/api/colleges");
 
@@ -278,7 +252,6 @@ export interface CatalogProfessor {
   college: string;
   avgRating: number | null;
   rmpRating: number | null;
-  traceRating: number | null;
   totalReviews: number;
   totalComments: number;
   wouldTakeAgainPct: number | null;
@@ -310,49 +283,30 @@ export interface CourseCatalogResponse {
 
 export interface CourseSummary {
   code: string;
-  name: string;
+  /** Null when the catalog has no title for the code; show the code instead. */
+  name: string | null;
   department: string;
   avgRating: number | null;
-  avgEnrollment: number | null;
-  latestTermTitle: string;
-  ratingCount: number | null;
-  /** A code that runs as several unrelated classes in one term, so it has no
-   *  single course rating. avgRating and ratingCount are null when set. */
-  isTopics?: boolean;
+  numRatings: number;
+  latestDate: string | null;
 }
 
 export interface CourseInstructorBreakdown {
   name: string;
   slug: string;
   imageUrl: string | null;
-  difficulty: number | null;
   wouldTakeAgainPct: number | null;
   totalReviews: number;
   totalComments: number;
-  latestTermTitle: string;
+  latestDate: string | null;
   avgRating: number | null;
+  numReviews: number;
   courseAvgDifficulty: number | null;
-  courseAvgHoursPerWeek: number | null;
-}
-
-export interface CourseSection {
-  termId: number;
-  termTitle: string;
-  instructor: string;
-  overallRating: number | null;
-  rmpRating: number | null;
-}
-
-export interface CourseQuestionScore {
-  question: string;
-  avgRating: number | null;
 }
 
 export interface CourseDetail {
   summary: CourseSummary;
   instructors: CourseInstructorBreakdown[];
-  sections: CourseSection[];
-  questionScores: CourseQuestionScore[];
 }
 
 export function fetchProfessorsCatalog(params: {
@@ -394,7 +348,7 @@ export function fetchCoursesCatalog(params: {
   dept?: string;
   minRating?: number;
   maxRating?: number;
-  sort?: 'alpha' | 'rating' | 'sections' | 'recent';
+  sort?: 'alpha' | 'rating' | 'recent';
   page?: number;
   limit?: number;
 }): Promise<CourseCatalogResponse> {

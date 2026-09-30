@@ -89,13 +89,6 @@ function buildSearchParamsFromFilters(filters: Filters): URLSearchParams {
   return next;
 }
 
-function ratingColor(v: number | null): 'high' | 'mid' | 'low' | 'neutral' {
-  if (v === null) return 'neutral';
-  if (v >= 4) return 'high';
-  if (v >= 3) return 'mid';
-  return 'low';
-}
-
 export default function ProfessorCatalog() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -416,7 +409,7 @@ export default function ProfessorCatalog() {
     <div className="catalog-page">
       <Seo
         title="Northeastern Professor Ratings & Reviews | RateMyHusky"
-        description={`Browse ${total ? total.toLocaleString() : 'thousands of'} Northeastern University (NEU) professor ratings and reviews. Compare student reviews and RateMyProfessor ratings.`}
+        description={`Browse ${total ? total.toLocaleString() : 'thousands of'} Northeastern University (NEU) professor ratings and reviews. Compare RateMyProfessors ratings and reviews.`}
         canonical="https://ratemyhusky.com/professors"
       />
 
@@ -804,16 +797,6 @@ export default function ProfessorCatalog() {
                     </div>
                     <span className="prof-college">{prof.college}</span>
                     <span className="prof-dept-label">{prof.department}</span>
-                    <div className="prof-sub-ratings">
-                      <div className="sub-rating-item" data-color={ratingColor(prof.rmpRating)}>
-                        <span className="sub-rating-val">{prof.rmpRating != null ? prof.rmpRating.toFixed(1) : '—'}</span>
-                        <span className="sub-rating-lbl">RMP</span>
-                      </div>
-                      <div className="sub-rating-item" data-color={ratingColor(prof.traceRating)}>
-                        <span className="sub-rating-val">{prof.traceRating != null ? prof.traceRating.toFixed(1) : '—'}</span>
-                        <span className="sub-rating-lbl">Students</span>
-                      </div>
-                    </div>
                     <div className="prof-card-footer">
                       <span className="prof-rating-count">{prof.totalReviews.toLocaleString()} ratings</span>
                       <span className="prof-rating-count prof-rating-count--center">{prof.totalComments.toLocaleString()} comments</span>
