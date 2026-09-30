@@ -36,8 +36,8 @@ REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 DEFAULT_BACKUP = os.path.join(
     REPO_ROOT, "backend", "backups", "ratemyhusky_new_20260602T001500Z.sql.gz"
 )
-TRACE_COURSES_CSV = os.path.join(
-    REPO_ROOT, "backend", "Better_Scraper", "output_data", "trace_courses.csv"
+RMP_REVIEWS_CSV = os.path.join(
+    REPO_ROOT, "backend", "Better_Scraper", "output_data", "rmp_reviews.csv"
 )
 REDDIT_DIR = os.path.join(SCRIPT_DIR, "reddit_data")
 POSTS_CSV = os.path.join(REDDIT_DIR, "reddit_neu_posts.csv")
@@ -176,15 +176,14 @@ class Professor:
 # Column order from CREATE TABLE professors_catalog in the backup. Only a
 # fallback: _catalog_index prefers the column list the INSERT statement carries,
 # because this constant drifted from the real table and read the wrong fields for
-# as long as nobody checked. focus_x/focus_y were added to the table between
-# image_url and avg_hours and never added here, so total_comments was reading
+# as long as nobody checked. focus_x/focus_y were added to the table after
+# image_url and never added here, so total_comments was reading
 # focus_y — a focus coordinate, ~30 for every professor.
 _CATALOG_COLS = [
     "slug", "name", "name_key", "department", "college", "avg_rating",
-    "rmp_rating", "trace_rating", "num_ratings", "trace_reviews",
-    "total_reviews", "would_take_again_pct", "difficulty", "professor_url",
-    "image_url", "focus_x", "focus_y", "avg_hours", "total_comments",
-    "trace_name_key",
+    "rmp_rating", "num_ratings", "total_reviews", "would_take_again_pct",
+    "difficulty", "professor_url", "image_url", "focus_x", "focus_y",
+    "total_comments",
 ]
 
 # Only these are read out of a row; a backup missing any of them is unusable.
@@ -355,29 +354,29 @@ _COURSE_CODE_RE = re.compile(r"\b([A-Z]{2,4})[\s-]?(\d{4})\b")
 
 
 def parse_course_code(display_name: str) -> Optional[str]:
-    """Extract the course code (e.g. 'ENGW3302') from a TRACE displayName."""
+    """Extract the course code (e.g. 'ENGW3302') from an RMP review's course field."""
     m = _COURSE_CODE_RE.search(display_name or "")
     return f"{m.group(1)}{m.group(2)}" if m else None
 
 
-def load_course_map(trace_csv: str, index: "ProfessorIndex") -> Dict[str, Set[str]]:
-    """Map course_code -> set of instructor name_keys that exist in the catalog.
+def load_course_map(reviews_csv: str, index: "ProfessorIndex") -> Dict[str, Set[str]]:
+    """Map course_code -> set of professor name_keys that exist in the catalog.
 
-    Only instructors whose normalized name resolves to a catalog professor are
-    kept, so course context always lands on a real slug.
+    Built from the RMP reviews' course field. Only professors whose normalized
+    name resolves to a catalog professor are kept, so course context always lands
+    on a real slug.
     """
     catalog_keys = set(index.by_full_name.keys())
     course_map: Dict[str, Set[str]] = defaultdict(set)
-    if not os.path.exists(trace_csv):
+    if not os.path.exists(reviews_csv):
         return course_map
-    with open(trace_csv, "r", encoding="utf-8", errors="replace", newline="") as f:
+    with open(reviews_csv, "r", encoding="utf-8", errors="replace", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            code = parse_course_code(row.get("displayName", ""))
+            code = parse_course_code(row.get("course", ""))
             if not code:
                 continue
-            full = f"{row.get('instructorFirstName','')} {row.get('instructorLastName','')}"
-            nk = normalize_name(full)
+            nk = normalize_name(row.get("professor_name", ""))
             if nk in catalog_keys:
                 course_map[code].add(nk)
     return course_map
@@ -933,7 +932,7 @@ def run(args: argparse.Namespace) -> None:
     name_by_key = {p.name_key: p.name for p in profs}
     print(f"  {len(profs)} professors indexed")
 
-    course_map = load_course_map(TRACE_COURSES_CSV, index)
+    course_map = load_course_map(RMP_REVIEWS_CSV, index)
     print(f"  {len(course_map)} course codes mapped")
 
     resolve_threshold = args.resolve_threshold
@@ -1082,7 +1081,7 @@ def calibrate(args: argparse.Namespace) -> None:
     profs = load_catalog(args.backup)
     index = ProfessorIndex(profs)
     name_by_key = {p.name_key: p.name for p in profs}
-    course_map = load_course_map(TRACE_COURSES_CSV, index)
+    course_map = load_course_map(RMP_REVIEWS_CSV, index)
 
     buckets: Dict[Tuple[str, str], List[Dict[str, str]]] = defaultdict(list)
     seen: Dict[Tuple[str, str], int] = defaultdict(int)
@@ -1151,7 +1150,7 @@ def golden_selftest(check) -> None:
         return
     profs = load_catalog(DEFAULT_BACKUP)
     index = ProfessorIndex(profs)
-    course_map = load_course_map(TRACE_COURSES_CSV, index)
+    course_map = load_course_map(RMP_REVIEWS_CSV, index)
     def resolve(text):
         return aggregate(match_item(text, index, course_map), 0.80, 0.10, 0.55)
 
@@ -1754,7 +1753,7 @@ def experiment(args: argparse.Namespace) -> None:
     policy affects only pass-1, so this isolates the comparison and stays fast."""
     profs = load_catalog(args.backup)
     index = ProfessorIndex(profs)
-    course_map = load_course_map(TRACE_COURSES_CSV, index)
+    course_map = load_course_map(RMP_REVIEWS_CSV, index)
 
     items = []  # (source_type, source_id, thread_id, text)
     for row in read_csv_rows(POSTS_CSV, args.sample):
