@@ -116,18 +116,22 @@ def parse_course_superlative(query):
             return {"subject": subject, "metric": metric, "direction": direction}
     return None
 
-def rank_courses_by_metric(subject, metric, direction, query_fn, limit=5, min_responses=5):
+def _no_mod(alias=""):
+    return ""
+
+def rank_courses_by_metric(subject, metric, direction, query_fn, limit=5, min_responses=5,
+                           rmp_mod=_no_mod):
     """Rank a subject's courses by mean RMP rating or difficulty. Filters out courses with
     fewer than min_responses reviews (tiny-sample noise) and returns the top `limit` in the
     asked direction."""
     if metric not in ("rating", "difficulty"):
         return []
-    rows = query_fn("""
+    rows = query_fn(f"""
         SELECT cc.code AS code, cc.name AS name, cc.department AS department,
                cc.avg_rating AS r_avg, cc.num_ratings AS n, AVG(rr.difficulty) AS d_avg
         FROM course_catalog cc
         JOIN rmp_reviews rr ON rr.course_code = cc.code
-        WHERE cc.code LIKE %s AND cc.code ~ %s
+        WHERE cc.code LIKE %s AND cc.code ~ %s{rmp_mod("rr")}
         GROUP BY cc.code, cc.name, cc.department, cc.avg_rating, cc.num_ratings
     """, (f"{subject}%", f"^{subject}[0-9]"))
     ranked = []
@@ -150,7 +154,7 @@ def resolve_entity(query, hint, prof_search_fn, limit=1):
             return rows[0]
     return None
 
-def fetch_facts(slug, query_one_fn, query_fn):
+def fetch_facts(slug, query_one_fn, query_fn, rmp_mod=_no_mod):
     prof = query_one_fn("""
         SELECT slug, name_key, name, department, rmp_rating, avg_rating,
                difficulty, would_take_again_pct, total_reviews
@@ -159,19 +163,19 @@ def fetch_facts(slug, query_one_fn, query_fn):
     if not prof:
         return {}
     name_key = prof.get("name_key")
-    course_rows = query_fn("""
+    course_rows = query_fn(f"""
         SELECT rr.course_code AS code, cc.name AS name
         FROM rmp_reviews rr LEFT JOIN course_catalog cc ON cc.code = rr.course_code
-        WHERE rr.name_key = %s AND rr.course_code IS NOT NULL
+        WHERE rr.name_key = %s AND rr.course_code IS NOT NULL{rmp_mod("rr")}
         GROUP BY rr.course_code, cc.name
         ORDER BY COUNT(*) DESC, rr.course_code LIMIT 25
     """, (name_key,))
     courses = [f"{c['code']} {c['name']}".strip() if c.get("name") else c["code"]
                for c in course_rows if c.get("code")]
     # total written comments = RMP reviews with a comment (same count the professor page shows)
-    cc = query_one_fn("""
+    cc = query_one_fn(f"""
         SELECT COUNT(*) AS cnt FROM rmp_reviews
-        WHERE name_key = %s AND comment IS NOT NULL AND comment != ''
+        WHERE name_key = %s AND comment IS NOT NULL AND comment != ''{rmp_mod()}
     """, (name_key,))
     return {
         "kind": "professor",
@@ -184,7 +188,7 @@ def fetch_facts(slug, query_one_fn, query_fn):
         "courses": courses,
     }
 
-def fetch_course_facts(code, query_one_fn, query_fn):
+def fetch_course_facts(code, query_one_fn, query_fn, rmp_mod=_no_mod):
     """Compact course summary for Ask: overall rating and avg difficulty from RMP reviews
     tagged with this course, latest review date, recent professor names, and a per-professor
     breakdown."""
@@ -194,16 +198,17 @@ def fetch_course_facts(code, query_one_fn, query_fn):
     if not cat:
         return {}
     agg = query_one_fn(
-        "SELECT AVG(difficulty) AS avg_difficulty FROM rmp_reviews WHERE course_code = %s", (norm,))
+        "SELECT AVG(difficulty) AS avg_difficulty FROM rmp_reviews WHERE course_code = %s"
+        f"{rmp_mod()}", (norm,))
     def _r2(v):
         return round(float(v), 2) if v is not None else None
     # per-professor breakdown for the catalog professors who have reviews for this course
-    irows = query_fn("""
+    irows = query_fn(f"""
         SELECT pc.name AS name, AVG(rr.quality) AS rating, AVG(rr.difficulty) AS difficulty,
                MAX(rr.date) AS latest_date
         FROM rmp_reviews rr
         JOIN professors_catalog pc ON pc.name_key = rr.name_key
-        WHERE rr.course_code = %s AND rr.quality IS NOT NULL
+        WHERE rr.course_code = %s AND rr.quality IS NOT NULL{rmp_mod("rr")}
         GROUP BY pc.slug, pc.name
     """, (norm,))
     breakdown, dated = [], []
@@ -376,15 +381,18 @@ def fetch_evidence(slug, code, query, embed_query_fn, query_fn, limit=8):
                     "source": r.get("source")})
     return out
 
-def fetch_reddit_mentions(slug, query_fn):
-    rows = query_fn("""
+def fetch_reddit_mentions(slug, query_fn, mod_filter=""):
+    # t.flagged is the scraper's prompt-injection marker, mod_filter is the
+    # content verdict — a row clears both or it isn't shown. the caller passes
+    # mod_filter in so rag/ doesn't have to import from the backend root.
+    rows = query_fn(f"""
         SELECT t.body, t.subreddit, t.permalink, t.created_utc,
                t.score AS reddit_score, s.sentiment, s.score AS sentiment_score
         FROM reddit_mentions m
         JOIN reddit_text t ON t.source_id = m.source_id
         LEFT JOIN reddit_sentiment s
           ON s.source_id = t.source_id AND s.professor_slug = m.professor_slug
-        WHERE m.professor_slug = %s AND t.flagged = false
+        WHERE m.professor_slug = %s AND t.flagged = false{mod_filter}
         ORDER BY t.created_utc DESC NULLS LAST
     """, (slug,))
     out = []
@@ -400,7 +408,8 @@ def fetch_reddit_mentions(slug, query_fn):
         })
     return out
 
-def retrieve(query, hint, query_fn, query_one_fn, prof_search_fn, limit=8, embed_query_fn=None):
+def retrieve(query, hint, query_fn, query_one_fn, prof_search_fn, limit=8, embed_query_fn=None,
+             rmp_mod=_no_mod):
     # Superlative / ranking question ("which CS course has the highest rating"). Keys on the
     # query text, so it wins even when the gate hands back a junk hint like "CS course" — but a
     # genuine professor hint must win (don't turn "which CS course did Guha call hardest" into a
@@ -409,7 +418,7 @@ def retrieve(query, hint, query_fn, query_one_fn, prof_search_fn, limit=8, embed
     if sup and hint and prof_search_fn(hint, limit=1):
         sup = None
     if sup:
-        ranked = rank_courses_by_metric(sup["subject"], sup["metric"], sup["direction"], query_fn)
+        ranked = rank_courses_by_metric(sup["subject"], sup["metric"], sup["direction"], query_fn, rmp_mod=rmp_mod)
         if ranked:
             return {"kind": "course_ranking", "subject": sup["subject"], "metric": sup["metric"],
                     "direction": sup["direction"], "courses": ranked, "course_count": len(ranked),
@@ -434,7 +443,7 @@ def retrieve(query, hint, query_fn, query_one_fn, prof_search_fn, limit=8, embed
     # course's Reddit discussion, instead of trying to find a professor by that name.
     course_term = next((t for t in (hint, query) if is_course_code(t)), None)
     if course_term:
-        cfacts = fetch_course_facts(course_term, query_one_fn, query_fn)
+        cfacts = fetch_course_facts(course_term, query_one_fn, query_fn, rmp_mod)
         if cfacts:
             code = cfacts["code"]
             comments = fetch_evidence(None, code, query, embed_query_fn, query_fn, limit=limit)
@@ -450,7 +459,7 @@ def retrieve(query, hint, query_fn, query_one_fn, prof_search_fn, limit=8, embed
     if hint and not is_course_code(hint) and not prof_search_fn(hint, limit=1):
         named = resolve_course_by_name(hint, query_fn, limit=6)
         if len(named) == 1:
-            cfacts = fetch_course_facts(named[0]["code"], query_one_fn, query_fn)
+            cfacts = fetch_course_facts(named[0]["code"], query_one_fn, query_fn, rmp_mod)
             if cfacts:
                 code = cfacts["code"]
                 comments = fetch_evidence(None, code, query, embed_query_fn, query_fn, limit=limit)
@@ -471,7 +480,7 @@ def retrieve(query, hint, query_fn, query_one_fn, prof_search_fn, limit=8, embed
     comments = fetch_evidence(slug, None, query, embed_query_fn, query_fn, limit=limit)
     return {"professor_slug": slug, "course_code": None, "entity_key": slug,
             "professor_name": ent.get("name"), "entity_name": ent.get("name"),
-            "facts": fetch_facts(slug, query_one_fn, query_fn),
+            "facts": fetch_facts(slug, query_one_fn, query_fn, rmp_mod),
             "comments": comments, "comment_count": len(comments)}
 
 def selftest():

@@ -187,12 +187,17 @@ def professor_html(profile: dict, reviews: list, canonical: str) -> str:
     rmp_count = len(reviews)
 
     title = f"{name} Reviews & Ratings — Northeastern {dept}"
-    wta_txt = f" ({wta}% would take again)" if wta is not None else ""
+    # :g so 83.0 prints "83", as JS does for the same number in the page copy.
+    wta_txt = f" ({wta:g}% would take again)" if wta is not None else ""
+    # Mirrors Professor.tsx's seoDescription character for character, so the
+    # crawler copy and the page agree. Two decimals: the value is stored rounded
+    # to two, so .2f and JS toFixed(2) reproduce it exactly (one decimal would
+    # round an exact half differently in each).
     summary = (
-        f"{name} professor reviews and ratings: {avg}/5 from {total} student "
-        f"ratings at Northeastern{wta_txt}. RateMyProfessors + Reddit."
+        f"{name} professor reviews and ratings: {avg:.2f}/5 from {total} RMP ratings "
+        f"at Northeastern{wta_txt}. RateMyProfessors + Reddit."
         if avg is not None else
-        f"{name}, Northeastern {dept} professor: no student ratings yet. "
+        f"{name}, Northeastern {dept} professor: no Rate My Professors ratings yet. "
         "RateMyProfessors + Reddit."
     )
     month_year = _month_year(date.today())

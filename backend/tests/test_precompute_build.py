@@ -121,6 +121,33 @@ def test_build_runs_end_to_end_and_writes_the_contract_tables(build):
     assert "ADD COLUMN course_code" in sql
 
 
+def test_rmp_source_tables_are_written(build):
+    db = build()
+    sql = db.sql()
+    for table in ("prof_identity", "prof_rmp_link", "prof_rmp_summary"):
+        assert f"SWAP {table}" in sql
+    identity = {r[0]: r for r in db.inserts["prof_identity_new"]}
+    assert set(identity) == {"ann-lee", "bob-ray", "cy-zed"}
+    assert identity["ann-lee"][1:3] == ("Ann Lee", "ann lee")
+    links = {r[0]: r for r in db.inserts["prof_rmp_link_new"]}
+    assert set(links) == set(identity)
+    assert links["ann-lee"][1] is None  # fixture URL has no /professor/<id>
+    assert links["ann-lee"][5] == "exact" and links["ann-lee"][6] is False
+    summaries = {r[0]: r for r in db.inserts["prof_rmp_summary_new"]}
+    # Counted from stored reviews: mean quality 4.0 over 3 ratings, 2 comments.
+    assert summaries["ann-lee"][1] == 4.0 and summaries["ann-lee"][4:6] == (3, 2)
+    assert summaries["cy-zed"][1] is None and summaries["cy-zed"][4] == 0
+
+
+def test_link_report_is_written(build, tmp_path, monkeypatch):
+    report = tmp_path / "reports" / "rmp_link_review.csv"
+    monkeypatch.setenv("RMP_LINK_REPORT", str(report))
+    build()
+    lines = report.read_text().splitlines()
+    assert lines[0].startswith("source,slug,")
+    assert len(lines) == 1  # nothing in the fixture needs review
+
+
 def test_catalog_columns_match_the_insert(build):
     db = build()
     src = PRECOMPUTE_PY.read_text()

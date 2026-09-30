@@ -56,11 +56,12 @@ class RecordingQuery:
         return sum(1 for c in self.calls if table.lower() in c.lower())
 
 
-def _fake_fetch_reddit_mentions(slug, query_fn):
-    # Mirror server's fetch_reddit_mentions: a real round-trip through query().
+def _fake_fetch_reddit_mentions(slug, query_fn, mod_filter=""):
+    # Mirror server's fetch_reddit_mentions: a real round-trip through query(),
+    # moderation predicate included, so the round-trip count stays honest.
     rows = query_fn("SELECT t.body, t.subreddit FROM reddit_mentions m "
                     "JOIN reddit_text t ON t.source_id = m.source_id "
-                    "WHERE m.professor_slug = %s", (slug,))
+                    f"WHERE m.professor_slug = %s{mod_filter}", (slug,))
     return [{"body": r.get("body") or "", "sentiment": r.get("sentiment"),
              "sentiment_score": r.get("sentiment_score"), "score": r.get("reddit_score"),
              "subreddit": r.get("subreddit"), "permalink": r.get("permalink"),
@@ -163,3 +164,103 @@ def test_resolve_professor_applies_alias_map_to_slug_fallback():
 
     _resolve_professor("chris-bosso", fake_query_one)
     assert calls[-1] == ("christopher bosso",), calls
+
+
+# ── v2: RMP in its own section ──────────────────────────────────────────────
+# The same fake DB as above: RMP rating 4.1, difficulty 3.5, total_reviews 31.
+
+from professor_full import build_full_v2  # noqa: E402
+
+RMP_LINK = {"rmp_legacy_id": 999, "match_method": "exact", "needs_review": False,
+            "link_url": "https://www.ratemyprofessors.com/professor/999",
+            "rating": 4.1, "difficulty": 3.5, "would_take_again_pct": 88.0,
+            "num_ratings": 1, "professor_url": "https://www.ratemyprofessors.com/professor/999",
+            "scraped_at": None}
+
+
+def _build_v2(fetch_rmp_links=None, catalog=None):
+    rq = RecordingQuery(catalog)
+    if fetch_rmp_links is None:
+        def fetch_rmp_links(slug):
+            # A real round-trip, so the count below stays honest.
+            rq.query("SELECT 1 FROM prof_rmp_link l LEFT JOIN prof_rmp_summary s "
+                     "ON s.slug = l.slug WHERE l.slug = %s", (slug,))
+            return [RMP_LINK]
+    data = build_full_v2("olin-guha", rq.query, rq.query_one, sanitize=lambda t: t,
+                         fetch_rmp_links=fetch_rmp_links,
+                         fetch_reddit_mentions=_fake_fetch_reddit_mentions)
+    return data, rq
+
+
+def test_v2_splits_identity_from_rmp():
+    data, _ = _build_v2()
+    assert data["version"] == 2
+    assert data["identity"] == {"slug": "olin-guha", "name": "Olin Guha",
+                                "department": "Khoury", "college": None,
+                                "imageUrl": None, "focusX": 50.0, "focusY": 30.0}
+    assert data["sources"]["rmp"]["rating"] == 4.1
+    assert data["sources"]["rmp"]["reviews"][0]["course"] == "CS3500"
+
+
+def test_v2_serves_exactly_the_contract_keys():
+    data, _ = _build_v2()
+    assert set(data) == {"version", "identity", "sources", "courses", "redditMentions"}
+    assert set(data["sources"]) == {"rmp"}
+    assert data["courses"][0]["code"] == "CS3500"
+    assert data["redditMentions"][0]["sentiment"] == "negative"
+
+
+def test_v2_moves_v1_rmp_fields_under_sources():
+    data, _ = _build_v2()
+    for moved in ("avgRating", "totalRatings", "totalComments", "difficulty",
+                  "rmpRating", "wouldTakeAgainPct", "professorUrl", "reviews",
+                  "colleagues", "name", "department", "imageUrl"):
+        assert moved not in data
+
+
+def test_v2_costs_one_round_trip_more_than_v1():
+    """The RMP link/summary lookup. Reviews are v1's, not fetched twice."""
+    _, rq = _build_v2()
+    assert len(rq.calls) <= 5, rq.calls
+    assert rq.count_hitting("select course, quality") == 1
+
+
+def test_v2_without_an_rmp_record_says_so():
+    data, _ = _build_v2(fetch_rmp_links=lambda slug: [])
+    rmp_section = data["sources"]["rmp"]
+    assert rmp_section["available"] is False
+    assert rmp_section["reason"] == "no_rmp_record"
+    assert rmp_section["rating"] is None
+
+
+def test_v2_before_the_rmp_tables_exist_uses_the_catalogs_rmp_columns():
+    data, _ = _build_v2(fetch_rmp_links=lambda slug: None, catalog={"num_ratings": 12})
+    assert data["sources"]["rmp"]["rating"] == 4.1
+    assert data["sources"]["rmp"]["numRatings"] == 12     # num_ratings, not total_reviews 31
+    assert data["sources"]["rmp"]["difficulty"] == 3.5
+
+
+def test_v2_404_when_professor_missing():
+    rq = RecordingQuery()
+    rq._rows_for = lambda sql: []
+    assert build_full_v2("nobody", rq.query, rq.query_one, sanitize=lambda t: t,
+                         fetch_rmp_links=lambda slug: []) is None
+
+
+def test_v1_is_unchanged_by_v2():
+    """v1 is still the default response and keeps its flat RMP fields."""
+    data, _ = _build()
+    assert data["difficulty"] == 3.5
+    assert data["avgRating"] == 4.1
+
+
+def test_courses_aggregate_applies_the_moderation_filter(monkeypatch):
+    from professor_full import build_courses
+    seen = []
+    monkeypatch.setenv("MODERATION_ENFORCE", "true")
+    build_courses("olin guha", lambda sql, params=None: seen.append(sql) or [])
+    assert "rr.mod_action" in seen[0]
+    monkeypatch.setenv("MODERATION_ENFORCE", "false")
+    seen.clear()
+    build_courses("olin guha", lambda sql, params=None: seen.append(sql) or [])
+    assert "mod_action" not in seen[0]

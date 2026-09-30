@@ -144,6 +144,18 @@ jobs:
           CRDB_DATABASE_URL: ${{ secrets.CRDB_DATABASE_URL }}
         run: python precompute.py
 
+      # Every RMP link a person should check: pages merged onto one professor.
+      # Fixed by hand in prof_aliases.py (RMP_MANUAL_LINKS). always(): a failed DB write still
+      # leaves the report, which is written before the write phase.
+      - name: Upload RMP link review report
+        if: ${{ always() && !inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rmp-link-review
+          path: backend/reports/rmp_link_review.csv
+          if-no-files-found: ignore
+          retention-days: 30
+
       # Post-write verification: the pre-scrape floors validate the input CSVs;
       # this validates what actually landed in the DB. Runs BEFORE the store
       # push so a bad DB state also blocks overwriting the data store.

@@ -51,7 +51,7 @@ def upgrade_image_url(url):
     return re.sub(r'-\d+x\d+(?=\.\w+$)', '', str(url))
 
 
-from prof_aliases import ALIAS_MAP
+from prof_aliases import ALIAS_MAP, rmp_link_key
 
 COLLEGE_MAP = {
     "Computer Science": "Khoury", "Information Science": "Khoury",
@@ -354,6 +354,7 @@ CATALOG_COLUMNS = (
     "difficulty", "professor_url", "image_url", "focus_x", "focus_y",
     "total_comments",
 )
+_CATALOG_IDX = {c: i for i, c in enumerate(CATALOG_COLUMNS)}
 
 
 def apply_avg_rating(rmp_profs):
@@ -362,6 +363,177 @@ def apply_avg_rating(rmp_profs):
     rmp_profs["avg_rating"] = np.where(has_rmp, rmp_profs["rating"].round(2), np.nan)
     rmp_profs["avg_rating"] = rmp_profs["avg_rating"].where(
         rmp_profs["avg_rating"].notna(), other=None)
+
+
+# ── RMP source tables ────────────────────────────────────────────────────────
+# prof_identity, prof_rmp_link and prof_rmp_summary split professors_catalog by
+# source: identity holds who the professor is and nothing measured, and the two
+# RMP tables hold only what RMP reported, so no value in them is computed from
+# or averaged with another source. professors_catalog is still written beside
+# them until every page reads the split tables (see rmp.py for the reader).
+
+def rmp_legacy_id(url):
+    """RMP's numeric professor id from a /professor/<id> URL, or None."""
+    m = re.search(r"/professor/(\d+)", str(url or ""))
+    return int(m.group(1)) if m else None
+
+
+def assign_rmp_keys(rmp_profs):
+    """Set _name_key, _match_method and _rmp_legacy_id on raw RMP listings.
+
+    Runs before merge_rmp_aliases, while each row is still one RMP page, so the
+    link table can record every page and how it was matched. The key comes from
+    prof_aliases.rmp_link_key — the same function the review rows resolve
+    through, so a listing and its ratings can never land on different keys.
+    Modifies in place and returns the frame.
+    """
+    keyed = rmp_profs["name"].map(rmp_link_key)
+    rmp_profs["_name_key"] = keyed.map(lambda km: km[0])
+    rmp_profs["_match_method"] = keyed.map(lambda km: km[1])
+    urls = rmp_profs["professor_url"] if "professor_url" in rmp_profs.columns \
+        else pd.Series([None] * len(rmp_profs), index=rmp_profs.index)
+    rmp_profs["_rmp_legacy_id"] = urls.map(rmp_legacy_id).astype(object)
+    return rmp_profs
+
+
+def rmp_wta(raw):
+    """Would-take-again % from RMP's "83%" / "N/A" / -1 field, or None."""
+    s = str(raw if raw is not None else "").strip().replace("%", "")
+    if not s or s.lower() in ("nan", "n/a"):
+        return None
+    try:
+        wta = round(float(s), 1)
+    except (ValueError, TypeError):
+        return None
+    return None if wta < 0 else wta
+
+
+def rmp_difficulty(raw):
+    """RMP's level_of_difficulty as a 1-5 float, or None (0 means unset)."""
+    try:
+        val = float(raw)
+    except (ValueError, TypeError):
+        return None
+    return round(val, 2) if pd.notna(val) and val > 0 else None
+
+
+def rmp_link_rows(raw_links, slug_by_key):
+    """prof_rmp_link rows: one per RMP page that reached a catalog professor.
+
+    `raw_links` is the listing frame before merge_rmp_aliases, so two RMP pages
+    folded onto one professor stay two rows here. Those merges are flagged for
+    review: nothing lexical tells a duplicate page of one person from two people
+    who share a name, and the merge averages their ratings together.
+
+    Pages whose key has no catalog row (denylisted, or dropped by the RMP
+    cleaning) are left out, so every link points at a professor that exists.
+    """
+    if raw_links.empty:
+        return []
+    live = raw_links[raw_links["_name_key"].isin(slug_by_key.keys())]
+    pages = live.groupby("_name_key")["_name_key"].transform("size")
+    rows = []
+    for (_, r), n_pages in zip(live.iterrows(), pages):
+        method = r["_match_method"]
+        reasons = []
+        if method == "fuzzy":
+            reasons.append("fuzzy name match")
+        if n_pages > 1:
+            reasons.append(f"{n_pages} RMP pages merged into one professor")
+        url = r.get("professor_url")
+        legacy = r.get("_rmp_legacy_id")
+        rows.append((
+            slug_by_key[r["_name_key"]],
+            int(legacy) if legacy is not None and pd.notna(legacy) else None,
+            str(r["name"]),
+            str(r["department"]) if pd.notna(r.get("department")) else None,
+            url if isinstance(url, str) and url else None,
+            method,
+            bool(reasons),
+            "; ".join(reasons) or None,
+        ))
+    return rows
+
+
+def rmp_summary_rows(rmp_profs, slug_by_key, rmp_comment_counts, scraped_at):
+    """prof_rmp_summary rows: RMP's own numbers, one row per RMP professor.
+
+    Read after apply_counted_num_ratings / apply_counted_rmp_rating, so rating
+    and num_ratings are the ones counted from the reviews we store — the same
+    values professors_catalog.rmp_rating/num_ratings carry. Difficulty is RMP's
+    level_of_difficulty.
+    """
+    rows = []
+    for _, r in rmp_profs.iterrows():
+        slug = slug_by_key.get(r["_name_key"])
+        if slug is None:
+            continue
+        n = int(r["num_ratings"]) if pd.notna(r["num_ratings"]) else 0
+        rating = float(r["rating"]) if pd.notna(r["rating"]) else None
+        url = r.get("professor_url")
+        rows.append((
+            slug,
+            round(rating, 2) if n > 0 and rating and rating > 0 else None,
+            rmp_difficulty(r.get("level_of_difficulty")),
+            rmp_wta(r.get("would_take_again_pct")),
+            n,
+            int(rmp_comment_counts.get(r["_name_key"], 0)),
+            url if isinstance(url, str) and url else None,
+            scraped_at,
+        ))
+    return rows
+
+
+def identity_rows(catalog_rows):
+    """prof_identity rows projected from the catalog: who, not how rated."""
+    cols = ("slug", "name", "name_key", "department", "college",
+            "image_url", "focus_x", "focus_y")
+    return [tuple(row[_CATALOG_IDX[c]] for c in cols) for row in catalog_rows]
+
+
+def rmp_scraped_at(csv_path):
+    """When the RMP data this build reads was scraped, as an aware UTC datetime.
+
+    RMP_SCRAPED_AT (ISO 8601) wins when set, for a rebuild from an older CSV.
+    Otherwise the CSV's mtime: in data-refresh.yml fetch_lite writes the file a
+    few minutes before this runs, so the mtime is the scrape time. A local run
+    from a fresh clone of the data store would report the clone time instead,
+    which is what the override is for. None if neither is available.
+    """
+    from datetime import datetime, timezone
+    raw = os.getenv("RMP_SCRAPED_AT", "").strip()
+    if raw:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    try:
+        return datetime.fromtimestamp(os.path.getmtime(csv_path), tz=timezone.utc)
+    except OSError:
+        return None
+
+
+RMP_LINK_REPORT_COLUMNS = ("source", "slug", "name_key", "matched_name",
+                           "rmp_legacy_id", "professor_url", "match_method",
+                           "reason")
+
+
+def rmp_link_report(link_rows):
+    """Rows for the manual-review CSV: every RMP link a person should look at.
+
+    Links flagged needs_review (merged pages, anything fuzzy), fixed by hand in
+    prof_aliases.RMP_MANUAL_LINKS.
+    """
+    return [("rmp", slug, None, rmp_name, legacy, url, method, reason)
+            for slug, legacy, rmp_name, _dept, url, method, needs, reason in link_rows
+            if needs]
+
+
+def write_rmp_link_report(path, rows):
+    import csv
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(RMP_LINK_REPORT_COLUMNS)
+        w.writerows(rows)
 
 
 def assign_slugs(name_keys, existing):
@@ -465,10 +637,15 @@ def main(csv_dir=None):
     rmp_profs["department"] = rmp_profs["department"].astype(str).str.replace(r'\bamp\b', '&', regex=True)
 
     # ── Merge RMP aliases ──
-    # ── Merge RMP aliases ──
+    # Keys are assigned per RMP page first, and the pages kept, so the link
+    # table can record each page and how it matched after the merge folds them.
+    rmp_profs = assign_rmp_keys(rmp_profs)
+    raw_rmp_links = rmp_profs[[
+        c for c in ("name", "department", "professor_url",
+                    "_name_key", "_match_method", "_rmp_legacy_id")
+        if c in rmp_profs.columns]].copy()
+
     def merge_rmp_aliases(df):
-        df["_name_key"] = df["name"].apply(normalize_name)
-        df["_name_key"] = df["_name_key"].replace(ALIAS_MAP)
         rows = []
         for nk, g in df.groupby("_name_key"):
             if len(g) == 1:
@@ -509,7 +686,8 @@ def main(csv_dir=None):
     # This is the enforcement point that matters most, because it is the one that
     # runs every refresh. A row deleted by hand comes back with the next rebuild;
     # a row dropped here never enters it. See denylist.py.
-    rmp_rev_keys = rmp_reviews["professor_name"].apply(normalize_name).replace(ALIAS_MAP)
+    # rmp_link_key, like the listings above, so a manual link moves both.
+    rmp_rev_keys = rmp_reviews["professor_name"].map(lambda n: rmp_link_key(n)[0])
     if denied_hashes():
         rmp_before = len(rmp_profs)
         rmp_profs = rmp_profs[~rmp_profs["_name_key"].map(is_denied_key)].copy()
@@ -532,7 +710,7 @@ def main(csv_dir=None):
 
     # ── Comment counts per name_key ──
     rmp_rev = rmp_reviews[rmp_reviews["comment"].notna() & (rmp_reviews["comment"].astype(str).str.strip() != "")].copy()
-    rmp_rev["_name_key"] = rmp_rev["professor_name"].apply(normalize_name).replace(ALIAS_MAP)
+    rmp_rev["_name_key"] = rmp_rev["professor_name"].map(lambda n: rmp_link_key(n)[0])
     rmp_comment_counts_lookup = rmp_rev.groupby("_name_key").size().astype(int).to_dict()
     print(f"Computed comment counts for {len(rmp_comment_counts_lookup)} professors")
 
@@ -541,6 +719,8 @@ def main(csv_dir=None):
     existing_slugs = {nk: slug for nk, (slug,) in _read_lookup(
         conn, "professors_catalog", ("name_key", "slug")).items()}
     slugs = assign_slugs(rmp_profs["_name_key"], existing_slugs)
+    # RMP name_key -> the slug its catalog row got; the RMP tables key on slug.
+    rmp_slug_by_key = dict(zip(rmp_profs["_name_key"], slugs))
     print(f"Preserved {sum(1 for nk in rmp_profs['_name_key'] if nk in existing_slugs)} existing slugs")
     catalog_rows = []
 
@@ -549,24 +729,9 @@ def main(csv_dir=None):
         dept = str(row["department"])
         college = get_college(dept)
 
-        wta = None
-        wta_raw = str(row.get("would_take_again_pct", "")).strip().replace("%", "")
-        try:
-            if wta_raw and wta_raw.lower() not in ("nan", "n/a", ""):
-                wta = round(float(wta_raw), 1)
-                if wta < 0:
-                    wta = None
-        except (ValueError, TypeError):
-            pass
-
-        difficulty = None
-        if "level_of_difficulty" in row.index:
-            try:
-                val = float(row["level_of_difficulty"])
-                if pd.notna(val) and val > 0:
-                    difficulty = round(val, 2)
-            except (ValueError, TypeError):
-                pass
+        # Same parsers prof_rmp_summary uses, so the two tables cannot disagree.
+        wta = rmp_wta(row.get("would_take_again_pct", ""))
+        difficulty = rmp_difficulty(row.get("level_of_difficulty"))
 
         catalog_rows.append((
             slug, row["name"], row["_name_key"], dept, college,
@@ -603,6 +768,25 @@ def main(csv_dir=None):
     course_rows = build_course_catalog_rows(course_records, catalog_names, previous_courses)
     print(f"Built course catalog with {len(course_rows)} courses "
           f"(catalog_courses: {len(catalog_names)}, previous: {len(previous_courses)})")
+
+    # ── RMP source tables (see rmp_link_rows / rmp_summary_rows) ──
+    scraped_at = rmp_scraped_at(os.path.join(csv_dir, "rmp_professors.csv"))
+    identity = identity_rows(catalog_rows)
+    rmp_links = rmp_link_rows(raw_rmp_links, rmp_slug_by_key)
+    rmp_summaries = rmp_summary_rows(rmp_profs, rmp_slug_by_key,
+                                     rmp_comment_counts_lookup, scraped_at)
+    methods = pd.Series([r[5] for r in rmp_links], dtype=object).value_counts().to_dict()
+    print(f"RMP links: {len(rmp_links)} pages -> {len(rmp_summaries)} professors "
+          f"({', '.join(f'{m} {n}' for m, n in sorted(methods.items()))}); "
+          f"{sum(1 for r in rmp_links if r[6])} flagged for review; "
+          f"scraped_at {scraped_at.isoformat() if scraped_at else 'unknown'}")
+
+    # Written before the DB phase so a failed write still leaves the report.
+    report_path = os.getenv("RMP_LINK_REPORT") or os.path.join(
+        os.path.dirname(__file__), "reports", "rmp_link_review.csv")
+    report = rmp_link_report(rmp_links)
+    write_rmp_link_report(report_path, report)
+    print(f"Wrote {len(report)} links for manual review to {report_path}")
 
     # ── Compute stats ──
     stat_professors = len({n.strip() for n in rmp_profs["_name_key"].unique()
@@ -652,6 +836,82 @@ def main(csv_dir=None):
     conn.commit()
     swap_in(conn, "professors_catalog")
     print(f"  Inserted {len(catalog_rows)} rows")
+
+    # 1b. RMP source tables. Same build-into-_new-then-swap as the catalog, so a
+    # reader never sees one missing; rmp.py falls back to the catalog's RMP
+    # columns only for a database this step has never run against.
+    print("Creating prof_identity / prof_rmp_link / prof_rmp_summary...")
+    cur.execute("DROP TABLE IF EXISTS prof_identity_new")
+    cur.execute("""
+        CREATE TABLE prof_identity_new (
+            slug TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            name_key TEXT NOT NULL,
+            department TEXT,
+            college TEXT,
+            image_url TEXT,
+            focus_x FLOAT,
+            focus_y FLOAT
+        )
+    """)
+    chunk_insert(cur, """
+        INSERT INTO prof_identity_new
+        (slug, name, name_key, department, college, image_url, focus_x, focus_y)
+        VALUES %s
+    """, identity)
+    cur.execute("CREATE INDEX idx_pi_name_key ON prof_identity_new (name_key)")
+    conn.commit()
+    swap_in(conn, "prof_identity")
+
+    cur.execute("DROP TABLE IF EXISTS prof_rmp_link_new")
+    cur.execute("""
+        CREATE TABLE prof_rmp_link_new (
+            slug TEXT NOT NULL,
+            rmp_legacy_id INT,
+            rmp_name TEXT NOT NULL,
+            rmp_department TEXT,
+            professor_url TEXT,
+            match_method TEXT NOT NULL
+                CHECK (match_method IN ('exact', 'alias', 'fuzzy', 'manual')),
+            needs_review BOOL NOT NULL DEFAULT false,
+            review_reason TEXT
+        )
+    """)
+    if rmp_links:
+        chunk_insert(cur, """
+            INSERT INTO prof_rmp_link_new
+            (slug, rmp_legacy_id, rmp_name, rmp_department, professor_url,
+             match_method, needs_review, review_reason)
+            VALUES %s
+        """, rmp_links)
+    cur.execute("CREATE INDEX idx_prl_slug ON prof_rmp_link_new (slug)")
+    conn.commit()
+    swap_in(conn, "prof_rmp_link")
+
+    cur.execute("DROP TABLE IF EXISTS prof_rmp_summary_new")
+    cur.execute("""
+        CREATE TABLE prof_rmp_summary_new (
+            slug TEXT PRIMARY KEY,
+            rating FLOAT,
+            difficulty FLOAT,
+            would_take_again_pct FLOAT,
+            num_ratings INT NOT NULL DEFAULT 0,
+            num_comments INT NOT NULL DEFAULT 0,
+            professor_url TEXT,
+            scraped_at TIMESTAMPTZ
+        )
+    """)
+    if rmp_summaries:
+        chunk_insert(cur, """
+            INSERT INTO prof_rmp_summary_new
+            (slug, rating, difficulty, would_take_again_pct, num_ratings,
+             num_comments, professor_url, scraped_at)
+            VALUES %s
+        """, rmp_summaries)
+    conn.commit()
+    swap_in(conn, "prof_rmp_summary")
+    print(f"  Inserted {len(identity)} identities, {len(rmp_links)} RMP links, "
+          f"{len(rmp_summaries)} RMP summaries")
 
     # 2. course_catalog
     print("Creating course_catalog...")
@@ -705,8 +965,7 @@ def main(csv_dir=None):
     unique_rev_names = rmp_reviews["professor_name"].dropna().unique()
     rev_mapping_rows = []
     for name in unique_rev_names:
-        nk = normalize_name(name)
-        nk = ALIAS_MAP.get(nk, nk)
+        nk, _ = rmp_link_key(name)
         rev_mapping_rows.append((name, nk))
 
     cur.execute("CREATE TEMP TABLE _rev_nk_map (professor_name TEXT, name_key TEXT)")

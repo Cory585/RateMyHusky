@@ -49,8 +49,8 @@ def test_professor_meta_description_leads_with_reviews_and_ratings_phrase():
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
     desc = _meta_description(html)
     assert desc.startswith(
-        "Francis Georges professor reviews and ratings: 4.25/5 from 2686 student "
-        "ratings at Northeastern (83% would take again). RateMyProfessors + Reddit."
+        "Francis Georges professor reviews and ratings: 4.25/5 from 2686 RMP ratings "
+        "at Northeastern (83% would take again). RateMyProfessors + Reddit."
     )
 
 
@@ -60,8 +60,8 @@ def test_professor_meta_description_omits_would_take_again_clause_when_absent():
     desc = _meta_description(html)
     assert "would take again" not in desc
     assert desc.startswith(
-        "Francis Georges professor reviews and ratings: 4.25/5 from 2686 student "
-        "ratings at Northeastern. RateMyProfessors + Reddit."
+        "Francis Georges professor reviews and ratings: 4.25/5 from 2686 RMP ratings "
+        "at Northeastern. RateMyProfessors + Reddit."
     )
 
 
@@ -98,7 +98,7 @@ def test_professor_html_says_no_ratings_rather_than_rating_them_zero():
     assert "0/5" not in html
     assert "Average rating" not in html
     desc = _meta_description(html)
-    assert "no student ratings yet" in desc.lower()
+    assert "no rate my professors ratings yet" in desc.lower()
 
 
 def test_professor_html_omits_aggregate_rating_when_no_ratings():

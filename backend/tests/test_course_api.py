@@ -155,14 +155,14 @@ def test_profile_serves_courses_and_no_trace_fields(server_mod, monkeypatch):
 
 
 def test_reviews_route_returns_reviews_and_reddit_only(server_mod, monkeypatch):
-    monkeypatch.setattr(server_mod, "fetch_reddit_mentions", lambda slug, q: [])
+    monkeypatch.setattr(server_mod, "fetch_reddit_mentions", lambda slug, q, mf="": [])
     body = _prof_client(server_mod, monkeypatch).get("/api/professors/ada-byron/reviews").get_json()
     assert set(body) == {"reviews", "redditMentions"}
     assert body["reviews"][0]["comment"] == "Solid."
 
 
 def test_full_route_has_courses_reviews_and_no_trace_comments(server_mod, monkeypatch):
-    monkeypatch.setattr(server_mod, "fetch_reddit_mentions", lambda slug, q: [])
+    monkeypatch.setattr(server_mod, "fetch_reddit_mentions", lambda slug, q, mf="": [])
     monkeypatch.setattr(server_mod, "_department_colleagues", lambda dept, slug: [])
     body = _prof_client(server_mod, monkeypatch).get("/api/professors/ada-byron/full").get_json()
     assert body["courses"][0]["code"] == "CS3500"

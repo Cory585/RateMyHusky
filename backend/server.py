@@ -9,6 +9,7 @@ Run:           python server.py
 import os, re, unicodedata, json, hashlib, random
 import html as _html
 import psycopg2
+import psycopg2.errors
 from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.extras import RealDictCursor
 from functools import lru_cache
@@ -33,9 +34,11 @@ from rag.chat_gate import gate
 from rag.chat_retrieve import retrieve, fetch_reddit_mentions
 from rag.query_embedder import embed_query
 from rag.chat_answer import generate, generate_course_list, generate_course_ranking
-from professor_full import (build_full, build_profile_unauthed, build_reviews,
-                            _resolve_professor)
+from professor_full import (build_full, build_full_v2, build_profile_unauthed,
+                            build_reviews, _resolve_professor)
+import rmp
 import bookmarks
+import moderation
 import usage_alert
 
 load_dotenv()
@@ -349,6 +352,17 @@ def query(sql, params=None):
 def query_one(sql, params=None):
     rows = query(sql, params)
     return rows[0] if rows else None
+
+
+def rmp_link_rows_or_none(slug):
+    """rmp.fetch_link_rows, or None on a database precompute has not yet built
+    the RMP tables in — rmp.build_section then falls back to the catalog's
+    RMP-only columns. Rolls back so the caller's next query is not aborted."""
+    try:
+        return rmp.fetch_link_rows(slug, query)
+    except psycopg2.errors.UndefinedTable:
+        get_db().rollback()
+        return None
 
 def _chat_write(sql, params=None):
     """Write helper for the question path (ask_log INSERTs): execute + commit, never fetch.
@@ -673,7 +687,7 @@ def goat_professors():
         for r in query(
             "SELECT name_key, COUNT(*) AS cnt FROM rmp_reviews "
             f"WHERE name_key IN ({','.join(['%s'] * len(name_keys))}) "
-            "AND comment IS NOT NULL AND comment != '' "
+            f"AND comment IS NOT NULL AND comment != ''{moderation.sql_filter()} "
             "GROUP BY name_key",
             name_keys,
         ):
@@ -792,7 +806,8 @@ def chat():
             limit = min(int(request.args.get("limit", "20")), 50)
         except (TypeError, ValueError):
             limit = 20
-        data = keyword_search(q, query, _professor_search, limit=limit)
+        data = keyword_search(q, query, _professor_search, limit=limit,
+                              mod_filter=moderation.sql_filter("t"))
         return jsonify({"mode": "keyword", "results": data["comments"], "professors": data["professors"]})
     # 'question' mode is account-gated: identity comes from the verified JWT (not a spoofable
     # header), so the abuse ladder keys on a server-trusted user id that can't be forged or omitted.
@@ -813,7 +828,8 @@ def chat():
         cache_set_fn=cache_set,
         keyword_search_fn=lambda qq: keyword_search(qq, query, _professor_search),
         gate_fn=lambda qq: gate(qq, _chat_adapter),
-        retrieve_fn=lambda qq, hint: retrieve(qq, hint, query, query_one, _professor_search, embed_query_fn=embed_query),
+        retrieve_fn=lambda qq, hint: retrieve(qq, hint, query, query_one, _professor_search, embed_query_fn=embed_query,
+                                        rmp_mod=moderation.sql_filter),
         generate_fn=lambda qq, blocks: generate(qq, blocks, _chat_adapter),
         generate_course_list_fn=lambda topic, courses: generate_course_list(topic, courses, _chat_adapter),
         generate_course_ranking_fn=lambda subject, metric, direction, courses: generate_course_ranking(subject, metric, direction, courses, _chat_adapter),
@@ -902,18 +918,27 @@ def professor_reviews(slug):
 def professor_full(slug):
     """Combined profile + reviews in one request (build_full shares the
     catalog lookup between the two)."""
-    cache_key = f"prof_full:{slug}"
+    v2 = request.args.get("v") == "2"
+    cache_key = f"prof_full:{slug}{':v2' if v2 else ''}"
     cached = cache_get(cache_key)
     if cached:
         return _public_json(cached)
 
-    profile_data = build_full(slug, query, query_one, sanitize,
-                              fetch_reddit_mentions=fetch_reddit_mentions)
+    # ?v=2 serves RMP as its own section (professor_full.to_v2). v1 stays the
+    # default until every reader has moved; the cache key keeps them apart.
+    if v2:
+        profile_data = build_full_v2(slug, query, query_one, sanitize,
+                                     fetch_rmp_links=rmp_link_rows_or_none,
+                                     fetch_reddit_mentions=fetch_reddit_mentions)
+    else:
+        profile_data = build_full(slug, query, query_one, sanitize,
+                                  fetch_reddit_mentions=fetch_reddit_mentions)
     if profile_data is None:
         return jsonify({"error": "Professor not found"}), 404
-    # Same colleagues field the profile page gets — served from the
-    # per-department cache, no per-request DB cost.
-    profile_data["colleagues"] = _department_colleagues(profile_data["department"], slug)
+    if not v2:
+        # Same colleagues field the profile page gets — served from the
+        # per-department cache, no per-request DB cost.
+        profile_data["colleagues"] = _department_colleagues(profile_data["department"], slug)
 
     cache_set(cache_key, profile_data)
     return _public_json(profile_data)
@@ -1317,7 +1342,8 @@ def course_profile(code):
         return jsonify({"error": "Course not found"}), 404
 
     latest = query_one(
-        "SELECT MAX(date) AS latest_date FROM rmp_reviews WHERE course_code = %s",
+        "SELECT MAX(date) AS latest_date FROM rmp_reviews WHERE course_code = %s"
+        f"{moderation.sql_filter()}",
         (code_norm,),
     )
 
@@ -1332,7 +1358,7 @@ def course_profile(code):
 
     # Professors with at least one review filed under this course, aggregated
     # over just those reviews.
-    rows = query("""
+    rows = query(f"""
         SELECT pc.name, pc.slug, pc.image_url, pc.would_take_again_pct,
                pc.total_reviews, pc.total_comments,
                COUNT(*) AS num_reviews,
@@ -1341,7 +1367,7 @@ def course_profile(code):
                MAX(rr.date) AS latest_date
         FROM rmp_reviews rr
         JOIN professors_catalog pc ON pc.name_key = rr.name_key
-        WHERE rr.course_code = %s
+        WHERE rr.course_code = %s{moderation.sql_filter("rr")}
         GROUP BY pc.name, pc.slug, pc.image_url, pc.would_take_again_pct,
                  pc.total_reviews, pc.total_comments
     """, (code_norm,))

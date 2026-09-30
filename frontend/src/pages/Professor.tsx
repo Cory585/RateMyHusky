@@ -9,7 +9,7 @@ import RatingBar from '../components/RatingBar';
 import Breadcrumbs from '../components/Breadcrumbs';
 import Seo from '../components/Seo';
 import { fetchProfessorFull, fetchDeptAvg } from '../api/api';
-import type { ProfessorProfile, ProfessorReview, RedditMention, DeptAvg } from '../api/api';
+import type { ProfessorPage, ProfessorReview, RedditMention, DeptAvg } from '../api/api';
 import { isPinned, pinnedFirst } from '../utils/askPinMatch';
 import BookmarkButton from '../components/BookmarkButton';
 import neuIcon from '../assets/neu-circle-icon.png';
@@ -145,7 +145,7 @@ const Professor = () => {
   const gradesRef = useRef<HTMLDivElement>(null);
   const reviewTabsRef = useRef<HTMLDivElement>(null);
 
-  const [profile, setProfile] = useState<ProfessorProfile | null>(null);
+  const [profile, setProfile] = useState<ProfessorPage | null>(null);
   const [reviews, setReviews] = useState<ProfessorReview[]>([]);
   const [deptAvg, setDeptAvg] = useState<DeptAvg | null>(null);
   const [redditMentions, setRedditMentions] = useState<RedditMention[]>([]);
@@ -242,7 +242,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
           setError('Professor not found.');
         } else {
           setProfile(data);
-          setReviews(data.reviews || []);
+          setReviews(data.sources.rmp.reviews || []);
           setRedditMentions(data.redditMentions || []);
         }
       } catch { if (!cancelled) setError('Failed to load professor data.'); }
@@ -254,13 +254,13 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
 
   /* ── department averages for the comparison card ── */
   useEffect(() => {
-    if (!profile?.department) return;
+    if (!profile?.identity.department) return;
     let cancelled = false;
-    fetchDeptAvg(profile.department)
+    fetchDeptAvg(profile.identity.department)
       .then(d => { if (!cancelled) setDeptAvg(d); })
       .catch(() => { if (!cancelled) setDeptAvg(null); });
     return () => { cancelled = true; };
-  }, [profile?.department]);
+  }, [profile?.identity.department]);
 
   /* ── Ask citation pins: switch to the cited source's tab and scroll to reviews ── */
   useEffect(() => {
@@ -367,87 +367,75 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
     () => deduplicateByText(rmpRatingsInSelection, r => r.comment),
     [rmpRatingsInSelection]);
 
-  const stats = useMemo(() => {
+  /* The course filter narrows RMP to the ratings left on the selected courses. */
+  const unfiltered = allCourseCodes.length === 0 || selectedCourses.size === allCourseCodes.length;
+  const noneSelected = allCourseCodes.length > 0 && selectedCourses.size === 0;
+
+  const rmpStats = useMemo(() => {
     if (!profile) return null;
-
-    const noneSelected = selectedCourses.size === 0;
-    const allSelected = allCourseCodes.length > 0 && selectedCourses.size === allCourseCodes.length;
-
-    if (noneSelected) {
-      return {
-        avgRating: null,
-        difficulty: null,
-        totalRatings: null,
-        wouldTakeAgainPct: profile.wouldTakeAgainPct,
-      };
-    }
-
-    if (allSelected) {
-      return {
-        avgRating: profile.avgRating,
-        difficulty: profile.difficulty ?? 0,
-        /* The catalog's own count — the same field the GOATED board's "Ratings"
-           column serves, so the two pages agree by construction instead of by
-           two hand-rolled sums happening to land on the same number. */
-        totalRatings: profile.totalRatings,
-        wouldTakeAgainPct: profile.wouldTakeAgainPct,
-      };
-    }
-
-    // Course-filtered: recomputed over every rating in the selection, the same
-    // rows the count below reports — a mean over the text-deduplicated subset
-    // would be a mean of one population beside the size of another. null, not 0,
-    // for a selection with no ratings: 0 would render as 0.00 under five empty stars.
-    const avgRating = rmpRatingsInSelection.length > 0
-      ? rmpRatingsInSelection.reduce((acc, r) => acc + r.quality, 0) / rmpRatingsInSelection.length
-      : null;
-    const rmpDifficulty = rmpRatingsInSelection.length > 0
-      ? rmpRatingsInSelection.reduce((acc, r) => acc + r.difficulty, 0) / rmpRatingsInSelection.length
-      : null;
-
+    const rmp = profile.sources.rmp;
+    if (noneSelected) return { rating: null, difficulty: null, numRatings: 0 };
+    // Unfiltered: RMP's own summary (backend/rmp.py), not a recomputation.
+    if (unfiltered) return { rating: rmp.rating, difficulty: rmp.difficulty, numRatings: rmp.numRatings };
+    // Filtered: over every rating in the selection — the rows the count below
+    // reports. 0 is an unset score, not a score of zero (as in precompute).
+    const mean = (vals: number[]) => vals.length > 0 ? vals.reduce((a, v) => a + v, 0) / vals.length : null;
     return {
-      avgRating,
-      difficulty: rmpDifficulty ?? profile.difficulty ?? 0,
-      totalRatings: rmpRatingsInSelection.length,
-      wouldTakeAgainPct: profile.wouldTakeAgainPct,
+      rating: mean(rmpRatingsInSelection.map(r => r.quality).filter(q => q >= 1 && q <= 5)),
+      difficulty: mean(rmpRatingsInSelection.map(r => r.difficulty).filter(d => d >= 1 && d <= 5)),
+      numRatings: rmpRatingsInSelection.length,
     };
-  }, [profile, rmpRatingsInSelection, allCourseCodes, selectedCourses]);
+  }, [profile, rmpRatingsInSelection, unfiltered, noneSelected]);
 
+  /* RMP only: every rating in the selection, so the bars add up to the RMP
+     ratings card. Unfiltered, the backend's own distribution — the same rows. */
   const ratingDistribution = useMemo(() => {
-    const counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-
-    if (selectedCourses.size === 0) {
-      return [5, 4, 3, 2, 1].map(star => ({ star, count: 0 }));
+    if (noneSelected || !profile) return [5, 4, 3, 2, 1].map(star => ({ star, count: 0 }));
+    if (unfiltered) {
+      const d = profile.sources.rmp.ratingDistribution;
+      return [5, 4, 3, 2, 1].map(star => ({ star, count: d[String(star) as '1'] ?? 0 }));
     }
-
-    // Every rating, so the bars add up to the Total Ratings card above
+    const counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
     rmpRatingsInSelection.forEach(r => {
-      if (r.quality >= 1 && r.quality <= 5) {
-        const q = Math.round(r.quality) as 1 | 2 | 3 | 4 | 5;
-        counts[q]++;
-      }
+      if (r.quality >= 1 && r.quality <= 5) counts[Math.round(r.quality) as 1 | 2 | 3 | 4 | 5]++;
     });
-
-    return [5, 4, 3, 2, 1].map(star => ({
-      star,
-      count: counts[star as 1 | 2 | 3 | 4 | 5],
-    }));
-  }, [rmpRatingsInSelection, selectedCourses]);
+    return [5, 4, 3, 2, 1].map(star => ({ star, count: counts[star as 1 | 2 | 3 | 4 | 5] }));
+  }, [profile, rmpRatingsInSelection, unfiltered, noneSelected]);
 
   const maxCount = useMemo(() => Math.max(...ratingDistribution.map(d => d.count), 1), [ratingDistribution]);
 
+  /* RMP tags, over the same rows; unfiltered, the backend's ranking. Same
+     rule as rmp.top_tags: RMP joins a review's tags with "--". */
+  const topTags = useMemo(() => {
+    if (!profile || noneSelected) return [];
+    if (unfiltered) return profile.sources.rmp.topTags;
+    const counts = new Map<string, number>();
+    rmpRatingsInSelection.forEach(r => (r.tags || '').split('--').map(t => t.trim()).filter(Boolean)
+      .forEach(t => counts.set(t, (counts.get(t) || 0) + 1)));
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].toLowerCase().localeCompare(b[0].toLowerCase()))
+      .slice(0, profile.sources.rmp.topTags.length || 8)
+      .map(([tag, count]) => ({ tag, count }));
+  }, [profile, rmpRatingsInSelection, unfiltered, noneSelected]);
+
+  /* RMP grades, over the same rows as the rating distribution. */
   const gradeDistribution = useMemo(() => {
-    const counts: Record<string, number> = {};
-    filteredRmpReviews.forEach(r => {
-      const g = r.grade?.trim();
-      if (g && g !== 'N/A' && g !== 'Not sure yet' && g !== 'Rather not say') {
-        counts[g] = (counts[g] || 0) + 1;
-      }
-    });
+    let counts: Record<string, number> = {};
+    if (unfiltered && profile) {
+      counts = { ...profile.sources.rmp.gradeDistribution };
+    } else if (!noneSelected) {
+      rmpRatingsInSelection.forEach(r => {
+        const g = r.grade?.trim();
+        if (g && g !== 'N/A' && g !== 'Not sure yet' && g !== 'Rather not say') {
+          counts[g] = (counts[g] || 0) + 1;
+        }
+      });
+    }
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
     if (total === 0) return [];
     // Find the range of grades that appear and include all in-between
     const presentIndices = GRADE_ORDER.map((g, i) => counts[g] ? i : -1).filter(i => i >= 0);
+    if (presentIndices.length === 0) return [];
     const minIdx = Math.min(...presentIndices);
     const maxIdx = Math.max(...presentIndices);
     return GRADE_ORDER.slice(minIdx, maxIdx + 1).map(g => ({
@@ -456,7 +444,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
       pct: ((counts[g] || 0) / total) * 100,
       color: GRADE_COLORS[g] || '#999'
     }));
-  }, [filteredRmpReviews]);
+  }, [profile, rmpRatingsInSelection, unfiltered, noneSelected]);
 
   useEffect(() => {
     const el = gradesRef.current;
@@ -552,16 +540,31 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
     </div>
   );
 
-  if (error || !profile || !stats) return <NotFound />;
+  if (error || !profile || !rmpStats) return <NotFound />;
+
+  const identity = profile.identity;
+  const rmp = profile.sources.rmp;
+  const rmpScrapedLabel = (() => {
+    if (!rmp.scrapedAt) return null;
+    const d = new Date(rmp.scrapedAt);
+    return isNaN(d.getTime()) ? null : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  })();
+  const goToRmpReviews = () => {
+    setReviewTab('rmp');
+    setTimeout(() => reviewsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
 
   /* Mirrors render.professor_html's two forms deliberately: that module serves
      this same page to crawlers, and a professor whose description differs
-     between the two renders is the kind of mismatch that costs the canonical. */
-  const seoDescription = profile.avgRating !== null
-    ? `${profile.name} professor reviews and ratings: ${profile.avgRating.toFixed(1)}/5 from ${profile.totalRatings} student ratings at Northeastern` +
-      (profile.wouldTakeAgainPct != null ? ` (${profile.wouldTakeAgainPct}% would take again)` : '') +
+     between the two renders is the kind of mismatch that costs the canonical.
+     Labeled RMP values, not a blend: two decimals because the value is stored
+     at two and toFixed(2) reproduces Python's .2f exactly; would-take-again is
+     dropped when 0 because render reads v1, which coalesces 0 to null. */
+  const seoDescription = rmp.available && rmp.rating !== null
+    ? `${identity.name} professor reviews and ratings: ${rmp.rating.toFixed(2)}/5 from ${rmp.numRatings} RMP ratings at Northeastern` +
+      (rmp.wouldTakeAgainPct ? ` (${rmp.wouldTakeAgainPct}% would take again)` : '') +
       `. RateMyProfessors + Reddit.`
-    : `${profile.name}, Northeastern ${profile.department} professor: no student ratings yet. RateMyProfessors + Reddit.`;
+    : `${identity.name}, Northeastern ${identity.department} professor: no Rate My Professors ratings yet. RateMyProfessors + Reddit.`;
   const profCanonical = `https://ratemyhusky.com/professors/${slug}`;
   const profJsonLd = {
     '@context': 'https://schema.org',
@@ -569,17 +572,17 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
     dateModified: new Date().toISOString().slice(0, 10),
     mainEntity: {
       '@type': 'Person',
-      name: profile.name,
+      name: identity.name,
       jobTitle: 'Professor',
       worksFor: {
         '@type': 'CollegeOrUniversity',
         name: 'Northeastern University',
         sameAs: 'https://www.northeastern.edu',
       },
-      knowsAbout: profile.department,
+      knowsAbout: identity.department,
       url: profCanonical,
-      ...(profile.imageUrl ? { image: profile.imageUrl } : {}),
-      ...(profile.professorUrl ? { sameAs: [profile.professorUrl] } : {}),
+      ...(identity.imageUrl ? { image: identity.imageUrl } : {}),
+      ...(rmp.professorUrl ? { sameAs: [rmp.professorUrl] } : {}),
       // schema.org Person does not support aggregateRating (Google rejects it
       // as an invalid object type in Rich Results), so it is intentionally omitted.
     },
@@ -590,17 +593,26 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
     itemListElement: [
       { '@type': 'ListItem', position: 1, name: 'Home', item: 'https://ratemyhusky.com/' },
       { '@type': 'ListItem', position: 2, name: 'Professors', item: 'https://ratemyhusky.com/professors' },
-      { '@type': 'ListItem', position: 3, name: profile.name, item: profCanonical },
+      { '@type': 'ListItem', position: 3, name: identity.name, item: profCanonical },
     ],
+  };
+
+  const difficultyColor = (d: number) => {
+    if (d <= 1.5) return '#27ae60';
+    if (d <= 2.5) return '#66bd63';
+    if (d <= 3.0) return '#f39c12';
+    if (d <= 3.5) return '#e67e22';
+    if (d <= 4.0) return '#e74c3c';
+    return '#c0392b';
   };
 
   return (
     <div className="prof-page">
       <Seo
-        title={`${profile.name} Reviews & Ratings — Northeastern ${profile.department}`}
+        title={`${identity.name} Reviews & Ratings — Northeastern ${identity.department}`}
         description={seoDescription}
         canonical={profCanonical}
-        image={profile.imageUrl}
+        image={identity.imageUrl}
         ogType="profile"
         jsonLd={[profJsonLd, profBreadcrumbJsonLd]}
       />
@@ -609,31 +621,31 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
         <div className="prof-hero-glow" />
         <Breadcrumbs items={[
           { label: 'Professors', to: '/professors' },
-          { label: profile.name },
+          { label: identity.name },
         ]} />
         <div className="prof-hero-inner">
           <div
-            className={`prof-avatar ${profile.imageUrl ? 'prof-avatar-clickable' : ''}`}
+            className={`prof-avatar ${identity.imageUrl ? 'prof-avatar-clickable' : ''}`}
             onClick={() => {
-              if (profile.imageUrl) setIsImageModalOpen(true);
+              if (identity.imageUrl) setIsImageModalOpen(true);
             }}
-            role={profile.imageUrl ? 'button' : undefined}
-            tabIndex={profile.imageUrl ? 0 : undefined}
+            role={identity.imageUrl ? 'button' : undefined}
+            tabIndex={identity.imageUrl ? 0 : undefined}
             onKeyDown={(e) => {
-              if (!profile.imageUrl) return;
+              if (!identity.imageUrl) return;
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 setIsImageModalOpen(true);
               }
             }}
-            aria-label={profile.imageUrl ? `Open larger photo of ${profile.name}` : undefined}
+            aria-label={identity.imageUrl ? `Open larger photo of ${identity.name}` : undefined}
           >
-            {profile.imageUrl ? (
+            {identity.imageUrl ? (
               <img
-                src={profile.imageUrl}
-                alt={profile.name}
+                src={identity.imageUrl}
+                alt={identity.name}
                 className="prof-avatar-img"
-                style={{ objectPosition: `${profile.focusX ?? 50}% ${profile.focusY ?? 30}%` }}
+                style={{ objectPosition: `${identity.focusX ?? 50}% ${identity.focusY ?? 30}%` }}
                 onError={(e) => {
                   const target = e.currentTarget;
                   target.style.display = 'none';
@@ -644,130 +656,190 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
             ) : null}
             <span
               className="prof-avatar-initials"
-              style={profile.imageUrl ? { display: 'none' } : undefined}
+              style={identity.imageUrl ? { display: 'none' } : undefined}
             >
-              {profile.name.split(' ').map(n => n[0]).join('')}
+              {identity.name.split(' ').map(n => n[0]).join('')}
             </span>
           </div>
           <div className="prof-hero-info">
             <h1 className="prof-name">
-              {profile.name}
+              {identity.name}
               <BookmarkButton itemType="professor" itemKey={slug!} size="md" className="prof-hero-bookmark" />
             </h1>
-            <p className="prof-dept">{profile.department}</p>
+            <p className="prof-dept">{identity.department}</p>
+            {/* The one rating in the hero, and it says whose it is. */}
+            <button type="button" className="prof-hero-headline" onClick={() => chartsRef.current?.scrollIntoView({ behavior: 'smooth' })}>
+              <span className="prof-source-badge">RMP</span>
+              {rmp.available && rmp.rating !== null ? (
+                <span>
+                  <strong>{rmp.rating.toFixed(1)}</strong>
+                  <span className="prof-hero-headline-sep" aria-hidden="true">·</span>
+                  {rmp.numRatings.toLocaleString()} rating{rmp.numRatings === 1 ? '' : 's'}
+                </span>
+              ) : (
+                <span>No Rate My Professors ratings</span>
+              )}
+            </button>
           </div>
         </div>
       </header>
 
-      <section className="prof-stats">
-        <div className="prof-stat-card">
-          <span className="prof-stat-value">{stats.avgRating !== null ? <AnimatedNumber value={stats.avgRating} /> : '—'}</span>
-          <span className="prof-stat-label">Overall Rating</span>
-          <StarRating rating={stats.avgRating ?? 0} size="lg" />
-        </div>
-        <div className="prof-stat-card">
-          <span className="prof-stat-value">{stats.difficulty != null && stats.difficulty > 0 ? <AnimatedNumber value={stats.difficulty} /> : '—'}</span>
-          <span className="prof-stat-label">Difficulty</span>
-          <div className="prof-difficulty-bar">
-            <div className="prof-difficulty-fill" style={{ 
-              width: `${((stats.difficulty ?? 0) / 5) * 100}%`,
-              background: (() => {
-                const d = stats.difficulty ?? 0;
-                if (d <= 1.5) return '#27ae60';
-                if (d <= 2.5) return '#66bd63';
-                if (d <= 3.0) return '#f39c12';
-                if (d <= 3.5) return '#e67e22';
-                if (d <= 4.0) return '#e74c3c';
-                return '#c0392b';
-              })()
-            }} />
-          </div>
-        </div>
-        <div className="prof-stat-card">
-          <span className={`prof-stat-value ${stats.wouldTakeAgainPct !== null ? 'green' : ''}`}>
-            {stats.wouldTakeAgainPct !== null ? <AnimatedNumber value={stats.wouldTakeAgainPct} decimals={0} suffix="%" /> : '—'}
-          </span>
-          <span className="prof-stat-label">Would Take Again</span>
-        </div>
-        <div className="prof-stat-card prof-stat-clickable" onClick={() => chartsRef.current?.scrollIntoView({ behavior: 'smooth' })}>
-          <span className="prof-stat-value">{stats.totalRatings ? stats.totalRatings.toLocaleString() : '—'}</span>
-          <span className="prof-stat-label">Total Ratings</span>
-          <span className="prof-stat-hint">View distribution ↓</span>
-        </div>
-        <div className="prof-stat-card prof-stat-clickable" onClick={() => reviewsRef.current?.scrollIntoView({ behavior: 'smooth' })}>
-          <span className="prof-stat-value">{filteredRmpReviews.length.toLocaleString()}</span>
-          <span className="prof-stat-label">Total Comments</span>
-          <span className="prof-stat-hint">Read reviews ↓</span>
-        </div>
-      </section>
-
       <div className="prof-hero-actions-row">
-        <Link 
-          to={`/compare?a=${profile.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`} 
+        <Link
+          to={`/compare?a=${identity.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`}
           className="prof-compare-btn"
         >
           Compare
         </Link>
-        {profile.professorUrl && (
-          <a href={profile.professorUrl} target="_blank" rel="noreferrer" className="prof-rmp-btn">
-            View on RMP →
-          </a>
-        )}
       </div>
 
-      <section className="prof-section prof-charts-row" ref={chartsRef}>
-        <div className="prof-chart-card">
-          <h3 className="prof-chart-title">Rating Distribution</h3>
-          <div className="prof-distribution">
-            {ratingDistribution.map((d) => (
-              <RatingBar key={d.star} star={d.star} count={d.count} max={maxCount} />
-            ))}
+      {/* ═══ Rate My Professors: every number in here is RMP's, and only RMP's ═══ */}
+      <section className="prof-section prof-source-section" ref={chartsRef} aria-labelledby="prof-rmp-title">
+        <div className="prof-source-header">
+          <div className="prof-source-heading">
+            <span className="prof-source-badge">RMP</span>
+            <h2 className="prof-section-title" id="prof-rmp-title">Rate My Professors</h2>
+          </div>
+          <div className="prof-source-meta">
+            {rmpScrapedLabel && <span className="prof-source-asof">Data as of {rmpScrapedLabel}</span>}
+            {rmp.professorUrl && (
+              <a href={rmp.professorUrl} target="_blank" rel="noreferrer" className="prof-rmp-btn">
+                View on RMP →
+              </a>
+            )}
           </div>
         </div>
-        {gradeDistribution.length > 0 && (
-          <div className="prof-chart-card" ref={gradesRef}>
-            <h3 className="prof-chart-title">Grade Distribution</h3>
-            <div className="prof-grades">
-              {gradeDistribution.map((g) => (
-                <div key={g.grade} className="prof-grade-row">
-                  <span className="prof-grade-label" style={{ color: g.color }}>{g.grade}</span>
-                  <div className="prof-grade-track">
-                    <div className="prof-grade-fill" style={{ width: gradesAnimated ? `${g.pct}%` : '0%', background: g.color }} />
-                  </div>
-                  <span className="prof-grade-count">{g.count}</span>
-                </div>
-              ))}
-            </div>
+
+        {!rmp.available ? (
+          <div className="prof-source-empty">
+            <p className="prof-source-empty-title">No Rate My Professors data</p>
+            <p className="prof-source-empty-text">
+              {rmp.reason === 'no_ratings'
+                ? 'This professor has a Rate My Professors page, but no ratings yet.'
+                : 'We couldn’t find this professor on Rate My Professors.'}
+            </p>
           </div>
-        )}
-        {deptAvg && (deptAvg.avgRating != null || deptAvg.difficulty != null || deptAvg.wouldTakeAgainPct != null) && (
-          <div className="prof-chart-card">
-            <h3 className="prof-chart-title">vs. {profile.department}</h3>
-            <div className="prof-compare-rows">
-              {([
-                { label: 'Rating', prof: profile.avgRating, dept: deptAvg.avgRating, max: 5, fmt: (v: number) => v.toFixed(1) },
-                { label: 'Difficulty', prof: profile.difficulty, dept: deptAvg.difficulty, max: 5, fmt: (v: number) => v.toFixed(1) },
-                { label: 'Would Take Again', prof: profile.wouldTakeAgainPct, dept: deptAvg.wouldTakeAgainPct, max: 100, fmt: (v: number) => `${Math.round(v)}%` },
-              ]).map(m => (
-                <div key={m.label} className="prof-compare-row">
-                  <span className="prof-compare-label">{m.label}</span>
-                  {([['This professor', m.prof, ''], ['Department', m.dept, ' dept']] as const).map(([who, v, cls]) => (
-                    <div key={who} className="prof-compare-bar">
-                      <span className="prof-compare-who">{who}</span>
-                      <div className="prof-compare-track">
-                        {v != null && <div className={`prof-compare-fill${cls}`} style={{ width: `${Math.min(100, (v / m.max) * 100)}%` }} />}
-                      </div>
-                      <span className="prof-compare-val">{v != null ? m.fmt(v) : '—'}</span>
-                    </div>
+        ) : (
+          <>
+            {(rmp.fewRatings || !unfiltered) && (
+              <div className="prof-source-notes">
+                {rmp.fewRatings && (
+                  <span className="prof-source-note warn">
+                    Only {rmp.numRatings} rating{rmp.numRatings === 1 ? '' : 's'} — a few reviews can swing these numbers a lot.
+                  </span>
+                )}
+                {!unfiltered && (
+                  <span className="prof-source-note">
+                    Showing {rmpStats.numRatings.toLocaleString()} of {rmp.numRatings.toLocaleString()} RMP ratings for the selected courses.
+                  </span>
+                )}
+              </div>
+            )}
+
+            <div className="prof-stats prof-source-stats">
+              <div className="prof-stat-card">
+                <span className="prof-stat-value">{rmpStats.rating !== null ? <AnimatedNumber value={rmpStats.rating} /> : '—'}</span>
+                <span className="prof-stat-label">RMP Rating</span>
+                <StarRating rating={rmpStats.rating ?? 0} size="lg" />
+              </div>
+              <div className="prof-stat-card">
+                <span className="prof-stat-value">{rmpStats.difficulty !== null ? <AnimatedNumber value={rmpStats.difficulty} /> : '—'}</span>
+                <span className="prof-stat-label">RMP Difficulty</span>
+                <div className="prof-difficulty-bar">
+                  <div className="prof-difficulty-fill" style={{
+                    width: `${((rmpStats.difficulty ?? 0) / 5) * 100}%`,
+                    background: difficultyColor(rmpStats.difficulty ?? 0),
+                  }} />
+                </div>
+              </div>
+              <div className="prof-stat-card">
+                <span className={`prof-stat-value ${rmp.wouldTakeAgainPct !== null ? 'green' : ''}`}>
+                  {rmp.wouldTakeAgainPct !== null ? <AnimatedNumber value={rmp.wouldTakeAgainPct} decimals={0} suffix="%" /> : '—'}
+                </span>
+                <span className="prof-stat-label">Would Take Again</span>
+                {/* RMP publishes this per professor only, so it cannot follow the course filter. */}
+                {!unfiltered && <span className="prof-stat-hint">All courses</span>}
+              </div>
+              <div className="prof-stat-card prof-stat-clickable" onClick={goToRmpReviews}>
+                <span className="prof-stat-value">{rmpStats.numRatings ? rmpStats.numRatings.toLocaleString() : '—'}</span>
+                <span className="prof-stat-label">RMP Ratings</span>
+                <span className="prof-stat-hint">Read reviews ↓</span>
+              </div>
+            </div>
+
+            <div className="prof-charts-row prof-source-charts">
+              <div className="prof-chart-card">
+                <h3 className="prof-chart-title">RMP Rating Distribution</h3>
+                <div className="prof-distribution">
+                  {ratingDistribution.map((d) => (
+                    <RatingBar key={d.star} star={d.star} count={d.count} max={maxCount} />
                   ))}
                 </div>
-              ))}
+              </div>
+              {gradeDistribution.length > 0 && (
+                <div className="prof-chart-card" ref={gradesRef}>
+                  <h3 className="prof-chart-title">RMP Grade Distribution</h3>
+                  <div className="prof-grades">
+                    {gradeDistribution.map((g) => (
+                      <div key={g.grade} className="prof-grade-row">
+                        <span className="prof-grade-label" style={{ color: g.color }}>{g.grade}</span>
+                        <div className="prof-grade-track">
+                          <div className="prof-grade-fill" style={{ width: gradesAnimated ? `${g.pct}%` : '0%', background: g.color }} />
+                        </div>
+                        <span className="prof-grade-count">{g.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {deptAvg && (deptAvg.avgRating != null || deptAvg.difficulty != null || deptAvg.wouldTakeAgainPct != null) && (
+                <div className="prof-chart-card">
+                  <h3 className="prof-chart-title">vs. {identity.department}</h3>
+                  <div className="prof-compare-rows">
+                    {([
+                      { label: 'Rating', prof: rmp.rating, dept: deptAvg.avgRating, max: 5, fmt: (v: number) => v.toFixed(1) },
+                      { label: 'Difficulty', prof: rmp.difficulty, dept: deptAvg.difficulty, max: 5, fmt: (v: number) => v.toFixed(1) },
+                      { label: 'Would Take Again', prof: rmp.wouldTakeAgainPct, dept: deptAvg.wouldTakeAgainPct, max: 100, fmt: (v: number) => `${Math.round(v)}%` },
+                    ]).map(m => (
+                      <div key={m.label} className="prof-compare-row">
+                        <span className="prof-compare-label">{m.label}</span>
+                        {([['This professor', m.prof, ''], ['Department', m.dept, ' dept']] as const).map(([who, v, cls]) => (
+                          <div key={who} className="prof-compare-bar">
+                            <span className="prof-compare-who">{who}</span>
+                            <div className="prof-compare-track">
+                              {v != null && <div className={`prof-compare-fill${cls}`} style={{ width: `${Math.min(100, (v / m.max) * 100)}%` }} />}
+                            </div>
+                            <span className="prof-compare-val">{v != null ? m.fmt(v) : '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
+
+            {topTags.length > 0 && (
+              <div className="prof-source-tags">
+                <h3 className="prof-chart-title">Top RMP Tags</h3>
+                <div className="prof-review-tags">
+                  {topTags.map(t => (
+                    <span key={t.tag} className="prof-review-tag">
+                      {t.tag} <span className="prof-source-tag-count">{t.count}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <button type="button" className="prof-action-link prof-source-reviews-link" onClick={goToRmpReviews}>
+              Read {filteredRmpReviews.length.toLocaleString()} RMP review{filteredRmpReviews.length === 1 ? '' : 's'} ↓
+            </button>
+          </>
         )}
       </section>
 
-      {isImageModalOpen && profile.imageUrl && (
+      {isImageModalOpen && identity.imageUrl && (
         <div className="prof-image-modal-overlay" onClick={() => setIsImageModalOpen(false)}>
           <div className="prof-image-modal" onClick={(e) => e.stopPropagation()}>
             <button
@@ -777,7 +849,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
             >
               ×
             </button>
-            <img src={profile.imageUrl} alt={profile.name} className="prof-image-modal-img" />
+            <img src={identity.imageUrl} alt={identity.name} className="prof-image-modal-img" />
           </div>
         </div>
       )}
@@ -807,7 +879,7 @@ const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('p
               {row.hasPage && (
                 <Link
                   to={`/courses/${row.code.toLowerCase()}`}
-                  state={{ fromPage: { label: profile.name, url: `/professors/${slug}` } }}
+                  state={{ fromPage: { label: identity.name, url: `/professors/${slug}` } }}
                   className="prof-course-view-btn"
                   onClick={(e) => e.stopPropagation()}
                 >
