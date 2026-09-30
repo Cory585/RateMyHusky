@@ -26,11 +26,9 @@ def test_rmp_professors_can_be_replaced():
 
 
 def test_cumulative_artifacts_cannot_be_replaced():
-    # TRACE and photo CSVs accumulate across scrapes rather than being a
-    # complete snapshot of the source, so replacing from them destroys data.
-    for table in ("trace_courses", "trace_scores", "trace_comments",
-                  "professor_photos"):
-        assert table not in REPLACE_ALLOWED
+    # The photo CSV accumulates across scrapes rather than being a complete
+    # snapshot of the source, so replacing from it destroys data.
+    assert "professor_photos" not in REPLACE_ALLOWED
 
 
 def test_allowlist_only_names_real_tables():

@@ -15,8 +15,6 @@ backend/groq_keys.local.json
 *.local.json
 
 archive/
-scraper/trace_pipeline/cookies.txt
-scraper/applyweb_pipeline/data/
-scraper/applyweb_pipeline/cookies.txt
+scraper/*/cookies.txt
 backend/rag/eval/pool.json*
 backend/rag/eval/runs/*/answers.json*

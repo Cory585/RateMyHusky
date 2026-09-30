@@ -39,7 +39,7 @@ jobs:
         working-directory: backend
         run: pip install -r requirements-data.txt
 
-      # Pull the CSV data store (photos, course listings, previous RMP data) into
+      # Pull the CSV data store (photos, previous RMP data) into
       # output_data. precompute.py reads its CSVs from here; the RMP scrape
       # below overwrites rmp_professors.csv / rmp_reviews.csv with fresh data.
       - name: Fetch data store
@@ -137,15 +137,11 @@ jobs:
           python prune_rmp_reviews.py \
             --csv Better_Scraper/output_data/rmp_reviews.csv
 
-      # RMP-only refresh: TRACE data is unchanged this run, so skip the heavy
-      # TRACE table maintenance (REFRESH_TRACE=false). Run a full precompute
-      # (REFRESH_TRACE unset/true) after a manual TRACE re-scrape.
       - name: Precompute & write to CockroachDB
         if: ${{ !inputs.dry_run }}
         working-directory: backend
         env:
           CRDB_DATABASE_URL: ${{ secrets.CRDB_DATABASE_URL }}
-          REFRESH_TRACE: "false"
         run: python precompute.py
 
       # Post-write verification: the pre-scrape floors validate the input CSVs;
