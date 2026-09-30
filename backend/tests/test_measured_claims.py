@@ -192,11 +192,6 @@ CLAIMS = [
      lambda c: len(c.board("Professional Studies")),
      ("abs", 1)),
 
-    ("TRACE share of total_reviews (frontend)", HOMEPAGE_TSX,
-     r"survey responses \(~(\d+)% the latter\)",
-     lambda c: _trace_share(c),
-     ("abs", 2)),
-
     ("score/review-count tie groups", SERVER_PY,
      r"\b(\d+) such groups across the catalog",
      lambda c: _tie_groups(c)[0],
@@ -206,15 +201,6 @@ CLAIMS = [
      r"covering (\d+) professors",
      lambda c: _tie_groups(c)[1],
      ("rel", 0.25)),
-
-    ("eligible professors with no written RMP review", HOMEPAGE_TSX,
-     r"the latter\), and ([\d,]+) of the professors",
-     lambda c: c.val(
-         "SELECT count(*) FROM professors_catalog p WHERE p.total_reviews >= %s "
-         "AND NOT EXISTS (SELECT 1 FROM rmp_reviews r WHERE r.name_key = p.name_key "
-         "  AND r.comment IS NOT NULL AND r.comment != %s)",
-         (server.BOARD_MIN_REVIEWS, "")),
-     ("rel", 0.10)),
 
     ("fewest rating inversions on a board", HOMEPAGE_TSX,
      r"moves backwards between adjacent rows, (\d+)-\d+ times per board",
@@ -246,13 +232,6 @@ def _reviews_to_reach(corpus, college):
         if n > 100_000:                            # unreachable target
             return n
     return n
-
-
-def _trace_share(corpus):
-    return 100.0 * corpus.val(
-        "SELECT sum(trace_reviews)::float / sum(total_reviews)::float "
-        "FROM professors_catalog WHERE total_reviews >= %s",
-        (server.BOARD_MIN_REVIEWS,))
 
 
 def _tie_group_sizes(corpus, college=None):

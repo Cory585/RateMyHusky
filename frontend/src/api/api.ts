@@ -10,14 +10,10 @@ export interface Professor {
   name: string;
   dept: string;
   rmpRating: number | null;
-  traceRating: number | null;
   avgRating: number;
-  /** Ratings: RMP ratings + TRACE overall-question responses. What the
-   *  leaderboard's floor gates on, and what the ranking weights by. */
+  /** Ratings behind avgRating: what the leaderboard's floor gates on and the ranking weights by. */
   totalReviews?: number;
-  /** Rows of written text: RMP comments + TRACE comment rows. Not a subset of
-   *  totalReviews and usually 2-3x larger, because TRACE stores one row per
-   *  open-ended question per student. Unused by the leaderboard. */
+  /** Written reviews. Unused by the leaderboard. */
   totalComments?: number;
 }
 
@@ -25,69 +21,6 @@ export interface RandomProfessor {
   name: string;
   dept: string;
   college: string;
-}
-
-/* ---- Professor page types ---- */
-export interface RadarDataPoint {
-  metric: string;
-  professor: number;
-  department: number;
-  profMissing: boolean;
-  deptMissing: boolean;
-}
-
-export interface TraceCourse {
-  courseId: number;
-  termId: number;
-  termTitle: string;
-  departmentName: string;
-  displayName: string;
-  hoursPerWeek?: number | null;
-  challengeWeightedSum?: number | null;
-  challengeResponses?: number | null;
-  overallRating?: number | null;
-}
-
-export interface TraceRatingCounts {
-  count1: number;
-  count2: number;
-  count3: number;
-  count4: number;
-  count5: number;
-  completed: number;
-}
-
-export interface ProfessorProfile {
-  name: string;
-  department: string;
-  rmpRating: number | null;
-  traceRating: number | null;
-  /* Null for a professor with no RMP ratings and no responses to TRACE's
-     overall question — the catalog holds NULL and the API no longer coalesces
-     it to 0, since 0 is off the bottom of the 1-5 scale and rendered as a real
-     score. Every display of it needs the null branch; "—" is the house style,
-     matching what totalRatings already showed for the same professors. */
-  avgRating: number | null;
-  wouldTakeAgainPct: number | null;
-  difficulty: number | null;
-  totalRatings: number;
-  totalComments: number;
-  professorUrl: string | null;
-  traceCourses: TraceCourse[];
-  imageUrl: string | null;
-  focusX: number;
-  focusY: number;
-  hoursPerWeek: number | null;
-  traceRatingCounts?: Record<string, TraceRatingCounts>;
-  radarData?: RadarDataPoint[] | null;
-  radarTermTitle?: string | null;
-  colleagues?: { name: string; slug: string; avgRating: number | null; totalRatings: number }[];
-}
-
-export interface ProfessorReviews {
-  reviews: ProfessorReview[];
-  traceComments: TraceComment[];
-  redditMentions: RedditMention[];
 }
 
 /* ---- Professor page (/full, version 2) ----
@@ -166,13 +99,6 @@ export interface ProfessorReview {
   comment: string;
 }
 
-export interface TraceComment {
-  courseId: number;
-  question: string;
-  comment: string;
-  termId: number;
-}
-
 export interface RedditMention {
   body: string;
   sentiment: 'positive' | 'neutral' | 'negative' | null;
@@ -184,8 +110,6 @@ export interface RedditMention {
 }
 
 /* ---- Session caches (cleared on page refresh, keyed by slug/code) ---- */
-const _profCache = new Map<string, ProfessorProfile>();
-const _profReviewsCache = new Map<string, ProfessorReviews>();
 const _courseCache = new Map<string, CourseDetail>();
 
 const _profPageCache = new Map<string, ProfessorPage>();
@@ -253,32 +177,6 @@ export async function fetchProfessorFull(slug: string): Promise<Fetched<Professo
   const res = await fetchWithStatus<ProfessorPage>(`/api/professors/${encodeURIComponent(slug)}/full`);
   if (res.ok) _profPageCache.set(slug, res.data);
   return res;
-}
-
-export async function fetchProfessorData(slug: string): Promise<ProfessorProfile | null> {
-  const token = localStorage.getItem('auth_token');
-  const key = `${slug}:${token ?? 'u'}`;
-  if (_profCache.has(key)) return _profCache.get(key)!;
-  try {
-    const data = await get<ProfessorProfile>(`/api/professors/${encodeURIComponent(slug)}`);
-    _profCache.set(key, data);
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-export async function fetchProfessorReviews(slug: string): Promise<ProfessorReviews | null> {
-  const token = localStorage.getItem('auth_token');
-  const key = `${slug}:${token ?? 'u'}`;
-  if (_profReviewsCache.has(key)) return _profReviewsCache.get(key)!;
-  try {
-    const data = await get<ProfessorReviews>(`/api/professors/${encodeURIComponent(slug)}/reviews`);
-    _profReviewsCache.set(key, data);
-    return data;
-  } catch {
-    return null;
-  }
 }
 
 /* ---- Search autocomplete ---- */
@@ -355,7 +253,6 @@ export interface CatalogProfessor {
   college: string;
   avgRating: number | null;
   rmpRating: number | null;
-  traceRating: number | null;
   totalReviews: number;
   totalComments: number;
   wouldTakeAgainPct: number | null;

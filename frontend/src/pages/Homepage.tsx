@@ -170,12 +170,6 @@ const RatingCell = ({ prof, isOpen, onToggle }: {
               {prof.rmpRating !== null ? prof.rmpRating.toFixed(2) : '—'}
             </span>
           </div>
-          <div className="tooltip-row">
-            <span className="tooltip-label">TRACE</span>
-            <span className="tooltip-value">
-              {prof.traceRating !== null ? prof.traceRating.toFixed(2) : '—'}
-            </span>
-          </div>
           <div className="tooltip-divider" />
           <div className="tooltip-row">
             <span className="tooltip-label">Avg Rating</span>
@@ -452,14 +446,14 @@ const Homepage = () => {
     <div className="homepage">
       <Seo
         title="RateMyHusky — Northeastern University Professor Reviews & Ratings"
-        description="Find the right Northeastern professor every semester. RateMyHusky combines TRACE evaluations and RateMyProfessor ratings and reviews in one place."
+        description="Find the right Northeastern professor every semester. RateMyHusky brings RateMyProfessor ratings and Reddit discussion together in one place."
         canonical="https://ratemyhusky.com/"
         jsonLd={{
           '@context': 'https://schema.org',
           '@type': 'WebSite',
           name: 'RateMyHusky',
           url: 'https://ratemyhusky.com/',
-          description: 'Northeastern University professor and course ratings combining TRACE evaluations and RateMyProfessor reviews.',
+          description: 'Northeastern University professor and course ratings from RateMyProfessor reviews and Reddit discussion.',
         }}
       />
 
@@ -506,7 +500,7 @@ const Homepage = () => {
           Find the <span>right professor</span>, every semester
         </h1>
         <p className="hero-subtitle">
-          TRACE evaluations and RateMyProfessor ratings, all in one place.
+          RateMyProfessor ratings and Reddit discussion, all in one place.
         </p>
 
         <SearchBar forceAsk={askTrigger} restoreAsk={(location.state as { restoreAsk?: boolean } | null)?.restoreAsk} />
@@ -596,9 +590,7 @@ const Homepage = () => {
                 on Rating alone reads as "sorted by Rating, descending", the exact
                 claim the note is there to deny. */}
             <span className="goat-col-rating goat-col-ranked">Rating</span>
-            {/* "Ratings", not "Reviews": the number is RMP ratings plus TRACE
-                survey responses (~95% the latter), and 1,907 of the professors
-                eligible for these boards have no written RMP review at all. */}
+            {/* "Ratings", not "Reviews": many professors on these boards have ratings but no written review. */}
             <span className="goat-col-reviews goat-col-ranked">Ratings</span>
           </div>
 
