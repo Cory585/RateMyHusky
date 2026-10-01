@@ -298,6 +298,25 @@ def _course(**summary_over):
             "professors": [{"slug": "francis-georges", "name": "Francis Georges"}]}
 
 
+def test_course_html_shows_catalog_details():
+    detail = {**_course(), "catalog": {"description": "Covers the macroeconomy.", "credits": "4",
+                                       "prerequisites": "ECON 1116", "corequisites": None,
+                                       "nupath": ["Analyzing/Using Data"]}}
+    html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
+    assert "<p>Covers the macroeconomy.</p>" in html
+    assert "<dt>Credits</dt><dd>4</dd>" in html
+    assert "<dt>Prerequisites</dt><dd>ECON 1116</dd>" in html
+    assert "<dt>NUpath</dt><dd>Analyzing/Using Data</dd>" in html
+    assert "Corequisites" not in html
+    course_block = next(b for b in _extract_jsonld(html) if b.get("@type") == "Course")
+    assert course_block["description"] == "Covers the macroeconomy."
+
+
+def test_course_html_without_catalog_is_unchanged():
+    html = course_html(_course(), "https://ratemyhusky.com/courses/econ1115")
+    assert "<dt>Credits</dt>" not in html
+
+
 def _base_profile(**over):
     p = {
         "name": "Francis Georges", "department": "Economics", "avgRating": 4.25,

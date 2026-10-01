@@ -369,7 +369,7 @@ const Professor = () => {
 
   /* Every stored RMP rating in the selection; the card list below dedupes these for display. */
   const rmpRatingsInSelection = useMemo(
-    () => unfiltered ? reviews : reviews.filter(r => selectedCourses.has(courseCode(r.course))),
+    () => unfiltered ? reviews : reviews.filter(r => r.courseCode !== null && selectedCourses.has(r.courseCode)),
     [reviews, selectedCourses, unfiltered]);
 
   const filteredRmpReviews = useMemo(

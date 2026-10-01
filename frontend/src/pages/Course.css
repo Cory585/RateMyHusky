@@ -651,3 +651,67 @@
   box-shadow: 0 6px 24px rgba(214,57,76,0.45);
 }
 .back-to-top svg { width: 20px; height: 20px; }
+
+/* Catalog description, credits, prerequisites and NUpath. */
+.course-catalog-desc {
+	margin: 0 0 14px;
+	color: #3a3a3a;
+	line-height: 1.55;
+}
+
+.course-catalog-facts {
+	display: grid;
+	gap: 10px;
+	margin: 0;
+}
+
+.course-catalog-facts > div {
+	display: grid;
+	grid-template-columns: 120px 1fr;
+	gap: 12px;
+}
+
+.course-catalog-facts dt {
+	color: #767676;
+	font-weight: 700;
+	font-size: 0.85rem;
+}
+
+.course-catalog-facts dd {
+	margin: 0;
+	color: #3a3a3a;
+	font-size: 0.9rem;
+	overflow-wrap: anywhere;
+}
+
+.course-catalog-nupath {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.course-catalog-tag {
+	padding: 2px 10px;
+	border-radius: 999px;
+	background: #e8f3f0;
+	color: #1b6d5e;
+	font-size: 0.8rem;
+	font-weight: 600;
+}
+
+@media (max-width: 600px) {
+	.course-catalog-facts > div {
+		grid-template-columns: 1fr;
+		gap: 2px;
+	}
+}
+
+.dark .course-catalog-desc,
+.dark .course-catalog-facts dd {
+	color: #c8c8c8;
+}
+
+.dark .course-catalog-tag {
+	background: #1f3a34;
+	color: #7fd1bd;
+}
