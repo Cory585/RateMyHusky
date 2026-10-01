@@ -13,6 +13,7 @@ import Footer from '../components/Footer';
 import StarRating from '../components/StarRating';
 import BookmarkButton from '../components/BookmarkButton';
 import Seo from '../components/Seo';
+import { useDebouncedValue } from '../utils/useDebouncedValue';
 import './ProfessorCatalog.css';
 import './Courses.css';
 
@@ -151,11 +152,13 @@ export default function Courses() {
 		fetchCourseDepartments().then(setDepartments).catch(console.error);
 	}, []);
 
+	const debouncedQ = useDebouncedValue(filters.q, 250);
+
 	useEffect(() => {
 		if (!isMeasured) return;
 		setLoading(true);
 		fetchCoursesCatalog({
-			q: filters.q || undefined,
+			q: debouncedQ || undefined,
 			dept: filters.dept || undefined,
 			minRating: filters.minRating > 0 ? filters.minRating : undefined,
 			maxRating: filters.maxRating < 5 ? filters.maxRating : undefined,
@@ -170,7 +173,7 @@ export default function Courses() {
 			})
 			.catch(console.error)
 			.finally(() => setLoading(false));
-	}, [filters, pageSize, isMeasured]);
+	}, [debouncedQ, filters.dept, filters.minRating, filters.maxRating, filters.sort, filters.page, pageSize, isMeasured]);
 
 	useEffect(() => {
 		const next = buildSearchParamsFromFilters(filters);

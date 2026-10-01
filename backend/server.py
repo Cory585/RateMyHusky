@@ -24,7 +24,7 @@ import jwt as pyjwt
 import requests as http_requests
 from urllib.parse import urlencode, urlparse
 from datetime import datetime, timedelta, timezone
-from threading import Lock, Thread, Event
+from threading import Lock
 import time
 from rag.chat_search import keyword_search
 from rag.chat_question import handle_question
@@ -252,6 +252,7 @@ def _get_pool():
     if _pool is None:
         _pool = ThreadedConnectionPool(5, 10, CRDB_DATABASE_URL, sslmode="require",
                                        connect_timeout=5,
+                                       options="-c statement_timeout=5000",
                                        keepalives=1, keepalives_idle=30,
                                        keepalives_interval=10, keepalives_count=3)
     return _pool
@@ -261,7 +262,7 @@ def _get_pool():
 # ──────────────────────────────────────────────
 _cache = {}
 _cache_lock = Lock()
-CACHE_TTL = 3600      # 1 hour
+CACHE_TTL = 86400      # 24 h; a pipeline run invalidates by bumping data_version
 CACHE_MAX_SIZE = 5000
 
 _feedback_lock = Lock()
@@ -274,7 +275,34 @@ _ACCOUNT_FEEDBACK_TYPES = {"banappeal", "datadeletion"}
 
 
 
+DATA_VERSION_TTL = 60
+_version_state = {"value": 0, "checked": 0.0}
+_version_lock = Lock()
+
+
+def data_version():
+    """stats_cache.data_version, re-read at most once a minute per process. Every
+    pipeline run bumps it, which retires every cached page at once. Bumping it by
+    hand (UPDATE stats_cache SET value = value + 1 WHERE key = 'data_version')
+    flushes every process's cache within a minute, e.g. after a takedown or
+    moderation change."""
+    now = time.time()
+    with _version_lock:
+        if now - _version_state["checked"] < DATA_VERSION_TTL:
+            return _version_state["value"]
+        _version_state["checked"] = now
+    row = query_one("SELECT value FROM stats_cache WHERE key = 'data_version'")
+    value = int(row["value"]) if row else 0
+    with _version_lock:
+        if value != _version_state["value"]:
+            with _cache_lock:
+                _cache.clear()   # entries under the old version can never be read again
+        _version_state["value"] = value
+    return value
+
+
 def cache_get(key):
+    key = f"v{data_version()}:{key}"
     with _cache_lock:
         entry = _cache.get(key)
         if entry and time.time() - entry["ts"] < CACHE_TTL:
@@ -283,48 +311,12 @@ def cache_get(key):
 
 
 def cache_set(key, data):
+    key = f"v{data_version()}:{key}"
     with _cache_lock:
+        _cache.pop(key, None)   # re-insert so dict order stays oldest-first
         _cache[key] = {"data": data, "ts": time.time()}
-        if len(_cache) > CACHE_MAX_SIZE:
-            cutoff = time.time() - CACHE_TTL
-            expired = [k for k, v in _cache.items() if v["ts"] < cutoff]
-            for k in expired:
-                del _cache[k]
-
-
-# ──────────────────────────────────────────────
-#  Daily memory reset at 09:00 UTC
-# ──────────────────────────────────────────────
-_shutdown_event = Event()
-_reset_thread_started = False
-
-def _seconds_until_next_9utc():
-    now = datetime.now(timezone.utc)
-    target = now.replace(hour=9, minute=0, second=0, microsecond=0)
-    if now >= target:
-        target += timedelta(days=1)
-    return (target - now).total_seconds()
-
-def _daily_cache_reset():
-    while not _shutdown_event.is_set():
-        wait = _seconds_until_next_9utc()
-        if _shutdown_event.wait(timeout=wait):
-            break
-        try:
-            with _cache_lock:
-                _cache.clear()
-            print(f"[{datetime.now(timezone.utc).isoformat()}] Daily cache reset complete",
-                  flush=True)
-        except Exception as e:
-            print(f"[{datetime.now(timezone.utc).isoformat()}] Cache reset error: {e}",
-                  flush=True)
-
-def _start_reset_thread():
-    global _reset_thread_started
-    if not _reset_thread_started:
-        _reset_thread_started = True
-        t = Thread(target=_daily_cache_reset, daemon=True)
-        t.start()
+        while len(_cache) > CACHE_MAX_SIZE:
+            del _cache[next(iter(_cache))]
 
 
 def _acquire_fresh_conn():
@@ -358,11 +350,6 @@ def get_db():
     return conn
 
 
-@app.before_request
-def _ensure_reset_thread():
-    _start_reset_thread()
-
-
 @app.teardown_appcontext
 def return_db(exc):
     db = g.pop('db', None)
@@ -383,6 +370,8 @@ def query(sql, params=None):
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute(sql, params or ())
         return cur.fetchall()
+    except psycopg2.extensions.QueryCanceledError:
+        raise   # statement_timeout: the connection is healthy, a retry would just time out again
     except (psycopg2.InterfaceError, psycopg2.OperationalError):
         # Connection was stale — discard it and retry once with a fresh one
         _discard_db_conn()
@@ -408,6 +397,8 @@ def _chat_write(sql, params=None):
         cur = conn.cursor()
         cur.execute(sql, params or ())
         conn.commit()
+    except psycopg2.extensions.QueryCanceledError as e:
+        print(f"_chat_write: log write timed out, dropping: {e}")
     except (psycopg2.InterfaceError, psycopg2.OperationalError):
         try:
             _discard_db_conn()
@@ -438,6 +429,8 @@ def _write(sql, params=None):
         cur = conn.cursor()
         cur.execute(sql, params or ())
         conn.commit()
+    except psycopg2.extensions.QueryCanceledError:
+        raise
     except (psycopg2.InterfaceError, psycopg2.OperationalError):
         _discard_db_conn()
         conn = get_db()
