@@ -22,6 +22,7 @@ LIVE_TABLES = {
     "professors_catalog", "course_catalog", "rmp_reviews", "rmp_professors",
     "stats_cache", "bookmarks", "reddit_mentions", "reddit_text", "reddit_sentiment",
     "ask_log", "evidence", "evidence_embeddings", "usage_alerts",
+    "professors", "rmp_links", "source_summary", "catalog_courses", "catalog_nupath",
 }
 _TABLE_REF = re.compile(r"\b(?:FROM|JOIN)\s+([a-z_][a-z0-9_]*)", re.IGNORECASE)
 
@@ -37,7 +38,11 @@ ROW = {
     "item_type": "professor", "item_key": "olin-guha",
     "created_at": datetime.datetime(2026, 9, 1, tzinfo=datetime.timezone.utc),
     "body": "text", "subreddit": "NEU", "permalink": "/r/x", "created_utc": None,
-    "reddit_score": 1, "sentiment": None, "sentiment_score": None, "source_id": "s1", "professor_slug": "olin-guha", "professor_slugs": ["olin-guha"], "score": 1,
+    "professor_slug": "olin-guha", "course_code": "CS3500", "source": "blend",
+    "num_comments": 1, "hours_per_week": None, "rating_distribution": {}, "grade_distribution": {},
+    "course_name": None, "description": None, "credit_hours": None, "prerequisites": None,
+    "corequisites": None, "nupath": [],
+    "reddit_score": 1, "sentiment": None, "sentiment_score": None, "source_id": "s1", "professor_slugs": ["olin-guha"], "score": 1,
 }
 
 TEST_SECRET = "test-secret-0123456789abcdefghijklmnop"  # gitleaks:allow

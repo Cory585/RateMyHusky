@@ -713,19 +713,6 @@ def goat_professors():
         LIMIT %s
     """, (college, min_reviews, prior, limit))
 
-    # Comment counts for the displayed rows, one batched round trip.
-    comment_counts = {}
-    if rows:
-        name_keys = [row["name_key"] for row in rows]
-        for r in query(
-            "SELECT name_key, COUNT(*) AS cnt FROM rmp_reviews "
-            f"WHERE name_key IN ({','.join(['%s'] * len(name_keys))}) "
-            "AND comment IS NOT NULL AND comment != '' "
-            "GROUP BY name_key",
-            name_keys,
-        ):
-            comment_counts[r["name_key"]] = int(r["cnt"])
-
     result = []
     for row in rows:
         result.append({
@@ -736,7 +723,7 @@ def goat_professors():
             # Displayed as "Ratings": the floor above gates on it and
             # RANKING_SCORE_SQL weights by it.
             "totalReviews": row["total_reviews"] or 0,
-            "totalComments": comment_counts.get(row["name_key"], 0),
+            "totalComments": row["total_comments"] or 0,
         })
     cache_set(cache_key, result)
     return jsonify(result)
