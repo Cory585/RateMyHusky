@@ -552,7 +552,7 @@ const Professor = () => {
      and the page must agree). Two decimals: toFixed(2) reproduces Python's .2f. */
   const seoDescription = rmp.available && rmp.rating !== null
     ? `${identity.name} professor reviews and ratings: ${rmp.rating.toFixed(2)}/5 from ${rmp.numRatings} RMP ratings at Northeastern` +
-      (rmp.wouldTakeAgainPct ? ` (${rmp.wouldTakeAgainPct}% would take again)` : '') +
+      (rmp.wouldTakeAgainPct != null ? ` (${rmp.wouldTakeAgainPct}% would take again)` : '') +
       `. RateMyProfessor + Reddit.`
     : `${identity.name}, Northeastern ${identity.department} professor: no Rate My Professors ratings yet. RateMyProfessor + Reddit.`;
 
