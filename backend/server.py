@@ -9,7 +9,6 @@ Run:           python server.py
 import os, re, unicodedata, json, hashlib, random
 import html as _html
 import psycopg2
-import psycopg2.errors
 from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.extras import RealDictCursor
 from functools import lru_cache
@@ -20,11 +19,12 @@ from flask_cors import CORS
 from flask_compress import Compress
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from werkzeug.exceptions import HTTPException
 import jwt as pyjwt
 import requests as http_requests
 from urllib.parse import urlencode, urlparse
 from datetime import datetime, timedelta, timezone
-from threading import Lock, Thread, Event
+from threading import Lock
 import time
 from rag.chat_search import keyword_search
 from rag.chat_question import handle_question
@@ -34,9 +34,8 @@ from rag.chat_gate import gate
 from rag.chat_retrieve import retrieve, fetch_reddit_mentions
 from rag.query_embedder import embed_query
 from rag.chat_answer import generate, generate_course_list, generate_course_ranking
-from professor_full import (build_full, build_full_v2, build_profile_unauthed,
-                            build_reviews, _resolve_professor)
-import rmp
+from course_page import build_course
+from professor_full import build_payload
 import bookmarks
 import moderation
 import usage_alert
@@ -45,7 +44,7 @@ load_dotenv()
 
 import types as _types
 
-CHAT_ENABLED = os.getenv("CHAT_ENABLED", "true").lower() == "true"
+CHAT_ENABLED = os.getenv("CHAT_ENABLED", "false").lower() == "true"
 _IP_SALT = os.getenv("ASK_IP_SALT", "rmh-default-salt")
 _chat_pool = KeyPool()
 _chat_adapter = GroqAdapter(_chat_pool)
@@ -57,11 +56,22 @@ def _hash_ip(ip):
 # ──────────────────────────────────────────────
 #  Helpers
 # ──────────────────────────────────────────────
+
+
 def normalize_name(name):
     s = str(name).strip().lower()
     s = unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
     s = re.sub(r'\s+', ' ', s).strip()
     return s
+
+
+# Joins multi-select dept/college filter values. Not ",": department names carry
+# commas ("Lang, Literature and Culture"). Must match FILTER_SEPARATOR in api.ts.
+FILTER_SEPARATOR = "|"
+
+
+def split_filter(raw):
+    return [v.strip() for v in (raw or "").split(FILTER_SEPARATOR) if v.strip()]
 
 
 # Build a word-level mapping so partial/typeahead queries also resolve.
@@ -79,7 +89,7 @@ for _from, _to in ALIAS_MAP.items():
 
 
 def resolve_alias(q):
-    """Return the canonical query if q matches an alias, else q."""
+    """Return the canonical (trace) query if q matches an alias, else q."""
     return ALIAS_MAP.get(q, q)
 
 
@@ -195,6 +205,39 @@ def set_security_headers(response):
     return response
 
 
+# TEMPORARY: per-request server time for the backend refactor's latency targets.
+# Remove once the targets are measured.
+_TIMED_PREFIXES = ("/api/professors/", "/api/courses/", "/api/professors-catalog",
+                   "/api/courses-catalog")
+
+
+@app.before_request
+def _timing_start():
+    g.t0 = time.perf_counter()
+
+
+@app.after_request
+def _timing_log(response):
+    t0 = g.pop("t0", None)
+    if t0 is not None and request.path.startswith(_TIMED_PREFIXES):
+        print(f"[timing] {request.path} {response.status_code} "
+              f"{(time.perf_counter() - t0) * 1000:.1f}ms", flush=True)
+    return response
+
+
+@app.errorhandler(HTTPException)
+def _http_error(e):
+    """404/405/429 and every other HTTP error as JSON; the frontend reads the status."""
+    return jsonify({"error": e.description}), e.code
+
+
+@app.errorhandler(Exception)
+def _unhandled_error(e):
+    """Any uncaught error is logged with its traceback and served as a JSON 500."""
+    app.logger.exception("Unhandled error on %s", request.path)
+    return jsonify({"error": "Internal server error"}), 500
+
+
 # ──────────────────────────────────────────────
 #  Database connection pool
 # ──────────────────────────────────────────────
@@ -209,6 +252,7 @@ def _get_pool():
     if _pool is None:
         _pool = ThreadedConnectionPool(5, 10, CRDB_DATABASE_URL, sslmode="require",
                                        connect_timeout=5,
+                                       options="-c statement_timeout=5000",
                                        keepalives=1, keepalives_idle=30,
                                        keepalives_interval=10, keepalives_count=3)
     return _pool
@@ -218,7 +262,7 @@ def _get_pool():
 # ──────────────────────────────────────────────
 _cache = {}
 _cache_lock = Lock()
-CACHE_TTL = 3600      # 1 hour
+CACHE_TTL = 86400      # 24 h; a pipeline run invalidates by bumping data_version
 CACHE_MAX_SIZE = 5000
 
 _feedback_lock = Lock()
@@ -231,7 +275,39 @@ _ACCOUNT_FEEDBACK_TYPES = {"banappeal", "datadeletion"}
 
 
 
+DATA_VERSION_TTL = 60
+_version_state = {"value": 0, "checked": 0.0}
+_version_lock = Lock()
+
+
+def data_version():
+    """stats_cache.data_version, re-read at most once a minute per process. Every
+    pipeline run bumps it, which retires every cached page at once. Bumping it by
+    hand (UPDATE stats_cache SET value = value + 1 WHERE key = 'data_version')
+    flushes every process's cache within a minute, e.g. after a takedown or
+    moderation change."""
+    now = time.time()
+    with _version_lock:
+        if now - _version_state["checked"] < DATA_VERSION_TTL:
+            return _version_state["value"]
+        _version_state["checked"] = now
+    try:
+        row = query_one("SELECT value FROM stats_cache WHERE key = 'data_version'")
+    except psycopg2.Error as e:
+        # A cache hit needs no other query; keep serving it and re-read in a minute.
+        print(f"data_version: read failed, keeping v{_version_state['value']}: {e}")
+        return _version_state["value"]
+    value = int(row["value"]) if row else 0
+    with _version_lock:
+        if value != _version_state["value"]:
+            with _cache_lock:
+                _cache.clear()   # entries under the old version can never be read again
+        _version_state["value"] = value
+    return value
+
+
 def cache_get(key):
+    key = f"v{data_version()}:{key}"
     with _cache_lock:
         entry = _cache.get(key)
         if entry and time.time() - entry["ts"] < CACHE_TTL:
@@ -240,48 +316,12 @@ def cache_get(key):
 
 
 def cache_set(key, data):
+    key = f"v{data_version()}:{key}"
     with _cache_lock:
+        _cache.pop(key, None)   # re-insert so dict order stays oldest-first
         _cache[key] = {"data": data, "ts": time.time()}
-        if len(_cache) > CACHE_MAX_SIZE:
-            cutoff = time.time() - CACHE_TTL
-            expired = [k for k, v in _cache.items() if v["ts"] < cutoff]
-            for k in expired:
-                del _cache[k]
-
-
-# ──────────────────────────────────────────────
-#  Daily memory reset at 09:00 UTC
-# ──────────────────────────────────────────────
-_shutdown_event = Event()
-_reset_thread_started = False
-
-def _seconds_until_next_9utc():
-    now = datetime.now(timezone.utc)
-    target = now.replace(hour=9, minute=0, second=0, microsecond=0)
-    if now >= target:
-        target += timedelta(days=1)
-    return (target - now).total_seconds()
-
-def _daily_cache_reset():
-    while not _shutdown_event.is_set():
-        wait = _seconds_until_next_9utc()
-        if _shutdown_event.wait(timeout=wait):
-            break
-        try:
-            with _cache_lock:
-                _cache.clear()
-            print(f"[{datetime.now(timezone.utc).isoformat()}] Daily cache reset complete",
-                  flush=True)
-        except Exception as e:
-            print(f"[{datetime.now(timezone.utc).isoformat()}] Cache reset error: {e}",
-                  flush=True)
-
-def _start_reset_thread():
-    global _reset_thread_started
-    if not _reset_thread_started:
-        _reset_thread_started = True
-        t = Thread(target=_daily_cache_reset, daemon=True)
-        t.start()
+        while len(_cache) > CACHE_MAX_SIZE:
+            del _cache[next(iter(_cache))]
 
 
 def _acquire_fresh_conn():
@@ -305,6 +345,15 @@ def _discard_db_conn():
                 pass
 
 
+def _rollback_after_cancel(conn):
+    """A cancelled statement aborts the transaction (the pool is not autocommit), so
+    roll back or the request's next query fails with InFailedSqlTransaction."""
+    try:
+        conn.rollback()
+    except Exception:
+        _discard_db_conn()
+
+
 def get_db():
     if 'db' not in g:
         return _acquire_fresh_conn()
@@ -313,11 +362,6 @@ def get_db():
         _discard_db_conn()
         return _acquire_fresh_conn()
     return conn
-
-
-@app.before_request
-def _ensure_reset_thread():
-    _start_reset_thread()
 
 
 @app.teardown_appcontext
@@ -340,6 +384,9 @@ def query(sql, params=None):
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute(sql, params or ())
         return cur.fetchall()
+    except psycopg2.extensions.QueryCanceledError:
+        _rollback_after_cancel(conn)
+        raise   # statement_timeout: the connection is healthy, a retry would just time out again
     except (psycopg2.InterfaceError, psycopg2.OperationalError):
         # Connection was stale — discard it and retry once with a fresh one
         _discard_db_conn()
@@ -354,16 +401,6 @@ def query_one(sql, params=None):
     return rows[0] if rows else None
 
 
-def rmp_link_rows_or_none(slug):
-    """rmp.fetch_link_rows, or None on a database precompute has not yet built
-    the RMP tables in — rmp.build_section then falls back to the catalog's
-    RMP-only columns. Rolls back so the caller's next query is not aborted."""
-    try:
-        return rmp.fetch_link_rows(slug, query)
-    except psycopg2.errors.UndefinedTable:
-        get_db().rollback()
-        return None
-
 def _chat_write(sql, params=None):
     """Write helper for the question path (ask_log INSERTs): execute + commit, never fetch.
     The read-only query()/query_one() call fetchall(), which raises on a non-RETURNING INSERT;
@@ -375,6 +412,9 @@ def _chat_write(sql, params=None):
         cur = conn.cursor()
         cur.execute(sql, params or ())
         conn.commit()
+    except psycopg2.extensions.QueryCanceledError as e:
+        _rollback_after_cancel(conn)
+        print(f"_chat_write: log write timed out, dropping: {e}")
     except (psycopg2.InterfaceError, psycopg2.OperationalError):
         try:
             _discard_db_conn()
@@ -405,6 +445,9 @@ def _write(sql, params=None):
         cur = conn.cursor()
         cur.execute(sql, params or ())
         conn.commit()
+    except psycopg2.extensions.QueryCanceledError:
+        _rollback_after_cancel(conn)
+        raise
     except (psycopg2.InterfaceError, psycopg2.OperationalError):
         _discard_db_conn()
         conn = get_db()
@@ -568,7 +611,7 @@ SHRINKAGE_M = 50
 #
 # The prior of a ranking should be the mean of the quantity being ranked, so it
 # is measured over professors whose rating is actually pinned down. At 30
-# responses the standard error of a mean rating is ~0.13; at 5 it is ~0.33, which
+# responses the standard error of a TRACE mean is ~0.13; at 5 it is ~0.33, which
 # is wider than the entire top of the board.
 #
 # Deliberately global rather than per-college: a per-college prior ranks each
@@ -680,19 +723,6 @@ def goat_professors():
         LIMIT %s
     """, (college, min_reviews, prior, limit))
 
-    # Batch-count RMP comments.
-    comment_counts = {}
-    if rows:
-        name_keys = [row["name_key"] for row in rows]
-        for r in query(
-            "SELECT name_key, COUNT(*) AS cnt FROM rmp_reviews "
-            f"WHERE name_key IN ({','.join(['%s'] * len(name_keys))}) "
-            f"AND comment IS NOT NULL AND comment != ''{moderation.sql_filter()} "
-            "GROUP BY name_key",
-            name_keys,
-        ):
-            comment_counts[r["name_key"]] = int(r["cnt"])
-
     result = []
     for row in rows:
         result.append({
@@ -700,14 +730,10 @@ def goat_professors():
             "dept": row["department"],
             "rmpRating": round(row["rmp_rating"], 2) if row["rmp_rating"] else None,
             "avgRating": round(row["avg_rating"], 2) if row["avg_rating"] else None,
-            # The board displays this as "Ratings", because it is the quantity
-            # every decision here is made on: the floor above gates on it, and
-            # RANKING_SCORE_SQL weights by it. It is the RMP rating count, the
-            # denominator of avgRating beside it, and the same field the profile
-            # page's "Total Ratings" card displays, so the two pages cannot
-            # drift apart.
+            # Displayed as "Ratings": the floor above gates on it and
+            # RANKING_SCORE_SQL weights by it.
             "totalReviews": row["total_reviews"] or 0,
-            "totalComments": comment_counts.get(row["name_key"], 0),
+            "totalComments": row["total_comments"] or 0,
         })
     cache_set(cache_key, result)
     return jsonify(result)
@@ -736,15 +762,6 @@ def random_professor():
 
 def _format_course_code(raw: str) -> str:
     return re.sub(r"\s+", "", str(raw).upper())
-
-
-def _safe_int(value, default: int = 0) -> int:
-    try:
-        if value is None:
-            return default
-        return int(value)
-    except (TypeError, ValueError):
-        return default
 
 
 @app.route("/api/search")
@@ -828,8 +845,7 @@ def chat():
         cache_set_fn=cache_set,
         keyword_search_fn=lambda qq: keyword_search(qq, query, _professor_search),
         gate_fn=lambda qq: gate(qq, _chat_adapter),
-        retrieve_fn=lambda qq, hint: retrieve(qq, hint, query, query_one, _professor_search, embed_query_fn=embed_query,
-                                        rmp_mod=moderation.sql_filter),
+        retrieve_fn=lambda qq, hint: retrieve(qq, hint, query, query_one, _professor_search, embed_query_fn=embed_query),
         generate_fn=lambda qq, blocks: generate(qq, blocks, _chat_adapter),
         generate_course_list_fn=lambda topic, courses: generate_course_list(topic, courses, _chat_adapter),
         generate_course_ranking_fn=lambda subject, metric, direction, courses: generate_course_ranking(subject, metric, direction, courses, _chat_adapter),
@@ -873,75 +889,31 @@ def _department_colleagues(department, exclude_slug):
     return colleagues[:8]
 
 
-def _public_json(payload):
-    resp = jsonify(payload)
-    resp.headers["Cache-Control"] = "public, max-age=3600"
-    return resp
-
-
 # ──────────────────────────────────────────────
 #  Professor profile page
 # ──────────────────────────────────────────────
-@app.route("/api/professors/<slug>")
-def professor_profile(slug):
-    cache_key = f"prof:{slug}"
-    cached = cache_get(cache_key)
-    if cached:
-        return _public_json(cached)
-
-    prof = _resolve_professor(slug, query_one)
-    if not prof:
-        return jsonify({"error": "Professor not found"}), 404
-
-    profile = build_profile_unauthed(prof, query)
-    cache_set(cache_key, profile)
-    return _public_json(profile)
-
-
-@app.route("/api/professors/<slug>/reviews")
-def professor_reviews(slug):
-    cache_key = f"prof_reviews:{slug}"
-    cached = cache_get(cache_key)
-    if cached:
-        return _public_json(cached)
-
-    prof = _resolve_professor(slug, query_one)
-    if not prof:
-        return jsonify({"error": "Professor not found"}), 404
-
-    result = build_reviews(slug, prof, query, sanitize, fetch_reddit_mentions)
-    cache_set(cache_key, result)
-    return _public_json(result)
+def professor_payload(slug):
+    """The §4.2 payload for `slug` (cached), or None when no professor matches.
+    Shared by /full and render.py so the crawler page and the app agree."""
+    cache_key = f"prof_full:{slug}"
+    data = cache_get(cache_key)
+    if data is None:
+        data = build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions)
+        if data is None:
+            return None
+        cache_set(cache_key, data)
+    return data
 
 
 @app.route("/api/professors/<slug>/full")
 def professor_full(slug):
-    """Combined profile + reviews in one request (build_full shares the
-    catalog lookup between the two)."""
-    v2 = request.args.get("v") == "2"
-    cache_key = f"prof_full:{slug}{':v2' if v2 else ''}"
-    cached = cache_get(cache_key)
-    if cached:
-        return _public_json(cached)
-
-    # ?v=2 serves RMP as its own section (professor_full.to_v2). v1 stays the
-    # default until every reader has moved; the cache key keeps them apart.
-    if v2:
-        profile_data = build_full_v2(slug, query, query_one, sanitize,
-                                     fetch_rmp_links=rmp_link_rows_or_none,
-                                     fetch_reddit_mentions=fetch_reddit_mentions)
-    else:
-        profile_data = build_full(slug, query, query_one, sanitize,
-                                  fetch_reddit_mentions=fetch_reddit_mentions)
-    if profile_data is None:
+    data = professor_payload(slug)
+    if data is None:
         return jsonify({"error": "Professor not found"}), 404
-    if not v2:
-        # Same colleagues field the profile page gets — served from the
-        # per-department cache, no per-request DB cost.
-        profile_data["colleagues"] = _department_colleagues(profile_data["department"], slug)
-
-    cache_set(cache_key, profile_data)
-    return _public_json(profile_data)
+    resp = jsonify(data)
+    resp.headers["Cache-Control"] = "private, max-age=3600" if _is_authed() else "public, max-age=3600"
+    resp.headers["Vary"] = "Authorization"
+    return resp
 
 
 @app.route("/api/departments")
@@ -952,7 +924,7 @@ def departments():
     if cached:
         return jsonify(cached)
     if college and college != "All":
-        college_list = [c.strip() for c in college.split(",") if c.strip()]
+        college_list = split_filter(college)
         if len(college_list) == 1:
             rows = query("""
                 SELECT DISTINCT department FROM professors_catalog
@@ -1114,7 +1086,7 @@ def professors_catalog():
     params = []
 
     if college and college != "All":
-        college_list = [c.strip() for c in college.split(",") if c.strip()]
+        college_list = split_filter(college)
         if len(college_list) == 1:
             conditions.append("college = %s")
             params.append(college_list[0])
@@ -1126,7 +1098,7 @@ def professors_catalog():
         "Counseling & Educational Psych": ["Counseling amp Educational Psych", "Counseling  Educational Psych"],
     }
     if dept and dept != "All":
-        dept_list = [d.strip() for d in dept.split(",") if d.strip()]
+        dept_list = split_filter(dept)
         expanded = []
         for d in dept_list:
             expanded.append(d)
@@ -1268,7 +1240,7 @@ def courses_catalog():
     params = []
 
     if dept and dept != "All":
-        dept_list = [d.strip() for d in dept.split(",") if d.strip()]
+        dept_list = split_filter(dept)
         if len(dept_list) == 1:
             conditions.append("department = %s")
             params.append(dept_list[0])
@@ -1288,7 +1260,7 @@ def courses_catalog():
     where_str = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     if sort == "rating":
-        order = "avg_rating DESC NULLS LAST"
+        order = "avg_rating DESC NULLS LAST, lower(code) ASC"
     else:
         order = "lower(code) ASC"
 
@@ -1326,71 +1298,31 @@ def courses_catalog():
     return jsonify(result)
 
 
-@app.route("/api/courses/<code>")
-def course_profile(code):
+def course_payload(code):
+    """The §4.3 payload for `code` (cached), or None when it is not in the catalog.
+    Shared by /api/courses/<code> and render.py."""
     code_norm = _format_course_code(code)
     if not code_norm:
-        return jsonify({"error": "Course not found"}), 404
-
+        return None
     cache_key = f"course:{code_norm}"
-    cached = cache_get(cache_key)
-    if cached:
-        return _public_json(cached)
+    data = cache_get(cache_key)
+    if data is None:
+        data = build_course(code_norm, query, query_one)
+        if data is None:
+            return None
+        cache_set(cache_key, data)
+    return data
 
-    course = query_one("SELECT * FROM course_catalog WHERE code = %s", (code_norm,))
-    if not course:
+
+@app.route("/api/courses/<code>")
+def course_profile(code):
+    data = course_payload(code)
+    if data is None:
         return jsonify({"error": "Course not found"}), 404
-
-    latest = query_one(
-        "SELECT MAX(date) AS latest_date FROM rmp_reviews WHERE course_code = %s"
-        f"{moderation.sql_filter()}",
-        (code_norm,),
-    )
-
-    summary = {
-        "code": course["code"],
-        "name": course["name"] or None,
-        "department": course["department"] or "",
-        "avgRating": round(course["avg_rating"], 2) if course["avg_rating"] else None,
-        "numRatings": _safe_int(course["num_ratings"]),
-        "latestDate": str(latest["latest_date"]) if latest and latest["latest_date"] else None,
-    }
-
-    # Professors with at least one review filed under this course, aggregated
-    # over just those reviews.
-    rows = query(f"""
-        SELECT pc.name, pc.slug, pc.image_url, pc.would_take_again_pct,
-               pc.total_reviews, pc.total_comments,
-               COUNT(*) AS num_reviews,
-               AVG(rr.quality) AS avg_rating,
-               AVG(rr.difficulty) AS avg_difficulty,
-               MAX(rr.date) AS latest_date
-        FROM rmp_reviews rr
-        JOIN professors_catalog pc ON pc.name_key = rr.name_key
-        WHERE rr.course_code = %s{moderation.sql_filter("rr")}
-        GROUP BY pc.name, pc.slug, pc.image_url, pc.would_take_again_pct,
-                 pc.total_reviews, pc.total_comments
-    """, (code_norm,))
-
-    instructors = []
-    for r in rows:
-        instructors.append({
-            "name": r["name"],
-            "slug": r["slug"],
-            "imageUrl": r["image_url"],
-            "avgRating": round(float(r["avg_rating"]), 2) if r["avg_rating"] is not None else None,
-            "numReviews": _safe_int(r["num_reviews"]),
-            "courseAvgDifficulty": round(float(r["avg_difficulty"]), 2) if r["avg_difficulty"] is not None else None,
-            "wouldTakeAgainPct": round(r["would_take_again_pct"], 1) if r["would_take_again_pct"] else None,
-            "totalReviews": _safe_int(r["total_reviews"]),
-            "totalComments": _safe_int(r["total_comments"]),
-            "latestDate": str(r["latest_date"]) if r["latest_date"] else None,
-        })
-    instructors.sort(key=lambda i: (i["avgRating"] is None, -(i["avgRating"] or 0), -i["numReviews"], i["name"]))
-
-    result = {"summary": summary, "instructors": instructors}
-    cache_set(cache_key, result)
-    return _public_json(result)
+    resp = jsonify(data)
+    resp.headers["Cache-Control"] = "private, max-age=3600" if _is_authed() else "public, max-age=3600"
+    resp.headers["Vary"] = "Authorization"
+    return resp
 
 
 # ──────────────────────────────────────────────
@@ -1491,6 +1423,19 @@ def _get_auth_token():
     if auth_header.startswith("Bearer "):
         return auth_header[7:]
     return request.cookies.get("auth_token")
+
+
+def _is_authed():
+    """True when the request carries a valid session token. Pages serve the same
+    payload either way; only the Cache-Control header differs."""
+    token = _get_auth_token()
+    if not token:
+        return False
+    try:
+        pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        return True
+    except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+        return False
 
 
 @app.route("/api/auth/me")
@@ -1693,42 +1638,6 @@ def submit_feedback():
         return jsonify({"error": "Failed to send email"}), 500
 
     return jsonify({"ok": True})
-
-
-@app.route("/api/dept-avg")
-def dept_avg():
-    department = request.args.get("department", "").strip()
-    empty = {"avgRating": None, "difficulty": None,
-             "wouldTakeAgainPct": None, "numProfessors": 0}
-    if not department:
-        return jsonify(empty)
-
-    cache_key = f"dept_avg:{department}"
-    cached = cache_get(cache_key)
-    if cached:
-        return _public_json(cached)
-
-    row = query_one("""
-        SELECT AVG(avg_rating) AS avg_rating,
-               AVG(difficulty) AS difficulty,
-               AVG(would_take_again_pct) AS would_take_again_pct,
-               COUNT(*) AS num_professors
-        FROM professors_catalog
-        WHERE department = %s
-    """, (department,))
-
-    def _round(key, places):
-        v = row.get(key) if row else None
-        return round(float(v), places) if v is not None else None
-
-    result = {
-        "avgRating": _round("avg_rating", 2),
-        "difficulty": _round("difficulty", 2),
-        "wouldTakeAgainPct": _round("would_take_again_pct", 1),
-        "numProfessors": _safe_int(row["num_professors"]) if row else 0,
-    }
-    cache_set(cache_key, result)
-    return _public_json(result)
 
 
 from render import render_bp

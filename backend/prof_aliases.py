@@ -3,7 +3,7 @@
 Folds the different spellings RMP files one professor under ("dan kennedy",
 "daniel kennedy") onto one name_key, which also keeps their catalog slug stable.
 
-Single source of truth shared by precompute.py (build time) and server.py
+Single source of truth shared by the pipeline (build time) and server.py
 (runtime). These were previously two hand-synced copies that had drifted:
 the server copy was missing 62 of the aliases the catalog was built with.
 """
@@ -145,14 +145,12 @@ ALIAS_MAP = {
 # Keyed by name rather than RMP's legacy id because rmp_reviews carries no id:
 # reviews reach a professor through their professor_name, so an override keyed
 # any other way would move the summary and leave its ratings behind — the
-# recount in precompute would then publish 0 ratings under the new key.
+# recount in the pipeline would then publish 0 ratings under the new key.
 # rmp_link_key() is the single place both sides resolve through.
 #
-# Fill this from the rmp_link_review.csv report precompute writes each run.
+# Add entries here by hand when a reviewer finds a wrong link.
 RMP_MANUAL_LINKS = {
 }
-
-RMP_MATCH_METHODS = ("exact", "alias", "fuzzy", "manual")
 
 
 def _normalize_name(name: str) -> str:
@@ -162,7 +160,7 @@ def _normalize_name(name: str) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
-# Ensure keys/values match normalize_name() used by server.py/precompute.py.
+# Ensure keys/values match normalize_name() used by server.py and the pipeline.
 ALIAS_MAP = {_normalize_name(k): _normalize_name(v) for k, v in ALIAS_MAP.items()}
 RMP_MANUAL_LINKS = {_normalize_name(k): _normalize_name(v) for k, v in RMP_MANUAL_LINKS.items()}
 

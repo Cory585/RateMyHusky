@@ -236,53 +236,43 @@ def test_ordering_breaks_ties_by_name():
     assert "total_reviews DESC, name" in body
 
 
-# ── comment counts are RMP-only ──────────────────────────────────────────────
+# ── comment counts ──────────────────────────────────────────────────────────
 
-MEG = {"slug": "meg-heckman", "name": "Meg Heckman", "department": "Journalism",
-       "name_key": "meg heckman", "rmp_rating": 4.4, "avg_rating": 4.4,
-       "total_reviews": 300}
-OLIN = {"slug": "olin-guha", "name": "Olin Guha", "department": "Khoury",
-        "name_key": "olin guha", "rmp_rating": 4.1, "avg_rating": 4.1,
-        "total_reviews": 250}
-
-RMP_COMMENTS = {"meg heckman": 12, "olin guha": 30}
+ROW = {"slug": "olin-guha", "name": "Olin Guha", "department": "Khoury",
+       "name_key": "olin guha", "rmp_rating": 4.1, "avg_rating": 4.1,
+       "total_reviews": 250, "total_comments": 30}
 
 
-def _leaderboard_query(catalog_rows, seen=None):
-    """Stands in for query(), answering each of the endpoint's statements."""
+def _run_leaderboard(monkeypatch, catalog_rows):
+    seen = []
+
     def query(sql, params):
         s = " ".join(sql.split())
-        if seen is not None:
-            seen.append((s, list(params)))
+        seen.append(s)
         if "FROM professors_catalog" in s:
             return catalog_rows
-        if "FROM rmp_reviews" in s:
-            return [{"name_key": k, "cnt": RMP_COMMENTS[k]}
-                    for k in params if k in RMP_COMMENTS]
         raise AssertionError(f"unexpected query: {s}")
-    return query
 
-
-def _run_leaderboard(monkeypatch, catalog_rows, seen=None):
-    monkeypatch.setattr(server, "query", _leaderboard_query(catalog_rows, seen))
+    monkeypatch.setattr(server, "query", query)
     monkeypatch.setattr(server, "query_one", lambda sql, params: {"prior": C})
     monkeypatch.setattr(server, "cache_get", lambda key: None)
     monkeypatch.setattr(server, "cache_set", lambda key, val: None)
     with server.app.test_request_context("/api/goat-professors?college=Khoury"):
         resp = server.goat_professors()
-    return {p["name"]: p for p in resp.get_json()}
+    return {p["name"]: p for p in resp.get_json()}, seen
 
 
-def test_comment_count_is_the_rmp_count(monkeypatch):
-    out = _run_leaderboard(monkeypatch, [MEG, OLIN])
-    assert out["Meg Heckman"]["totalComments"] == 12
+def test_board_reads_the_stored_comment_count(monkeypatch):
+    out, _ = _run_leaderboard(monkeypatch, [ROW])
     assert out["Olin Guha"]["totalComments"] == 30
 
 
-def test_leaderboard_rows_carry_no_removed_fields_or_queries(monkeypatch):
-    seen = []
-    out = _run_leaderboard(monkeypatch, [MEG, OLIN], seen)
-    assert "traceRating" not in out["Olin Guha"]
-    assert not any("trace" in s.lower() for s, _ in seen)
-    rmp_params = next(p for s, p in seen if "FROM rmp_reviews" in s)
-    assert sorted(rmp_params) == ["meg heckman", "olin guha"]
+def test_board_row_has_exactly_these_keys(monkeypatch):
+    out, _ = _run_leaderboard(monkeypatch, [ROW])
+    assert set(out["Olin Guha"]) == {"name", "dept", "rmpRating", "avgRating",
+                                     "totalReviews", "totalComments"}
+
+
+def test_board_is_one_statement(monkeypatch):
+    _, seen = _run_leaderboard(monkeypatch, [ROW])
+    assert len(seen) == 1   # the prior goes through query_one, so GOAT is two statements in all

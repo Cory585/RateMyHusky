@@ -80,7 +80,7 @@
 }
 
 @media (min-width: 768px) {
-	.course-stats-grid { grid-template-columns: repeat(5, 1fr); }
+	.course-stats-grid { grid-template-columns: repeat(6, 1fr); }
 }
 
 .course-stat-card {
@@ -96,6 +96,42 @@
 	transition: transform 0.2s, box-shadow 0.2s;
 	animation: courseCardIn 0.5s ease both;
 	position: relative;
+}
+
+.course-stat-breakdown {
+	position: absolute;
+	bottom: 0;
+	left: 50%;
+	transform: translateX(-50%) translateY(100%);
+	background: #333;
+	color: #fff;
+	padding: 8px 12px;
+	border-radius: 6px;
+	font-size: 0.8rem;
+	display: flex;
+	gap: 12px;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.2s, transform 0.2s;
+	white-space: nowrap;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+	z-index: 10;
+}
+
+.course-stat-breakdown::before {
+	content: '';
+	position: absolute;
+	top: -4px;
+	left: 50%;
+	transform: translateX(-50%);
+	border-width: 0 5px 5px 5px;
+	border-style: solid;
+	border-color: transparent transparent #333 transparent;
+}
+
+.course-stat-card:hover .course-stat-breakdown {
+	opacity: 1;
+	transform: translateX(-50%) translateY(85%);
 }
 
 .course-stat-card:hover {
@@ -129,22 +165,6 @@
 	margin-top: auto;
 }
 
-.course-stat-last-reviewed .course-stat-value {
-	display: block;
-	width: 100%;
-	max-width: 100%;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	text-align: center;
-	font-size: clamp(1.6rem, 2.5vw, 2.3rem);
-}
-
-.course-stat-card.course-stat-last-reviewed {
-	padding-left: 10px;
-	padding-right: 10px;
-}
-
 .course-difficulty-bar {
 	width: 100%;
 	align-self: stretch;
@@ -160,6 +180,9 @@
 	border-radius: 3px;
 	transition: width 1.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.5s ease;
 }
+
+.course-empty { margin: 0; color: #888; font-weight: 700; }
+.dark .course-empty { color: #999; }
 
 .course-panel {
 	background: #fff;
@@ -239,7 +262,6 @@
 	width: 100%;
 	height: 100%;
 	object-fit: cover;
-	object-position: center 30%;
 }
 
 .course-top-prof-rank {
@@ -309,20 +331,8 @@
 	word-break: break-word;
 }
 
-.course-top-prof-footer--center {
-	flex: 0 0 auto !important;
-	margin: 0 auto;
-	text-align: center;
-}
-
 .course-top-prof-footer--right {
 	text-align: right;
-}
-
-.course-top-prof-card.disabled {
-	cursor: default;
-	pointer-events: none;
-	opacity: 0.92;
 }
 
 .instructor-scroll-wrap {
@@ -594,19 +604,17 @@
 		white-space: normal;
 	}
 
-	.course-stat-last-reviewed .course-stat-value {
-		font-size: 1.5rem;
-		white-space: nowrap;
-	}
-
-	.course-stat-card.course-stat-last-reviewed {
-		padding-left: 8px;
-		padding-right: 8px;
-	}
-
 	/* Top prof cards: 2 columns on small screens */
 	.course-top-prof-grid {
 		grid-template-columns: repeat(2, 1fr);
+	}
+
+	/* Tables: drop Enrollment & Responses columns */
+	.section-table th:nth-child(5),
+	.section-table td:nth-child(5),
+	.section-table th:nth-child(6),
+	.section-table td:nth-child(6) {
+		display: none;
 	}
 
 	/* Instructor table: horizontal scroll on small screens */
@@ -703,6 +711,16 @@
 	border-color: #f06d7d;
 }
 
+.dark .course-stat-breakdown {
+	background: #444;
+	color: #e0e0e0;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.dark .course-stat-breakdown::before {
+	border-color: transparent transparent #444 transparent;
+}
+
 .dark .course-question-card strong,
 .dark .course-code {
 	color: #89d7c6;
@@ -786,6 +804,70 @@
   box-shadow: 0 6px 24px rgba(214,57,76,0.45);
 }
 .back-to-top svg { width: 20px; height: 20px; }
+
+/* Catalog description, credits, prerequisites and NUpath. */
+.course-catalog-desc {
+	margin: 0 0 14px;
+	color: #3a3a3a;
+	line-height: 1.55;
+}
+
+.course-catalog-facts {
+	display: grid;
+	gap: 10px;
+	margin: 0;
+}
+
+.course-catalog-facts > div {
+	display: grid;
+	grid-template-columns: 120px 1fr;
+	gap: 12px;
+}
+
+.course-catalog-facts dt {
+	color: #767676;
+	font-weight: 700;
+	font-size: 0.85rem;
+}
+
+.course-catalog-facts dd {
+	margin: 0;
+	color: #3a3a3a;
+	font-size: 0.9rem;
+	overflow-wrap: anywhere;
+}
+
+.course-catalog-nupath {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.course-catalog-tag {
+	padding: 2px 10px;
+	border-radius: 999px;
+	background: #e8f3f0;
+	color: #1b6d5e;
+	font-size: 0.8rem;
+	font-weight: 600;
+}
+
+@media (max-width: 600px) {
+	.course-catalog-facts > div {
+		grid-template-columns: 1fr;
+		gap: 2px;
+	}
+}
+
+.dark .course-catalog-desc,
+.dark .course-catalog-facts dd {
+	color: #c8c8c8;
+}
+
+.dark .course-catalog-tag {
+	background: #1f3a34;
+	color: #7fd1bd;
+}
 
 /* Top prof cards: 1 column on very narrow phones */
 @media (max-width: 420px) {

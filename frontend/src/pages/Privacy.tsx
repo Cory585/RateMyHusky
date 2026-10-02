@@ -8,7 +8,7 @@ const Privacy = () => {
         <div className="terms-shell">
           <header className="terms-header">
             <h1>Privacy Policy</h1>
-            <p className="terms-meta">Effective September 23, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective October 1, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -241,7 +241,7 @@ const Privacy = () => {
                   privacy policies.
                 </li>
                 <li>
-                  <strong>RateMyProfessors, Northeastern faculty pages &amp; Reddit</strong>: these
+                  <strong>RateMyProfessors, Northeastern faculty pages, the Northeastern course catalog &amp; Reddit</strong>: these
                   are data sources only. We do not send any user
                   data to these services.
                 </li>
@@ -333,8 +333,8 @@ const Privacy = () => {
               <ul>
                 <li>
                   Name, department, and college, together with metrics we compute from the
-                  underlying data (average rating, difficulty, would-take-again, per-term
-                  history, and department comparisons).
+                  underlying data (average rating, difficulty, would-take-again, and
+                  department comparisons).
                 </li>
                 <li>Ratings and written reviews from RateMyProfessors.</li>
                 <li>

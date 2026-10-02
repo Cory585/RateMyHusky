@@ -11,11 +11,9 @@ export interface Professor {
   dept: string;
   rmpRating: number | null;
   avgRating: number;
-  /** Ratings: RMP ratings. What the leaderboard's floor gates on, and what
-   *  the ranking weights by. */
+  /** Ratings behind avgRating: what the leaderboard's floor gates on and the ranking weights by. */
   totalReviews?: number;
-  /** RMP ratings that carry written text. Not every rating has a comment, so
-   *  this can be smaller than totalReviews. Unused by the leaderboard. */
+  /** Written reviews. Unused by the leaderboard. */
   totalComments?: number;
 }
 
@@ -25,54 +23,9 @@ export interface RandomProfessor {
   college: string;
 }
 
-/* ---- Professor page types ---- */
-export interface ProfessorCourse {
-  code: string;
-  name: string | null;
-  numReviews: number;
-  avgRating: number | null;
-  avgDifficulty: number | null;
-  latestDate: string | null;
-}
-
-export interface DeptAvg {
-  avgRating: number | null;
-  difficulty: number | null;
-  wouldTakeAgainPct: number | null;
-  numProfessors: number;
-}
-
-export interface ProfessorProfile {
-  name: string;
-  department: string;
-  rmpRating: number | null;
-  /* Null for a professor with no RMP ratings — the catalog holds NULL and the API no longer coalesces
-     it to 0, since 0 is off the bottom of the 1-5 scale and rendered as a real
-     score. Every display of it needs the null branch; "—" is the house style,
-     matching what totalRatings already showed for the same professors. */
-  avgRating: number | null;
-  wouldTakeAgainPct: number | null;
-  difficulty: number | null;
-  totalRatings: number;
-  totalComments: number;
-  professorUrl: string | null;
-  courses: ProfessorCourse[];
-  imageUrl: string | null;
-  focusX: number;
-  focusY: number;
-  colleagues?: { name: string; slug: string; avgRating: number | null; totalRatings: number }[];
-}
-
-export interface ProfessorReviews {
-  reviews: ProfessorReview[];
-  redditMentions: RedditMention[];
-}
-
-/* ---- Professor page v2: RMP in its own section ----
-   /full?v=2 splits the page payload by source. `identity` is who the
-   professor is and nothing measured; `sources.rmp` is only what Rate My
-   Professors reported (backend/rmp.py). No field in either is a blend, so
-   RMP values stay in RmpData rather than being mixed into shared fields. */
+/* ---- Professor page (/full, version 2) ----
+   `summary` holds the blended numbers every page shows; `sources.<name>` holds what
+   each source measured; `courses` has one row per course the ratings name. */
 
 export interface ProfessorIdentity {
   slug: string;
@@ -84,33 +37,52 @@ export interface ProfessorIdentity {
   focusY: number;
 }
 
-export type RmpMatchMethod = 'exact' | 'alias' | 'fuzzy' | 'manual';
+export interface SourceSummary {
+  rating: number | null;
+  numRatings: number;
+}
 
-export interface RmpData {
-  /** False for a professor with no RMP page, or an RMP page with no ratings.
-   *  Every number below is null then — never filled in from another source. */
-  available: boolean;
-  reason: 'no_rmp_record' | 'no_ratings' | null;
+export interface ProfessorSummary {
   rating: number | null;
   difficulty: number | null;
   wouldTakeAgainPct: number | null;
   numRatings: number;
-  /** Fewer ratings than the backend's FEW_RATINGS threshold. */
-  fewRatings: boolean;
-  ratingDistribution: Record<'1' | '2' | '3' | '4' | '5', number>;
-  gradeDistribution: Record<string, number>;
-  topTags: { tag: string; count: number }[];
-  reviews: ProfessorReview[];
+  numComments: number;
+  hoursPerWeek: number | null;
+  bySource: Record<string, SourceSummary>;
+}
+
+export type RatingDistribution = Record<'1' | '2' | '3' | '4' | '5', number>;
+
+export interface RmpData {
+  /** False without RMP ratings; every number below is null then. */
+  available: boolean;
+  rating: number | null;
+  difficulty: number | null;
+  wouldTakeAgainPct: number | null;
+  numRatings: number;
   professorUrl: string | null;
-  /** ISO 8601; null before the RMP tables are built. */
-  scrapedAt: string | null;
-  matchMethod: RmpMatchMethod | null;
-  rmpPages: number | null;
+  ratingDistribution: RatingDistribution;
+  gradeDistribution: Record<string, number>;
+  reviews: ProfessorReview[];
+}
+
+export interface ProfessorCourse {
+  code: string;
+  /** null when the code is not in the course catalog (no course page to link to). */
+  name: string | null;
+  rating: number | null;
+  difficulty: number | null;
+  numRatings: number;
+  ratingDistribution: RatingDistribution;
+  /** Terms taught. Not sent yet: it arrives with student-submitted data, and no term tags show until then. */
+  terms?: string[];
 }
 
 export interface ProfessorPage {
   version: 2;
   identity: ProfessorIdentity;
+  summary: ProfessorSummary;
   sources: { rmp: RmpData };
   courses: ProfessorCourse[];
   redditMentions: RedditMention[];
@@ -118,6 +90,7 @@ export interface ProfessorPage {
 
 export interface ProfessorReview {
   course: string;
+  courseCode: string | null;
   quality: number;
   difficulty: number;
   date: string;
@@ -140,8 +113,6 @@ export interface RedditMention {
 }
 
 /* ---- Session caches (cleared on page refresh, keyed by slug/code) ---- */
-const _profCache = new Map<string, ProfessorProfile>();
-const _profReviewsCache = new Map<string, ProfessorReviews>();
 const _courseCache = new Map<string, CourseDetail>();
 
 const _profPageCache = new Map<string, ProfessorPage>();
@@ -159,6 +130,26 @@ export function maintenanceGuard(res: Response): boolean {
 }
 
 /* ---- Fetchers ---- */
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/* A fetch that reports why it failed, so a page shows NotFound only for a real 404.
+   status 0 = network failure or the maintenance redirect. */
+export type Fetched<T> = { ok: true; data: T } | { ok: false; status: number };
+
+async function fetchWithStatus<T>(path: string): Promise<Fetched<T>> {
+  try {
+    return { ok: true, data: await get<T>(path) };
+  } catch (e) {
+    return { ok: false, status: e instanceof ApiError ? e.status : 0 };
+  }
+}
+
 async function get<T>(path: string): Promise<T> {
   const headers: Record<string, string> = {};
   const token = localStorage.getItem('auth_token');
@@ -167,14 +158,11 @@ async function get<T>(path: string): Promise<T> {
   }
   const res = await fetch(`${API_BASE}${path}`, { headers, cache: token ? 'no-cache' : 'default' });
   if (maintenanceGuard(res)) throw new Error('Site is under maintenance');
-  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
+  if (!res.ok) throw new ApiError(res.status, `API ${res.status}: ${res.statusText}`);
   return res.json();
 }
 
 export const fetchStats = () => get<Stat[]>("/api/stats");
-
-export const fetchDeptAvg = (department: string) =>
-  get<DeptAvg>(`/api/dept-avg?department=${encodeURIComponent(department)}`);
 
 export const fetchColleges = () => get<string[]>("/api/colleges");
 
@@ -184,46 +172,14 @@ export const fetchGoatProfessors = (college: string, limit = 10) =>
 export const fetchRandomProfessor = () => get<RandomProfessor>("/api/random-professor");
 
 /* ---- Professor page fetchers ---- */
-/* The Professor page's single round-trip. v2, so it no longer seeds the v1
-   profile/reviews caches the way the v1 /full did: Compare reads those, and a
-   v2 payload in them would be the wrong shape. */
-export async function fetchProfessorFull(slug: string): Promise<ProfessorPage | null> {
-  const token = localStorage.getItem('auth_token');
-  const key = `${slug}:${token ?? 'u'}`;
-  if (_profPageCache.has(key)) return _profPageCache.get(key)!;
-  try {
-    const data = await get<ProfessorPage>(`/api/professors/${encodeURIComponent(slug)}/full?v=2`);
-    _profPageCache.set(key, data);
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-export async function fetchProfessorData(slug: string): Promise<ProfessorProfile | null> {
-  const token = localStorage.getItem('auth_token');
-  const key = `${slug}:${token ?? 'u'}`;
-  if (_profCache.has(key)) return _profCache.get(key)!;
-  try {
-    const data = await get<ProfessorProfile>(`/api/professors/${encodeURIComponent(slug)}`);
-    _profCache.set(key, data);
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-export async function fetchProfessorReviews(slug: string): Promise<ProfessorReviews | null> {
-  const token = localStorage.getItem('auth_token');
-  const key = `${slug}:${token ?? 'u'}`;
-  if (_profReviewsCache.has(key)) return _profReviewsCache.get(key)!;
-  try {
-    const data = await get<ProfessorReviews>(`/api/professors/${encodeURIComponent(slug)}/reviews`);
-    _profReviewsCache.set(key, data);
-    return data;
-  } catch {
-    return null;
-  }
+/* The Professor page's single round-trip. Every visitor gets the same payload, so the
+   cache is keyed by slug alone; failures are not cached. */
+export async function fetchProfessorFull(slug: string): Promise<Fetched<ProfessorPage>> {
+  const cached = _profPageCache.get(slug);
+  if (cached) return { ok: true, data: cached };
+  const res = await fetchWithStatus<ProfessorPage>(`/api/professors/${encodeURIComponent(slug)}/full`);
+  if (res.ok) _profPageCache.set(slug, res.data);
+  return res;
 }
 
 /* ---- Search autocomplete ---- */
@@ -330,31 +286,40 @@ export interface CourseCatalogResponse {
 }
 
 export interface CourseSummary {
-  code: string;
-  /** Null when the catalog has no title for the code; show the code instead. */
-  name: string | null;
-  department: string;
-  avgRating: number | null;
+  rating: number | null;
+  difficulty: number | null;
   numRatings: number;
-  latestDate: string | null;
+  hoursPerWeek: number | null;
+  bySource: Record<string, SourceSummary>;
 }
 
-export interface CourseInstructorBreakdown {
-  name: string;
+export interface CourseProfessor {
   slug: string;
+  name: string;
   imageUrl: string | null;
-  wouldTakeAgainPct: number | null;
-  totalReviews: number;
-  totalComments: number;
-  latestDate: string | null;
-  avgRating: number | null;
-  numReviews: number;
-  courseAvgDifficulty: number | null;
+  focusX: number;
+  focusY: number;
+  /** This professor's ratings for this course only. */
+  rating: number | null;
+  difficulty: number | null;
+  numRatings: number;
+}
+
+export interface CourseCatalog {
+  description: string | null;
+  credits: string | null;
+  prerequisites: string | null;
+  corequisites: string | null;
+  nupath: string[];
 }
 
 export interface CourseDetail {
+  code: string;
+  name: string;
+  department: string;
+  catalog: CourseCatalog | null;
   summary: CourseSummary;
-  instructors: CourseInstructorBreakdown[];
+  professors: CourseProfessor[];
 }
 
 export function fetchProfessorsCatalog(params: {
@@ -383,6 +348,11 @@ export function fetchProfessorsCatalog(params: {
   return get<CatalogResponse>(`/api/professors-catalog?${sp.toString()}`);
 }
 
+/** Joins multi-select dept/college filter values. Not ",": department names
+ *  carry commas ("Lang, Literature and Culture"). Must match FILTER_SEPARATOR
+ *  in backend/server.py. */
+export const FILTER_SEPARATOR = '|';
+
 export const fetchDepartments = (college?: string) => {
   const sp = new URLSearchParams();
   if (college) sp.set('college', college);
@@ -396,7 +366,7 @@ export function fetchCoursesCatalog(params: {
   dept?: string;
   minRating?: number;
   maxRating?: number;
-  sort?: 'alpha' | 'rating' | 'recent';
+  sort?: 'alpha' | 'rating' | 'sections' | 'recent';
   page?: number;
   limit?: number;
 }): Promise<CourseCatalogResponse> {
@@ -512,15 +482,11 @@ export async function fetchDepartmentDetail(slug: string): Promise<DepartmentDet
   }
 }
 
-export async function fetchCourseData(code: string): Promise<CourseDetail | null> {
-  const token = localStorage.getItem('auth_token');
-  const key = `${code}:${token ?? 'u'}`;
-  if (_courseCache.has(key)) return _courseCache.get(key)!;
-  try {
-    const data = await get<CourseDetail>(`/api/courses/${encodeURIComponent(code)}`);
-    _courseCache.set(key, data);
-    return data;
-  } catch {
-    return null;
-  }
+/* Same payload for every visitor, so cached by code alone; failures are not cached. */
+export async function fetchCourseData(code: string): Promise<Fetched<CourseDetail>> {
+  const cached = _courseCache.get(code);
+  if (cached) return { ok: true, data: cached };
+  const res = await fetchWithStatus<CourseDetail>(`/api/courses/${encodeURIComponent(code)}`);
+  if (res.ok) _courseCache.set(code, res.data);
+  return res;
 }

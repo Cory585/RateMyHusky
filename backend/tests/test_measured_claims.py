@@ -266,14 +266,6 @@ def _tie_groups(corpus):
     return len(rows), sum(int(r["c"]) for r in rows)
 
 
-def _median(values):
-    ordered = sorted(values)
-    mid = len(ordered) // 2
-    if len(ordered) % 2:
-        return ordered[mid]
-    return (ordered[mid - 1] + ordered[mid]) / 2
-
-
 def _find(path, pattern):
     """(stated number, line) for a pattern that must appear exactly once."""
     text = path.read_text()

@@ -6,7 +6,6 @@ the existing API data functions.
 """
 
 import json
-import re
 from datetime import date
 from html import escape as _html_escape
 from flask import Blueprint  # noqa: F401  (used by the route task)
@@ -115,20 +114,6 @@ def _month_year(today: date) -> str:
     return today.strftime("%B %Y")
 
 
-def _dedupe_courses(courses: list) -> list:
-    """Unique course codes from the profile `courses` entries, first-seen
-    order. Entries with no code are skipped."""
-    seen = set()
-    out = []
-    for c in courses or []:
-        code = (c.get("code") or "").strip().upper()
-        if not code or code in seen:
-            continue
-        seen.add(code)
-        out.append(code)
-    return out
-
-
 def _select_reviews(reviews: list, limit: int) -> list:
     """Prefer recent + longest + spread across courses: group by course (no-
     course group last), order courses by their most recent review date desc,
@@ -180,51 +165,59 @@ def professor_html(profile: dict, reviews: list, canonical: str) -> str:
     # outside the 1-5 scale either way, so there is no reading of it as a score:
     # "rated 0/5 by 0 students" is the sentence Google would have indexed for
     # the ~2,083 unrated professors who still carry a course list.
-    avg = profile.get("avgRating") or None
+    # Every number here is labeled with its source, and none is a blend: the
+    # rating, count and difficulty are RMP's own (rmpRating / rmpNumRatings /
+    # rmpDifficulty), not avgRating / totalRatings / difficulty, which are the
+    # blend. "RMP ratings" rather than the name spelled out keeps the
+    # description inside MAX_DESCRIPTION, where the old "student reviews" sat,
+    # so the source credit at its end survives the clip. It mirrors Professor.tsx's seoDescription
+    # character for character, so the crawler copy and the page agree. Two
+    # decimals, not one: the value is stored rounded to two, so .2f and JS
+    # toFixed(2) reproduce it exactly, where one decimal would round an exact
+    # half differently in each (Python 4.25 -> "4.2", JS -> "4.3").
+    rmp_rating = profile.get("rmpRating") or None
+    rmp_n = profile.get("rmpNumRatings") or 0
+    has_rmp = rmp_rating is not None and rmp_n > 0
+    rmp_txt = f"{rmp_rating:.2f}" if has_rmp else None
+    # Blended count, used only to decide noindex below — never displayed.
     total = profile.get("totalRatings") or 0
-    wta = profile.get("wouldTakeAgainPct")
-    diff = profile.get("difficulty")
+    wta = profile.get("wouldTakeAgainPct") if has_rmp else None
+    wta_txt_n = f"{wta:g}" if wta is not None else None
+    diff = profile.get("rmpDifficulty") if has_rmp else None
     rmp_count = len(reviews)
 
     title = f"{name} Reviews & Ratings — Northeastern {dept}"
-    # :g so 83.0 prints "83", as JS does for the same number in the page copy.
-    wta_txt = f" ({wta:g}% would take again)" if wta is not None else ""
-    # Mirrors Professor.tsx's seoDescription character for character, so the
-    # crawler copy and the page agree. Two decimals: the value is stored rounded
-    # to two, so .2f and JS toFixed(2) reproduce it exactly (one decimal would
-    # round an exact half differently in each).
+    wta_txt = f" ({wta_txt_n}% would take again)" if wta is not None else ""
     summary = (
-        f"{name} professor reviews and ratings: {avg:.2f}/5 from {total} RMP ratings "
-        f"at Northeastern{wta_txt}. RateMyProfessors + Reddit."
-        if avg is not None else
+        f"{name} professor reviews and ratings: {rmp_txt}/5 from {rmp_n} RMP ratings "
+        f"at Northeastern{wta_txt}. RateMyProfessor + Reddit."
+        if has_rmp else
         f"{name}, Northeastern {dept} professor: no Rate My Professors ratings yet. "
-        "RateMyProfessors + Reddit."
+        "RateMyProfessor + Reddit."
     )
     month_year = _month_year(date.today())
 
-    diff_clause = f", with {diff}/5 difficulty" if diff is not None else ""
-    wta_clause = f" and {wta}% who would take them again" if wta is not None else ""
+    diff_clause = f", with {diff}/5 RMP difficulty" if diff is not None else ""
+    wta_clause = f" and {wta_txt_n}% who would take them again" if wta is not None else ""
     verdict = (
         f"{name} is {_article(dept)} {dept} professor at Northeastern University rated "
-        f"{avg}/5 by {total} students{diff_clause}{wta_clause} "
+        f"{rmp_txt}/5 on Rate My Professors by {rmp_n} students{diff_clause}{wta_clause} "
         f"(RateMyProfessors + Reddit, updated {month_year})."
-        if avg is not None else
+        if has_rmp else
         f"{name} is {_article(dept)} {dept} professor at Northeastern University "
-        f"with no student ratings yet "
+        f"with no Rate My Professors ratings yet "
         f"(RateMyProfessors + Reddit, updated {month_year})."
     )
 
     stats = _stat_rows([
-        ("Average rating", f"{avg}/5" if avg is not None else None),
-        ("Total ratings", total),
-        ("Would take again", f"{wta}%" if wta is not None else None),
-        ("Difficulty", f"{diff}/5" if diff is not None else None),
-        ("RateMyProfessor rating", profile.get("rmpRating")),
+        ("Rate My Professors rating", f"{rmp_txt}/5" if has_rmp else None),
+        ("Rate My Professors ratings", rmp_n if has_rmp else None),
+        ("Would take again (RMP)", f"{wta_txt_n}%" if wta is not None else None),
+        ("Difficulty (RMP)", f"{diff}/5" if diff is not None else None),
         ("RateMyProfessor reviews", rmp_count if rmp_count else None),
     ])
 
-    courses = profile.get("courses") or []
-    course_codes = _dedupe_courses(courses)
+    course_codes = profile.get("courses") or []
     course_items = "".join(
         f'<li><a href="{SITE}/courses/{_esc(code)}">{_esc(code)}</a></li>' for code in course_codes
     )
@@ -254,16 +247,17 @@ def professor_html(profile: dict, reviews: list, canonical: str) -> str:
     # ── FAQ: plain HTML only, no FAQPage JSON-LD (Google restricted that rich
     # result; the extractable text is the value for LLM answer engines). ──
     faq_items = []
-    if total:
-        wta_faq = f" {wta}% of students said they would take them again." if wta is not None else ""
+    if has_rmp:
+        wta_faq = (f" {wta_txt_n}% of RMP reviewers said they would take them again."
+                   if wta is not None else "")
         faq_items.append((
             f"Is {name} a good professor?",
-            f"{name} has an average rating of {avg}/5 from {total} student reviews.{wta_faq}",
+            f"{name} is rated {rmp_txt}/5 on Rate My Professors from {rmp_n} ratings.{wta_faq}",
         ))
     if diff is not None:
         faq_items.append((
             f"How hard are {name}'s classes?",
-            f"{name}'s classes have a difficulty rating of {diff}/5 based on student reviews.",
+            f"{name}'s classes have a difficulty rating of {diff}/5 on Rate My Professors.",
         ))
     if course_codes:
         faq_items.append((
@@ -277,7 +271,7 @@ def professor_html(profile: dict, reviews: list, canonical: str) -> str:
 
     freshness = f"<p>Data updated {_esc(month_year)}.</p>"
 
-    # Thin content (no ratings, no RMP review text) is excluded from the
+    # Thin content (no ratings and no RMP review text) is excluded from the
     # sitemap; keep search engines from indexing it too.
     is_zero_content = not total and not review_items
 
@@ -323,54 +317,60 @@ def professor_html(profile: dict, reviews: list, canonical: str) -> str:
 
 
 def course_html(detail: dict, canonical: str) -> str:
+    code = detail.get("code") or ""
+    cname = detail.get("name") or ""
     s = detail.get("summary") or {}
-    code = s.get("code") or ""
-    cname = s.get("name") or ""
-    avg = s.get("avgRating")
-    num_ratings = s.get("numRatings") or 0
+    avg = s.get("rating")
+    diff = s.get("difficulty")
+    n = s.get("numRatings") or 0
+    catalog = detail.get("catalog") or {}
+    description = catalog.get("description")
 
-    label = f"{code} ({cname})" if cname else code
-    title = f"{code} Reviews — {cname} at Northeastern" if cname else f"{code} Reviews at Northeastern"
-    avg_txt = f"Average rating {avg}/5. " if avg is not None else ""
+    title = f"{code} Reviews — {cname} at Northeastern"
+    avg_txt = f"Average rating {avg:.1f}/5. " if avg is not None else ""
     summary = (
-        f"{label} course reviews and ratings at Northeastern (NEU). "
-        f"{avg_txt}"
-        f"Compare instructors with RMP reviews."
+        f"{code} ({cname}) course reviews and ratings at Northeastern (NEU). "
+        f"{avg_txt}Compare professors with RateMyProfessor reviews."
     )
 
     stats = _stat_rows([
-        ("Average rating", f"{avg}/5" if avg is not None else None),
-        ("Total ratings", num_ratings if num_ratings else None),
+        ("Average rating", f"{avg:.1f}/5" if avg is not None else None),
+        ("Difficulty", f"{diff:.1f}/5" if diff is not None else None),
+        ("Ratings", n or None),
+        ("Credits", catalog.get("credits")),
+        ("Prerequisites", catalog.get("prerequisites")),
+        ("Corequisites", catalog.get("corequisites")),
+        ("NUpath", ", ".join(catalog.get("nupath") or []) or None),
     ])
 
-    instructors = detail.get("instructors") or []
-    inst_items = "".join(
-        f'<li><a href="{SITE}/professors/{_esc(i.get("slug"))}">{_esc(i.get("name"))}</a></li>'
-        for i in instructors if i.get("slug")
+    professors = detail.get("professors") or []
+    prof_items = "".join(
+        f'<li><a href="{SITE}/professors/{_esc(p.get("slug"))}">{_esc(p.get("name"))}</a></li>'
+        for p in professors if p.get("slug")
     )
-    inst_block = f"<h2>Instructors</h2><ul>{inst_items}</ul>" if inst_items else ""
+    prof_block = f"<h2>Professors</h2><ul>{prof_items}</ul>" if prof_items else ""
     freshness = f"<p>Data updated {_esc(_month_year(date.today()))}.</p>"
 
     body = (
-        f"<h1>{_esc(code)}{' — ' + _esc(cname) if cname else ''}: Reviews & Ratings</h1>"
+        f"<h1>{_esc(code)} — {_esc(cname)}: Reviews & Ratings</h1>"
         f"<p>{_esc(summary)}</p>"
-        f"{stats}{inst_block}{freshness}"
+        f"{'<p>' + _esc(description) + '</p>' if description else ''}"
+        f"{stats}{prof_block}{freshness}"
         f'<p><a href="{_esc(canonical)}">View on RateMyHusky</a></p>'
     )
 
     jsonld = {
         "@context": "https://schema.org",
         "@type": "Course",
-        "name": f"{code} — {cname}" if cname else code,
+        "name": f"{code} — {cname}",
         "courseCode": code,
         "provider": {"@type": "CollegeOrUniversity", "name": "Northeastern University"},
     }
-    if avg is not None and num_ratings:
+    if description:
+        jsonld["description"] = description
+    if avg is not None and n:
         jsonld["aggregateRating"] = {
-            "@type": "AggregateRating",
-            "ratingValue": avg,
-            "ratingCount": num_ratings,
-            "bestRating": 5,
+            "@type": "AggregateRating", "ratingValue": avg, "ratingCount": n, "bestRating": 5,
         }
     breadcrumb = _breadcrumb_list("Courses", f"{SITE}/courses", code, canonical)
     return _page(title, summary, canonical, body, [jsonld, breadcrumb])
@@ -379,7 +379,7 @@ def course_html(detail: dict, canonical: str) -> str:
 def home_html(stats: list, top_professors: list, canonical: str) -> str:
     title = "RateMyHusky — Northeastern University Professor Reviews & Ratings"
     summary = (
-        "RateMyHusky combines RateMyProfessors ratings and Reddit discussion for "
+        "RateMyHusky combines RateMyProfessor reviews and Reddit talk for "
         "Northeastern professors and courses. Compare ratings, difficulty, and "
         "reviews — free."
     )
@@ -432,8 +432,7 @@ def professors_listing_html(entries: list, total: int, canonical: str) -> str:
     total_txt = str(total) if total else "thousands of"
     summary = (
         f"Browse {total_txt} Northeastern University (NEU) professor ratings and "
-        f"reviews. Compare ratings, difficulty, and would-take-again from student "
-        f"reviews and RateMyProfessor ratings."
+        f"reviews. Compare ratings, difficulty, and would-take-again from RateMyProfessor reviews."
     )
 
     shown = [e for e in (entries or []) if e.get("slug")][:LISTING_CAP]
@@ -471,8 +470,7 @@ def courses_listing_html(entries: list, total: int, canonical: str) -> str:
     total_txt = str(total) if total else "thousands of"
     summary = (
         f"Browse {total_txt} Northeastern University (NEU) course reviews and "
-        f"ratings. Compare instructors and average ratings from "
-        f"student reviews."
+        f"ratings. Compare professors, average ratings, and difficulty from RateMyProfessor reviews."
     )
 
     shown = [e for e in (entries or []) if e.get("code")][:LISTING_CAP]
@@ -616,23 +614,41 @@ def not_found_html(kind: str) -> str:
                  noindex=True)
 
 
+def _professor_view(payload: dict, colleagues: list) -> dict:
+    """The fields professor_html reads, taken from the /full payload."""
+    identity, rmp = payload["identity"], payload["sources"]["rmp"]
+    return {
+        "name": identity["name"],
+        "department": identity["department"],
+        "imageUrl": identity["imageUrl"],
+        "rmpRating": rmp["rating"],
+        "rmpNumRatings": rmp["numRatings"],
+        "rmpDifficulty": rmp["difficulty"],
+        "wouldTakeAgainPct": rmp["wouldTakeAgainPct"],
+        "professorUrl": rmp["professorUrl"],
+        "totalRatings": payload["summary"]["numRatings"],
+        "courses": [c["code"] for c in payload["courses"]],
+        "colleagues": colleagues,
+    }
+
+
 render_bp = Blueprint("render", __name__)
 
 
 # Lazy accessors so tests can monkeypatch and routes avoid circular imports.
-def _get_profile_view():
-    from server import professor_profile
-    return professor_profile
+def _get_professor_payload():
+    from server import professor_payload
+    return professor_payload
 
 
-def _get_reviews_view():
-    from server import professor_reviews
-    return professor_reviews
+def _get_colleagues():
+    from server import _department_colleagues
+    return _department_colleagues
 
 
-def _get_course_view():
-    from server import course_profile  # the /api/courses/<code> view
-    return course_profile
+def _get_course_payload():
+    from server import course_payload
+    return course_payload
 
 
 def _json_or_404(resp):
@@ -646,17 +662,14 @@ def _json_or_404(resp):
 @render_bp.route("/render/professors/<slug>")
 def render_professor(slug):
     from flask import Response
-    profile_resp = _get_profile_view()(slug)
-    data, err = _json_or_404(profile_resp)
-    if err:
+    payload = _get_professor_payload()(slug)
+    if payload is None:
         return Response(not_found_html("professor"), status=404, mimetype="text/html")
-
-    reviews_resp = _get_reviews_view()(slug)
-    rdata, rerr = _json_or_404(reviews_resp)
-    reviews = (rdata or {}).get("reviews", []) if not rerr else []
-
+    identity = payload["identity"]
+    colleagues = _get_colleagues()(identity["department"], identity["slug"])
     canonical = f"{SITE}/professors/{slug}"
-    html = professor_html(data, reviews, canonical)
+    html = professor_html(_professor_view(payload, colleagues),
+                          payload["sources"]["rmp"]["reviews"], canonical)
     resp = Response(html, mimetype="text/html")
     resp.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
     return resp
@@ -665,9 +678,8 @@ def render_professor(slug):
 @render_bp.route("/render/courses/<code>")
 def render_course(code):
     from flask import Response
-    detail_resp = _get_course_view()(code)
-    data, err = _json_or_404(detail_resp)
-    if err:
+    data = _get_course_payload()(code)
+    if data is None:
         return Response(not_found_html("course"), status=404, mimetype="text/html")
 
     canonical = f"{SITE}/courses/{code}"

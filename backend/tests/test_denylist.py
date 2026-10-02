@@ -49,25 +49,25 @@ def listfile(tmp_path, monkeypatch):
 
 # ── the matching rule ───────────────────────────────────────────────────────
 
-def test_normalize_matches_precomputes_rule():
-    """The key has to be byte-identical to precompute's or the filter never fires.
+def test_normalize_matches_pipeline_rule():
+    """The key has to be byte-identical to pipeline.names' or the filter never fires.
 
-    Duplicated rather than imported because precompute pulls in pandas and numpy
-    and this module is imported by loaders that carry neither.
+    denylist.py keeps its own copy rather than importing pipeline.names, to stay
+    import-light for loaders that do not carry the pipeline package.
     """
-    from precompute import normalize_name as pc_normalize
+    from pipeline.names import normalize_name as pc_normalize
     for raw in ["Julia Garrett", "  JULIA   GARRETT ", "Renée Descartes",
                 "José Álvarez", "O'Brien", "Zhiyuan (Katherine) Zhang"]:
         assert normalize_name(raw) == pc_normalize(raw), raw
 
 
-def test_purge_slug_rule_matches_precomputes():
-    """purge_denied reconstructs slugs precompute wrote; the rules must agree.
+def test_purge_slug_rule_matches_pipeline():
+    """purge_denied reconstructs slugs the pipeline wrote; the rules must agree.
 
-    Duplicated for the same reason normalize_name is — precompute pulls in pandas
-    and numpy, and purge_denied is a small operational script.
+    Duplicated for the same reason normalize_name is: purge_denied is a small
+    operational script that stays import-light rather than importing pipeline.names.
     """
-    from precompute import name_to_slug as pc_slug
+    from pipeline.names import name_to_slug as pc_slug
     from purge_denied import name_to_slug
     for key in ["julia garrett", "jose garcia", "o'brien smith",
                 "md nazmus sakib miazi", "zhiyuan (katherine) zhang"]:

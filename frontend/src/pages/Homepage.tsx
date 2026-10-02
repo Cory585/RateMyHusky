@@ -13,10 +13,10 @@ import { ASK_ENABLED } from '../config';
 import './Homepage.css';
 
 const STATS = [
-  { label: 'Professors', value: '3,800+' },
-  { label: 'Courses', value: '3,300+' },
-  { label: 'Comments', value: '44,700+' },
-  { label: 'Departments', value: '100+' },
+  { label: 'Professors', value: '9,300+' },
+  { label: 'Courses', value: '7,900+' },
+  { label: 'Comments', value: '1,767,900+' },
+  { label: 'Departments', value: '80' },
 ];
 
 const COLLEGES = [
@@ -132,13 +132,54 @@ const RANK_NOTE =
   'lower score from hundreds. That is why the ratings below do not always go ' +
   'from highest to lowest.';
 
-/* ---- rating cell ---- */
-const RatingCell = ({ prof }: { prof: Professor }) => (
-  <span className="goat-col-rating">
-    <span className="goat-score">{prof.avgRating?.toFixed(2) ?? '—'}</span>
-    <Stars rating={prof.avgRating ?? 0} />
-  </span>
-);
+/* ---- rating cell with hover/click tooltip ---- */
+const RatingCell = ({ prof, isOpen, onToggle }: {
+  prof: Professor;
+  isOpen: boolean;
+  onToggle: () => void;
+}) => {
+  const ref = useRef<HTMLSpanElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!isOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        onToggle();
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [isOpen, onToggle]);
+
+  return (
+    <span
+      ref={ref}
+      className="goat-col-rating goat-rating-wrapper"
+      onClick={(e) => { e.stopPropagation(); onToggle(); }}
+    >
+      <span className="goat-score">{prof.avgRating?.toFixed(2) ?? '—'}</span>
+      <Stars rating={prof.avgRating ?? 0} />
+      <span className="goat-rating-hint">ⓘ</span>
+
+      {isOpen && (
+        <div className="goat-rating-tooltip">
+          <div className="tooltip-row">
+            <span className="tooltip-label">RMP</span>
+            <span className="tooltip-value">
+              {prof.rmpRating !== null ? prof.rmpRating.toFixed(2) : '—'}
+            </span>
+          </div>
+          <div className="tooltip-divider" />
+          <div className="tooltip-row">
+            <span className="tooltip-label">Avg Rating</span>
+            <span className="tooltip-value tooltip-blended">{prof.avgRating?.toFixed(2) ?? '—'}</span>
+          </div>
+        </div>
+      )}
+    </span>
+  );
+};
 
 const Homepage = () => {
   const navigate = useNavigate();
@@ -170,6 +211,7 @@ const Homepage = () => {
   const [shuffleVisible, setShuffleVisible] = useState(false);
   const shuffleSectionRef = useRef<HTMLElement>(null);
   const [shuffling, setShuffling] = useState(false);
+  const [openTooltip, setOpenTooltip] = useState<number | null>(null);
   const [showAskTip, setShowAskTip] = useState(() => localStorage.getItem('home_ask_tip_dismissed') !== '1');
   const [askTrigger, setAskTrigger] = useState<number | undefined>(undefined);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -290,6 +332,7 @@ const Homepage = () => {
     const cached = goatCache.get(selectedCollege);
     if (cached) {
       setProfs(cached);
+      setOpenTooltip(null);
       return;
     }
 
@@ -297,6 +340,7 @@ const Homepage = () => {
 
     async function loadProfs() {
       setProfsLoading(true);
+      setOpenTooltip(null);
       try {
         const data = await fetchGoatProfessors(selectedCollege);
         if (!cancelled) {
@@ -402,14 +446,14 @@ const Homepage = () => {
     <div className="homepage">
       <Seo
         title="RateMyHusky — Northeastern University Professor Reviews & Ratings"
-        description="Find the right Northeastern professor every semester. RateMyHusky combines RateMyProfessors ratings and reviews with Reddit discussion in one place."
+        description="Find the right Northeastern professor every semester. RateMyHusky brings RateMyProfessor ratings and Reddit discussion together in one place."
         canonical="https://ratemyhusky.com/"
         jsonLd={{
           '@context': 'https://schema.org',
           '@type': 'WebSite',
           name: 'RateMyHusky',
           url: 'https://ratemyhusky.com/',
-          description: 'Northeastern University professor and course ratings combining RateMyProfessors ratings and Reddit discussion.',
+          description: 'Northeastern University professor and course ratings from RateMyProfessor reviews and Reddit discussion.',
         }}
       />
 
@@ -456,7 +500,7 @@ const Homepage = () => {
           Find the <span>right professor</span>, every semester
         </h1>
         <p className="hero-subtitle">
-          RateMyProfessors ratings and Reddit discussion, all in one place.
+          RateMyProfessor ratings and Reddit discussion, all in one place.
         </p>
 
         <SearchBar forceAsk={askTrigger} restoreAsk={(location.state as { restoreAsk?: boolean } | null)?.restoreAsk} />
@@ -481,7 +525,8 @@ const Homepage = () => {
                 without a pointer: it opens on :hover for mice and :focus-visible
                 for keyboards, and on a touch device a tap fires the sticky
                 :hover. All three paths are CSS, so there is no open/closed state
-                to track here. */}
+                to track here — unlike RatingCell, which needs click-toggling
+                because its tooltip sits inside a row that is itself a link. */}
             <button
               type="button"
               className="goat-rank-help"
@@ -545,7 +590,7 @@ const Homepage = () => {
                 on Rating alone reads as "sorted by Rating, descending", the exact
                 claim the note is there to deny. */}
             <span className="goat-col-rating goat-col-ranked">Rating</span>
-            {/* "Ratings", not "Reviews": some RMP ratings carry no written comment. */}
+            {/* "Ratings", not "Reviews": many professors on these boards have ratings but no written review. */}
             <span className="goat-col-reviews goat-col-ranked">Ratings</span>
           </div>
 
@@ -577,7 +622,11 @@ const Homepage = () => {
                   <span className="goat-name-text">{p.name}</span>
                 </div>
                 <span className="goat-col-dept">{p.dept}</span>
-                <RatingCell prof={p} />
+                <RatingCell
+                  prof={p}
+                  isOpen={openTooltip === i}
+                  onToggle={() => setOpenTooltip(openTooltip === i ? null : i)}
+                />
                 <span className="goat-col-reviews">
                   {/* No totalComments fallback: it is a comment count, so under a
                       "Ratings" header it would show the wrong unit entirely. */}

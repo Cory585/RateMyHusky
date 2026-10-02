@@ -8,7 +8,7 @@ const Terms = () => {
         <div className="terms-shell">
           <header className="terms-header">
             <h1>Terms &amp; Conditions</h1>
-            <p className="terms-meta">Effective September 23, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective October 1, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -23,8 +23,9 @@ const Terms = () => {
               <p>
                 RateMyHusky is a professor and course review platform for Northeastern University
                 students. It shows ratings and reviews from RateMyProfessors, excerpts of publicly
-                available discussion on Reddit, and professor photos from Northeastern's public
-                faculty directory pages. Alongside that data we show figures we compute from it —
+                available discussion on Reddit, professor photos from Northeastern's public
+                faculty directory pages, and course details from Northeastern's public course
+                catalog. Alongside that data we show figures we compute from it —
                 averages, department comparisons, and sentiment labels derived from Reddit text.
                 Those are our estimates, not numbers published by any source.
               </p>
@@ -181,6 +182,11 @@ const Terms = () => {
                   sourced from the public college and department directory pages that publish them.
                 </li>
                 <li>
+                  <strong>Northeastern course catalog</strong>: course names, departments,
+                  descriptions, credits, prerequisites, corequisites, and NUPath attributes are
+                  sourced from the public course catalog at catalog.northeastern.edu.
+                </li>
+                <li>
                   <strong>Reddit</strong>: publicly available discussion mentioning professors is
                   sourced from Reddit and remains subject to Reddit's own terms and policies.
                 </li>
@@ -191,9 +197,10 @@ const Terms = () => {
               <h2>7. Intellectual Property &amp; Data Sources</h2>
               <p>
                 Review content and ratings sourced from RateMyProfessors remain subject to
-                RateMyProfessors' intellectual property rights and terms of use. Faculty photos
-                published on Northeastern's directory pages remain the property of Northeastern
-                University, and we display them as they are published there. Reddit content
+                RateMyProfessors' intellectual property rights and terms of use. The faculty
+                photos published on Northeastern University's directory pages and the course
+                descriptions in its public course catalog remain its property, and we display
+                them as they are published there. Reddit content
                 remains the property of its authors and of Reddit. Reviews submitted on
                 RateMyHusky are owned by RateMyHusky, as described in Section 8.
               </p>
@@ -309,7 +316,7 @@ const Terms = () => {
               <p>
                 Professor ratings and review comments come from external sources and from the
                 students who write them, and may be incomplete, outdated, or inaccurate. Figures we
-                compute — averages, per-term trends, and Reddit sentiment labels — depend
+                compute — averages and Reddit sentiment labels — depend
                 on that source data and on matching a professor's name across systems that spell
                 it differently, so they can be wrong even when the sources are right. RateMyHusky
                 makes no guarantees about the accuracy, completeness, or timeliness of anything
