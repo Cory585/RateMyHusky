@@ -214,6 +214,127 @@
 	line-height: 1.6;
 }
 
+.course-top-prof-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+	gap: 12px;
+}
+
+.course-top-prof-card {
+	background: #fff;
+	border: 1px solid #e8e8e8;
+	border-radius: 14px;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+	transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+	text-decoration: none;
+}
+
+.course-top-prof-card:hover {
+	transform: translateY(-2px);
+	box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+	border-color: rgba(214, 57, 76, 0.25);
+}
+
+.course-top-prof-photo {
+	width: 100%;
+	height: 150px;
+	flex-shrink: 0;
+	overflow: hidden;
+	position: relative;
+}
+
+.course-top-prof-avatar {
+	width: 100%;
+	height: 100%;
+	background: linear-gradient(135deg, #d6394c, #a02030);
+	color: #fff;
+	font-weight: 900;
+	font-size: 2rem;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	letter-spacing: 1px;
+}
+
+.course-top-prof-img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.course-top-prof-rank {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	font-size: 0.72rem;
+	font-weight: 800;
+	color: #d6394c;
+	background: rgba(255, 255, 255, 0.92);
+	border: 1px solid #ffd5dd;
+	border-radius: 999px;
+	padding: 2px 8px;
+	backdrop-filter: blur(4px);
+}
+
+.course-top-prof-body {
+	padding: 12px 14px;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	flex: 1;
+}
+
+.course-top-prof-body-top {
+	overflow: hidden;
+}
+
+.course-top-prof-name {
+	margin: 0;
+	font-size: 0.92rem;
+	font-weight: 800;
+	color: #1b1b1b;
+	line-height: 1.3;
+}
+
+.course-top-prof-rating {
+	float: right;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	margin-left: 6px;
+	margin-bottom: 2px;
+}
+
+.course-top-prof-avg {
+	font-size: 1rem;
+	font-weight: 800;
+	color: #d6394c;
+	line-height: 1;
+}
+
+.course-top-prof-footer {
+	display: flex;
+	justify-content: space-between;
+	gap: 4px;
+	margin-top: auto;
+	padding-top: 8px;
+	border-top: 1px solid #f0f0f0;
+}
+
+.course-top-prof-footer span {
+	font-size: 0.62rem;
+	font-weight: 600;
+	color: #bbb;
+	flex: 1;
+	word-break: break-word;
+}
+
+.course-top-prof-footer--right {
+	text-align: right;
+}
+
 .instructor-scroll-wrap {
 	position: relative;
 }
@@ -483,6 +604,11 @@
 		white-space: normal;
 	}
 
+	/* Top prof cards: 2 columns on small screens */
+	.course-top-prof-grid {
+		grid-template-columns: repeat(2, 1fr);
+	}
+
 	/* Tables: drop Enrollment & Responses columns */
 	.section-table th:nth-child(5),
 	.section-table td:nth-child(5),
@@ -618,6 +744,33 @@
 	border-color: #343434;
 }
 
+.dark .course-top-prof-card {
+	background: #232323;
+	border-color: #333;
+}
+
+.dark .course-top-prof-rank {
+	color: #f06d7d;
+	background: rgba(35, 35, 35, 0.92);
+	border-color: #59333b;
+}
+
+.dark .course-top-prof-name {
+	color: #e3e3e3;
+}
+
+.dark .course-top-prof-avg {
+	color: #f06d7d;
+}
+
+.dark .course-top-prof-footer {
+	border-top-color: #333;
+}
+
+.dark .course-top-prof-footer span {
+	color: #555;
+}
+
 
 /* ── back to top ── */
 .back-to-top {
@@ -714,4 +867,11 @@
 .dark .course-catalog-tag {
 	background: #1f3a34;
 	color: #7fd1bd;
+}
+
+/* Top prof cards: 1 column on very narrow phones */
+@media (max-width: 420px) {
+	.course-top-prof-grid {
+		grid-template-columns: 1fr;
+	}
 }
