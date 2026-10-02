@@ -39,6 +39,12 @@ def test_stat_treats_zero_and_none_as_missing():
     assert rmp.stat(3.456, 2) == 3.46
 
 
+def test_pct_keeps_zero_and_nulls_none():
+    assert rmp.pct(0) == 0.0
+    assert rmp.pct(None) is None
+    assert rmp.pct(87.66) == 87.7
+
+
 def test_rating_distribution_counts_each_star():
     d = rmp.rating_distribution([_review(5), _review(5), _review(1), _review(0)])
     assert d == {"1": 1, "2": 0, "3": 0, "4": 0, "5": 2}

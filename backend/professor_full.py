@@ -55,7 +55,7 @@ def build_summary(prof, reviews, reddit_mentions):
     return {
         "rating": rmp.stat(prof.get("avg_rating"), 2),
         "difficulty": rmp.stat(prof.get("difficulty"), 2),
-        "wouldTakeAgainPct": rmp.stat(prof.get("would_take_again_pct"), 1),
+        "wouldTakeAgainPct": rmp.pct(prof.get("would_take_again_pct")),
         "numRatings": num_ratings,
         "numComments": sum(1 for r in reviews if r["comment"].strip()) + len(reddit_mentions),
         "hoursPerWeek": None,
