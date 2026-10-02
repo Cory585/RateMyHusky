@@ -19,6 +19,12 @@ def stat(value, places):
     return round(float(value), places) if value else None
 
 
+def pct(value):
+    """A stored percentage for display, or None. Unlike the 1-5 scales, 0% is
+    a real value; a missing one is already stored as NULL."""
+    return round(float(value), 1) if value is not None else None
+
+
 def fetch_reviews(name_key, query, sanitize):
     """The professor's stored RMP ratings, moderation filter applied."""
     rows = query(f"""
@@ -72,7 +78,7 @@ def build_section(prof, reviews):
         "available": available,
         "rating": rating if available else None,
         "difficulty": stat(prof.get("difficulty"), 2) if available else None,
-        "wouldTakeAgainPct": stat(prof.get("would_take_again_pct"), 1) if available else None,
+        "wouldTakeAgainPct": pct(prof.get("would_take_again_pct")) if available else None,
         "numRatings": num_ratings,
         "professorUrl": prof.get("professor_url"),
         "ratingDistribution": rating_distribution(reviews),

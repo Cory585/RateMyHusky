@@ -155,6 +155,12 @@ def test_zero_ratings_are_null_not_zero():
     assert data["summary"]["difficulty"] is None
 
 
+def test_zero_would_take_again_is_a_real_percentage():
+    data, _, _ = _build(db=FakeDB(catalog={**CATALOG, "would_take_again_pct": 0.0}))
+    assert data["summary"]["wouldTakeAgainPct"] == 0.0
+    assert data["sources"]["rmp"]["wouldTakeAgainPct"] == 0.0
+
+
 def test_alias_fallback_serves_the_canonical_slug():
     # No row has slug "olin-guha", so the lookup falls back to name_key "olin guha".
     db = FakeDB(catalog={**CATALOG, "slug": "olin-guha-2"})
