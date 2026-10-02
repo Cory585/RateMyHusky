@@ -156,7 +156,7 @@ export default function Courses() {
 		fetchCoursesCatalog({
 			q: filters.q || undefined,
 			dept: filters.dept || undefined,
-			minRating: Math.max(filters.minRating, 0.01),
+			minRating: filters.minRating > 0 ? filters.minRating : undefined,
 			maxRating: filters.maxRating < 5 ? filters.maxRating : undefined,
 			sort: filters.sort,
 			page: filters.page,
@@ -315,7 +315,7 @@ export default function Courses() {
 		<div className="catalog-page">
 			<Seo
 				title="Northeastern Course Reviews & Ratings | RateMyHusky"
-				description={`Browse ${total ? total.toLocaleString() : 'thousands of'} Northeastern University (NEU) course reviews and ratings. See TRACE evaluation data and compare instructors for every course.`}
+				description={`Browse ${total ? total.toLocaleString() : 'thousands of'} Northeastern University (NEU) course reviews and ratings. Compare course ratings and difficulty from RateMyProfessor reviews.`}
 				canonical="https://ratemyhusky.com/courses"
 			/>
 			{sidebarOpen && <div className="catalog-overlay" onClick={() => setSidebarOpen(false)} />}

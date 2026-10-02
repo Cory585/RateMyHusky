@@ -64,16 +64,17 @@ def render_client(monkeypatch):
     def fake_colleagues(department, exclude_slug):
         return [{"name": "Alice Smith", "slug": "alice-smith", "avgRating": 4.5, "totalRatings": 30}]
 
-    def fake_course_detail(code):
+    def fake_course_payload(code):
         if code == "missing":
-            return ({"error": "not found"}, 404)
-        return FakeResp({
-            "summary": {"code": "ECON1115", "name": "Macroeconomics",
-                        "department": "Economics", "avgRating": 4.1,
-                        "avgEnrollment": 120, "latestTermTitle": "Fall 2025"},
-            "instructors": [{"name": "Francis Georges", "slug": "francis-georges"}],
-            "sections": [], "questionScores": [],
-        })
+            return None
+        return {
+            "code": "ECON1115", "name": "Macroeconomics", "department": "Economics", "catalog": None,
+            "summary": {"rating": 4.1, "difficulty": 2.5, "numRatings": 342, "hoursPerWeek": None,
+                        "bySource": {"rmp": {"rating": 4.1, "numRatings": 342}}},
+            "professors": [{"slug": "francis-georges", "name": "Francis Georges", "imageUrl": None,
+                            "focusX": 50.0, "focusY": 30.0, "rating": 4.1, "difficulty": 2.5,
+                            "numRatings": 342}],
+        }
 
     def fake_stats():
         return FakeResp([
@@ -116,7 +117,7 @@ def render_client(monkeypatch):
 
     monkeypatch.setattr(render, "_get_professor_payload", lambda: fake_professor_payload, raising=False)
     monkeypatch.setattr(render, "_get_colleagues", lambda: fake_colleagues, raising=False)
-    monkeypatch.setattr(render, "_get_course_view", lambda: fake_course_detail, raising=False)
+    monkeypatch.setattr(render, "_get_course_payload", lambda: fake_course_payload, raising=False)
     monkeypatch.setattr(render, "_get_stats_view", lambda: fake_stats, raising=False)
     monkeypatch.setattr(render, "_get_professors_catalog_view", lambda: fake_professors_catalog, raising=False)
     monkeypatch.setattr(render, "_get_courses_catalog_view", lambda: fake_courses_catalog, raising=False)

@@ -8,7 +8,7 @@ const Privacy = () => {
         <div className="terms-shell">
           <header className="terms-header">
             <h1>Privacy Policy</h1>
-            <p className="terms-meta">Effective August 12, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective October 1, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -90,7 +90,6 @@ const Privacy = () => {
               <p>The information we collect is used solely to:</p>
               <ul>
                 <li>Authenticate your identity and confirm your <code>@husky.neu.edu</code> affiliation</li>
-                <li>Restrict access to TRACE course evaluation comments to signed-in users</li>
                 <li>Display your name and profile photo in the navigation bar while signed in</li>
                 <li>Save and display the professors and courses you bookmark</li>
                 <li>Apply rate limits across the site so automated traffic cannot overwhelm it</li>
@@ -226,8 +225,7 @@ const Privacy = () => {
                   privacy policies.
                 </li>
                 <li>
-                  <strong>RateMyProfessors, Northeastern TRACE, Northeastern faculty pages
-                  &amp; Reddit</strong>: these are data sources only. We do not send any user
+                  <strong>RateMyProfessors, Northeastern faculty pages &amp; Reddit</strong>: these are data sources only. We do not send any user
                   data to these services.
                 </li>
               </ul>
@@ -318,13 +316,11 @@ const Privacy = () => {
               <ul>
                 <li>
                   Name, department, and college, together with metrics we compute from the
-                  underlying data (average rating, difficulty, would-take-again, per-term
-                  history, and department comparisons).
+                  underlying data (average rating, difficulty, would-take-again, and
+                  department comparisons).
                 </li>
                 <li>
-                  Ratings and written reviews from RateMyProfessors, and scores and written
-                  comments from Northeastern's TRACE course evaluations. TRACE comments are
-                  shown only to signed-in <code>@husky.neu.edu</code> users.
+                  Ratings and written reviews from RateMyProfessors.
                 </li>
                 <li>
                   A profile photo, taken from the public Northeastern faculty and college
@@ -338,8 +334,7 @@ const Privacy = () => {
               </ul>
               <p>
                 We publish no contact details, no course rosters, and nothing that is not already
-                public in the sources above (except TRACE comments, which stay behind sign-in as
-                Northeastern publishes them). Data is refreshed on a weekly schedule.
+                public in the sources above.
               </p>
               <p>
                 <strong>Removal requests.</strong> If you are a professor or instructor and want
@@ -350,7 +345,7 @@ const Privacy = () => {
                 cannot reinstate you, and the rows already loaded — your page, your ratings and
                 comments, your Reddit mentions, and the evidence corpus built from them — are
                 deleted. Two limits are worth being straight about: we cannot remove your data
-                from RateMyProfessors, TRACE, or Reddit themselves, and our own private source
+                from RateMyProfessors or Reddit themselves, and our own private source
                 files can still contain your rows until the upstream source stops publishing
                 them, though nothing published on the site can reach them. If you
                 need removal from a source itself, contact that source directly.
