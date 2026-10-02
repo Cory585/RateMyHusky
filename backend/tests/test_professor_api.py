@@ -10,7 +10,7 @@ import pytest
 os.environ.setdefault("CRDB_DATABASE_URL", "postgresql://stub")
 import server  # noqa: E402
 
-from tests.test_professor_full import CATALOG, REVIEWS  # noqa: E402
+from tests.test_professor_full import CATALOG, REVIEWS, SUMMARY_ROWS  # noqa: E402
 
 TEST_SECRET = "test-secret-0123456789abcdefghijklmnop"  # gitleaks:allow
 
@@ -40,8 +40,8 @@ def client(monkeypatch):
             return []
         if "FROM rmp_reviews" in s:
             return [dict(r) for r in REVIEWS]
-        if "FROM course_catalog" in s:
-            return [{"code": "CS3500", "name": "Object-Oriented Design"}]
+        if "FROM source_summary" in s:
+            return [dict(r) for r in SUMMARY_ROWS]
         if "FROM reddit_mentions" in s:
             return []
         raise AssertionError(f"unexpected query: {s}")

@@ -14,6 +14,7 @@ import StarRating from '../components/StarRating';
 import BookmarkButton from '../components/BookmarkButton';
 import Seo from '../components/Seo';
 import { getInitials, splitProfName, stripPrefix } from '../utils/nameUtils';
+import { useDebouncedValue } from '../utils/useDebouncedValue';
 
 import './ProfessorCatalog.css';
 
@@ -188,12 +189,15 @@ export default function ProfessorCatalog() {
       .catch(console.error);
   }, [filters.college]);
 
+  const debouncedQ = useDebouncedValue(filters.q, 250);
+
   // Fetch professors when any filter changes
   useEffect(() => {
     if (viewMode === 'grid' && !isMeasured) return;
+    let cancelled = false;   // a slower, older response must not overwrite a newer one
     setLoading(true);
     fetchProfessorsCatalog({
-      q:          filters.q          || undefined,
+      q:          debouncedQ         || undefined,
       college:    filters.college    || undefined,
       dept:       filters.dept       || undefined,
       minRating:  filters.minRating  > 0 ? filters.minRating  : undefined,
@@ -205,13 +209,15 @@ export default function ProfessorCatalog() {
       limit:      pageSize,
     })
       .then(data => {
+        if (cancelled) return;
         setProfessors(data.professors);
         setTotal(data.total);
         setTotalPages(data.totalPages);
       })
       .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [filters, pageSize, isMeasured, viewMode]);
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [debouncedQ, filters.college, filters.dept, filters.minRating, filters.maxRating, filters.minReviews, filters.maxReviews, filters.sort, filters.page, pageSize, isMeasured, viewMode]);
 
   // Keep filters in the URL so the catalog view is shareable/bookmarkable.
   useEffect(() => {

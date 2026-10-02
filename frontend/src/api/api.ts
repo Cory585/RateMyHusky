@@ -90,6 +90,7 @@ export interface ProfessorPage {
 
 export interface ProfessorReview {
   course: string;
+  courseCode: string | null;
   quality: number;
   difficulty: number;
   date: string;
@@ -304,11 +305,19 @@ export interface CourseProfessor {
   numRatings: number;
 }
 
+export interface CourseCatalog {
+  description: string | null;
+  credits: string | null;
+  prerequisites: string | null;
+  corequisites: string | null;
+  nupath: string[];
+}
+
 export interface CourseDetail {
   code: string;
   name: string;
   department: string;
-  catalog: null;
+  catalog: CourseCatalog | null;
   summary: CourseSummary;
   professors: CourseProfessor[];
 }

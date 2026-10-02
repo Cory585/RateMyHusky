@@ -103,6 +103,7 @@ const Course = () => {
 		name: `${course.code} — ${course.name}`,
 		courseCode: course.code,
 		provider: { '@type': 'CollegeOrUniversity', name: 'Northeastern University' },
+		...(course.catalog?.description ? { description: course.catalog.description } : {}),
 	};
 	if (summary.rating != null && summary.numRatings) {
 		courseJsonLd.aggregateRating = {
@@ -146,6 +147,29 @@ const Course = () => {
 						<p className="course-dept">{course.department}</p>
 					</div>
 				</header>
+
+				{course.catalog && (course.catalog.description || course.catalog.credits || course.catalog.prerequisites
+					|| course.catalog.corequisites || course.catalog.nupath.length > 0) && (
+					<section className="course-panel course-catalog-info">
+						<div className="course-panel-header">
+							<h2>About This Course</h2>
+						</div>
+						{course.catalog.description && <p className="course-catalog-desc">{course.catalog.description}</p>}
+						<dl className="course-catalog-facts">
+							{course.catalog.credits && <div><dt>Credits</dt><dd>{course.catalog.credits}</dd></div>}
+							{course.catalog.prerequisites && <div><dt>Prerequisites</dt><dd>{course.catalog.prerequisites}</dd></div>}
+							{course.catalog.corequisites && <div><dt>Corequisites</dt><dd>{course.catalog.corequisites}</dd></div>}
+							{course.catalog.nupath.length > 0 && (
+								<div>
+									<dt>NUpath</dt>
+									<dd className="course-catalog-nupath">
+										{course.catalog.nupath.map(n => <span key={n} className="course-catalog-tag">{n}</span>)}
+									</dd>
+								</div>
+							)}
+						</dl>
+					</section>
+				)}
 
 				<section className="course-stats-grid">
 					<article className="course-stat-card">
