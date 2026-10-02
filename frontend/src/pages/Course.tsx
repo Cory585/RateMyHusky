@@ -6,6 +6,7 @@ import LoadError from '../components/LoadError';
 import { fetchCourseData } from '../api/api';
 import type { CourseDetail } from '../api/api';
 import Footer from '../components/Footer';
+import { getInitials, stripPrefix } from '../utils/nameUtils';
 import Breadcrumbs from '../components/Breadcrumbs';
 import Seo from '../components/Seo';
 import BookmarkButton from '../components/BookmarkButton';
@@ -14,6 +15,7 @@ import './Course.css';
 
 const INITIAL_PROFESSORS_VISIBLE = 5;
 const PROFESSORS_VISIBLE_STEP = 5;
+const TOP_PROFESSORS = 10;
 
 /* Display names for summary.bySource keys; an unlisted source shows its key. */
 const SOURCE_LABELS: Record<string, string> = { rmp: 'RMP' };
@@ -84,6 +86,8 @@ const Course = () => {
 	const hasMore = visibleCount < professors.length;
 	const canCollapse = visibleCount > INITIAL_PROFESSORS_VISIBLE;
 	const hasExpandable = professors.length > INITIAL_PROFESSORS_VISIBLE;
+	/* professors[] arrives sorted by rating count, most first. */
+	const topProfessors = professors.slice(0, TOP_PROFESSORS);
 	const breakdown = Object.entries(summary.bySource).filter(([, v]) => v.rating !== null);
 
 	/* Mirrors render.course_html's description exactly (crawler copy and page must agree). */
@@ -168,6 +172,62 @@ const Course = () => {
 						<StatCard label="Avg Hrs / Week" value={summary.hoursPerWeek != null ? `${summary.hoursPerWeek.toFixed(1)}h` : '—'} />
 					)}
 				</section>
+
+				{topProfessors.length > 0 && (
+					<section className="course-panel">
+						<div className="course-panel-header">
+							<h2>Most-Rated Professors</h2>
+						</div>
+						<div className="course-top-prof-grid">
+							{topProfessors.map((prof, index) => (
+								<Link
+									to={`/professors/${prof.slug}`}
+									state={{ fromPage: { label: `${course.code} – ${course.name}`, url: `/courses/${code}` } }}
+									className="course-top-prof-card"
+									key={prof.slug}
+									aria-label={`View ${prof.name}`}
+								>
+									<div className="course-top-prof-photo">
+										{prof.imageUrl ? (
+											<img
+												className="course-top-prof-img"
+												src={prof.imageUrl}
+												alt={prof.name}
+												style={{ objectPosition: `${prof.focusX}% ${prof.focusY}%` }}
+											/>
+										) : (
+											<div className="course-top-prof-avatar" aria-hidden="true">
+												{getInitials(prof.name)}
+											</div>
+										)}
+										<span className="course-top-prof-rank">#{index + 1}</span>
+									</div>
+									<div className="course-top-prof-body">
+										<div className="course-top-prof-body-top">
+											<div className="course-top-prof-rating">
+												{prof.rating != null ? (
+													<>
+														<span className="course-top-prof-avg">{prof.rating.toFixed(1)}</span>
+														<StarRating rating={prof.rating} size="sm" />
+													</>
+												) : (
+													<span className="course-top-prof-avg">—</span>
+												)}
+											</div>
+											<h3 className="course-top-prof-name">
+												{stripPrefix(prof.name)}
+											</h3>
+										</div>
+										<div className="course-top-prof-footer">
+											<span>{prof.numRatings.toLocaleString()} rating{prof.numRatings === 1 ? '' : 's'}</span>
+											<span className="course-top-prof-footer--right">{prof.difficulty != null ? `${prof.difficulty.toFixed(1)} difficulty` : '—'}</span>
+										</div>
+									</div>
+								</Link>
+							))}
+						</div>
+					</section>
+				)}
 
 				<section className="course-panel">
 					<div className="course-panel-header">
