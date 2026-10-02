@@ -189,3 +189,35 @@ jobs:
           git push -f \
             "https://x-access-token:${RMH_DATA_TOKEN}@github.com/RayanR000/RateMyHusky-data.git" \
             main
+
+  # A failed refresh leaves the site serving stale data with nothing on it to
+  # say so, and GitHub's own failure email only reaches whoever last edited the
+  # cron line. Open an issue instead, so the failure reaches everyone watching
+  # the repo and stays open until someone deals with it. Repeat failures comment
+  # on the open issue rather than stacking new ones. A separate job, so only this
+  # step gets write access: the job that writes prod keeps its read-only token.
+  notify-failure:
+    needs: refresh
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TRIGGER: ${{ github.event_name }}
+        run: |
+          title="Data refresh failed"
+          existing=$(gh issue list --state open --search "\"$title\" in:title" \
+            --json number,title -q ".[] | select(.title == \"$title\") | .number" | head -n1)
+          body="The $TRIGGER run failed: $RUN_URL
+
+          Until a run succeeds, the site keeps serving the last good RMP data."
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
