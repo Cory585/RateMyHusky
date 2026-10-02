@@ -429,12 +429,6 @@
 	line-height: 1.3;
 }
 
-.compare-cell small {
-	font-size: 0.73rem;
-	color: #8e8e8e;
-	line-height: 1.25;
-}
-
 .compare-cell-left {
 	text-align: center;
 }
@@ -561,7 +555,6 @@
 .dark .compare-suggestion-meta,
 .dark .compare-status,
 .dark .compare-metrics-header p,
-.dark .compare-cell small,
 .dark .compare-profile-card p {
 	color: #a1a7af;
 }
@@ -737,10 +730,6 @@
 		font-size: 0.65rem;
 		letter-spacing: 0.04em;
 	}
-
-	.compare-cell small {
-		font-size: 0.65rem;
-	}
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -832,9 +821,5 @@
 	.compare-cell-label {
 		font-size: 0.6rem;
 		padding: 8px 4px;
-	}
-
-	.compare-cell small {
-		font-size: 0.6rem;
 	}
 }

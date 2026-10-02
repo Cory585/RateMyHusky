@@ -224,7 +224,7 @@ def reviews_client(monkeypatch):
                 "grade": "B", "textbook": "", "online_class": "",
                 "comment": "Brutal curve, no partial credit.",
             }]
-        if "FROM course_catalog" in sql:
+        if "FROM source_summary" in sql:
             return []
         raise AssertionError(f"unexpected query: {sql}")
 

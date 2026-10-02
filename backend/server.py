@@ -9,7 +9,6 @@ Run:           python server.py
 import os, re, unicodedata, json, hashlib, random
 import html as _html
 import psycopg2
-import psycopg2.errors
 from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.extras import RealDictCursor
 from functools import lru_cache
@@ -25,7 +24,7 @@ import jwt as pyjwt
 import requests as http_requests
 from urllib.parse import urlencode, urlparse
 from datetime import datetime, timedelta, timezone
-from threading import Lock, Thread, Event
+from threading import Lock
 import time
 from rag.chat_search import keyword_search
 from rag.chat_question import handle_question
@@ -35,6 +34,7 @@ from rag.chat_gate import gate
 from rag.chat_retrieve import retrieve, fetch_reddit_mentions
 from rag.query_embedder import embed_query
 from rag.chat_answer import generate, generate_course_list, generate_course_ranking
+from course_page import build_course
 from professor_full import build_payload
 import bookmarks
 import moderation
@@ -56,10 +56,6 @@ def _hash_ip(ip):
 # ──────────────────────────────────────────────
 #  Helpers
 # ──────────────────────────────────────────────
-# Shared with precompute.py, which needs the same ordering to pick a course's
-# current title (most recent term wins). Two copies of a parser this fiddly
-# would drift, so it lives in one module both import.
-from term_order import term_sort_key  # noqa: E402
 
 
 def normalize_name(name):
@@ -67,6 +63,15 @@ def normalize_name(name):
     s = unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
     s = re.sub(r'\s+', ' ', s).strip()
     return s
+
+
+# Joins multi-select dept/college filter values. Not ",": department names carry
+# commas ("Lang, Literature and Culture"). Must match FILTER_SEPARATOR in api.ts.
+FILTER_SEPARATOR = "|"
+
+
+def split_filter(raw):
+    return [v.strip() for v in (raw or "").split(FILTER_SEPARATOR) if v.strip()]
 
 
 # Build a word-level mapping so partial/typeahead queries also resolve.
@@ -200,6 +205,26 @@ def set_security_headers(response):
     return response
 
 
+# TEMPORARY: per-request server time for the backend refactor's latency targets.
+# Remove once the targets are measured.
+_TIMED_PREFIXES = ("/api/professors/", "/api/courses/", "/api/professors-catalog",
+                   "/api/courses-catalog")
+
+
+@app.before_request
+def _timing_start():
+    g.t0 = time.perf_counter()
+
+
+@app.after_request
+def _timing_log(response):
+    t0 = g.pop("t0", None)
+    if t0 is not None and request.path.startswith(_TIMED_PREFIXES):
+        print(f"[timing] {request.path} {response.status_code} "
+              f"{(time.perf_counter() - t0) * 1000:.1f}ms", flush=True)
+    return response
+
+
 @app.errorhandler(HTTPException)
 def _http_error(e):
     """404/405/429 and every other HTTP error as JSON; the frontend reads the status."""
@@ -227,6 +252,7 @@ def _get_pool():
     if _pool is None:
         _pool = ThreadedConnectionPool(5, 10, CRDB_DATABASE_URL, sslmode="require",
                                        connect_timeout=5,
+                                       options="-c statement_timeout=5000",
                                        keepalives=1, keepalives_idle=30,
                                        keepalives_interval=10, keepalives_count=3)
     return _pool
@@ -236,7 +262,7 @@ def _get_pool():
 # ──────────────────────────────────────────────
 _cache = {}
 _cache_lock = Lock()
-CACHE_TTL = 3600      # 1 hour
+CACHE_TTL = 86400      # 24 h; a pipeline run invalidates by bumping data_version
 CACHE_MAX_SIZE = 5000
 
 _feedback_lock = Lock()
@@ -249,7 +275,39 @@ _ACCOUNT_FEEDBACK_TYPES = {"banappeal", "datadeletion"}
 
 
 
+DATA_VERSION_TTL = 60
+_version_state = {"value": 0, "checked": 0.0}
+_version_lock = Lock()
+
+
+def data_version():
+    """stats_cache.data_version, re-read at most once a minute per process. Every
+    pipeline run bumps it, which retires every cached page at once. Bumping it by
+    hand (UPDATE stats_cache SET value = value + 1 WHERE key = 'data_version')
+    flushes every process's cache within a minute, e.g. after a takedown or
+    moderation change."""
+    now = time.time()
+    with _version_lock:
+        if now - _version_state["checked"] < DATA_VERSION_TTL:
+            return _version_state["value"]
+        _version_state["checked"] = now
+    try:
+        row = query_one("SELECT value FROM stats_cache WHERE key = 'data_version'")
+    except psycopg2.Error as e:
+        # A cache hit needs no other query; keep serving it and re-read in a minute.
+        print(f"data_version: read failed, keeping v{_version_state['value']}: {e}")
+        return _version_state["value"]
+    value = int(row["value"]) if row else 0
+    with _version_lock:
+        if value != _version_state["value"]:
+            with _cache_lock:
+                _cache.clear()   # entries under the old version can never be read again
+        _version_state["value"] = value
+    return value
+
+
 def cache_get(key):
+    key = f"v{data_version()}:{key}"
     with _cache_lock:
         entry = _cache.get(key)
         if entry and time.time() - entry["ts"] < CACHE_TTL:
@@ -258,48 +316,12 @@ def cache_get(key):
 
 
 def cache_set(key, data):
+    key = f"v{data_version()}:{key}"
     with _cache_lock:
+        _cache.pop(key, None)   # re-insert so dict order stays oldest-first
         _cache[key] = {"data": data, "ts": time.time()}
-        if len(_cache) > CACHE_MAX_SIZE:
-            cutoff = time.time() - CACHE_TTL
-            expired = [k for k, v in _cache.items() if v["ts"] < cutoff]
-            for k in expired:
-                del _cache[k]
-
-
-# ──────────────────────────────────────────────
-#  Daily memory reset at 09:00 UTC
-# ──────────────────────────────────────────────
-_shutdown_event = Event()
-_reset_thread_started = False
-
-def _seconds_until_next_9utc():
-    now = datetime.now(timezone.utc)
-    target = now.replace(hour=9, minute=0, second=0, microsecond=0)
-    if now >= target:
-        target += timedelta(days=1)
-    return (target - now).total_seconds()
-
-def _daily_cache_reset():
-    while not _shutdown_event.is_set():
-        wait = _seconds_until_next_9utc()
-        if _shutdown_event.wait(timeout=wait):
-            break
-        try:
-            with _cache_lock:
-                _cache.clear()
-            print(f"[{datetime.now(timezone.utc).isoformat()}] Daily cache reset complete",
-                  flush=True)
-        except Exception as e:
-            print(f"[{datetime.now(timezone.utc).isoformat()}] Cache reset error: {e}",
-                  flush=True)
-
-def _start_reset_thread():
-    global _reset_thread_started
-    if not _reset_thread_started:
-        _reset_thread_started = True
-        t = Thread(target=_daily_cache_reset, daemon=True)
-        t.start()
+        while len(_cache) > CACHE_MAX_SIZE:
+            del _cache[next(iter(_cache))]
 
 
 def _acquire_fresh_conn():
@@ -323,6 +345,15 @@ def _discard_db_conn():
                 pass
 
 
+def _rollback_after_cancel(conn):
+    """A cancelled statement aborts the transaction (the pool is not autocommit), so
+    roll back or the request's next query fails with InFailedSqlTransaction."""
+    try:
+        conn.rollback()
+    except Exception:
+        _discard_db_conn()
+
+
 def get_db():
     if 'db' not in g:
         return _acquire_fresh_conn()
@@ -331,11 +362,6 @@ def get_db():
         _discard_db_conn()
         return _acquire_fresh_conn()
     return conn
-
-
-@app.before_request
-def _ensure_reset_thread():
-    _start_reset_thread()
 
 
 @app.teardown_appcontext
@@ -358,6 +384,9 @@ def query(sql, params=None):
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute(sql, params or ())
         return cur.fetchall()
+    except psycopg2.extensions.QueryCanceledError:
+        _rollback_after_cancel(conn)
+        raise   # statement_timeout: the connection is healthy, a retry would just time out again
     except (psycopg2.InterfaceError, psycopg2.OperationalError):
         # Connection was stale — discard it and retry once with a fresh one
         _discard_db_conn()
@@ -372,28 +401,6 @@ def query_one(sql, params=None):
     return rows[0] if rows else None
 
 
-def catalog_rows_by_trace_keys(trace_keys):
-    """Catalog rows whose TRACE spelling (trace_name_key) is one of `trace_keys`.
-
-    These are fuzzy-matched professors: TRACE files their courses under a name
-    that differs from the catalog row's name_key, so a name_key lookup by the
-    TRACE spelling misses them. A catalog built before the column existed has
-    no such rows, and naming the column there raises, so that returns [] after
-    rolling back the aborted transaction for the caller's next query.
-    """
-    if not trace_keys:
-        return []
-    placeholders = ",".join(["%s"] * len(trace_keys))
-    try:
-        return query(
-            f"SELECT * FROM professors_catalog WHERE trace_name_key IN ({placeholders})",
-            list(trace_keys),
-        )
-    except psycopg2.errors.UndefinedColumn:
-        get_db().rollback()
-        return []
-
-
 def _chat_write(sql, params=None):
     """Write helper for the question path (ask_log INSERTs): execute + commit, never fetch.
     The read-only query()/query_one() call fetchall(), which raises on a non-RETURNING INSERT;
@@ -405,6 +412,9 @@ def _chat_write(sql, params=None):
         cur = conn.cursor()
         cur.execute(sql, params or ())
         conn.commit()
+    except psycopg2.extensions.QueryCanceledError as e:
+        _rollback_after_cancel(conn)
+        print(f"_chat_write: log write timed out, dropping: {e}")
     except (psycopg2.InterfaceError, psycopg2.OperationalError):
         try:
             _discard_db_conn()
@@ -435,6 +445,9 @@ def _write(sql, params=None):
         cur = conn.cursor()
         cur.execute(sql, params or ())
         conn.commit()
+    except psycopg2.extensions.QueryCanceledError:
+        _rollback_after_cancel(conn)
+        raise
     except (psycopg2.InterfaceError, psycopg2.OperationalError):
         _discard_db_conn()
         conn = get_db()
@@ -710,19 +723,6 @@ def goat_professors():
         LIMIT %s
     """, (college, min_reviews, prior, limit))
 
-    # Comment counts for the displayed rows, one batched round trip.
-    comment_counts = {}
-    if rows:
-        name_keys = [row["name_key"] for row in rows]
-        for r in query(
-            "SELECT name_key, COUNT(*) AS cnt FROM rmp_reviews "
-            f"WHERE name_key IN ({','.join(['%s'] * len(name_keys))}) "
-            "AND comment IS NOT NULL AND comment != '' "
-            "GROUP BY name_key",
-            name_keys,
-        ):
-            comment_counts[r["name_key"]] = int(r["cnt"])
-
     result = []
     for row in rows:
         result.append({
@@ -733,7 +733,7 @@ def goat_professors():
             # Displayed as "Ratings": the floor above gates on it and
             # RANKING_SCORE_SQL weights by it.
             "totalReviews": row["total_reviews"] or 0,
-            "totalComments": comment_counts.get(row["name_key"], 0),
+            "totalComments": row["total_comments"] or 0,
         })
     cache_set(cache_key, result)
     return jsonify(result)
@@ -762,24 +762,6 @@ def random_professor():
 
 def _format_course_code(raw: str) -> str:
     return re.sub(r"\s+", "", str(raw).upper())
-
-
-def _safe_int(value, default: int = 0) -> int:
-    try:
-        if value is None:
-            return default
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _safe_float(value, default: float = 0.0) -> float:
-    try:
-        if value is None:
-            return default
-        return float(value)
-    except (TypeError, ValueError):
-        return default
 
 
 @app.route("/api/search")
@@ -942,7 +924,7 @@ def departments():
     if cached:
         return jsonify(cached)
     if college and college != "All":
-        college_list = [c.strip() for c in college.split(",") if c.strip()]
+        college_list = split_filter(college)
         if len(college_list) == 1:
             rows = query("""
                 SELECT DISTINCT department FROM professors_catalog
@@ -1104,7 +1086,7 @@ def professors_catalog():
     params = []
 
     if college and college != "All":
-        college_list = [c.strip() for c in college.split(",") if c.strip()]
+        college_list = split_filter(college)
         if len(college_list) == 1:
             conditions.append("college = %s")
             params.append(college_list[0])
@@ -1116,7 +1098,7 @@ def professors_catalog():
         "Counseling & Educational Psych": ["Counseling amp Educational Psych", "Counseling  Educational Psych"],
     }
     if dept and dept != "All":
-        dept_list = [d.strip() for d in dept.split(",") if d.strip()]
+        dept_list = split_filter(dept)
         expanded = []
         for d in dept_list:
             expanded.append(d)
@@ -1258,7 +1240,7 @@ def courses_catalog():
     params = []
 
     if dept and dept != "All":
-        dept_list = [d.strip() for d in dept.split(",") if d.strip()]
+        dept_list = split_filter(dept)
         if len(dept_list) == 1:
             conditions.append("department = %s")
             params.append(dept_list[0])
@@ -1278,7 +1260,7 @@ def courses_catalog():
     where_str = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     if sort == "rating":
-        order = "avg_rating DESC NULLS LAST"
+        order = "avg_rating DESC NULLS LAST, lower(code) ASC"
     else:
         order = "lower(code) ASC"
 
@@ -1316,320 +1298,29 @@ def courses_catalog():
     return jsonify(result)
 
 
-@app.route("/api/courses/<code>")
-def course_profile(code):
+def course_payload(code):
+    """The §4.3 payload for `code` (cached), or None when it is not in the catalog.
+    Shared by /api/courses/<code> and render.py."""
     code_norm = _format_course_code(code)
     if not code_norm:
+        return None
+    cache_key = f"course:{code_norm}"
+    data = cache_get(cache_key)
+    if data is None:
+        data = build_course(code_norm, query, query_one)
+        if data is None:
+            return None
+        cache_set(cache_key, data)
+    return data
+
+
+@app.route("/api/courses/<code>")
+def course_profile(code):
+    data = course_payload(code)
+    if data is None:
         return jsonify({"error": "Course not found"}), 404
-
-    is_authed = False
-    token = _get_auth_token()
-    if token:
-        try:
-            pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-            is_authed = True
-        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
-            pass
-
-    cache_key = f"course:{code_norm}:{'a' if is_authed else 'u'}"
-    cached = cache_get(cache_key)
-    if cached:
-        resp = jsonify(cached)
-        resp.headers["Cache-Control"] = "private, max-age=3600" if is_authed else "public, max-age=3600"
-        resp.headers["Vary"] = "Authorization"
-        return resp
-
-    # Look up course in catalog
-    # SELECT * so a catalog built before is_topics existed still serves (the
-    # column reads as absent, i.e. not a topics code).
-    course = query_one("SELECT * FROM course_catalog WHERE code = %s", (code_norm,))
-    if not course:
-        return jsonify({"error": "Course not found"}), 404
-
-    # Get all sections for this course from trace_courses using indexed course_code column
-    sections = query("""
-        SELECT DISTINCT ON (tc.course_id, tc.instructor_id, tc.term_id)
-            tc.course_id, tc.instructor_id, tc.term_id, tc.term_title,
-            tc.department_name, tc.display_name, tc.section, tc.enrollment,
-            tc.instructor_first_name, tc.instructor_last_name
-        FROM trace_courses tc
-        WHERE tc.course_code = %s
-        ORDER BY tc.course_id, tc.instructor_id, tc.term_id, tc.term_id DESC
-    """, (code_norm,))
-
-    if not sections:
-        return jsonify({"error": "Course not found"}), 404
-
-    # Single query for all score types using conditional aggregation (replaces 3 separate queries)
-    section_keys = tuple((s["course_id"], s["instructor_id"], s["term_id"]) for s in sections)
-    combined_scores = query(
-        "SELECT course_id, instructor_id, term_id, "
-        "SUM(CASE WHEN lower(question) LIKE '%%overall%%' AND lower(question) != 'overall effectiveness' THEN CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT) ELSE 0 END) as overall_weighted, "
-        "SUM(CASE WHEN lower(question) LIKE '%%overall%%' AND lower(question) != 'overall effectiveness' THEN CAST(total_responses AS INT) ELSE 0 END) as overall_responses, "
-        "SUM(CASE WHEN lower(question) LIKE '%%overall%%' AND lower(question) != 'overall effectiveness' THEN completed ELSE 0 END) as overall_completed, "
-        "SUM(CASE WHEN lower(question) LIKE '%%challeng%%' THEN CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT) ELSE 0 END) as challeng_weighted, "
-        "SUM(CASE WHEN lower(question) LIKE '%%challeng%%' THEN CAST(total_responses AS INT) ELSE 0 END) as challeng_responses, "
-        "SUM(CASE WHEN lower(question) LIKE '%%hours%%' THEN CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT) ELSE 0 END) as hours_weighted, "
-        "SUM(CASE WHEN lower(question) LIKE '%%hours%%' THEN CAST(total_responses AS INT) ELSE 0 END) as hours_responses "
-        "FROM trace_scores "
-        "WHERE (course_id, instructor_id, term_id) IN %s "
-        "AND ((lower(question) LIKE '%%overall%%' AND lower(question) != 'overall effectiveness') OR lower(question) LIKE '%%challeng%%' OR lower(question) LIKE '%%hours%%') "
-        "GROUP BY course_id, instructor_id, term_id",
-        (section_keys,)
-    )
-
-    # Build score maps from combined result
-    score_map = {}
-    challenging_map = {}
-    hours_map = {}
-    for row in combined_scores:
-        key = (row["course_id"], row["instructor_id"], row["term_id"])
-        if row["overall_responses"]:
-            score_map[key] = {
-                "weighted_sum": row["overall_weighted"],
-                "total_responses": row["overall_responses"],
-                "completed": row["overall_completed"],
-            }
-        if row["challeng_responses"]:
-            challenging_map[key] = {
-                "weighted_sum": row["challeng_weighted"],
-                "total_responses": row["challeng_responses"],
-            }
-        if row["hours_responses"]:
-            hours_map[key] = {
-                "weighted_sum": row["hours_weighted"],
-                "total_responses": row["hours_responses"],
-            }
-
-    # Compute summary
-    total_weighted = 0.0
-    total_responses = 0
-    total_enrollment = 0
-    total_sections_with_enrollment = 0
-    latest_term_id = 0
-    latest_term_title = ""
-    latest_term_sort = -1
-
-    for s in sections:
-        enrollment = _safe_int(s["enrollment"])
-        if enrollment > 0:
-            total_enrollment += enrollment
-            total_sections_with_enrollment += 1
-        tid = _safe_int(s["term_id"])
-        tsort = term_sort_key(s["term_title"] or "")
-        if tsort > latest_term_sort:
-            latest_term_sort = tsort
-            latest_term_id = tid
-            latest_term_title = s["term_title"] or ""
-        key = (s["course_id"], s["instructor_id"], s["term_id"])
-        if key in score_map:
-            total_weighted += _safe_float(score_map[key]["weighted_sum"])
-            total_responses += _safe_int(score_map[key]["total_responses"])
-
-    avg_rating = (total_weighted / total_responses) if total_responses > 0 else None
-
-    # A topics code (e.g. HONR3310 running as "Election 2024" and "Language and
-    # Power" in the same term) is a container for unrelated classes, so a single
-    # course-level average would blend them. Its sections keep their own ratings.
-    is_topics = bool(course.get("is_topics"))
-
-    summary = {
-        "code": course["code"],
-        "name": course["name"],
-        "department": course["department"] or "",
-        "isTopics": is_topics,
-        "avgRating": round(avg_rating, 2) if avg_rating is not None and not is_topics else None,
-        "avgEnrollment": round(total_enrollment / total_sections_with_enrollment) if total_sections_with_enrollment > 0 else None,
-        "latestTermTitle": latest_term_title,
-        # Count of TRACE "overall" question responses backing avgRating, for
-        # AggregateRating JSON-LD (schema.org requires ratingCount alongside ratingValue).
-        "ratingCount": total_responses if total_responses > 0 and not is_topics else None,
-    }
-
-    # Build instructor aggregates
-    instructor_data = {}
-    for s in sections:
-        fname = (s["instructor_first_name"] or "").strip()
-        lname = (s["instructor_last_name"] or "").strip()
-        name = f"{fname} {lname}".strip()
-        if not name:
-            continue
-        if name not in instructor_data:
-            instructor_data[name] = {
-                "sections": 0, "enrollment": 0,
-                "weighted": 0.0, "responses": 0,
-                "challeng_weighted": 0.0, "challeng_responses": 0,
-                "hours_weighted": 0.0, "hours_responses": 0,
-                "latest_term_title": "", "latest_term_sort": -1,
-            }
-        tsort = term_sort_key(s["term_title"] or "")
-        if tsort > instructor_data[name]["latest_term_sort"]:
-            instructor_data[name]["latest_term_sort"] = tsort
-            instructor_data[name]["latest_term_title"] = s["term_title"] or ""
-        instructor_data[name]["sections"] += 1
-        instructor_data[name]["enrollment"] += _safe_int(s["enrollment"])
-        key = (s["course_id"], s["instructor_id"], s["term_id"])
-        if key in score_map:
-            instructor_data[name]["weighted"] += _safe_float(score_map[key]["weighted_sum"])
-            instructor_data[name]["responses"] += _safe_int(score_map[key]["total_responses"])
-        if key in challenging_map:
-            instructor_data[name]["challeng_weighted"] += _safe_float(challenging_map[key]["weighted_sum"])
-            instructor_data[name]["challeng_responses"] += _safe_int(challenging_map[key]["total_responses"])
-        if key in hours_map:
-            instructor_data[name]["hours_weighted"] += _safe_float(hours_map[key]["weighted_sum"])
-            instructor_data[name]["hours_responses"] += _safe_int(hours_map[key]["total_responses"])
-
-    # Look up instructor metadata from professors_catalog (batched)
-    name_key_map = {normalize_name(name): name for name in instructor_data}
-    name_keys = list(name_key_map.keys())
-    prof_map = {}
-    comment_counts = {}
-    rmp_course_diff_map = {}
-    rmp_key_of = {}
-    if name_keys:
-        placeholders = ",".join(["%s"] * len(name_keys))
-        prof_rows = query(
-            f"SELECT name_key, slug, image_url, total_reviews, would_take_again_pct, difficulty, rmp_rating "
-            f"FROM professors_catalog WHERE name_key IN ({placeholders})", name_keys
-        )
-        prof_map = {r["name_key"]: r for r in prof_rows}
-        # These instructor names are TRACE's spelling. A fuzzy-matched professor's
-        # catalog row is keyed by the RMP spelling and records TRACE's in
-        # trace_name_key, so without this second lookup their card here has no
-        # profile link, photo or review counts. An exact name_key match wins.
-        for r in catalog_rows_by_trace_keys([k for k in name_keys if k not in prof_map]):
-            prof_map.setdefault(r["trace_name_key"], r)
-        # RMP rows (difficulty, comments) are stored under the catalog's RMP key.
-        rmp_key_of = {nk: (prof_map[nk]["name_key"] if nk in prof_map else nk)
-                      for nk in name_keys}
-        rmp_keys = list(set(rmp_key_of.values()))
-        rmp_placeholders = ",".join(["%s"] * len(rmp_keys))
-        # Fuzzy match RMP course: exact normalized match, or match on numeric portion
-        # (RMP course names are often misspelled, e.g. "C1100" instead of "CS1100")
-        code_num = re.sub(r"[^0-9]", "", code_norm)
-        rmp_course_diff_rows = query(
-            f"SELECT name_key, AVG(CAST(difficulty AS FLOAT)) as avg_diff "
-            f"FROM rmp_reviews "
-            f"WHERE name_key IN ({rmp_placeholders}) AND difficulty IS NOT NULL "
-            f"AND (UPPER(REPLACE(course, ' ', '')) = %s OR REGEXP_REPLACE(course, '[^0-9]', '', 'g') = %s) "
-            f"GROUP BY name_key",
-            rmp_keys + [code_norm, code_num]
-        )
-        rmp_course_diff_map = {r["name_key"]: round(float(r["avg_diff"]), 2) for r in rmp_course_diff_rows if r["avg_diff"] is not None}
-        # Each side counted under its own key, then added per instructor: RMP
-        # comments live under the RMP spelling, TRACE comments under TRACE's.
-        rmp_counts = {r["name_key"]: int(r["cnt"]) for r in query(
-            f"SELECT name_key, COUNT(*) as cnt FROM rmp_reviews "
-            f"WHERE name_key IN ({rmp_placeholders}) AND comment IS NOT NULL AND comment != '' "
-            f"GROUP BY name_key",
-            rmp_keys
-        )}
-        trace_counts = {r["name_key"]: int(r["cnt"]) for r in query(
-            f"SELECT tc2.name_key, COUNT(*) as cnt "
-            f"FROM trace_comments tc "
-            f"JOIN trace_courses tc2 ON tc.tc_course_id = tc2.course_id "
-            f"  AND tc.tc_instructor_id = tc2.instructor_id "
-            f"  AND tc.tc_term_id = tc2.term_id "
-            f"WHERE tc2.name_key IN ({placeholders}) "
-            f"AND tc.comment IS NOT NULL AND tc.comment != '' "
-            f"GROUP BY tc2.name_key",
-            name_keys
-        )}
-        for nk in name_keys:
-            comment_counts[nk] = rmp_counts.get(rmp_key_of[nk], 0) + trace_counts.get(nk, 0)
-
-    instructor_rows = []
-    for name, data in instructor_data.items():
-        prof = prof_map.get(normalize_name(name))
-        nk = normalize_name(name)
-        meta_slug = prof["slug"] if prof else ""
-        meta_image = prof["image_url"] if prof else None
-        meta_reviews = prof["total_reviews"] if prof else 0
-        meta_wta = round(prof["would_take_again_pct"], 1) if prof and prof["would_take_again_pct"] else None
-        meta_diff = round(prof["difficulty"], 2) if prof and prof["difficulty"] else None
-        meta_comments = comment_counts.get(nk, 0)
-
-        resp = data["responses"]
-        challeng_resp = data["challeng_responses"]
-        hours_resp = data["hours_responses"]
-        trace_diff = round(data["challeng_weighted"] / challeng_resp, 2) if challeng_resp > 0 else None
-        rmp_course_diff = rmp_course_diff_map.get(rmp_key_of.get(nk, nk))
-        if trace_diff is not None and rmp_course_diff is not None:
-            course_diff = round((trace_diff + rmp_course_diff) / 2, 2)
-        elif trace_diff is not None:
-            course_diff = trace_diff
-        else:
-            course_diff = rmp_course_diff
-        instructor_rows.append({
-            "name": name,
-            "slug": meta_slug,
-            "imageUrl": meta_image,
-            "difficulty": meta_diff,
-            "wouldTakeAgainPct": meta_wta,
-            "totalReviews": meta_reviews or 0,
-            "totalComments": meta_comments,
-            "_sections": data["sections"],
-            "latestTermTitle": data["latest_term_title"],
-            "avgRating": round(data["weighted"] / resp, 2) if resp > 0 else None,
-            "courseAvgDifficulty": course_diff,
-            "courseAvgHoursPerWeek": round(data["hours_weighted"] / hours_resp, 2) if hours_resp > 0 else None,
-        })
-    instructor_rows.sort(key=lambda r: (r["avgRating"] is None, -(r["avgRating"] or 0), -r["_sections"]))
-    for row in instructor_rows:
-        del row["_sections"]
-
-    # Build section rows
-    section_rows = []
-    for s in sorted(sections, key=lambda x: -(x["term_id"] or 0)):
-        key = (s["course_id"], s["instructor_id"], s["term_id"])
-        sc = score_map.get(key)
-        fname = (s["instructor_first_name"] or "").strip()
-        lname = (s["instructor_last_name"] or "").strip()
-        name = f"{fname} {lname}".strip()
-        overall_mean = None
-        if sc and _safe_int(sc["total_responses"]) > 0:
-            overall_mean = round(_safe_float(sc["weighted_sum"]) / _safe_int(sc["total_responses"]), 2)
-        prof = prof_map.get(normalize_name(name))
-        rmp_rating = round(prof["rmp_rating"], 2) if prof and prof.get("rmp_rating") else None
-        section_rows.append({
-            "termId": _safe_int(s["term_id"]),
-            "termTitle": s["term_title"] or "",
-            "instructor": name,
-            "overallRating": overall_mean if is_authed else None,
-            "rmpRating": rmp_rating if is_authed else None,
-        })
-
-    # Get question-level scores
-    question_rows = []
-    q_scores = query(
-        "SELECT question, "
-        "SUM(CAST(mean AS FLOAT) * CAST(total_responses AS FLOAT)) as weighted_sum, "
-        "SUM(total_responses) as total_responses "
-        "FROM trace_scores "
-        "WHERE (course_id, instructor_id, term_id) IN %s "
-        "GROUP BY question",
-        (section_keys,)
-    )
-    for qs in q_scores:
-        resp = _safe_int(qs["total_responses"])
-        question_rows.append({
-            "question": qs["question"],
-            "avgRating": round(_safe_float(qs["weighted_sum"]) / resp, 2) if resp > 0 else None,
-            "_totalResponses": resp,
-        })
-    question_rows.sort(key=lambda r: (-r["_totalResponses"], r["question"].lower()))
-    for row in question_rows:
-        del row["_totalResponses"]
-
-    result = {
-        "summary": summary,
-        "instructors": instructor_rows,
-        "sections": section_rows if is_authed else [],
-        "questionScores": question_rows if is_authed else [],
-    }
-    cache_set(cache_key, result)
-    resp = jsonify(result)
-    resp.headers["Cache-Control"] = "private, max-age=3600" if is_authed else "public, max-age=3600"
+    resp = jsonify(data)
+    resp.headers["Cache-Control"] = "private, max-age=3600" if _is_authed() else "public, max-age=3600"
     resp.headers["Vary"] = "Authorization"
     return resp
 
