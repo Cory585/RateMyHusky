@@ -21,6 +21,8 @@ os.environ["JWT_SECRET"] = "test-secret"
 # does not override an existing var. A deliberately unusable value — nothing in
 # the suite connects, and a real URL here would let a stray test reach prod.
 os.environ["CRDB_DATABASE_URL"] = "postgresql://test:test@localhost:26257/test"
+# pipeline.db prefers this name, and load_dotenv() would inject the real one.
+os.environ["NEW_CRDB_DATABASE_URL"] = "postgresql://test:test@localhost:26257/test"
 
 
 @pytest.fixture
@@ -68,7 +70,10 @@ def render_client(monkeypatch):
         if code == "missing":
             return None
         return {
-            "code": "ECON1115", "name": "Macroeconomics", "department": "Economics", "catalog": None,
+            "code": "ECON1115", "name": "Macroeconomics", "department": "Economics",
+            "catalog": {"description": "Covers the macroeconomy.", "credits": "4",
+                        "prerequisites": "ECON 1116 with a minimum grade of D-", "corequisites": None,
+                        "nupath": ["Analyzing/Using Data", "Societies/Institutions"]},
             "summary": {"rating": 4.1, "difficulty": 2.5, "numRatings": 342, "hoursPerWeek": None,
                         "bySource": {"rmp": {"rating": 4.1, "numRatings": 342}}},
             "professors": [{"slug": "francis-georges", "name": "Francis Georges", "imageUrl": None,

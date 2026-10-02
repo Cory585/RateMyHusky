@@ -90,6 +90,7 @@ export interface ProfessorPage {
 
 export interface ProfessorReview {
   course: string;
+  courseCode: string | null;
   quality: number;
   difficulty: number;
   date: string;
@@ -304,11 +305,19 @@ export interface CourseProfessor {
   numRatings: number;
 }
 
+export interface CourseCatalog {
+  description: string | null;
+  credits: string | null;
+  prerequisites: string | null;
+  corequisites: string | null;
+  nupath: string[];
+}
+
 export interface CourseDetail {
   code: string;
   name: string;
   department: string;
-  catalog: null;
+  catalog: CourseCatalog | null;
   summary: CourseSummary;
   professors: CourseProfessor[];
 }
@@ -338,6 +347,11 @@ export function fetchProfessorsCatalog(params: {
   if (params.limit) sp.set('limit', String(params.limit));
   return get<CatalogResponse>(`/api/professors-catalog?${sp.toString()}`);
 }
+
+/** Joins multi-select dept/college filter values. Not ",": department names
+ *  carry commas ("Lang, Literature and Culture"). Must match FILTER_SEPARATOR
+ *  in backend/server.py. */
+export const FILTER_SEPARATOR = '|';
 
 export const fetchDepartments = (college?: string) => {
   const sp = new URLSearchParams();

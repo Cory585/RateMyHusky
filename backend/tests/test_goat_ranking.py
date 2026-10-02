@@ -240,10 +240,10 @@ def test_ordering_breaks_ties_by_name():
 
 ROW = {"slug": "olin-guha", "name": "Olin Guha", "department": "Khoury",
        "name_key": "olin guha", "rmp_rating": 4.1, "avg_rating": 4.1,
-       "total_reviews": 250}
+       "total_reviews": 250, "total_comments": 30}
 
 
-def _run_leaderboard(monkeypatch, catalog_rows, comments):
+def _run_leaderboard(monkeypatch, catalog_rows):
     seen = []
 
     def query(sql, params):
@@ -251,8 +251,6 @@ def _run_leaderboard(monkeypatch, catalog_rows, comments):
         seen.append(s)
         if "FROM professors_catalog" in s:
             return catalog_rows
-        if "FROM rmp_reviews" in s:
-            return [{"name_key": k, "cnt": comments[k]} for k in params if k in comments]
         raise AssertionError(f"unexpected query: {s}")
 
     monkeypatch.setattr(server, "query", query)
@@ -264,18 +262,17 @@ def _run_leaderboard(monkeypatch, catalog_rows, comments):
     return {p["name"]: p for p in resp.get_json()}, seen
 
 
-def test_board_counts_written_rmp_reviews(monkeypatch):
-    out, _ = _run_leaderboard(monkeypatch, [ROW], {"olin guha": 30})
+def test_board_reads_the_stored_comment_count(monkeypatch):
+    out, _ = _run_leaderboard(monkeypatch, [ROW])
     assert out["Olin Guha"]["totalComments"] == 30
 
 
 def test_board_row_has_exactly_these_keys(monkeypatch):
-    out, _ = _run_leaderboard(monkeypatch, [ROW], {})
+    out, _ = _run_leaderboard(monkeypatch, [ROW])
     assert set(out["Olin Guha"]) == {"name", "dept", "rmpRating", "avgRating",
                                      "totalReviews", "totalComments"}
 
 
-def test_board_counts_comments_in_one_statement(monkeypatch):
-    _, seen = _run_leaderboard(monkeypatch, [ROW], {})
-    assert sum("FROM rmp_reviews" in s for s in seen) == 1
-    assert len(seen) == 2   # the board rows + the comment counts
+def test_board_is_one_statement(monkeypatch):
+    _, seen = _run_leaderboard(monkeypatch, [ROW])
+    assert len(seen) == 1   # the prior goes through query_one, so GOAT is two statements in all

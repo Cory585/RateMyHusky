@@ -323,6 +323,8 @@ def course_html(detail: dict, canonical: str) -> str:
     avg = s.get("rating")
     diff = s.get("difficulty")
     n = s.get("numRatings") or 0
+    catalog = detail.get("catalog") or {}
+    description = catalog.get("description")
 
     title = f"{code} Reviews — {cname} at Northeastern"
     avg_txt = f"Average rating {avg:.1f}/5. " if avg is not None else ""
@@ -335,6 +337,10 @@ def course_html(detail: dict, canonical: str) -> str:
         ("Average rating", f"{avg:.1f}/5" if avg is not None else None),
         ("Difficulty", f"{diff:.1f}/5" if diff is not None else None),
         ("Ratings", n or None),
+        ("Credits", catalog.get("credits")),
+        ("Prerequisites", catalog.get("prerequisites")),
+        ("Corequisites", catalog.get("corequisites")),
+        ("NUpath", ", ".join(catalog.get("nupath") or []) or None),
     ])
 
     professors = detail.get("professors") or []
@@ -348,6 +354,7 @@ def course_html(detail: dict, canonical: str) -> str:
     body = (
         f"<h1>{_esc(code)} — {_esc(cname)}: Reviews & Ratings</h1>"
         f"<p>{_esc(summary)}</p>"
+        f"{'<p>' + _esc(description) + '</p>' if description else ''}"
         f"{stats}{prof_block}{freshness}"
         f'<p><a href="{_esc(canonical)}">View on RateMyHusky</a></p>'
     )
@@ -359,6 +366,8 @@ def course_html(detail: dict, canonical: str) -> str:
         "courseCode": code,
         "provider": {"@type": "CollegeOrUniversity", "name": "Northeastern University"},
     }
+    if description:
+        jsonld["description"] = description
     if avg is not None and n:
         jsonld["aggregateRating"] = {
             "@type": "AggregateRating", "ratingValue": avg, "ratingCount": n, "bestRating": 5,

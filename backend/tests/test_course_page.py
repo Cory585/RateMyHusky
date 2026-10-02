@@ -8,12 +8,20 @@ os.environ.setdefault("CRDB_DATABASE_URL", "postgresql://stub")
 import server  # noqa: E402
 from course_page import build_course  # noqa: E402
 
-COURSE = {"code": "CS3500", "name": "Object-Oriented Design", "department": "Computer Science"}
+COURSE = {"code": "CS3500", "name": "Object-Oriented Design", "department": "Computer Science",
+          "description": "Design.", "credit_hours": "4", "prerequisites": "CS2510", "corequisites": None,
+          "nupath": ["NUpath Analyzing/Using Data"]}
+_NONE = {"rating": None, "difficulty": None, "hours_per_week": None, "image_url": None,
+         "focus_x": None, "focus_y": None, "name": None}
 ROWS = [
-    {"slug": "olin-guha", "name": "Olin Guha", "image_url": None, "focus_x": None, "focus_y": None,
-     "rating": 4.5, "difficulty": 3.0, "num_ratings": 30},
-    {"slug": "amal-ahmed", "name": "Amal Ahmed", "image_url": "https://img/a.jpg", "focus_x": 40.0,
-     "focus_y": 20.0, "rating": 3.5, "difficulty": 4.0, "num_ratings": 10},
+    {**_NONE, "professor_slug": "", "source": "blend", "rating": 4.25, "difficulty": 3.25, "num_ratings": 40,
+     "hours_per_week": 6.5},
+    {**_NONE, "professor_slug": "", "source": "rmp", "rating": 4.25, "difficulty": 3.25, "num_ratings": 40},
+    {**_NONE, "professor_slug": "olin-guha", "source": "blend", "rating": 4.5, "difficulty": 3.0,
+     "num_ratings": 30, "name": "Olin Guha"},
+    {**_NONE, "professor_slug": "amal-ahmed", "source": "blend", "rating": 3.5, "difficulty": 4.0,
+     "num_ratings": 10, "name": "Amal Ahmed", "image_url": "https://img/a.jpg", "focus_x": 40.0,
+     "focus_y": 20.0},
 ]
 
 
@@ -23,7 +31,7 @@ class FakeDB:
 
     def query(self, sql, params=None):
         self.calls.append(sql)
-        assert "FROM rmp_reviews" in sql and "JOIN professors_catalog" in sql
+        assert "FROM source_summary" in sql
         return [dict(r) for r in self.rows]
 
     def query_one(self, sql, params=None):
@@ -35,18 +43,24 @@ class FakeDB:
 def test_contract_keys():
     data = build_course("CS3500", FakeDB().query, FakeDB().query_one)
     assert set(data) == {"code", "name", "department", "catalog", "summary", "professors"}
-    assert data["catalog"] is None
+    assert set(data["catalog"]) == {"description", "credits", "prerequisites", "corequisites", "nupath"}
     assert set(data["summary"]) == {"rating", "difficulty", "numRatings", "hoursPerWeek", "bySource"}
     assert all(set(p) == {"slug", "name", "imageUrl", "focusX", "focusY", "rating", "difficulty",
                           "numRatings"} for p in data["professors"])
 
 
-def test_summary_is_rating_count_weighted():
+def test_catalog_details_come_from_the_course_row():
+    db = FakeDB()
+    assert build_course("CS3500", db.query, db.query_one)["catalog"] == {
+        "description": "Design.", "credits": "4", "prerequisites": "CS2510", "corequisites": None,
+        "nupath": ["NUpath Analyzing/Using Data"]}
+
+
+def test_summary_comes_from_the_course_blend_row():
     db = FakeDB()
     data = build_course("CS3500", db.query, db.query_one)
-    # (4.5*30 + 3.5*10) / 40 = 4.25 ; (3.0*30 + 4.0*10) / 40 = 3.25
     assert data["summary"] == {"rating": 4.25, "difficulty": 3.25, "numRatings": 40,
-                               "hoursPerWeek": None,
+                               "hoursPerWeek": 6.5,
                                "bySource": {"rmp": {"rating": 4.25, "numRatings": 40}}}
 
 
@@ -55,6 +69,14 @@ def test_professor_rows_default_the_photo_focus():
     p = build_course("CS3500", db.query, db.query_one)["professors"][0]
     assert p == {"slug": "olin-guha", "name": "Olin Guha", "imageUrl": None, "focusX": 50.0,
                  "focusY": 30.0, "rating": 4.5, "difficulty": 3.0, "numRatings": 30}
+
+
+def test_professor_missing_from_the_catalog_is_left_out():
+    rows = [*ROWS, {**_NONE, "professor_slug": "gone", "source": "blend", "rating": 5.0,
+                    "difficulty": 1.0, "num_ratings": 99}]
+    db = FakeDB(rows=rows)
+    data = build_course("CS3500", db.query, db.query_one)
+    assert [p["slug"] for p in data["professors"]] == ["olin-guha", "amal-ahmed"]
 
 
 def test_course_without_reviews_is_200_with_nulls():
