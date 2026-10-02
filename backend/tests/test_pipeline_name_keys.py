@@ -17,5 +17,9 @@ def test_a_wrong_key_is_corrected_and_a_right_one_left_alone():
     assert plan_name_keys(reviews, PAGE_SLUG, KEY_BY_SLUG) == [(1, "olin guha")]
 
 
-def test_a_review_on_no_linked_page_is_left_alone():
-    assert plan_name_keys([review(1, dept="Law")], PAGE_SLUG, KEY_BY_SLUG) == []
+def test_a_review_on_no_linked_page_falls_back_to_its_own_name():
+    assert plan_name_keys([review(1, name="Olin  GUHA", dept="Law")], PAGE_SLUG, KEY_BY_SLUG) == [(1, "olin guha")]
+
+
+def test_a_keyed_review_on_no_linked_page_is_left_alone():
+    assert plan_name_keys([review(1, dept="Law", name_key="o guha")], PAGE_SLUG, KEY_BY_SLUG) == []

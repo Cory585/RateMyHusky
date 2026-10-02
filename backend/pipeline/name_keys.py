@@ -2,19 +2,26 @@
 
 Professor pages and course pages find a professor's reviews by name_key, and a
 freshly loaded review has none. A review on a linked RMP page takes the key of
-the professor that page links to. One batched UPDATE through a temp table.
+the professor that page links to. A review on no linked page, with no key yet,
+takes its own name's key, as precompute's backfill did. One batched UPDATE
+through a temp table.
 """
+
+from prof_aliases import rmp_link_key
 
 from .db import chunk_insert
 
 
 def plan_name_keys(reviews, page_slug, key_by_slug):
-    """(id, name_key) for every review whose stored key differs from its page's professor."""
+    """(id, name_key) for every review whose stored key differs from its page's
+    professor, plus every unkeyed review on no linked page."""
     pairs = []
     for r in reviews:
         slug = page_slug.get((r["professor_name"], r["department"]))
         if slug and r["name_key"] != key_by_slug[slug]:
             pairs.append((r["id"], key_by_slug[slug]))
+        elif not slug and r["name_key"] is None and r["professor_name"]:
+            pairs.append((r["id"], rmp_link_key(r["professor_name"])[0]))
     return pairs
 
 

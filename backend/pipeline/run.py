@@ -66,7 +66,9 @@ def main(argv=None):
         name_counts[p["name_key"]] = name_counts.get(p["name_key"], 0) + 1
     name_key_slug = {p["name_key"]: p["slug"] for p in professors if name_counts[p["name_key"]] == 1}
     key_pairs = name_keys.plan_name_keys(reviews, page_slug, {p["slug"]: p["name_key"] for p in professors})
-    keyed = {i for i, _ in key_pairs}
+    new_keys = dict(key_pairs)
+    for r in reviews:
+        r["name_key"] = new_keys.get(r["id"], r["name_key"])
     print(f"name keys to set: {len(key_pairs)}")
 
     rows, coverage = summaries.build_summaries(linked_pages, [r for r in reviews if r["visible"]],
@@ -79,7 +81,7 @@ def main(argv=None):
     courses = read_models.course_rows(catalog_courses, rows)
     counts = read_models.stats(catalog, courses, rows)
     _print("read models", {**counts, "summary_rows": len(rows)})
-    missing_key = sum(1 for r in reviews if r["name_key"] is None and r["id"] not in keyed)
+    missing_key = sum(1 for r in reviews if r["name_key"] is None)
     print(f"rmp_reviews left with no name_key (invisible on professor pages): {missing_key}")
 
     errors = read_models.verify(catalog, courses)
