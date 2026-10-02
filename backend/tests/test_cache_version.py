@@ -1,5 +1,9 @@
 import os
 
+import psycopg2
+import psycopg2.extensions
+import pytest
+
 os.environ.setdefault("CRDB_DATABASE_URL", "postgresql://stub")
 import server  # noqa: E402
 
@@ -66,12 +70,17 @@ def test_cache_is_bounded_and_evicts_oldest(monkeypatch):
     server._cache.clear()
 
 
-def test_a_cancelled_query_is_not_retried(monkeypatch):
-    import psycopg2.extensions
-    import pytest
+def test_a_failed_version_read_keeps_the_last_version(monkeypatch):
+    def fail(sql, params=None):
+        raise psycopg2.extensions.QueryCanceledError("canceling statement")
 
-    executed = []
+    monkeypatch.setattr(server, "query_one", fail)
+    monkeypatch.setattr(server, "_version_state", {"value": 4, "checked": 1000.0})
+    monkeypatch.setattr(server.time, "time", lambda: 1061.0)
+    assert server.data_version() == 4
 
+
+def _cancelling_conn(executed, rollback_fails=False):
     class Cur:
         def execute(self, sql, params=()):
             executed.append(sql)
@@ -83,8 +92,37 @@ def test_a_cancelled_query_is_not_retried(monkeypatch):
         def cursor(self, **kw):
             return Cur()
 
-    monkeypatch.setattr(server, "get_db", lambda: Conn())
+        def rollback(self):
+            if rollback_fails:
+                raise psycopg2.InterfaceError("connection already closed")
+            executed.append("rollback")
+
+    return Conn()
+
+
+def test_a_cancelled_query_is_rolled_back_not_retried(monkeypatch):
+    executed = []
+    monkeypatch.setattr(server, "get_db", lambda: _cancelling_conn(executed))
     monkeypatch.setattr(server, "_discard_db_conn", lambda: executed.append("discard"))
     with pytest.raises(psycopg2.extensions.QueryCanceledError):
         server.query("SELECT 1")
-    assert executed == ["SELECT 1"]
+    assert executed == ["SELECT 1", "rollback"]
+
+
+def test_a_cancelled_write_is_rolled_back(monkeypatch):
+    executed = []
+    monkeypatch.setattr(server, "get_db", lambda: _cancelling_conn(executed))
+    monkeypatch.setattr(server, "_discard_db_conn", lambda: executed.append("discard"))
+    server._chat_write("INSERT 1")
+    with pytest.raises(psycopg2.extensions.QueryCanceledError):
+        server._write("INSERT 2")
+    assert executed == ["INSERT 1", "rollback", "INSERT 2", "rollback"]
+
+
+def test_a_failed_rollback_discards_the_connection(monkeypatch):
+    executed = []
+    monkeypatch.setattr(server, "get_db", lambda: _cancelling_conn(executed, rollback_fails=True))
+    monkeypatch.setattr(server, "_discard_db_conn", lambda: executed.append("discard"))
+    with pytest.raises(psycopg2.extensions.QueryCanceledError):
+        server.query("SELECT 1")
+    assert executed == ["SELECT 1", "discard"]

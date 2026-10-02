@@ -170,9 +170,9 @@ const Terms = () => {
                   sourced from the public college and department directory pages that publish them.
                 </li>
                 <li>
-                  <strong>Northeastern course catalog</strong>: course names, departments, and
-                  descriptions are sourced from the public course catalog at
-                  catalog.northeastern.edu.
+                  <strong>Northeastern course catalog</strong>: course names, departments,
+                  descriptions, credits, prerequisites, corequisites, and NUPath attributes are
+                  sourced from the public course catalog at catalog.northeastern.edu.
                 </li>
                 <li>
                   <strong>Reddit</strong>: publicly available discussion mentioning professors is

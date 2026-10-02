@@ -291,7 +291,12 @@ def data_version():
         if now - _version_state["checked"] < DATA_VERSION_TTL:
             return _version_state["value"]
         _version_state["checked"] = now
-    row = query_one("SELECT value FROM stats_cache WHERE key = 'data_version'")
+    try:
+        row = query_one("SELECT value FROM stats_cache WHERE key = 'data_version'")
+    except psycopg2.Error as e:
+        # A cache hit needs no other query; keep serving it and re-read in a minute.
+        print(f"data_version: read failed, keeping v{_version_state['value']}: {e}")
+        return _version_state["value"]
     value = int(row["value"]) if row else 0
     with _version_lock:
         if value != _version_state["value"]:
@@ -340,6 +345,15 @@ def _discard_db_conn():
                 pass
 
 
+def _rollback_after_cancel(conn):
+    """A cancelled statement aborts the transaction (the pool is not autocommit), so
+    roll back or the request's next query fails with InFailedSqlTransaction."""
+    try:
+        conn.rollback()
+    except Exception:
+        _discard_db_conn()
+
+
 def get_db():
     if 'db' not in g:
         return _acquire_fresh_conn()
@@ -371,6 +385,7 @@ def query(sql, params=None):
         cur.execute(sql, params or ())
         return cur.fetchall()
     except psycopg2.extensions.QueryCanceledError:
+        _rollback_after_cancel(conn)
         raise   # statement_timeout: the connection is healthy, a retry would just time out again
     except (psycopg2.InterfaceError, psycopg2.OperationalError):
         # Connection was stale — discard it and retry once with a fresh one
@@ -398,6 +413,7 @@ def _chat_write(sql, params=None):
         cur.execute(sql, params or ())
         conn.commit()
     except psycopg2.extensions.QueryCanceledError as e:
+        _rollback_after_cancel(conn)
         print(f"_chat_write: log write timed out, dropping: {e}")
     except (psycopg2.InterfaceError, psycopg2.OperationalError):
         try:
@@ -430,6 +446,7 @@ def _write(sql, params=None):
         cur.execute(sql, params or ())
         conn.commit()
     except psycopg2.extensions.QueryCanceledError:
+        _rollback_after_cancel(conn)
         raise
     except (psycopg2.InterfaceError, psycopg2.OperationalError):
         _discard_db_conn()

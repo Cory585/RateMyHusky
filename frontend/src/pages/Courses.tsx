@@ -156,6 +156,7 @@ export default function Courses() {
 
 	useEffect(() => {
 		if (!isMeasured) return;
+		let cancelled = false; // a slower, older response must not overwrite a newer one
 		setLoading(true);
 		fetchCoursesCatalog({
 			q: debouncedQ || undefined,
@@ -167,12 +168,18 @@ export default function Courses() {
 			limit: pageSize,
 		})
 			.then((data) => {
+				if (cancelled) return;
 				setCourses(data.courses);
 				setTotal(data.total);
 				setTotalPages(data.totalPages);
 			})
 			.catch(console.error)
-			.finally(() => setLoading(false));
+			.finally(() => {
+				if (!cancelled) setLoading(false);
+			});
+		return () => {
+			cancelled = true;
+		};
 	}, [debouncedQ, filters.dept, filters.minRating, filters.maxRating, filters.sort, filters.page, pageSize, isMeasured]);
 
 	useEffect(() => {

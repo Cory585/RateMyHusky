@@ -194,6 +194,7 @@ export default function ProfessorCatalog() {
   // Fetch professors when any filter changes
   useEffect(() => {
     if (viewMode === 'grid' && !isMeasured) return;
+    let cancelled = false;   // a slower, older response must not overwrite a newer one
     setLoading(true);
     fetchProfessorsCatalog({
       q:          debouncedQ         || undefined,
@@ -208,12 +209,14 @@ export default function ProfessorCatalog() {
       limit:      pageSize,
     })
       .then(data => {
+        if (cancelled) return;
         setProfessors(data.professors);
         setTotal(data.total);
         setTotalPages(data.totalPages);
       })
       .catch(console.error)
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [debouncedQ, filters.college, filters.dept, filters.minRating, filters.maxRating, filters.minReviews, filters.maxReviews, filters.sort, filters.page, pageSize, isMeasured, viewMode]);
 
   // Keep filters in the URL so the catalog view is shareable/bookmarkable.
