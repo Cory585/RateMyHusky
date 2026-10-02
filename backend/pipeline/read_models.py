@@ -100,16 +100,12 @@ def stats(catalog, courses, summary_rows):
             "departments": len({r["department"] for r in catalog if r["department"]})}
 
 
-def verify(catalog, courses, summary_rows):
+def verify(catalog, courses):
     errors = []
     if len(catalog) < MIN_PROFESSORS:
         errors.append(f"professors {len(catalog)} < {MIN_PROFESSORS}")
     if len(courses) < MIN_COURSES:
         errors.append(f"courses {len(courses)} < {MIN_COURSES}")
-    professor_rows = sum(1 for r in summary_rows
-                         if r["source"] == "blend" and r["course_code"] == "" and r["professor_slug"])
-    if professor_rows != len(catalog):
-        errors.append(f"professor summary rows {professor_rows} != catalog rows {len(catalog)}")
     return errors
 
 

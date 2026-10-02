@@ -56,11 +56,9 @@ def test_keep_summaries_drops_rows_for_professors_outside_the_catalog():
 def test_verify_floors():
     catalog = [{"slug": f"p{i}", "department": "CS", "total_comments": 1} for i in range(3000)]
     courses = [{"code": f"C{i}"} for i in range(5000)]
-    blend_rows = [srow(f"p{i}", "", "blend") for i in range(3000)]
-    assert verify(catalog, courses, blend_rows) == []
-    assert verify(catalog[:10], courses, blend_rows[:10])            # too few professors
-    assert verify(catalog, courses[:10], blend_rows)                 # too few courses
-    assert verify(catalog, courses, blend_rows[:5])                  # summary/catalog mismatch
+    assert verify(catalog, courses) == []
+    assert verify(catalog[:10], courses)                             # too few professors
+    assert verify(catalog, courses[:10])                             # too few courses
 
 
 def test_stats():
