@@ -34,7 +34,7 @@ def test_professor_html_has_title_canonical_and_h1():
         "difficulty": 2.9, "rmpRating": 4.25, "rmpNumRatings": 2686,
         "rmpDifficulty": 2.9, "traceRating": 4.2,
         "imageUrl": "https://img/x.jpg", "professorUrl": None,
-        "traceCourses": [{"displayName": "ECON1115: Macro"}],
+        "courses": ["ECON1115"],
     }
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/francis-georges")
     assert "<!doctype html>" in html.lower()
@@ -51,7 +51,7 @@ def test_professor_meta_description_leads_with_reviews_and_ratings_phrase():
     desc = _meta_description(html)
     assert desc.startswith(
         "Francis Georges professor reviews and ratings: 4.25/5 from 2686 RMP ratings "
-        "at Northeastern (83% would take again). TRACE + RateMyProfessor + Reddit."
+        "at Northeastern (83% would take again). RateMyProfessor + Reddit."
     )
 
 
@@ -62,7 +62,7 @@ def test_professor_meta_description_omits_would_take_again_clause_when_absent():
     assert "would take again" not in desc
     assert desc.startswith(
         "Francis Georges professor reviews and ratings: 4.25/5 from 2686 RMP ratings "
-        "at Northeastern. TRACE + RateMyProfessor + Reddit."
+        "at Northeastern. RateMyProfessor + Reddit."
     )
 
 
@@ -335,62 +335,35 @@ def test_render_course_route_returns_html(render_client):
     assert resp.headers["Cache-Control"] == "public, max-age=3600, s-maxage=86400"
 
 
-# ── TRACE review count (number only, never the comment text) ──
-
 def _base_profile(**over):
     p = {
         "name": "Francis Georges", "department": "Economics", "avgRating": 4.25,
         "totalRatings": 2686, "wouldTakeAgainPct": 83, "difficulty": 2.9,
         "rmpRating": 4.25, "rmpNumRatings": 2686, "rmpDifficulty": 2.9,
-        "traceRating": None, "imageUrl": None,
-        "professorUrl": None, "traceCourses": [],
+        "imageUrl": None,
+        "professorUrl": None, "courses": [],
     }
     p.update(over)
     return p
 
 
-def test_professor_html_shows_trace_review_count():
-    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x",
-                          trace_count=5662)
-    assert "<dt>TRACE reviews</dt><dd>5662</dd>" in html
-
-
-def test_professor_html_omits_trace_count_when_zero():
-    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x",
-                          trace_count=0)
-    assert "TRACE reviews" not in html
-
-
-def test_professor_html_never_shows_gated_trace_comment_text():
-    # Even if a gated (empty-text) trace entry were somehow passed as a review,
-    # only RMP review blockquotes are rendered; the trace count is a number only.
-    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x",
-                          trace_count=42)
-    # The count appears, but no blockquote section exists (no RMP review text given).
-    assert "<dd>42</dd>" in html
-    assert "<blockquote>" not in html
-
-
 def test_professor_html_shows_rmp_review_count():
     reviews = [{"course": "ECON1115", "quality": 5, "difficulty": 3,
                 "date": "2024", "comment": "Great."}]
-    html = professor_html(_base_profile(), reviews, "https://ratemyhusky.com/professors/x",
-                          trace_count=10)
+    html = professor_html(_base_profile(), reviews, "https://ratemyhusky.com/professors/x")
     assert "<dt>RateMyProfessor reviews</dt><dd>1</dd>" in html
 
 
 # ── noindex for zero-content professor pages (thin-content SEO) ──
 
-def test_professor_html_is_noindex_when_no_ratings_no_reviews_no_trace():
+def test_professor_html_is_noindex_when_no_ratings_and_no_reviews():
     profile = _base_profile(totalRatings=0)
-    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x",
-                          trace_count=0)
+    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
     assert '<meta name="robots" content="noindex">' in html
 
 
 def test_professor_html_is_indexed_when_ratings_exist():
-    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x",
-                          trace_count=0)
+    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x")
     assert '<meta name="robots" content="index, follow">' in html
 
 
@@ -422,14 +395,6 @@ def test_course_html_has_twitter_tags():
     html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
     assert '<meta name="twitter:card"' in html
     assert '<meta name="twitter:title" content="ECON1115 Reviews — Macroeconomics at Northeastern">' in html
-
-
-def test_render_professor_route_exposes_trace_count(render_client):
-    # The conftest stub returns traceComments with entries; the route should
-    # surface their count without rendering any gated comment text.
-    resp = render_client.get("/render/professors/francis-georges")
-    body = resp.get_data(as_text=True)
-    assert "TRACE reviews" in body
 
 
 def test_home_html_title_canonical_h1_and_summary():
@@ -615,27 +580,15 @@ def test_home_meta_description_within_limit():
 
 # ── Courses-taught links, deduped by base course code (P1-4) ──
 
-def test_professor_html_courses_taught_deduped_and_linked():
-    profile = _base_profile(traceCourses=[
-        {"displayName": "EECE2150:02 (Circuits) - X"},
-        {"displayName": "EECE2150:03 (Circuits) - X"},
-        {"displayName": "EECE2150:04 (Circuits) - X"},
-        {"displayName": "CS3500:01 (OOD) - X"},
-    ])
+def test_professor_html_courses_taught_linked():
+    profile = _base_profile(courses=["EECE2150", "CS3500"])
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
     assert html.count('href="https://ratemyhusky.com/courses/EECE2150"') == 1
     assert 'href="https://ratemyhusky.com/courses/CS3500"' in html
 
 
-def test_professor_html_courses_taught_skips_entries_with_no_extractable_code():
-    profile = _base_profile(traceCourses=[{"displayName": "(Special Topics) - X"}])
-    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
-    assert "/courses/" not in html.split("<h2>Courses taught</h2>")[1].split("</ul>")[0] \
-        if "<h2>Courses taught</h2>" in html else True
-
-
 def test_professor_html_omits_courses_block_when_no_courses():
-    html = professor_html(_base_profile(traceCourses=[]), [], "https://ratemyhusky.com/professors/x")
+    html = professor_html(_base_profile(courses=[]), [], "https://ratemyhusky.com/professors/x")
     assert "<h2>Courses taught</h2>" not in html
 
 
@@ -672,7 +625,7 @@ def test_professor_html_verdict_sentence_all_clauses():
         "Francis Georges is an Economics professor at Northeastern University "
         "rated 4.25/5 on Rate My Professors by 2686 students, with 2.9/5 RMP "
         "difficulty and 83% who would take them again "
-        f"(TRACE + RateMyProfessors + Reddit, updated {month_year})."
+        f"(RateMyProfessors + Reddit, updated {month_year})."
     )
     assert expected in html
 
@@ -684,7 +637,7 @@ def test_professor_html_verdict_sentence_omits_missing_clauses():
     expected = (
         "Francis Georges is an Economics professor at Northeastern University "
         "rated 4.25/5 on Rate My Professors by 2686 students "
-        f"(TRACE + RateMyProfessors + Reddit, updated {month_year})."
+        f"(RateMyProfessors + Reddit, updated {month_year})."
     )
     assert expected in html
 
@@ -733,7 +686,7 @@ def test_course_html_has_freshness_line():
 # ── FAQ block on professor pages, plain HTML, no FAQPage schema (P1-4) ──
 
 def test_professor_html_faq_present_with_all_stats():
-    profile = _base_profile(traceCourses=[{"displayName": "CS3500:01 (OOD) - X"}])
+    profile = _base_profile(courses=["CS3500"])
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
     assert "<h2>Frequently asked questions</h2>" in html
     assert "<h3>Is Francis Georges a good professor?</h3>" in html
@@ -755,14 +708,14 @@ def test_professor_html_faq_omits_difficulty_qa_when_absent():
 
 
 def test_professor_html_faq_omits_courses_qa_when_no_courses():
-    html = professor_html(_base_profile(traceCourses=[]), [], "https://ratemyhusky.com/professors/x")
+    html = professor_html(_base_profile(courses=[]), [], "https://ratemyhusky.com/professors/x")
     assert "<h3>What courses does Francis Georges teach at Northeastern?</h3>" not in html
 
 
 def test_professor_html_faq_omits_entirely_when_no_ratings():
     profile = _base_profile(totalRatings=0, avgRating=0.0, wouldTakeAgainPct=None,
                             difficulty=None, rmpRating=None, rmpNumRatings=0,
-                            rmpDifficulty=None, traceCourses=[])
+                            rmpDifficulty=None, courses=[])
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
     assert "<h2>Frequently asked questions</h2>" not in html
 
@@ -1020,3 +973,11 @@ def test_department_html_handles_zero_professors_without_crashing():
     assert html.count("<tr>") == 1  # header row only, no professor rows
     body = html.split("</h1>")[1].split("</p>")[0]
     assert "highest-rated" not in body
+
+
+def test_render_professor_route_uses_the_payload(render_client):
+    body = render_client.get("/render/professors/francis-georges").get_data(as_text=True)
+    assert "4.25/5 from 2686 RMP ratings" in body
+    assert 'href="https://ratemyhusky.com/courses/ECON1115"' in body
+    assert "<h2>More Economics professors at Northeastern</h2>" in body
+    assert "RateMyProfessor + Reddit." in body

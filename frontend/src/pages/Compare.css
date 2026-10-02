@@ -429,28 +429,6 @@
 	line-height: 1.3;
 }
 
-.compare-lock-prompt {
-	display: inline-flex;
-	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	gap: 4px;
-	max-width: 100%;
-	text-align: center;
-	line-height: 1.15;
-	font-weight: 800;
-	font-size: 0.72rem;
-	color: #7b7b7b;
-	word-break: break-word;
-}
-
-.compare-lock-icon {
-	width: 16px;
-	height: 16px;
-	flex: none;
-	color: #d6394c;
-}
-
 .compare-cell small {
 	font-size: 0.73rem;
 	color: #8e8e8e;
@@ -858,15 +836,5 @@
 
 	.compare-cell small {
 		font-size: 0.6rem;
-	}
-
-	.compare-lock-prompt {
-		font-size: 0.58rem;
-		gap: 3px;
-	}
-
-	.compare-lock-icon {
-		width: 14px;
-		height: 14px;
 	}
 }

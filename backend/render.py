@@ -115,31 +115,6 @@ def _month_year(today: date) -> str:
     return today.strftime("%B %Y")
 
 
-def _course_code(display_name: str) -> str:
-    """Extract the base course code (e.g. 'EECE2150') from a trace_courses
-    display_name like 'EECE2150:02 (Circuits) - X'. Same rule as the
-    professors_catalog / React course-code extraction elsewhere."""
-    dn = (display_name or "").strip()
-    if not dn:
-        return ""
-    m = re.match(r"^([A-Za-z]+\d+)", dn)
-    return m.group(1).upper() if m else ""
-
-
-def _dedupe_courses(courses: list) -> list:
-    """Unique base course codes from traceCourses entries, first-seen order.
-    Entries with no extractable code are skipped."""
-    seen = set()
-    out = []
-    for c in courses or []:
-        code = _course_code(c.get("displayName"))
-        if not code or code in seen:
-            continue
-        seen.add(code)
-        out.append(code)
-    return out
-
-
 def _select_reviews(reviews: list, limit: int) -> list:
     """Prefer recent + longest + spread across courses: group by course (no-
     course group last), order courses by their most recent review date desc,
@@ -183,8 +158,7 @@ def _select_reviews(reviews: list, limit: int) -> list:
     return selected
 
 
-def professor_html(profile: dict, reviews: list, canonical: str,
-                   trace_count: int = 0) -> str:
+def professor_html(profile: dict, reviews: list, canonical: str) -> str:
     name = profile.get("name") or ""
     dept = profile.get("department") or ""
     # Falsy, not just None, covers both the NULL the catalog holds for an
@@ -194,8 +168,8 @@ def professor_html(profile: dict, reviews: list, canonical: str,
     # the ~2,083 unrated professors who still carry a course list.
     # Every number here is labeled with its source, and none is a blend: the
     # rating, count and difficulty are RMP's own (rmpRating / rmpNumRatings /
-    # rmpDifficulty), not avgRating / totalRatings / difficulty, which pool RMP
-    # with TRACE. "RMP ratings" rather than the name spelled out keeps the
+    # rmpDifficulty), not avgRating / totalRatings / difficulty, which are the
+    # blend. "RMP ratings" rather than the name spelled out keeps the
     # description inside MAX_DESCRIPTION, where the old "student reviews" sat,
     # so the source credit at its end survives the clip. It mirrors Professor.tsx's seoDescription
     # character for character, so the crawler copy and the page agree. Two
@@ -217,10 +191,10 @@ def professor_html(profile: dict, reviews: list, canonical: str,
     wta_txt = f" ({wta_txt_n}% would take again)" if wta is not None else ""
     summary = (
         f"{name} professor reviews and ratings: {rmp_txt}/5 from {rmp_n} RMP ratings "
-        f"at Northeastern{wta_txt}. TRACE + RateMyProfessor + Reddit."
+        f"at Northeastern{wta_txt}. RateMyProfessor + Reddit."
         if has_rmp else
         f"{name}, Northeastern {dept} professor: no Rate My Professors ratings yet. "
-        "TRACE + RateMyProfessor + Reddit."
+        "RateMyProfessor + Reddit."
     )
     month_year = _month_year(date.today())
 
@@ -229,11 +203,11 @@ def professor_html(profile: dict, reviews: list, canonical: str,
     verdict = (
         f"{name} is {_article(dept)} {dept} professor at Northeastern University rated "
         f"{rmp_txt}/5 on Rate My Professors by {rmp_n} students{diff_clause}{wta_clause} "
-        f"(TRACE + RateMyProfessors + Reddit, updated {month_year})."
+        f"(RateMyProfessors + Reddit, updated {month_year})."
         if has_rmp else
         f"{name} is {_article(dept)} {dept} professor at Northeastern University "
         f"with no Rate My Professors ratings yet "
-        f"(TRACE + RateMyProfessors + Reddit, updated {month_year})."
+        f"(RateMyProfessors + Reddit, updated {month_year})."
     )
 
     stats = _stat_rows([
@@ -241,14 +215,10 @@ def professor_html(profile: dict, reviews: list, canonical: str,
         ("Rate My Professors ratings", rmp_n if has_rmp else None),
         ("Would take again (RMP)", f"{wta_txt_n}%" if wta is not None else None),
         ("Difficulty (RMP)", f"{diff}/5" if diff is not None else None),
-        ("TRACE rating", profile.get("traceRating")),
-        # Count of TRACE evaluations only — the comment text stays gated.
-        ("TRACE reviews", trace_count if trace_count else None),
         ("RateMyProfessor reviews", rmp_count if rmp_count else None),
     ])
 
-    courses = profile.get("traceCourses") or []
-    course_codes = _dedupe_courses(courses)
+    course_codes = profile.get("courses") or []
     course_items = "".join(
         f'<li><a href="{SITE}/courses/{_esc(code)}">{_esc(code)}</a></li>' for code in course_codes
     )
@@ -302,9 +272,9 @@ def professor_html(profile: dict, reviews: list, canonical: str,
 
     freshness = f"<p>Data updated {_esc(month_year)}.</p>"
 
-    # Thin content (no ratings, no RMP review text, no TRACE evaluations)
-    # is excluded from the sitemap; keep search engines from indexing it too.
-    is_zero_content = not total and not review_items and not trace_count
+    # Thin content (no ratings and no RMP review text) is excluded from the
+    # sitemap; keep search engines from indexing it too.
+    is_zero_content = not total and not review_items
 
     body = (
         f"<h1>{_esc(name)} — Ratings & Reviews (Northeastern University)</h1>"
@@ -406,7 +376,7 @@ def course_html(detail: dict, canonical: str) -> str:
 def home_html(stats: list, top_professors: list, canonical: str) -> str:
     title = "RateMyHusky — Northeastern University Professor Reviews & Ratings"
     summary = (
-        "RateMyHusky combines TRACE evaluations and RateMyProfessor reviews for "
+        "RateMyHusky combines RateMyProfessor reviews and Reddit talk for "
         "Northeastern professors and courses. Compare ratings, difficulty, and "
         "reviews — free."
     )
@@ -459,8 +429,7 @@ def professors_listing_html(entries: list, total: int, canonical: str) -> str:
     total_txt = str(total) if total else "thousands of"
     summary = (
         f"Browse {total_txt} Northeastern University (NEU) professor ratings and "
-        f"reviews. Compare ratings, difficulty, and would-take-again from TRACE "
-        f"evaluations and RateMyProfessor reviews."
+        f"reviews. Compare ratings, difficulty, and would-take-again from RateMyProfessor reviews."
     )
 
     shown = [e for e in (entries or []) if e.get("slug")][:LISTING_CAP]
@@ -498,8 +467,7 @@ def courses_listing_html(entries: list, total: int, canonical: str) -> str:
     total_txt = str(total) if total else "thousands of"
     summary = (
         f"Browse {total_txt} Northeastern University (NEU) course reviews and "
-        f"ratings. Compare instructors, average ratings, and enrollment from "
-        f"TRACE evaluations."
+        f"ratings. Compare professors, average ratings, and difficulty from RateMyProfessor reviews."
     )
 
     shown = [e for e in (entries or []) if e.get("code")][:LISTING_CAP]
@@ -643,18 +611,36 @@ def not_found_html(kind: str) -> str:
                  noindex=True)
 
 
+def _professor_view(payload: dict, colleagues: list) -> dict:
+    """The fields professor_html reads, taken from the /full payload."""
+    identity, rmp = payload["identity"], payload["sources"]["rmp"]
+    return {
+        "name": identity["name"],
+        "department": identity["department"],
+        "imageUrl": identity["imageUrl"],
+        "rmpRating": rmp["rating"],
+        "rmpNumRatings": rmp["numRatings"],
+        "rmpDifficulty": rmp["difficulty"],
+        "wouldTakeAgainPct": rmp["wouldTakeAgainPct"],
+        "professorUrl": rmp["professorUrl"],
+        "totalRatings": payload["summary"]["numRatings"],
+        "courses": [c["code"] for c in payload["courses"]],
+        "colleagues": colleagues,
+    }
+
+
 render_bp = Blueprint("render", __name__)
 
 
 # Lazy accessors so tests can monkeypatch and routes avoid circular imports.
-def _get_profile_view():
-    from server import professor_profile
-    return professor_profile
+def _get_professor_payload():
+    from server import professor_payload
+    return professor_payload
 
 
-def _get_reviews_view():
-    from server import professor_reviews
-    return professor_reviews
+def _get_colleagues():
+    from server import _department_colleagues
+    return _department_colleagues
 
 
 def _get_course_view():
@@ -673,19 +659,14 @@ def _json_or_404(resp):
 @render_bp.route("/render/professors/<slug>")
 def render_professor(slug):
     from flask import Response
-    profile_resp = _get_profile_view()(slug)
-    data, err = _json_or_404(profile_resp)
-    if err:
+    payload = _get_professor_payload()(slug)
+    if payload is None:
         return Response(not_found_html("professor"), status=404, mimetype="text/html")
-
-    reviews_resp = _get_reviews_view()(slug)
-    rdata, rerr = _json_or_404(reviews_resp)
-    reviews = (rdata or {}).get("reviews", []) if not rerr else []
-    # TRACE evaluation count (comment text stays gated; we expose only the number).
-    trace_count = len((rdata or {}).get("traceComments", [])) if not rerr else 0
-
+    identity = payload["identity"]
+    colleagues = _get_colleagues()(identity["department"], identity["slug"])
     canonical = f"{SITE}/professors/{slug}"
-    html = professor_html(data, reviews, canonical, trace_count=trace_count)
+    html = professor_html(_professor_view(payload, colleagues),
+                          payload["sources"]["rmp"]["reviews"], canonical)
     resp = Response(html, mimetype="text/html")
     resp.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
     return resp
