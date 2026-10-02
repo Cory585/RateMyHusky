@@ -42,7 +42,7 @@ def build_summary(own_rows, reddit_mentions):
     return {
         "rating": rmp.stat(b.get("rating"), 2),
         "difficulty": rmp.stat(b.get("difficulty"), 2),
-        "wouldTakeAgainPct": rmp.stat(b.get("would_take_again_pct"), 1),
+        "wouldTakeAgainPct": rmp.pct(b.get("would_take_again_pct")),
         "numRatings": int(b.get("num_ratings") or 0),
         "numComments": int(b.get("num_comments") or 0) + len(reddit_mentions),
         "hoursPerWeek": rmp.stat(b.get("hours_per_week"), 1),
