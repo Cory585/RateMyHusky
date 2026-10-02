@@ -10,7 +10,7 @@ import argparse
 
 import moderation
 
-from . import course_codes, read_models, roster, summaries
+from . import course_codes, name_keys, read_models, roster, summaries
 from .blend import blend
 from .db import connect, fetch_all
 from .rmp_fields import rmp_id
@@ -36,14 +36,15 @@ def main(argv=None):
     professors = fetch_all(conn, "SELECT slug, name, name_key, department, college, image_url, "
                                  "focus_x, focus_y FROM professors")
 
+    catalog_courses = fetch_all(conn, "SELECT code, name, department, subject, search_text, is_placeholder "
+                                      "FROM catalog_courses")
+
     new_links, new_professors, counts = roster.resolve_roster(pages, links, professors)
     _print("roster", counts)
-    if not args.dry_run:
-        roster.apply_roster(conn, new_links, new_professors)
     links, professors = links + new_links, professors + new_professors
     professors, links = read_models.drop_denied(professors, links)
 
-    valid = {r["code"] for r in fetch_all(conn, "SELECT code FROM catalog_courses")}
+    valid = {c["code"] for c in catalog_courses}
     print(f"moderation filter: {'on' if moderation.enforcing() else 'off'}")
     reviews = fetch_all(conn, "SELECT id, professor_name, department, name_key, course, quality, "
                               f"difficulty, grade, comment, (true{moderation.sql_filter()}) AS visible "
@@ -52,8 +53,6 @@ def main(argv=None):
     for r, (_, code) in zip(reviews, pairs):
         r["course_code"] = code
     print(f"course codes: reviews={len(pairs)}, with_code={sum(1 for _, c in pairs if c)}")
-    if not args.dry_run:
-        print(f"course codes changed: {course_codes.apply_codes(conn, pairs)}")
 
     slug_by_id = {l["rmp_id"]: l["slug"] for l in links}
     linked_pages, page_slug = [], {}
@@ -66,6 +65,9 @@ def main(argv=None):
     for p in professors:
         name_counts[p["name_key"]] = name_counts.get(p["name_key"], 0) + 1
     name_key_slug = {p["name_key"]: p["slug"] for p in professors if name_counts[p["name_key"]] == 1}
+    key_pairs = name_keys.plan_name_keys(reviews, page_slug, {p["slug"]: p["name_key"] for p in professors})
+    keyed = {i for i, _ in key_pairs}
+    print(f"name keys to set: {len(key_pairs)}")
 
     rows, coverage = summaries.build_summaries(linked_pages, [r for r in reviews if r["visible"]],
                                                page_slug, name_key_slug, set(slug_by_id.values()))
@@ -74,15 +76,13 @@ def main(argv=None):
 
     catalog = read_models.catalog_rows(professors, links, linked_pages, rows)
     rows = read_models.keep_summaries(rows, {r["slug"] for r in catalog})
-    catalog_courses = fetch_all(conn, "SELECT code, name, department, subject, search_text, is_placeholder "
-                                      "FROM catalog_courses")
     courses = read_models.course_rows(catalog_courses, rows)
     counts = read_models.stats(catalog, courses, rows)
     _print("read models", {**counts, "summary_rows": len(rows)})
-    missing_key = fetch_all(conn, "SELECT count(*) AS n FROM rmp_reviews WHERE name_key IS NULL")[0]["n"]
-    print(f"rmp_reviews with no name_key (invisible on professor pages): {missing_key}")
+    missing_key = sum(1 for r in reviews if r["name_key"] is None and r["id"] not in keyed)
+    print(f"rmp_reviews left with no name_key (invisible on professor pages): {missing_key}")
 
-    errors = read_models.verify(catalog, courses, rows)
+    errors = read_models.verify(catalog, courses)
     if errors:
         for e in errors:
             print(f"VERIFY FAILED: {e}")
@@ -90,6 +90,10 @@ def main(argv=None):
     if args.dry_run:
         print("dry run: nothing written")
         return 0
+    # Every write waits for verify, so a failed run leaves no rows behind.
+    roster.apply_roster(conn, new_links, new_professors)
+    print(f"course codes changed: {course_codes.apply_codes(conn, pairs)}")
+    print(f"name keys changed: {name_keys.apply_name_keys(conn, key_pairs)}")
     read_models.write(conn, catalog, courses, rows, counts)
     print("swapped in professors_catalog, course_catalog, source_summary; data_version bumped")
     return 0
