@@ -361,10 +361,9 @@ const Professor = () => {
   }, []);
 
   /* ── course filter ── */
-  const allCourseCodes = useMemo(() => courses.map(c => c.code), [courses]);
 
   /* An empty selection means every course; picking courses narrows to just those. */
-  const unfiltered = selectedCourses.size === 0 || selectedCourses.size === allCourseCodes.length;
+  const unfiltered = selectedCourses.size === 0;
   const selectedLabel = courses.filter(c => selectedCourses.has(c.code)).map(c => c.code).join(', ');
 
   /* Every stored RMP rating in the selection; the card list below keeps the written ones, deduped. */
