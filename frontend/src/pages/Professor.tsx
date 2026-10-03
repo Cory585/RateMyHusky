@@ -239,7 +239,6 @@ const Professor = () => {
   const [expandedTerms, setExpandedTerms] = useState<Set<string>>(new Set());
   const [closingTerms, setClosingTerms] = useState<Set<string>>(new Set());
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
-  const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('prof_course_tip_dismissed') !== '1');
 
   const location = useLocation();
   // Ask pins arrive via navigation state from a clicked citation. Keyed by askedAt so a new
@@ -305,7 +304,7 @@ const Professor = () => {
     setLoadError(null);
     fetchProfessorFull(slug).then((res) => {
       if (cancelled) return;
-      if (res.ok) { setProfile(res.data); setSelectedCourses(new Set(res.data.courses.map(c => c.code))); }
+      if (res.ok) { setProfile(res.data); setSelectedCourses(new Set()); }
       else setLoadError(res.status === 404 ? 'not_found' : 'failed');
       setLoading(false);
     });
@@ -364,16 +363,27 @@ const Professor = () => {
   /* ── course filter ── */
   const allCourseCodes = useMemo(() => courses.map(c => c.code), [courses]);
 
-  const unfiltered = allCourseCodes.length === 0 || selectedCourses.size === allCourseCodes.length;
-  const noneSelected = allCourseCodes.length > 0 && selectedCourses.size === 0;
+  /* An empty selection means every course; picking courses narrows to just those. */
+  const unfiltered = selectedCourses.size === 0 || selectedCourses.size === allCourseCodes.length;
+  const selectedLabel = courses.filter(c => selectedCourses.has(c.code)).map(c => c.code).join(', ');
 
-  /* Every stored RMP rating in the selection; the card list below dedupes these for display. */
+  /* Every stored RMP rating in the selection; the card list below keeps the written ones, deduped. */
   const rmpRatingsInSelection = useMemo(
     () => unfiltered ? reviews : reviews.filter(r => r.courseCode !== null && selectedCourses.has(r.courseCode)),
     [reviews, selectedCourses, unfiltered]);
 
+  /* A rating is any score; a review is a rating with a written comment. Only reviews get cards. */
+  const writtenReviews = useMemo(() => reviews.filter(r => r.comment?.trim()), [reviews]);
+
+  /* Reviews per course, counted the way the list shows them when only that course is picked. */
+  const reviewCountByCourse = useMemo(() => {
+    const byCourse = new Map<string, typeof reviews>();
+    for (const r of writtenReviews) if (r.courseCode !== null) byCourse.set(r.courseCode, [...(byCourse.get(r.courseCode) ?? []), r]);
+    return new Map([...byCourse].map(([code, rs]) => [code, deduplicateByText(rs, r => r.comment).length]));
+  }, [writtenReviews]);
+
   const filteredRmpReviews = useMemo(
-    () => deduplicateByText(rmpRatingsInSelection, r => r.comment),
+    () => deduplicateByText(rmpRatingsInSelection.filter(r => r.comment?.trim()), r => r.comment),
     [rmpRatingsInSelection]);
 
   /* The cards. Unfiltered: the backend's summary. Filtered: the selected courses[] rows
@@ -382,10 +392,6 @@ const Professor = () => {
   const stats = useMemo(() => {
     if (!profile) return null;
     const s = profile.summary;
-    if (noneSelected) {
-      return { rating: null, difficulty: null, numRatings: 0,
-               breakdown: [] as [string, number][], distribution: emptyDistribution() };
-    }
     if (unfiltered) {
       return {
         rating: s.rating, difficulty: s.difficulty, numRatings: s.numRatings,
@@ -413,7 +419,7 @@ const Professor = () => {
       breakdown: [] as [string, number][],
       distribution,
     };
-  }, [profile, courses, selectedCourses, unfiltered, noneSelected]);
+  }, [profile, courses, selectedCourses, unfiltered]);
 
   const ratingDistribution = useMemo(
     () => STARS.map(k => ({ star: Number(k), count: stats?.distribution[k] ?? 0 })), [stats]);
@@ -424,7 +430,7 @@ const Professor = () => {
     let counts: Record<string, number> = {};
     if (unfiltered && profile) {
       counts = { ...profile.sources.rmp.gradeDistribution };
-    } else if (!noneSelected) {
+    } else {
       rmpRatingsInSelection.forEach(r => {
         const g = r.grade?.trim();
         if (g && g !== 'N/A' && g !== 'Not sure yet' && g !== 'Rather not say') {
@@ -445,7 +451,7 @@ const Professor = () => {
       pct: ((counts[g] || 0) / total) * 100,
       color: GRADE_COLORS[g] || '#999'
     }));
-  }, [profile, rmpRatingsInSelection, unfiltered, noneSelected]);
+  }, [profile, rmpRatingsInSelection, unfiltered]);
 
   useEffect(() => {
     const el = gradesRef.current;
@@ -504,6 +510,10 @@ const Professor = () => {
       return ['http:', 'https:'].includes(new URL(url).protocol) ? url : null;
     } catch { return null; }
   };
+
+  const courseOptions = useMemo(
+    () => [{ value: 'all', label: 'All courses' }, ...courses.map(c => ({ value: c.code, label: c.code }))],
+    [courses]);
 
   const toggleCourse = (code: string) => {
     setSelectedCourses(prev => {
@@ -593,6 +603,7 @@ const Professor = () => {
     const terms = [...new Set((c.terms ?? []).map(cleanTerm))].filter(t => /\b20\d{2}\b/.test(t)).sort((a, b) => termSortKey(b) - termSortKey(a));
     const termsExpanded = expandedTerms.has(code);
     const hiddenTermCount = terms.length - MAX_VISIBLE_TERMS;
+    const reviewCount = reviewCountByCourse.get(c.code) ?? 0;
     return (
     <div
       key={c.code}
@@ -602,7 +613,10 @@ const Professor = () => {
       <div className="prof-course-row-main">
         <span className="prof-course-code">{c.code}</span>
         <span className="prof-course-title">{c.name ?? ''}</span>
-        <span className="prof-course-terms">{c.numRatings.toLocaleString()} rating{c.numRatings === 1 ? '' : 's'}</span>
+        <span className="prof-course-terms">
+          {c.numRatings.toLocaleString()} rating{c.numRatings === 1 ? '' : 's'}
+          {' · '}{reviewCount.toLocaleString()} review{reviewCount === 1 ? '' : 's'}
+        </span>
       </div>
       {(c.name || terms.length > 0) && (
         <div className="prof-course-lower">
@@ -774,7 +788,7 @@ const Professor = () => {
         {SHOW_SURVEY_STATS && (
           <div className="prof-stat-card prof-stat-clickable" onClick={() => reviewsRef.current?.scrollIntoView({ behavior: 'smooth' })}>
             <span className="prof-stat-value">{summary.numComments.toLocaleString()}</span>
-            <span className="prof-stat-label">Total Comments</span>
+            <span className="prof-stat-label">Reviews &amp; Mentions</span>
             <span className="prof-stat-hint">Read reviews ↓</span>
           </div>
         )}
@@ -841,8 +855,9 @@ const Professor = () => {
           <div className="prof-section-header">
             <h2 className="prof-section-title">Courses Taught</h2>
             <div className="prof-section-actions">
-              <button className="prof-action-link" onClick={() => setSelectedCourses(new Set(allCourseCodes))}>Select All</button>
-              <button className="prof-action-link" onClick={() => setSelectedCourses(new Set())}>Clear All</button>
+              {unfiltered
+                ? <span className="prof-section-hint">Click a course to filter reviews</span>
+                : <button className="prof-action-link" onClick={() => setSelectedCourses(new Set())}>Show all courses</button>}
             </div>
           </div>
           <div className="prof-courses-compact">
@@ -864,35 +879,10 @@ const Professor = () => {
         </section>
       )}
 
-      {showCourseTip && allCourseCodes.length > 0 && (
-        <div className="prof-course-tip-wrapper">
-          <div className="prof-course-tip">
-            <div className="prof-course-tip-icon">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-            </div>
-            <div className="prof-course-tip-body">
-              <div className="prof-course-tip-label">Tip</div>
-              <p className="prof-course-tip-text">
-                To filter reviews by course, click <strong>Clear All</strong> in the Courses Taught section, then select the course you want to see reviews for.
-              </p>
-            </div>
-            <button className="prof-course-tip-close" onClick={() => { localStorage.setItem('prof_course_tip_dismissed', '1'); setShowCourseTip(false); }} aria-label="Dismiss tip">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      )}
 
       <section className="prof-section prof-reviews-section" ref={reviewsRef}>
         <div className="prof-reviews-header">
-          <h2 className="prof-section-title">Reviews</h2>
+          <h2 className="prof-section-title">What Students Say</h2>
           <div className="prof-review-tabs" ref={reviewTabsRef}>
             <div 
               className={`prof-review-pill-background ${isReviewPillReady ? 'animate' : ''}`} 
@@ -904,11 +894,11 @@ const Professor = () => {
               }} 
             />
             <button className={`prof-review-tab ${reviewTab === 'rmp' ? 'active' : ''}`} onClick={() => setReviewTab('rmp')}>
-              <span className="prof-review-tab-full">RateMyProfessor ({filteredRmpReviews.length})</span>
+              <span className="prof-review-tab-full">RMP reviews ({filteredRmpReviews.length})</span>
               <span className="prof-review-tab-short">RMP ({filteredRmpReviews.length})</span>
             </button>
             <button className={`prof-review-tab ${reviewTab === 'reddit' ? 'active' : ''}`} onClick={() => setReviewTab('reddit')}>
-              <span className="prof-review-tab-full">Reddit ({redditMentions.length})</span>
+              <span className="prof-review-tab-full">Reddit mentions ({redditMentions.length})</span>
               <span className="prof-review-tab-short">Reddit ({redditMentions.length})</span>
             </button>
           </div>
@@ -917,8 +907,23 @@ const Professor = () => {
         {reviewTab === 'rmp' && (
           <>
             <div className="prof-reviews-filters">
+              {courses.length > 1 && (
+                <Dropdown
+                  className="feedback-dropdown"
+                  options={courseOptions}
+                  value={unfiltered ? 'all' : selectedCourses.size === 1 ? [...selectedCourses][0] : ''}
+                  onChange={v => setSelectedCourses(v === 'all' ? new Set() : new Set([v]))}
+                  placeholder={`${selectedCourses.size} courses`}
+                />
+              )}
               <Dropdown className="feedback-dropdown" options={sortOptions} value={sortBy} onChange={setSortBy} placeholder="Sort by…" />
             </div>
+            {!unfiltered && (
+              <div className="prof-active-filter">
+                Showing {filteredRmpReviews.length} review{filteredRmpReviews.length === 1 ? '' : 's'} for <strong>{selectedLabel}</strong>
+                <button className="prof-action-link" onClick={() => setSelectedCourses(new Set())}>Show all</button>
+              </div>
+            )}
             <div className="prof-reviews-list">
               {sortedReviews.length === 0 ? (
                 <p className="prof-no-reviews">No reviews match current filters.</p>
