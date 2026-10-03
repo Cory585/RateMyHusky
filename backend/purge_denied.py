@@ -58,6 +58,24 @@ def find_targets(cur):
             if nk:
                 name_keys.add(nk)
 
+    # The pipeline's own professors table keeps (slug, name_key) for a denied
+    # professor even after the read-model rebuild drops their catalog row, since
+    # drop_denied only filters in memory. It is the one slug source that survives
+    # when the professor also has no RMP reviews left to rebuild a name from.
+    try:
+        cur.execute("SELECT slug, name, name_key FROM professors")
+        for slug, name, nk in cur.fetchall():
+            if is_denied(name) or is_denied_key(nk):
+                slugs.add(slug)
+                if nk:
+                    name_keys.add(nk)
+    except Exception:
+        # Absent on a database the pipeline never ran on. Same rollback reason
+        # as the slug probe below.
+        conn = getattr(cur, "connection", None)
+        if conn is not None:
+            conn.rollback()
+
     # The catalog is not enough on its own. Once precompute has run with the
     # denylist the professor has no catalog row at all, while their review rows
     # are still loaded — so the raw tables have to be searched by name too, or a
@@ -163,6 +181,18 @@ def purge(conn, dry_run=False):
             "professors_catalog",
             "DELETE FROM professors_catalog WHERE slug = ANY(%s)",
             "SELECT count(*) FROM professors_catalog WHERE slug = ANY(%s)",
+            (slugs,)))
+        # The pipeline's identity tables: without these a deletion request
+        # leaves the name and the RMP name + URL behind.
+        steps.append((
+            "rmp_links",
+            "DELETE FROM rmp_links WHERE slug = ANY(%s)",
+            "SELECT count(*) FROM rmp_links WHERE slug = ANY(%s)",
+            (slugs,)))
+        steps.append((
+            "professors",
+            "DELETE FROM professors WHERE slug = ANY(%s)",
+            "SELECT count(*) FROM professors WHERE slug = ANY(%s)",
             (slugs,)))
     if name_keys:
         steps.append((

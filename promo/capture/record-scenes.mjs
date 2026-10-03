@@ -265,7 +265,7 @@ async function sceneCompare(browser) {
   return saveScene(s, 'compare');
 }
 
-// Scene 6: department hub -> course page, scrolled to the instructor breakdown.
+// Scene 6: department hub -> course page, scrolled to the Professors panel.
 async function sceneCourses(browser) {
   const s = await newScene(browser);
   const { page } = s;
@@ -279,9 +279,9 @@ async function sceneCourses(browser) {
   await page.goto(`${BASE}/courses/CS3500`, { waitUntil: 'networkidle' });
   await page.evaluate(() => window.__cursor.show());
   await page.waitForTimeout(800);
-  const instructorPanel = page.locator('.course-panel:has-text("Instructor Breakdown")');
-  await instructorPanel.waitFor();
-  const chartY = await instructorPanel.evaluate(
+  const professorsPanel = page.locator('.course-panel:has(h2:text-is("Professors"))');
+  await professorsPanel.waitFor();
+  const chartY = await professorsPanel.evaluate(
     (el) => el.getBoundingClientRect().top + window.scrollY
   );
   await page.evaluate(

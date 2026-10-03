@@ -254,9 +254,11 @@ class FakeCursor:
     answer one with the other's rows.
     """
 
-    def __init__(self, catalog, rmp_reviews, slug_rows=(), null_key_reviews=()):
+    def __init__(self, catalog, rmp_reviews, slug_rows=(), null_key_reviews=(),
+                 professors=()):
         self._data = {
             "catalog": catalog,
+            "professors": professors,
             "rmp_reviews": rmp_reviews,
             "slugs": slug_rows,
             "rmp_null": null_key_reviews,
@@ -267,6 +269,8 @@ class FakeCursor:
         flat = " ".join(sql.split())
         if "FROM professors_catalog" in flat:
             key = "catalog"
+        elif "FROM professors" in flat:
+            key = "professors"
         elif "professor_slug FROM" in flat:
             key = "slugs"
         elif "FROM rmp_reviews" in flat:
@@ -473,3 +477,55 @@ def test_camel_conversion_matches_the_transform_keys():
     from migrate_to_crdb import _camel
     assert _camel("professor_name") == "professorName"
     assert _camel("name") == "name"
+
+
+def test_purge_finds_a_professor_with_no_reviews_through_the_pipeline_table(listfile):
+    """No catalog row and no RMP reviews leaves only the pipeline's professors row.
+
+    Without it the slug never resolves, the reddit and evidence rows survive, and
+    the tool prints "Nothing to purge".
+    """
+    from purge_denied import find_targets
+    listfile("Julia Garrett")
+    cur = FakeCursor(
+        catalog=[], rmp_reviews=[],
+        professors=[("julia-garrett", "Julia Garrett", "julia garrett"),
+                    ("garrett-morrow", "Garrett Morrow", "garrett morrow")],
+        slug_rows=[("julia-garrett",)],
+    )
+    slugs, name_keys, _ = find_targets(cur)
+    assert slugs == ["julia-garrett"]
+    assert name_keys == ["julia garrett"]
+
+
+def test_purge_deletes_the_pipeline_identity_rows(listfile):
+    """A deletion request must not leave the name, RMP name or RMP URL behind."""
+    from purge_denied import purge
+    listfile("Julia Garrett")
+
+    class Recording(FakeCursor):
+        executed = []
+
+        def execute(self, sql, params=None):
+            Recording.executed.append(" ".join(sql.split()))
+            super().execute(sql, params)
+
+        def fetchone(self):
+            return (1,)
+
+    cur = Recording(catalog=[("julia-garrett", "Julia Garrett", "julia garrett")],
+                    rmp_reviews=[])
+
+    class Conn:
+        def cursor(self):
+            return cur
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+    purge(Conn())
+    assert "DELETE FROM rmp_links WHERE slug = ANY(%s)" in Recording.executed
+    assert "DELETE FROM professors WHERE slug = ANY(%s)" in Recording.executed

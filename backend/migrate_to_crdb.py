@@ -3,7 +3,12 @@ Migrate CSV data into CockroachDB.
 Idempotent — safe to re-run. Pre-filters rows client-side to avoid sending
 data the DB already has, minimizing Request Units.
 
-Run:  python backend/migrate_to_crdb.py all
+Run:  python backend/migrate_to_crdb.py <table> [<table> ...] [--replace]
+      python backend/migrate_to_crdb.py all
+      python backend/migrate_to_crdb.py add-constraints
+
+Tables must be named: a bare run upserts nothing. Uploading every table from a
+stale local CSV would re-insert reviews prune_rmp_reviews.py already removed.
 """
 
 import os, csv, sys, time
@@ -316,7 +321,11 @@ def add_constraints(conn):
 def main():
     args = sys.argv[1:]
     replace = "--replace" in args
-    targets = [a for a in args if not a.startswith("--")] or ["all"]
+    targets = [a for a in args if not a.startswith("--")]
+    if not targets:
+        # No default: "all" writes every table to prod, so it has to be asked for.
+        sys.exit("usage: migrate_to_crdb.py <table> [<table> ...] [--replace] | all | add-constraints\n"
+                 f"tables: {', '.join(TABLES)}")
 
     if targets == ["add-constraints"]:
         conn = get_connection()

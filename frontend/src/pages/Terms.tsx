@@ -21,19 +21,13 @@ const Terms = () => {
                 service.
               </p>
               <p>
-                RateMyHusky is a professor and course review platform for Northeastern University
-                students. It shows ratings and reviews from RateMyProfessors, excerpts of publicly
-                available discussion on Reddit, professor photos from Northeastern's public
-                faculty directory pages, and course details from Northeastern's public course
-                catalog. Alongside that data we show figures we compute from it —
-                averages, department comparisons, and sentiment labels derived from Reddit text.
+                RateMyHusky is a read-only aggregator of professor and course information for
+                Northeastern University students. Data displayed on this platform is sourced from
+                RateMyProfessors, Northeastern's public course catalog and faculty directory
+                pages, and publicly available discussion on Reddit; it is not submitted by users of this site.
+                Alongside that source data we show figures we compute from it — averages, blended
+                ratings, department comparisons, and sentiment labels derived from Reddit text.
                 Those are our estimates, not numbers published by any source.
-              </p>
-              <p>
-                We are adding the ability for students to write reviews on RateMyHusky itself.
-                Reviews submitted on RateMyHusky are owned by RateMyHusky, not by Northeastern
-                University or any other third party; Section 8 sets out that ownership and the
-                rules reviews must follow.
               </p>
               <p>
                 RateMyHusky is an independent student project and is not affiliated with,
@@ -47,8 +41,8 @@ const Terms = () => {
               <h2>2. Eligibility &amp; Access</h2>
               <p>
                 Most content on RateMyHusky is publicly accessible without an account. However,
-                bookmarks and writing reviews require signing in with a valid Northeastern University Google account
-                (<code>@husky.neu.edu</code>).
+                access to the bookmarks feature requires signing in with a valid Northeastern
+                University Google account (<code>@husky.neu.edu</code>).
               </p>
               <p>
                 By signing in, you confirm that you are at least 18 years of age and that you
@@ -68,15 +62,15 @@ const Terms = () => {
                 This information is encoded in a JWT (JSON Web Token) that is stored in your
                 browser's <code>localStorage</code>. The token expires after 30 days.
                 RateMyHusky does not maintain user accounts or profiles. The only per-user data
-                we store server-side is your bookmarks and any reviews you write, described below.
-                Signing out deletes the token from your browser.
+                we store server-side is your bookmarks, described below. Signing out deletes the
+                token from your browser.
               </p>
               <p>
-                Both are keyed to your Google account id. Bookmarks persist across sign-ins until
-                you remove them or request deletion, and reviews stay up until you delete them or
-                we remove them (see Section 4, "Data We Collect," and our{' '}
-                <a href="/privacy">Privacy Policy</a> for what is stored, how long it is kept, and
-                how to request deletion).
+                There is one exception. If you bookmark a professor or course, we store that
+                bookmark server-side, keyed to your Google account id; it persists across
+                sign-ins until you remove it or request deletion (see Section 4, "Data We
+                Collect," and our <a href="/privacy">Privacy Policy</a> for what is stored, how
+                long it is kept, and how to request deletion).
               </p>
             </section>
 
@@ -107,12 +101,6 @@ const Terms = () => {
                   course), the professor or course identifier, and a timestamp, server-side in
                   our database. Each account is capped at 200 bookmarks. See our{' '}
                   <a href="/privacy">Privacy Policy</a> for details on retention and deletion.
-                </li>
-                <li>
-                  <strong>Reviews:</strong> when you write a review, we store its ratings and text,
-                  the professor, course, and term it is about, when you posted it, its moderation
-                  status, and your Google account id. Your account id is kept private; reviews are
-                  shown anonymously (see Section 8).
                 </li>
               </ul>
               <p>
@@ -201,8 +189,7 @@ const Terms = () => {
                 photos published on Northeastern University's directory pages and the course
                 descriptions in its public course catalog remain its property, and we display
                 them as they are published there. Reddit content
-                remains the property of its authors and of Reddit. Reviews submitted on
-                RateMyHusky are owned by RateMyHusky, as described in Section 8.
+                remains the property of its authors and of Reddit.
               </p>
               <p>
                 You may not scrape, bulk-download, reproduce, or redistribute the aggregated
@@ -211,60 +198,7 @@ const Terms = () => {
             </section>
 
             <section className="terms-section">
-              <h2>8. Reviews You Submit</h2>
-              <p>
-                This section applies to any review, rating, or comment you submit to RateMyHusky
-                (a "review"). Review submission is not available yet; these terms govern every
-                review once it is.
-              </p>
-              <p>
-                <strong>Ownership.</strong> By submitting a review, you assign to RateMyHusky all
-                right, title, and interest in it, including copyright, to the fullest extent
-                permitted by law. Submitted reviews are owned by RateMyHusky; they are not owned by
-                Northeastern University or any other third party. Where a right cannot be assigned,
-                you grant RateMyHusky a perpetual, irrevocable, worldwide, royalty-free,
-                sublicensable license to use, reproduce, modify, publish, display, and distribute
-                the review in any form, and you waive any moral rights in it to the extent the law
-                allows.
-              </p>
-              <p>
-                <strong>What you promise.</strong> When you submit a review, you confirm that it
-                describes your own honest experience as a student in that course or with that
-                instructor, that you wrote it yourself, and that you have the right to give it to
-                us on these terms.
-              </p>
-              <p><strong>Rules.</strong> A review must not:</p>
-              <ul>
-                <li>State as fact something you know or suspect to be false</li>
-                <li>Harass, threaten, or demean anyone, or contain hate speech</li>
-                <li>
-                  Include anyone's contact details or other personal information, or discuss a
-                  person's private life beyond their teaching
-                </li>
-                <li>Impersonate anyone, or review a course or instructor you have not taken</li>
-                <li>Contain content you do not have the right to share, spam, or advertising</li>
-              </ul>
-              <p>
-                <strong>Moderation.</strong> We may screen reviews before or after they are
-                published, including with automated tools, and we may decline to publish or remove
-                any review at our discretion. Reviews express the opinions of the students who
-                write them, not the views of RateMyHusky.
-              </p>
-              <p>
-                <strong>Anonymity.</strong> Reviews are published anonymously: your name, email
-                address, and photo are never shown with a review. We keep a private record of
-                which account submitted each review, and we do not disclose it unless the law
-                requires us to.
-              </p>
-              <p>
-                <strong>Deleting your review.</strong> You can delete a review you wrote at any
-                time, which removes it from the site and from our database. Otherwise a review
-                stays up until you delete it or we remove it.
-              </p>
-            </section>
-
-            <section className="terms-section">
-              <h2>9. Acceptable Use</h2>
+              <h2>8. Acceptable Use</h2>
               <p>By using RateMyHusky, you agree not to:</p>
               <ul>
                 <li>Use automated scripts, bots, or crawlers to access the service (rate limiting is enforced)</li>
@@ -281,12 +215,12 @@ const Terms = () => {
               </ul>
               <p>
                 We enforce per-IP rate limits across the site. Repeated misuse may result in
-                suspension of your access, as described in Section 16.
+                suspension of your access, as described in Section 15.
               </p>
             </section>
 
             <section className="terms-section">
-              <h2>10. Availability &amp; Changes to the Service</h2>
+              <h2>9. Availability &amp; Changes to the Service</h2>
               <p>
                 RateMyHusky is a student-run project offered without any uptime commitment. We
                 take the site down for maintenance, add and remove features, and switch features
@@ -297,7 +231,7 @@ const Terms = () => {
             </section>
 
             <section className="terms-section">
-              <h2>11. Professor &amp; Instructor Removal Requests</h2>
+              <h2>10. Professor &amp; Instructor Removal Requests</h2>
               <p>
                 If you are a professor or instructor and you want your information removed from
                 RateMyHusky, email{' '}
@@ -312,11 +246,11 @@ const Terms = () => {
             </section>
 
             <section className="terms-section">
-              <h2>12. No Warranties &amp; Data Accuracy</h2>
+              <h2>11. No Warranties &amp; Data Accuracy</h2>
               <p>
-                Professor ratings and review comments come from external sources and from the
-                students who write them, and may be incomplete, outdated, or inaccurate. Figures we
-                compute — averages and Reddit sentiment labels — depend
+                Professor ratings and review comments are sourced from external systems and may
+                be incomplete, outdated, or inaccurate. Figures we compute — blended ratings,
+                averages, and Reddit sentiment labels — depend
                 on that source data and on matching a professor's name across systems that spell
                 it differently, so they can be wrong even when the sources are right. RateMyHusky
                 makes no guarantees about the accuracy, completeness, or timeliness of anything
@@ -330,7 +264,7 @@ const Terms = () => {
             </section>
 
             <section className="terms-section">
-              <h2>13. Limitation of Liability</h2>
+              <h2>12. Limitation of Liability</h2>
               <p>
                 RateMyHusky is provided "as-is" without warranties of any kind, express or
                 implied. To the fullest extent permitted by law, RateMyHusky and its developers
@@ -340,7 +274,7 @@ const Terms = () => {
             </section>
 
             <section className="terms-section">
-              <h2>14. Changes to These Terms</h2>
+              <h2>13. Changes to These Terms</h2>
               <p>
                 We may update these Terms from time to time. The effective date at the top of
                 this page will be updated when changes are made. Continued use of RateMyHusky
@@ -349,7 +283,7 @@ const Terms = () => {
             </section>
 
             <section className="terms-section">
-              <h2>15. Indemnification</h2>
+              <h2>14. Indemnification</h2>
               <p>
                 You agree to defend, indemnify, and hold harmless RateMyHusky and its developers
                 from and against any claims, damages, losses, or expenses (including reasonable
@@ -359,7 +293,7 @@ const Terms = () => {
             </section>
 
             <section className="terms-section">
-              <h2>16. Termination</h2>
+              <h2>15. Termination</h2>
               <p>
                 We reserve the right to suspend or terminate your access to RateMyHusky at any
                 time, with or without notice, if we believe you have violated these Terms or are
@@ -369,21 +303,20 @@ const Terms = () => {
             </section>
 
             <section className="terms-section">
-              <h2>17. DMCA &amp; Content Removal</h2>
+              <h2>16. DMCA &amp; Content Removal</h2>
               <p>
-                RateMyHusky shows publicly available data from third-party sources and reviews
-                written by students. If you
+                RateMyHusky aggregates publicly available data from third-party sources. If you
                 believe content displayed on this platform infringes your copyright or should be
                 removed for another legal reason, please contact us at{' '}
                 <a href="mailto:legal@ratemyhusky.com">legal@ratemyhusky.com</a> with a
                 description of the content and the basis for your removal request. We will
                 review and respond in good faith. Professors and instructors asking to be removed
-                should see Section 11, which does not require a legal basis.
+                should see Section 10, which does not require a legal basis.
               </p>
             </section>
 
             <section className="terms-section">
-              <h2>18. Governing Law</h2>
+              <h2>17. Governing Law</h2>
               <p>
                 These Terms are governed by the laws of the Commonwealth of Massachusetts,
                 without regard to conflict of law principles. Any disputes arising from these
@@ -394,7 +327,7 @@ const Terms = () => {
             </section>
 
             <section className="terms-section">
-              <h2>19. Severability</h2>
+              <h2>18. Severability</h2>
               <p>
                 If any provision of these Terms is found to be unenforceable or invalid under
                 applicable law, that provision will be modified to the minimum extent necessary
@@ -404,7 +337,7 @@ const Terms = () => {
             </section>
 
             <section className="terms-section terms-section--last">
-              <h2>20. Contact</h2>
+              <h2>19. Contact</h2>
               <p>
                 If you have questions about these Terms or want to report an issue, please email
                 us at <a href="mailto:support@ratemyhusky.com">support@ratemyhusky.com</a>.

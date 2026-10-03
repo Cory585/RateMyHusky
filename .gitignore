@@ -17,5 +17,8 @@ backend/groq_keys.local.json
 
 archive/
 scraper/*/cookies.txt
+# Left behind in existing checkouts by the deleted scrapers: a browser profile
+# (saved logins/cookies) and downloaded files.
+scraper/*/data/
 backend/rag/eval/pool.json*
 backend/rag/eval/runs/*/answers.json*

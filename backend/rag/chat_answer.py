@@ -63,7 +63,11 @@ def _provenance(c):
     src = c.get("source")
     if src == "rmp":
         return "(RateMyProfessor review)"
-    return f"(r/{c.get('subreddit')}, {c.get('score')} upvotes)"
+    if src == "reddit":
+        return f"(r/{c.get('subreddit')}, {c.get('score')} upvotes)"
+    # retrieval only admits reddit and rmp; anything else (a stale row from an old
+    # dump, say) must not be quoted as a Reddit post
+    return "(student comment)"
 
 def _fmt(v, suffix=""):
     return f"{v}{suffix}" if v is not None and v != "" else "unknown"
@@ -310,6 +314,8 @@ def selftest():
     check("reddit provenance shows subreddit + upvotes",
           _provenance({"source": "reddit", "subreddit": "NEU", "score": 12}) == "(r/NEU, 12 upvotes)")
     check("rmp provenance labeled", _provenance({"source": "rmp"}) == "(RateMyProfessor review)")
+    check("unknown source is never labeled as Reddit",
+          _provenance({"source": "retired-source", "subreddit": None, "score": None}) == "(student comment)")
     # build_user_message uses source-aware provenance for a non-reddit source
     um2 = build_user_message("q", facts, [{"source": "rmp", "body": "clear lectures"}])
     check("user msg labels RMP source", "(RateMyProfessor review)" in um2)
