@@ -157,6 +157,11 @@ def _select_reviews(reviews: list, limit: int) -> list:
     return selected
 
 
+def _award_label(a: dict) -> str:
+    """'Award, Awarding Body (Year)', the same string Professor.tsx builds."""
+    return f"{a['award']}, {a['awardingBody']} ({a['yearLabel']})"
+
+
 def professor_html(profile: dict, reviews: list, canonical: str) -> str:
     name = profile.get("name") or ""
     dept = profile.get("department") or ""
@@ -264,6 +269,14 @@ def professor_html(profile: dict, reviews: list, canonical: str) -> str:
             f"What courses does {name} teach at Northeastern?",
             f"{name} has taught {', '.join(course_codes)} at Northeastern.",
         ))
+    # Each label matches the Person.award strings Professor.tsx emits, so the
+    # crawler copy and the page agree.
+    award_labels = [_award_label(a) for a in profile.get("awards") or []]
+    if award_labels:
+        faq_items.append((
+            f"Has {name} won any teaching awards at Northeastern?",
+            f"{name} has received: {'; '.join(award_labels)}.",
+        ))
     faq_html = "".join(
         f"<h3>{_esc(q)}</h3><p>{_esc(a)}</p>" for q, a in faq_items
     )
@@ -300,6 +313,8 @@ def professor_html(profile: dict, reviews: list, canonical: str) -> str:
         person["image"] = profile["imageUrl"]
     if profile.get("professorUrl"):
         person["sameAs"] = [profile["professorUrl"]]
+    if award_labels:
+        person["award"] = award_labels
     # NB: schema.org Person does not support aggregateRating, and Google rejects
     # it ("Invalid object type" in Rich Results), so we do not emit one here.
     profilepage = {
@@ -629,6 +644,7 @@ def _professor_view(payload: dict, colleagues: list) -> dict:
         "totalRatings": payload["summary"]["numRatings"],
         "courses": [c["code"] for c in payload["courses"]],
         "colleagues": colleagues,
+        "awards": payload.get("awards") or [],
     }
 
 
