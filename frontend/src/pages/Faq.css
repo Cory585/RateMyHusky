@@ -1,0 +1,35 @@
+/* Builds on Terms.css: each audience is a .terms-section, each question an h3. */
+
+/* Clears the fixed navbar when /faq#professors jumps here. */
+.faq-group {
+  scroll-margin-top: 96px;
+}
+
+.faq-group h3 {
+  font-size: 0.98rem;
+  font-weight: 800;
+  color: #1f1f1f;
+  margin: 24px 0 6px;
+  line-height: 1.4;
+}
+
+.faq-group h2 + h3 {
+  margin-top: 14px;
+}
+
+.faq-jump a {
+  color: #5b9bd5;
+  text-decoration: none;
+}
+
+.faq-jump a:hover {
+  text-decoration: underline;
+}
+
+.dark .faq-group h3 {
+  color: #f3f3f3;
+}
+
+.dark .faq-jump a {
+  color: #7ab3e0;
+}

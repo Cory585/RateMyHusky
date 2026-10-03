@@ -8,7 +8,7 @@ const Terms = () => {
         <div className="terms-shell">
           <header className="terms-header">
             <h1>Terms &amp; Conditions</h1>
-            <p className="terms-meta">Effective October 1, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective October 3, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -23,8 +23,9 @@ const Terms = () => {
               <p>
                 RateMyHusky is a read-only aggregator of professor and course information for
                 Northeastern University students. Data displayed on this platform is sourced from
-                RateMyProfessors, Northeastern's public course catalog and faculty directory
-                pages, and publicly available discussion on Reddit; it is not submitted by users of this site.
+                RateMyProfessors, from Northeastern's public course catalog, faculty directory
+                pages, and teaching award announcements, and from publicly available discussion
+                on Reddit. It is not submitted by users of this site.
                 Alongside that source data we show figures we compute from it — averages, blended
                 ratings, department comparisons, and sentiment labels derived from Reddit text.
                 Those are our estimates, not numbers published by any source.
@@ -120,7 +121,9 @@ const Terms = () => {
                 information is used solely to improve the service and will not be shared with
                 third parties. The email address is optional for most message types but is
                 required for a "Data Deletion Request," for which (if you are signed in) your
-                account identifier is also included so we can act on the correct account.
+                account identifier is also included so we can act on the correct account. It is
+                also required for a professor's request to correct or remove their page, so we
+                can confirm the request with them.
               </p>
             </section>
 
@@ -170,6 +173,11 @@ const Terms = () => {
                   sourced from the public college and department directory pages that publish them.
                 </li>
                 <li>
+                  <strong>Northeastern teaching award announcements</strong>: teaching awards
+                  shown on professor pages are sourced from the award pages and news posts
+                  Northeastern publishes, and each links to its announcement.
+                </li>
+                <li>
                   <strong>Northeastern course catalog</strong>: course names, departments,
                   descriptions, credits, prerequisites, corequisites, and NUPath attributes are
                   sourced from the public course catalog at catalog.northeastern.edu.
@@ -186,8 +194,9 @@ const Terms = () => {
               <p>
                 Review content and ratings sourced from RateMyProfessors remain subject to
                 RateMyProfessors' intellectual property rights and terms of use. The faculty
-                photos published on Northeastern University's directory pages and the course
-                descriptions in its public course catalog remain its property, and we display
+                photos published on Northeastern University's directory pages, its teaching
+                award announcements, and the course descriptions in its public course catalog
+                remain its property, and we display
                 them as they are published there. Reddit content
                 remains the property of its authors and of Reddit.
               </p>
@@ -236,12 +245,21 @@ const Terms = () => {
                 If you are a professor or instructor and you want your information removed from
                 RateMyHusky, email{' '}
                 <a href="mailto:legal@ratemyhusky.com">legal@ratemyhusky.com</a> or use the
-                feedback form. We honor these requests: your page, ratings, comments, and Reddit
-                mentions are deleted, and your name is added to a removal list that every data
+                feedback form (&ldquo;Professor: Correct or Remove My Page&rdquo;), and include
+                your Northeastern email address. We confirm each
+                request at that address before acting on it, so that no one can remove or change
+                a professor's information by using their name; a request without a Northeastern
+                email address cannot be verified or answered. We honor confirmed requests: your
+                page, ratings, comments, and Reddit mentions are deleted, and your name is added to a removal list that every data
                 loader checks, so a later refresh does not bring them back. We cannot remove your
                 data from RateMyProfessors or Reddit themselves — contact those sources
                 directly. Our <a href="/privacy">Privacy Policy</a> describes what we publish and
                 the limits of what removal covers.
+              </p>
+              <p>
+                If information on your page is wrong or missing instead, request a correction the
+                same way, with your Northeastern email address. We correct it after confirming the
+                request with you.
               </p>
             </section>
 
