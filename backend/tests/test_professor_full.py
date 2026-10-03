@@ -73,7 +73,11 @@ class FakeDB:
         raise AssertionError(f"unexpected query_one: {sql}")
 
 
-def _build(slug="olin-guha", db=None, mentions=MENTIONS):
+AWARDS = {"olin guha": [{"award": "University Excellence in Teaching Award", "awardingBody": "Northeastern University",
+                          "year": 2023, "yearLabel": "2022\u201323", "sourceUrl": "https://example.edu/awards"}]}
+
+
+def _build(slug="olin-guha", db=None, mentions=MENTIONS, awards=AWARDS):
     db = db or FakeDB()
     seen = {}
 
@@ -82,7 +86,8 @@ def _build(slug="olin-guha", db=None, mentions=MENTIONS):
         seen["slug"] = s
         return [dict(m) for m in mentions]
 
-    data = build_payload(slug, db.query, db.query_one, lambda t: t, fetch_reddit_mentions)
+    data = build_payload(slug, db.query, db.query_one, lambda t: t, fetch_reddit_mentions,
+                         awards_for=lambda key: [dict(a) for a in awards.get(key, [])])
     return data, db, seen
 
 
@@ -90,8 +95,18 @@ def _build(slug="olin-guha", db=None, mentions=MENTIONS):
 
 def test_top_level_keys():
     data, _, _ = _build()
-    assert set(data) == {"version", "identity", "summary", "sources", "courses", "redditMentions"}
+    assert set(data) == {"version", "identity", "summary", "sources", "courses", "redditMentions", "awards"}
     assert data["version"] == 2
+
+
+def test_awards_join_on_the_catalog_name_key():
+    data, _, _ = _build()
+    assert data["awards"] == AWARDS["olin guha"]
+
+
+def test_no_awards_is_an_empty_list():
+    data, _, _ = _build(awards={})
+    assert data["awards"] == []
 
 
 def test_identity_keys():

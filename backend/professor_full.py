@@ -11,6 +11,7 @@ each source measured. A new source adds `sources.<name>` and
 
 import moderation
 import rmp
+import teaching_awards
 from prof_aliases import ALIAS_MAP
 
 
@@ -65,9 +66,11 @@ def build_courses(course_rows):
     return rows
 
 
-def build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions):
+def build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions,
+                  awards_for=teaching_awards.awards_for):
     """The §4.2 professor payload, or None when no professor matches `slug`.
-    Four statements: catalog row, summaries, RMP reviews, Reddit."""
+    Four statements: catalog row, summaries, RMP reviews, Reddit. Awards come
+    from the committed teaching_awards.json, not the database."""
     prof = _resolve_professor(slug, query_one)
     if not prof:
         return None
@@ -91,4 +94,5 @@ def build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions):
         "sources": {"rmp": rmp.build_section(own.get("rmp"), prof.get("professor_url"), reviews)},
         "courses": build_courses([r for r in summaries if r["course_code"] and r["source"] == "blend"]),
         "redditMentions": mentions,
+        "awards": awards_for(prof["name_key"]),
     }

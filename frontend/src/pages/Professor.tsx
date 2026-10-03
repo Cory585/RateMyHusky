@@ -9,7 +9,7 @@ import RatingBar from '../components/RatingBar';
 import Breadcrumbs from '../components/Breadcrumbs';
 import Seo from '../components/Seo';
 import { fetchProfessorFull } from '../api/api';
-import type { ProfessorPage, ProfessorCourse, RatingDistribution, RedditMention } from '../api/api';
+import type { ProfessorPage, ProfessorCourse, RatingDistribution, RedditMention, TeachingAward } from '../api/api';
 import { SHOW_SURVEY_STATS } from '../config';
 import { termSortKey } from '../utils/termUtils';
 import { isPinned, pinnedFirst } from '../utils/askPinMatch';
@@ -209,6 +209,19 @@ const difficultyColor = (d: number) => {
   if (d <= 3.5) return '#e67e22';
   if (d <= 4.0) return '#e74c3c';
   return '#c0392b';
+};
+
+/* One chip per award, its years newest first; the chip links to the newest announcement.
+   Award names already say who gave them ("CSSH Outstanding Teaching Award"), so the chip
+   drops only the trailing "Award". `awards` arrives newest first. */
+const groupAwards = (awards: TeachingAward[]) => {
+  const groups: { label: string; award: TeachingAward; years: string[] }[] = [];
+  for (const a of awards) {
+    const g = groups.find(x => x.award.award === a.award);
+    if (g) g.years.push(a.yearLabel);
+    else groups.push({ label: a.award.replace(/ Award$/, ''), award: a, years: [a.yearLabel] });
+  }
+  return groups;
 };
 
 const COURSES_COLLAPSED_LIMIT = 5;
@@ -547,6 +560,8 @@ const Professor = () => {
   const identity = profile.identity;
   const summary = profile.summary;
   const rmp = profile.sources.rmp;
+  // `?? []`: a payload cached before awards shipped has no key.
+  const awards = profile.awards ?? [];
 
   /* Mirrors render.professor_html's two forms character for character (the crawler copy
      and the page must agree). Two decimals: toFixed(2) reproduces Python's .2f. */
@@ -574,6 +589,7 @@ const Professor = () => {
       url: profCanonical,
       ...(identity.imageUrl ? { image: identity.imageUrl } : {}),
       ...(rmp.professorUrl ? { sameAs: [rmp.professorUrl] } : {}),
+      ...(awards.length ? { award: awards.map(a => `${a.award}, ${a.awardingBody} (${a.yearLabel})`) } : {}),
       // schema.org Person does not support aggregateRating (Google rejects it
       // as an invalid object type in Rich Results), so it is intentionally omitted.
     },
@@ -719,6 +735,25 @@ const Professor = () => {
               <BookmarkButton itemType="professor" itemKey={slug!} size="md" className="prof-hero-bookmark" />
             </h1>
             <p className="prof-dept">{identity.department}</p>
+            {awards.length > 0 && (
+              <ul className="prof-awards" aria-label="Teaching awards">
+                {groupAwards(awards).map(({ label, award: a, years }) => (
+                  <li key={a.award}>
+                    <a
+                      className="prof-award"
+                      href={a.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={`${a.award}, ${a.awardingBody}, ${years.join(', ')}. Opens the latest announcement.`}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="6" /><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11" /></svg>
+                      <span>{label}</span>
+                      <span className="prof-award-year">{years.join(', ')}</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
       </header>

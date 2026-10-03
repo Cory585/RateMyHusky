@@ -55,7 +55,8 @@ def client(monkeypatch):
 def test_full_serves_the_contract(client):
     resp = client.get("/api/professors/olin-guha/full")
     assert resp.status_code == 200
-    assert set(resp.get_json()) == {"version", "identity", "summary", "sources", "courses", "redditMentions"}
+    assert set(resp.get_json()) == {"version", "identity", "summary", "sources", "courses", "redditMentions",
+                                    "awards"}
 
 
 def test_full_is_identical_for_anonymous_and_signed_in(client):
