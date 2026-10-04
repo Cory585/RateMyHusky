@@ -519,7 +519,9 @@ const Professor = () => {
       const next = new Set(prev);
       if (next.has(code)) next.delete(code);
       else next.add(code);
-      return next;
+      /* Picking the last unpicked course is the same as no filter: snap back to it so the
+         stats match "All courses" and the next click filters instead of removing. */
+      return next.size === courses.length ? new Set() : next;
     });
   };
 
