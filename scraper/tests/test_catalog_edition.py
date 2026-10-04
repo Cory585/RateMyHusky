@@ -107,8 +107,9 @@ def test_rollover_exits_with_its_own_code_so_ci_goes_red(state, serve, capsys):
 def test_no_outcome_shares_exit_1_with_an_uncaught_exception():
     """CI files a different issue per code; a crash must never read as a rollover."""
     codes = {catalog_edition.EXIT_UNCHANGED, catalog_edition.EXIT_NEW_EDITION,
-             catalog_edition.EXIT_UNREADABLE, catalog_edition.EXIT_FETCH_FAILED}
-    assert len(codes) == 4
+             catalog_edition.EXIT_UNREADABLE, catalog_edition.EXIT_FETCH_FAILED,
+             catalog_edition.EXIT_FETCH_REJECTED}
+    assert len(codes) == 5
     assert 1 not in codes
 
 
@@ -151,7 +152,7 @@ class FakeResponse:
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            raise requests.HTTPError(f"{self.status_code}")
+            raise requests.HTTPError(f"{self.status_code}", response=self)
 
 
 class FakeSession:
@@ -186,6 +187,33 @@ def test_fetch_does_not_retry_a_403():
     with pytest.raises(requests.HTTPError):
         catalog_edition.fetch_home(session=session, sleep=lambda s: None)
     assert session.calls == 1
+
+
+def serve_through(monkeypatch, session):
+    """Run the real fetch_home (retries, raise_for_status) against a fake session."""
+    real = catalog_edition.fetch_home
+    monkeypatch.setattr(catalog_edition, "fetch_home",
+                        lambda url=catalog_edition.HOME_URL, session=session:
+                        real(url, session=session, sleep=lambda s: None))
+
+
+@pytest.mark.parametrize("status", [403, 404, 410])
+def test_permanent_4xx_gets_its_own_code_so_ci_files_an_issue(state, monkeypatch, capsys,
+                                                              status):
+    """A moved URL or a bot block is not a blip: reading it as one blinds the watcher."""
+    session = FakeSession(FakeResponse(status))
+    serve_through(monkeypatch, session)
+    assert catalog_edition.main(["--state", state]) == catalog_edition.EXIT_FETCH_REJECTED
+    assert "FETCH REJECTED" in capsys.readouterr().err
+    assert session.calls == 1
+
+
+@pytest.mark.parametrize("status", [429, 503])
+def test_retryable_status_that_persists_stays_transient(state, monkeypatch, status):
+    session = FakeSession(*[FakeResponse(status)] * catalog_edition.MAX_ATTEMPTS)
+    serve_through(monkeypatch, session)
+    assert catalog_edition.main(["--state", state]) == catalog_edition.EXIT_FETCH_FAILED
+    assert session.calls == catalog_edition.MAX_ATTEMPTS
 
 
 def test_record_writes_the_live_edition_as_the_new_baseline(state, serve):

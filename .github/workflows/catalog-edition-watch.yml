@@ -60,16 +60,19 @@ jobs:
           echo "code=$code" >> "$GITHUB_OUTPUT"
           exit "$code"
 
-      # A fetch that failed after retries is most likely the host having a bad
-      # day. The run still goes red, but an issue for every blip would teach
-      # people to ignore the issue that matters.
+      # A fetch that failed after retries (code 12: dropped connections,
+      # timeouts, 429/5xx) is most likely the host having a bad day. The run
+      # still goes red, but an issue for every blip would teach people to
+      # ignore the issue that matters. A non-retryable 4xx is code 13 and does
+      # file an issue below.
       - name: Note a failed fetch without filing an issue
         if: failure() && steps.check.outputs.code == '12'
         run: echo "::warning::Could not fetch the catalog homepage after retries; see the check step. No issue filed."
 
       # Everything else deserves a human: a real rollover, an unreadable
-      # edition label (the watcher is blind), or the watcher itself crashing or
-      # failing to install (also blind).
+      # edition label (the watcher is blind), a 403/404/410 from the homepage
+      # (the URL moved or runners are bot-blocked; blind too), or the watcher
+      # itself crashing or failing to install (also blind).
       - name: Open or update the edition issue
         if: failure() && steps.check.outputs.code != '12'
         env:
@@ -97,6 +100,17 @@ jobs:
               title="NEU catalog edition label unreadable — fix the watcher"
               body=$(cat <<'EOF'
           `catalog-edition-watch` could not find the `id="edition"` label on the catalog homepage. The layout changed, and the watcher is blind to a rollover until the selector in `scraper/catalog_edition.py` is updated. The next green run closes this issue.
+          EOF
+              ) ;;
+            13)
+              title="NEU catalog homepage rejecting the watcher — check the URL or bot-blocking"
+              body=$(cat <<'EOF'
+          `catalog-edition-watch` got a non-retryable 4xx (403, 404, 410 or similar; the status is in the check step's output) from the catalog homepage. Retrying will not fix this, and the watcher is blind to a rollover until it does. The likely causes:
+
+          - The catalog moved. If `https://catalog.northeastern.edu/` now 404s or 410s, find the new home and update `HOME_URL` in `scraper/catalog_edition.py`.
+          - GitHub's runners are being bot-blocked. If the URL loads in a browser but the run got a 403, the host or its CDN is refusing the runner's IP range or user agent.
+
+          The next green run closes this issue.
           EOF
               ) ;;
             *)

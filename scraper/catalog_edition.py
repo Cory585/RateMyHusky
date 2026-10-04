@@ -23,7 +23,9 @@ never read as a rollover.
     0   unchanged
     10  new edition is live
     11  EditionUnreadable — the layout moved and the watcher is blind
-    12  the homepage could not be fetched, even after retries
+    12  the homepage could not be fetched, even after retries (transient)
+    13  the homepage answered with a non-retryable 4xx (403/404/410...) — the URL
+        moved or the runner is bot-blocked, and the watcher is blind
 """
 
 import argparse
@@ -53,6 +55,7 @@ EXIT_UNCHANGED = 0
 EXIT_NEW_EDITION = 10
 EXIT_UNREADABLE = 11
 EXIT_FETCH_FAILED = 12
+EXIT_FETCH_REJECTED = 13
 
 # The id is the contract, not the position: the mobile toggle button repeats the
 # same label with no id, so matching the first year on the page would let stale
@@ -119,6 +122,19 @@ def fetch_home(url=HOME_URL, session=None, sleep=time.sleep):
     raise RuntimeError(f"{url}: exhausted {MAX_ATTEMPTS} attempts")
 
 
+def is_rejection(exc):
+    """A 4xx that retrying won't fix: the URL moved or the runner is blocked.
+
+    Kept apart from a transient failure because CI treats those as a blip and
+    files nothing; a permanent 403/404 read that way would blind the watcher
+    without anyone hearing about it.
+    """
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    return (isinstance(exc, requests.HTTPError) and status is not None
+            and 400 <= status < 500 and status not in RETRY_STATUSES)
+
+
 def read_state(path=STATE_PATH):
     with open(path, encoding="utf-8") as fh:
         return json.load(fh)["edition"]
@@ -146,6 +162,9 @@ def main(argv=None):
     try:
         html = fetch_home(args.url)
     except requests.RequestException as exc:
+        if is_rejection(exc):
+            print(f"FETCH REJECTED: {exc}", file=sys.stderr)
+            return EXIT_FETCH_REJECTED
         print(f"FETCH FAILED: {exc}", file=sys.stderr)
         return EXIT_FETCH_FAILED
 
