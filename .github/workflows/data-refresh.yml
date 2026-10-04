@@ -1,6 +1,8 @@
 name: Data Refresh
 
 on:
+  schedule:
+    - cron: "0 10 * * 0"  # 10:00 UTC every Sunday
   workflow_dispatch:
     inputs:
       dry_run:
