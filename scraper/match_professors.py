@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backend"))
+import csv_store  # noqa: E402
 from prof_aliases import rmp_link_key  # noqa: E402
 
 # Windows consoles default to cp1252 and can't encode the status glyphs below.
@@ -375,9 +376,12 @@ def load_course_map(reviews_csv: str, index: "ProfessorIndex") -> Dict[str, Set[
     """
     catalog_keys = set(index.by_full_name.keys())
     course_map: Dict[str, Set[str]] = defaultdict(set)
+    # csv_store, not open(): the store may ship rmp_reviews only as its .zip,
+    # and DictReader cannot open a .zip the way pandas can.
+    reviews_csv = csv_store.resolve(os.path.dirname(reviews_csv), os.path.basename(reviews_csv))
     if not os.path.exists(reviews_csv):
         return course_map
-    with open(reviews_csv, "r", encoding="utf-8", errors="replace", newline="") as f:
+    with csv_store.open_text(reviews_csv) as f:
         reader = csv.DictReader(f)
         for row in reader:
             code = parse_course_code(row.get("course", ""))
@@ -1562,6 +1566,16 @@ def selftest() -> int:
         os.unlink(fh.name)
     check("course map resolves RMP aliases and lowercase codes",
           cmap.get("CS2500") == {"elena strange"})
+
+    # The store may hold rmp_reviews only as its .zip; the course map must still
+    # load rather than come back silently empty.
+    import zipfile
+    with tempfile.TemporaryDirectory() as zdir:
+        with zipfile.ZipFile(os.path.join(zdir, "rmp_reviews.zip"), "w") as z:
+            z.writestr("rmp_reviews.csv", "professor_name,course\nLaney Strange,cs2500\n")
+        zmap = load_course_map(os.path.join(zdir, "rmp_reviews.csv"), alias_idx)
+    check("course map reads rmp_reviews from its .zip when no .csv exists",
+          zmap.get("CS2500") == {"elena strange"})
 
     def agg(cs):
         return aggregate(cs, resolve_threshold=0.80, margin=0.10, floor=0.55)
