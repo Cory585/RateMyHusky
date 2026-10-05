@@ -684,6 +684,36 @@ def test_professor_html_faq_omits_entirely_when_no_ratings():
     assert "<h2>Frequently asked questions</h2>" not in html
 
 
+_AWARDS = [
+    {"award": "Excellence in Teaching Award", "awardingBody": "Northeastern University",
+     "year": 2024, "yearLabel": "2024", "sourceUrl": "https://example.com/a"},
+    {"award": "CAMD Excellence in Teaching Award", "awardingBody": "College of Arts, Media and Design",
+     "year": 2021, "yearLabel": "2020–21", "sourceUrl": "https://example.com/b"},
+]
+
+
+def test_professor_html_faq_lists_teaching_awards():
+    html = professor_html(_base_profile(awards=_AWARDS), [], "https://ratemyhusky.com/professors/x")
+    assert "<h3>Has Francis Georges won any teaching awards at Northeastern?</h3>" in html
+    assert ("Francis Georges has received: Excellence in Teaching Award, Northeastern University (2024); "
+            "CAMD Excellence in Teaching Award, College of Arts, Media and Design (2020–21).") in html
+
+
+def test_professor_html_jsonld_person_lists_awards():
+    html = professor_html(_base_profile(awards=_AWARDS), [], "https://ratemyhusky.com/professors/x")
+    person = _extract_jsonld(html)[0]["mainEntity"]
+    assert person["award"] == [
+        "Excellence in Teaching Award, Northeastern University (2024)",
+        "CAMD Excellence in Teaching Award, College of Arts, Media and Design (2020–21)",
+    ]
+
+
+def test_professor_html_omits_awards_when_none():
+    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x")
+    assert "teaching awards" not in html
+    assert "award" not in _extract_jsonld(html)[0]["mainEntity"]
+
+
 # ── Review selection: recent + longest + spread across courses (P1-5) ──
 
 def test_professor_html_review_selection_round_robins_across_courses_by_recency():

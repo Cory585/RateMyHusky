@@ -87,6 +87,23 @@
   animation: profSlideUp 0.5s 0.25s ease both;
 }
 
+.prof-awards {
+  list-style: none; margin: 10px 0 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 6px;
+  animation: profSlideUp 0.5s 0.3s ease both;
+}
+.prof-award {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 11px; border-radius: 999px;
+  background: #fdf6e7; border: 1px solid #ecd9a8; color: #7a5300;
+  font-size: 0.82rem; font-weight: 600; text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.prof-award:hover { background: #faecc8; border-color: #dfc07a; }
+.prof-award:focus-visible { outline: 2px solid #d6394c; outline-offset: 2px; }
+.prof-award svg { flex-shrink: 0; }
+.prof-award-year { font-weight: 500; opacity: 0.75; white-space: nowrap; }
+
 .prof-hero-actions-row {
   margin: 20px 0 0; padding: 0 clamp(16px, 3vw, 48px);
   display: flex; gap: 10px;
@@ -389,6 +406,13 @@
 .prof-reviews-filters .feedback-dropdown { width: auto; min-width: 180px; margin-bottom: 0; }
 .prof-reviews-list { display: flex; flex-direction: column; gap: 14px; }
 .prof-no-reviews { text-align: center; color: #999; padding: 40px 0; font-size: 0.95rem; }
+/* Contrast is checked against the page background: brand red #d6394c is 4.2:1 on
+   #f5f5f5, so the link uses a darker red here and the site's lighter red in dark mode. */
+.prof-claim-note { text-align: center; color: #666; margin-top: 32px; font-size: 0.9rem; }
+.prof-claim-note a { color: #b8293b; font-weight: 700; text-decoration: none; }
+.prof-claim-note a:hover { text-decoration: underline; }
+.dark .prof-claim-note { color: #999; }
+.dark .prof-claim-note a { color: #f06a7a; }
 
 .prof-review-card {
   background: #fff; border-radius: 14px; padding: 26px 28px;
@@ -611,6 +635,8 @@
 .dark .prof-hero-glow { background: radial-gradient(circle, rgba(214,57,76,0.06) 0%, transparent 70%); }
 .dark .prof-name { color: #e0e0e0; }
 .dark .prof-dept { color: #999; }
+.dark .prof-award { background: #2b2415; border-color: #5a4a26; color: #e6c27a; }
+.dark .prof-award:hover { background: #352c18; border-color: #7a6331; }
 
 .dark .prof-compare-btn { box-shadow: 0 2px 8px rgba(214,57,76,0.15); }
 .dark .prof-rmp-btn { color: #e06070; border-color: #e06070; }
@@ -724,6 +750,7 @@
   .prof-hero { padding: 64px clamp(12px, 3vw, 16px) 28px; }
   .prof-name { font-size: 1.4rem; }
   .prof-dept { font-size: 0.88rem; }
+  .prof-award { font-size: 0.76rem; padding: 4px 10px; border-radius: 10px; }
   .prof-avatar { width: 60px; height: 60px; font-size: 1.3rem; }
 
   .prof-hero-actions-row { flex-direction: column; align-items: center; }

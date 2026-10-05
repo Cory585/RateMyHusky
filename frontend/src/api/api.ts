@@ -79,6 +79,17 @@ export interface ProfessorCourse {
   terms?: string[];
 }
 
+/** A teaching award from a page Northeastern publishes; newest first. */
+export interface TeachingAward {
+  award: string;
+  /** "Northeastern University" for the provost's award, else the college. */
+  awardingBody: string;
+  year: number;
+  /** As the source prints it: "2022–23" for an academic year, "2024" for Khoury's. */
+  yearLabel: string;
+  sourceUrl: string;
+}
+
 export interface ProfessorPage {
   version: 2;
   identity: ProfessorIdentity;
@@ -86,6 +97,7 @@ export interface ProfessorPage {
   sources: { rmp: RmpData };
   courses: ProfessorCourse[];
   redditMentions: RedditMention[];
+  awards: TeachingAward[];
 }
 
 export interface ProfessorReview {

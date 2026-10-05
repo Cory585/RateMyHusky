@@ -272,6 +272,31 @@ FEEDBACK_DAILY_LIMIT = 300
 # feedback types that require a reply email and carry the signed-in account's verified sub,
 # so support can act on the right ask_log rows (review an appeal, or erase the user's data)
 _ACCOUNT_FEEDBACK_TYPES = {"banappeal", "datadeletion"}
+# A professor asking to correct or remove their page: the FAQ, Privacy Policy and
+# Terms say these can't be verified or answered without an email, so it's required.
+_EMAIL_REQUIRED_FEEDBACK_TYPES = _ACCOUNT_FEEDBACK_TYPES | {"professor"}
+
+# Types that can change or remove what a professor's page shows. The FAQ and the
+# Privacy Policy promise professors we confirm these at their Northeastern
+# address before acting, so the support email says up front whether that is possible.
+_PAGE_CHANGE_FEEDBACK_TYPES = {"missing", "incorrectdata", "professor"}
+
+
+def _is_northeastern_address(email):
+    """@northeastern.edu, or a college subdomain such as @khoury.northeastern.edu."""
+    domain = email.rpartition("@")[2].lower()
+    return domain == "northeastern.edu" or domain.endswith(".northeastern.edu")
+
+
+def professor_verify_note(feedback_type, reply_email):
+    """The "Verify:" line for a page-change request, or None for other types."""
+    if feedback_type not in _PAGE_CHANGE_FEEDBACK_TYPES:
+        return None
+    if not reply_email:
+        return "no email - if this is a professor's request, it can't be verified or answered; don't act on it"
+    if _is_northeastern_address(reply_email):
+        return "Northeastern address - if it's a professor's request, reply to confirm before acting"
+    return "not a Northeastern address - if it's a professor's request, ask them to write from their Northeastern email"
 
 
 
@@ -1558,9 +1583,9 @@ def submit_feedback():
     if not feedback_type or not description:
         return jsonify({"error": "feedbackType and description are required"}), 400
 
-    # Ask ban appeals and data-deletion requests are useless without a reply address — require
-    # it (other types stay optional).
-    if feedback_type in _ACCOUNT_FEEDBACK_TYPES and not reply_email:
+    # Ask ban appeals, data-deletion and professor requests are useless without a reply
+    # address — require it (other types stay optional).
+    if feedback_type in _EMAIL_REQUIRED_FEEDBACK_TYPES and not reply_email:
         return jsonify({"error": "Email is required for this request"}), 400
 
     if reply_email and not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', reply_email):
@@ -1596,6 +1621,7 @@ def submit_feedback():
         "incorrectdata": "Incorrect Data",
         "banappeal": "Ask Ban Appeal",
         "datadeletion": "Data Deletion Request",
+        "professor": "Professor Request",
         "general": "General Feedback",
     }
     type_label = type_labels.get(feedback_type, feedback_type)
@@ -1607,6 +1633,9 @@ def submit_feedback():
     ]
     if reply_email:
         lines.append(f"From:        {reply_email}")
+    verify_note = professor_verify_note(feedback_type, reply_email)
+    if verify_note:
+        lines.append(f"Verify:      {verify_note}")
     if feedback_type in _ACCOUNT_FEEDBACK_TYPES:
         # surface the session_token to act on via clear_ask_strikes.py
         # (--account <sub> for appeals, --purge-account <sub> for data deletion)
