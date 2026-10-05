@@ -236,83 +236,43 @@ def test_ordering_breaks_ties_by_name():
     assert "total_reviews DESC, name" in body
 
 
-# ── comment counts must follow the TRACE name, not the RMP one ───────────────
-# A fuzzy-matched professor's TRACE comments are filed under trace_name_key, not
-# name_key (see professor_full.trace_key). The board counted both sides under
-# name_key alone, so it reported zero TRACE comments for exactly the professors
-# whose profile page resolves them correctly — Meg Heckman showed her handful of
-# RMP comments and none of her TRACE ones.
+# ── comment counts ──────────────────────────────────────────────────────────
 
-FUZZY = {"slug": "meg-heckman", "name": "Meg Heckman", "department": "Journalism",
-         "name_key": "meg heckman", "trace_name_key": "margaret heckman",
-         "rmp_rating": 4.4, "trace_rating": 4.6, "avg_rating": 4.5,
-         "total_reviews": 300}
-EXACT = {"slug": "olin-guha", "name": "Olin Guha", "department": "Khoury",
-         "name_key": "olin guha", "trace_name_key": None,
-         "rmp_rating": 4.1, "trace_rating": 4.2, "avg_rating": 4.15,
-         "total_reviews": 250}
-
-# name_key -> comments, in each source's own key space.
-RMP_COMMENTS = {"meg heckman": 12, "olin guha": 30}
-TRACE_COMMENTS = {"margaret heckman": 900, "olin guha": 400}
-
-
-def _leaderboard_query(catalog_rows):
-    """Stands in for query(), answering each of the endpoint's statements."""
-    def query(sql, params):
-        s = " ".join(sql.split())
-        if "FROM professors_catalog" in s:
-            return catalog_rows
-        if "FROM rmp_reviews" in s:
-            return [{"name_key": k, "cnt": RMP_COMMENTS[k]}
-                    for k in params if k in RMP_COMMENTS]
-        if "FROM trace_comments" in s:
-            return [{"name_key": k, "cnt": TRACE_COMMENTS[k]}
-                    for k in params if k in TRACE_COMMENTS]
-        raise AssertionError(f"unexpected query: {s}")
-    return query
+ROW = {"slug": "olin-guha", "name": "Olin Guha", "department": "Khoury",
+       "name_key": "olin guha", "rmp_rating": 4.1, "avg_rating": 4.1,
+       "total_reviews": 250, "total_comments": 30}
 
 
 def _run_leaderboard(monkeypatch, catalog_rows):
-    monkeypatch.setattr(server, "query", _leaderboard_query(catalog_rows))
+    seen = []
+
+    def query(sql, params):
+        s = " ".join(sql.split())
+        seen.append(s)
+        if "FROM professors_catalog" in s:
+            return catalog_rows
+        raise AssertionError(f"unexpected query: {s}")
+
+    monkeypatch.setattr(server, "query", query)
     monkeypatch.setattr(server, "query_one", lambda sql, params: {"prior": C})
     monkeypatch.setattr(server, "cache_get", lambda key: None)
     monkeypatch.setattr(server, "cache_set", lambda key, val: None)
     with server.app.test_request_context("/api/goat-professors?college=Khoury"):
         resp = server.goat_professors()
-    return {p["name"]: p for p in resp.get_json()}
+    return {p["name"]: p for p in resp.get_json()}, seen
 
 
-def test_fuzzy_matched_professor_gets_her_trace_comments(monkeypatch):
-    out = _run_leaderboard(monkeypatch, [FUZZY])
-    # 12 RMP + 900 TRACE. Keying both on "meg heckman" would have given just 12.
-    assert out["Meg Heckman"]["totalComments"] == 912
+def test_board_reads_the_stored_comment_count(monkeypatch):
+    out, _ = _run_leaderboard(monkeypatch, [ROW])
+    assert out["Olin Guha"]["totalComments"] == 30
 
 
-def test_exact_match_comment_count_is_unchanged(monkeypatch):
-    out = _run_leaderboard(monkeypatch, [EXACT])
-    # trace_name_key IS NULL -> both sides read name_key, the pre-existing case.
-    assert out["Olin Guha"]["totalComments"] == 430
+def test_board_row_has_exactly_these_keys(monkeypatch):
+    out, _ = _run_leaderboard(monkeypatch, [ROW])
+    assert set(out["Olin Guha"]) == {"name", "dept", "rmpRating", "avgRating",
+                                     "totalReviews", "totalComments"}
 
 
-def test_each_side_is_queried_under_its_own_key(monkeypatch):
-    seen = []
-    base = _leaderboard_query([FUZZY, EXACT])
-
-    def spy(sql, params):
-        seen.append((" ".join(sql.split()), list(params)))
-        return base(sql, params)
-
-    monkeypatch.setattr(server, "query", spy)
-    monkeypatch.setattr(server, "query_one", lambda sql, params: {"prior": C})
-    monkeypatch.setattr(server, "cache_get", lambda key: None)
-    monkeypatch.setattr(server, "cache_set", lambda key, val: None)
-    with server.app.test_request_context("/api/goat-professors?college=Khoury"):
-        server.goat_professors()
-
-    rmp_params = next(p for s, p in seen if "FROM rmp_reviews" in s)
-    trace_params = next(p for s, p in seen if "FROM trace_comments" in s)
-    assert sorted(rmp_params) == ["meg heckman", "olin guha"]
-    # The TRACE side must ask for the TRACE spelling and must not ask for the RMP
-    # one, which owns no trace_courses rows.
-    assert sorted(trace_params) == ["margaret heckman", "olin guha"]
+def test_board_is_one_statement(monkeypatch):
+    _, seen = _run_leaderboard(monkeypatch, [ROW])
+    assert len(seen) == 1   # the prior goes through query_one, so GOAT is two statements in all

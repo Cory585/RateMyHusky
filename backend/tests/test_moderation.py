@@ -199,7 +199,7 @@ def test_filter_honours_review_hides(enforcing):
     assert ("'review'" in moderation.sql_filter()) is moderation.REVIEW_HIDES
 
 
-# ── Route wiring:  /api/professors/<slug>/reviews ──
+# ── Route wiring:  /api/professors/<slug>/full ──
 
 @pytest.fixture
 def reviews_client(monkeypatch):
@@ -224,13 +224,14 @@ def reviews_client(monkeypatch):
                 "grade": "B", "textbook": "", "online_class": "",
                 "comment": "Brutal curve, no partial credit.",
             }]
-        if "FROM trace_courses" in sql:
+        if "FROM source_summary" in sql:
             return []
         raise AssertionError(f"unexpected query: {sql}")
 
     def fake_query_one(sql, params=()):
         if "FROM professors_catalog" in sql:
-            return {"name_key": "alice smith"}
+            return {"slug": "alice-smith", "name": "Alice Smith", "name_key": "alice smith",
+                    "department": "Khoury", "num_ratings": 1, "rmp_rating": 2.0}
         raise AssertionError(f"unexpected query_one: {sql}")
 
     monkeypatch.setattr(server, "query", fake_query, raising=False)
@@ -242,22 +243,22 @@ def reviews_client(monkeypatch):
 
 def test_reviews_route_returns_comment_text_unchanged(reviews_client):
     client, _ = reviews_client
-    resp = client.get("/api/professors/alice-smith/reviews")
+    resp = client.get("/api/professors/alice-smith/full")
     assert resp.status_code == 200
-    assert resp.get_json()["reviews"][0]["comment"] == "Brutal curve, no partial credit."
+    assert resp.get_json()["sources"]["rmp"]["reviews"][0]["comment"] == "Brutal curve, no partial credit."
 
 
 def test_reviews_route_applies_filter_when_enforcing(reviews_client, enforcing):
     client, seen = reviews_client
-    client.get("/api/professors/alice-smith/reviews")
+    client.get("/api/professors/alice-smith/full")
     rmp_sql = [s for s in seen["sql"] if "FROM rmp_reviews" in s]
-    assert rmp_sql, "the reviews route never queried rmp_reviews"
+    assert rmp_sql, "the full route never queried rmp_reviews"
     assert "mod_action" in rmp_sql[0]
 
 
 def test_reviews_route_unfiltered_when_not_enforcing(reviews_client, not_enforcing):
     client, seen = reviews_client
-    client.get("/api/professors/alice-smith/reviews")
+    client.get("/api/professors/alice-smith/full")
     rmp_sql = [s for s in seen["sql"] if "FROM rmp_reviews" in s]
     assert rmp_sql
     assert "mod_action" not in rmp_sql[0]

@@ -32,9 +32,9 @@ def test_professor_html_has_title_canonical_and_h1():
         "name": "Francis Georges", "department": "Economics",
         "avgRating": 4.25, "totalRatings": 2686, "wouldTakeAgainPct": 83,
         "difficulty": 2.9, "rmpRating": 4.25, "rmpNumRatings": 2686,
-        "rmpDifficulty": 2.9, "traceRating": 4.2,
+        "rmpDifficulty": 2.9,
         "imageUrl": "https://img/x.jpg", "professorUrl": None,
-        "traceCourses": [{"displayName": "ECON1115: Macro"}],
+        "courses": ["ECON1115"],
     }
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/francis-georges")
     assert "<!doctype html>" in html.lower()
@@ -51,7 +51,7 @@ def test_professor_meta_description_leads_with_reviews_and_ratings_phrase():
     desc = _meta_description(html)
     assert desc.startswith(
         "Francis Georges professor reviews and ratings: 4.25/5 from 2686 RMP ratings "
-        "at Northeastern (83% would take again). TRACE + RateMyProfessor + Reddit."
+        "at Northeastern (83% would take again). RateMyProfessor + Reddit."
     )
 
 
@@ -62,7 +62,7 @@ def test_professor_meta_description_omits_would_take_again_clause_when_absent():
     assert "would take again" not in desc
     assert desc.startswith(
         "Francis Georges professor reviews and ratings: 4.25/5 from 2686 RMP ratings "
-        "at Northeastern. TRACE + RateMyProfessor + Reddit."
+        "at Northeastern. RateMyProfessor + Reddit."
     )
 
 
@@ -73,8 +73,8 @@ def test_professor_html_jsonld_person_never_has_aggregate_rating():
     profile = {
         "name": "Francis Georges", "department": "Economics",
         "avgRating": 4.25, "totalRatings": 2686, "wouldTakeAgainPct": 83,
-        "difficulty": 2.9, "rmpRating": None, "traceRating": None,
-        "imageUrl": None, "professorUrl": None, "traceCourses": [],
+        "difficulty": 2.9, "rmpRating": None,
+        "imageUrl": None, "professorUrl": None,
     }
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/francis-georges")
     blocks = _extract_jsonld(html)
@@ -95,7 +95,7 @@ def test_professor_html_says_no_ratings_rather_than_rating_them_zero():
     """
     profile = _base_profile(avgRating=None, totalRatings=0, wouldTakeAgainPct=None,
                             difficulty=None, rmpRating=None, rmpNumRatings=0,
-                            rmpDifficulty=None, traceRating=None)
+                            rmpDifficulty=None)
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
     assert "0/5" not in html
     assert "<dt>Rate My Professors rating</dt>" not in html
@@ -107,8 +107,8 @@ def test_professor_html_omits_aggregate_rating_when_no_ratings():
     profile = {
         "name": "New Prof", "department": "Music",
         "avgRating": 0.0, "totalRatings": 0, "wouldTakeAgainPct": None,
-        "difficulty": None, "rmpRating": None, "traceRating": None,
-        "imageUrl": None, "professorUrl": None, "traceCourses": [],
+        "difficulty": None, "rmpRating": None,
+        "imageUrl": None, "professorUrl": None,
     }
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/new-prof")
     person = _extract_jsonld(html)[0]["mainEntity"]
@@ -173,12 +173,7 @@ def test_professor_html_has_breadcrumb_list():
 
 
 def test_course_html_has_breadcrumb_list():
-    detail = {
-        "summary": {"code": "ECON1115", "name": "Macroeconomics",
-                    "department": "Economics", "avgRating": 4.1,
-                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025"},
-        "instructors": [],
-    }
+    detail = _course()
     canonical = "https://ratemyhusky.com/courses/econ1115"
     html = course_html(detail, canonical)
     blocks = _extract_jsonld(html)
@@ -194,13 +189,7 @@ def test_course_html_has_breadcrumb_list():
 # ── Course AggregateRating (P1-2) ──
 
 def test_course_html_includes_aggregate_rating_when_avg_and_count_present():
-    detail = {
-        "summary": {"code": "ECON1115", "name": "Macroeconomics",
-                    "department": "Economics", "avgRating": 4.1,
-                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025",
-                    "ratingCount": 342},
-        "instructors": [],
-    }
+    detail = _course()
     html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
     course_block = next(b for b in _extract_jsonld(html) if b.get("@type") == "Course")
     assert course_block["aggregateRating"] == {
@@ -212,40 +201,15 @@ def test_course_html_includes_aggregate_rating_when_avg_and_count_present():
 
 
 def test_course_html_omits_aggregate_rating_when_no_rating_count():
-    detail = {
-        "summary": {"code": "ECON1115", "name": "Macroeconomics",
-                    "department": "Economics", "avgRating": 4.1,
-                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025",
-                    "ratingCount": None},
-        "instructors": [],
-    }
+    detail = _course(numRatings=0)
     html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
     course_block = next(b for b in _extract_jsonld(html) if b.get("@type") == "Course")
     assert "aggregateRating" not in course_block
 
 
 def test_course_html_omits_aggregate_rating_when_no_avg_rating():
-    detail = {
-        "summary": {"code": "NEW1000", "name": "Brand New Course",
-                    "department": "TBD", "avgRating": None,
-                    "avgEnrollment": None, "latestTermTitle": "",
-                    "ratingCount": 5},
-        "instructors": [],
-    }
+    detail = _course(rating=None)
     html = course_html(detail, "https://ratemyhusky.com/courses/new1000")
-    course_block = next(b for b in _extract_jsonld(html) if b.get("@type") == "Course")
-    assert "aggregateRating" not in course_block
-
-
-def test_course_html_omits_aggregate_rating_when_count_missing_key():
-    # No "ratingCount" key at all in summary (older payload shape) — must not fabricate.
-    detail = {
-        "summary": {"code": "ECON1115", "name": "Macroeconomics",
-                    "department": "Economics", "avgRating": 4.1,
-                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025"},
-        "instructors": [],
-    }
-    html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
     course_block = next(b for b in _extract_jsonld(html) if b.get("@type") == "Course")
     assert "aggregateRating" not in course_block
 
@@ -254,7 +218,7 @@ def test_professor_html_escapes_review_comment():
     profile = {
         "name": "X Y", "department": "CS", "avgRating": 3.0, "totalRatings": 1,
         "wouldTakeAgainPct": None, "difficulty": None, "rmpRating": None,
-        "traceRating": None, "imageUrl": None, "professorUrl": None, "traceCourses": [],
+        "imageUrl": None, "professorUrl": None,
     }
     reviews = [{"course": "CS1", "quality": 3, "difficulty": 3, "date": "2024",
                 "comment": "<script>alert(1)</script> great"}]
@@ -267,7 +231,7 @@ def test_professor_html_caps_reviews():
     profile = {
         "name": "X Y", "department": "CS", "avgRating": 3.0, "totalRatings": 50,
         "wouldTakeAgainPct": None, "difficulty": None, "rmpRating": None,
-        "traceRating": None, "imageUrl": None, "professorUrl": None, "traceCourses": [],
+        "imageUrl": None, "professorUrl": None,
     }
     reviews = [{"course": "CS1", "quality": 3, "difficulty": 3, "date": "2024",
                 "comment": f"comment number {i}"} for i in range(50)]
@@ -276,12 +240,7 @@ def test_professor_html_caps_reviews():
 
 
 def test_course_html_has_title_h1_and_jsonld():
-    detail = {
-        "summary": {"code": "ECON1115", "name": "Macroeconomics",
-                    "department": "Economics", "avgRating": 4.1,
-                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025"},
-        "instructors": [{"name": "Francis Georges", "slug": "francis-georges"}],
-    }
+    detail = _course()
     html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
     assert "<title>ECON1115 Reviews — Macroeconomics at Northeastern</title>" in html
     assert "<h1>ECON1115 — Macroeconomics: Reviews & Ratings</h1>" in html
@@ -291,18 +250,13 @@ def test_course_html_has_title_h1_and_jsonld():
 
 
 def test_course_meta_description_leads_with_reviews_and_ratings_phrase():
-    detail = {
-        "summary": {"code": "ECON1115", "name": "Macroeconomics",
-                    "department": "Economics", "avgRating": 4.1,
-                    "avgEnrollment": 120, "latestTermTitle": None},
-        "instructors": [],
-    }
+    detail = _course()
     html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
     desc = _meta_description(html)
     assert desc == (
         "ECON1115 (Macroeconomics) course reviews and ratings at Northeastern (NEU). "
         "Average rating 4.1/5. "
-        "Compare instructors with TRACE + RateMyProfessor reviews."
+        "Compare professors with RateMyProfessor reviews."
     )
 
 
@@ -335,62 +289,63 @@ def test_render_course_route_returns_html(render_client):
     assert resp.headers["Cache-Control"] == "public, max-age=3600, s-maxage=86400"
 
 
-# ── TRACE review count (number only, never the comment text) ──
+def _course(**summary_over):
+    summary = {"rating": 4.1, "difficulty": 2.5, "numRatings": 342, "hoursPerWeek": None,
+               "bySource": {"rmp": {"rating": 4.1, "numRatings": 342}}}
+    summary.update(summary_over)
+    return {"code": "ECON1115", "name": "Macroeconomics", "department": "Economics",
+            "catalog": None, "summary": summary,
+            "professors": [{"slug": "francis-georges", "name": "Francis Georges"}]}
+
+
+def test_course_html_shows_catalog_details():
+    detail = {**_course(), "catalog": {"description": "Covers the macroeconomy.", "credits": "4",
+                                       "prerequisites": "ECON 1116", "corequisites": None,
+                                       "nupath": ["Analyzing/Using Data"]}}
+    html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
+    assert "<p>Covers the macroeconomy.</p>" in html
+    assert "<dt>Credits</dt><dd>4</dd>" in html
+    assert "<dt>Prerequisites</dt><dd>ECON 1116</dd>" in html
+    assert "<dt>NUpath</dt><dd>Analyzing/Using Data</dd>" in html
+    assert "Corequisites" not in html
+    course_block = next(b for b in _extract_jsonld(html) if b.get("@type") == "Course")
+    assert course_block["description"] == "Covers the macroeconomy."
+
+
+def test_course_html_without_catalog_is_unchanged():
+    html = course_html(_course(), "https://ratemyhusky.com/courses/econ1115")
+    assert "<dt>Credits</dt>" not in html
+
 
 def _base_profile(**over):
     p = {
         "name": "Francis Georges", "department": "Economics", "avgRating": 4.25,
         "totalRatings": 2686, "wouldTakeAgainPct": 83, "difficulty": 2.9,
         "rmpRating": 4.25, "rmpNumRatings": 2686, "rmpDifficulty": 2.9,
-        "traceRating": None, "imageUrl": None,
-        "professorUrl": None, "traceCourses": [],
+        "imageUrl": None,
+        "professorUrl": None, "courses": [],
     }
     p.update(over)
     return p
 
 
-def test_professor_html_shows_trace_review_count():
-    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x",
-                          trace_count=5662)
-    assert "<dt>TRACE reviews</dt><dd>5662</dd>" in html
-
-
-def test_professor_html_omits_trace_count_when_zero():
-    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x",
-                          trace_count=0)
-    assert "TRACE reviews" not in html
-
-
-def test_professor_html_never_shows_gated_trace_comment_text():
-    # Even if a gated (empty-text) trace entry were somehow passed as a review,
-    # only RMP review blockquotes are rendered; the trace count is a number only.
-    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x",
-                          trace_count=42)
-    # The count appears, but no blockquote section exists (no RMP review text given).
-    assert "<dd>42</dd>" in html
-    assert "<blockquote>" not in html
-
-
 def test_professor_html_shows_rmp_review_count():
     reviews = [{"course": "ECON1115", "quality": 5, "difficulty": 3,
                 "date": "2024", "comment": "Great."}]
-    html = professor_html(_base_profile(), reviews, "https://ratemyhusky.com/professors/x",
-                          trace_count=10)
+    html = professor_html(_base_profile(), reviews, "https://ratemyhusky.com/professors/x")
     assert "<dt>RateMyProfessor reviews</dt><dd>1</dd>" in html
 
 
 # ── noindex for zero-content professor pages (thin-content SEO) ──
 
-def test_professor_html_is_noindex_when_no_ratings_no_reviews_no_trace():
+def test_professor_html_is_noindex_when_no_ratings_and_no_reviews():
     profile = _base_profile(totalRatings=0)
-    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x",
-                          trace_count=0)
+    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
     assert '<meta name="robots" content="noindex">' in html
 
 
 def test_professor_html_is_indexed_when_ratings_exist():
-    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x",
-                          trace_count=0)
+    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x")
     assert '<meta name="robots" content="index, follow">' in html
 
 
@@ -413,23 +368,10 @@ def test_professor_html_twitter_summary_when_no_photo():
 
 
 def test_course_html_has_twitter_tags():
-    detail = {
-        "summary": {"code": "ECON1115", "name": "Macroeconomics",
-                    "department": "Economics", "avgRating": 4.1,
-                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025"},
-        "instructors": [],
-    }
+    detail = _course()
     html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
     assert '<meta name="twitter:card"' in html
     assert '<meta name="twitter:title" content="ECON1115 Reviews — Macroeconomics at Northeastern">' in html
-
-
-def test_render_professor_route_exposes_trace_count(render_client):
-    # The conftest stub returns traceComments with entries; the route should
-    # surface their count without rendering any gated comment text.
-    resp = render_client.get("/render/professors/francis-georges")
-    body = resp.get_data(as_text=True)
-    assert "TRACE reviews" in body
 
 
 def test_home_html_title_canonical_h1_and_summary():
@@ -593,15 +535,7 @@ def test_professor_meta_description_within_limit_even_with_long_name():
 
 
 def test_course_meta_description_within_limit_even_with_long_name():
-    detail = {
-        "summary": {
-            "code": "INPC9999",
-            "name": "Advanced Topics in Interdisciplinary Engineering and Public Policy",
-            "department": "Interdisciplinary Engineering and Public Policy",
-            "avgRating": 4.1, "avgEnrollment": 120, "latestTermTitle": "Fall 2025",
-        },
-        "instructors": [],
-    }
+    detail = {**_course(), "code": "INPC9999", "name": "Advanced Topics in Interdisciplinary Engineering and Public Policy"}
     html = course_html(detail, "https://ratemyhusky.com/courses/x")
     desc = _meta_description(html)
     assert len(desc) <= MAX_DESCRIPTION + 1
@@ -615,27 +549,15 @@ def test_home_meta_description_within_limit():
 
 # ── Courses-taught links, deduped by base course code (P1-4) ──
 
-def test_professor_html_courses_taught_deduped_and_linked():
-    profile = _base_profile(traceCourses=[
-        {"displayName": "EECE2150:02 (Circuits) - X"},
-        {"displayName": "EECE2150:03 (Circuits) - X"},
-        {"displayName": "EECE2150:04 (Circuits) - X"},
-        {"displayName": "CS3500:01 (OOD) - X"},
-    ])
+def test_professor_html_courses_taught_linked():
+    profile = _base_profile(courses=["EECE2150", "CS3500"])
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
     assert html.count('href="https://ratemyhusky.com/courses/EECE2150"') == 1
     assert 'href="https://ratemyhusky.com/courses/CS3500"' in html
 
 
-def test_professor_html_courses_taught_skips_entries_with_no_extractable_code():
-    profile = _base_profile(traceCourses=[{"displayName": "(Special Topics) - X"}])
-    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
-    assert "/courses/" not in html.split("<h2>Courses taught</h2>")[1].split("</ul>")[0] \
-        if "<h2>Courses taught</h2>" in html else True
-
-
 def test_professor_html_omits_courses_block_when_no_courses():
-    html = professor_html(_base_profile(traceCourses=[]), [], "https://ratemyhusky.com/professors/x")
+    html = professor_html(_base_profile(courses=[]), [], "https://ratemyhusky.com/professors/x")
     assert "<h2>Courses taught</h2>" not in html
 
 
@@ -672,7 +594,7 @@ def test_professor_html_verdict_sentence_all_clauses():
         "Francis Georges is an Economics professor at Northeastern University "
         "rated 4.25/5 on Rate My Professors by 2686 students, with 2.9/5 RMP "
         "difficulty and 83% who would take them again "
-        f"(TRACE + RateMyProfessors + Reddit, updated {month_year})."
+        f"(RateMyProfessors + Reddit, updated {month_year})."
     )
     assert expected in html
 
@@ -684,7 +606,7 @@ def test_professor_html_verdict_sentence_omits_missing_clauses():
     expected = (
         "Francis Georges is an Economics professor at Northeastern University "
         "rated 4.25/5 on Rate My Professors by 2686 students "
-        f"(TRACE + RateMyProfessors + Reddit, updated {month_year})."
+        f"(RateMyProfessors + Reddit, updated {month_year})."
     )
     assert expected in html
 
@@ -719,12 +641,7 @@ def test_professor_html_has_freshness_line():
 
 
 def test_course_html_has_freshness_line():
-    detail = {
-        "summary": {"code": "ECON1115", "name": "Macroeconomics",
-                    "department": "Economics", "avgRating": 4.1,
-                    "avgEnrollment": 120, "latestTermTitle": "Fall 2025"},
-        "instructors": [],
-    }
+    detail = _course()
     html = course_html(detail, "https://ratemyhusky.com/courses/econ1115")
     month_year = date.today().strftime("%B %Y")
     assert f"<p>Data updated {month_year}.</p>" in html
@@ -733,7 +650,7 @@ def test_course_html_has_freshness_line():
 # ── FAQ block on professor pages, plain HTML, no FAQPage schema (P1-4) ──
 
 def test_professor_html_faq_present_with_all_stats():
-    profile = _base_profile(traceCourses=[{"displayName": "CS3500:01 (OOD) - X"}])
+    profile = _base_profile(courses=["CS3500"])
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
     assert "<h2>Frequently asked questions</h2>" in html
     assert "<h3>Is Francis Georges a good professor?</h3>" in html
@@ -755,16 +672,46 @@ def test_professor_html_faq_omits_difficulty_qa_when_absent():
 
 
 def test_professor_html_faq_omits_courses_qa_when_no_courses():
-    html = professor_html(_base_profile(traceCourses=[]), [], "https://ratemyhusky.com/professors/x")
+    html = professor_html(_base_profile(courses=[]), [], "https://ratemyhusky.com/professors/x")
     assert "<h3>What courses does Francis Georges teach at Northeastern?</h3>" not in html
 
 
 def test_professor_html_faq_omits_entirely_when_no_ratings():
     profile = _base_profile(totalRatings=0, avgRating=0.0, wouldTakeAgainPct=None,
                             difficulty=None, rmpRating=None, rmpNumRatings=0,
-                            rmpDifficulty=None, traceCourses=[])
+                            rmpDifficulty=None, courses=[])
     html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
     assert "<h2>Frequently asked questions</h2>" not in html
+
+
+_AWARDS = [
+    {"award": "Excellence in Teaching Award", "awardingBody": "Northeastern University",
+     "year": 2024, "yearLabel": "2024", "sourceUrl": "https://example.com/a"},
+    {"award": "CAMD Excellence in Teaching Award", "awardingBody": "College of Arts, Media and Design",
+     "year": 2021, "yearLabel": "2020–21", "sourceUrl": "https://example.com/b"},
+]
+
+
+def test_professor_html_faq_lists_teaching_awards():
+    html = professor_html(_base_profile(awards=_AWARDS), [], "https://ratemyhusky.com/professors/x")
+    assert "<h3>Has Francis Georges won any teaching awards at Northeastern?</h3>" in html
+    assert ("Francis Georges has received: Excellence in Teaching Award, Northeastern University (2024); "
+            "CAMD Excellence in Teaching Award, College of Arts, Media and Design (2020–21).") in html
+
+
+def test_professor_html_jsonld_person_lists_awards():
+    html = professor_html(_base_profile(awards=_AWARDS), [], "https://ratemyhusky.com/professors/x")
+    person = _extract_jsonld(html)[0]["mainEntity"]
+    assert person["award"] == [
+        "Excellence in Teaching Award, Northeastern University (2024)",
+        "CAMD Excellence in Teaching Award, College of Arts, Media and Design (2020–21)",
+    ]
+
+
+def test_professor_html_omits_awards_when_none():
+    html = professor_html(_base_profile(), [], "https://ratemyhusky.com/professors/x")
+    assert "teaching awards" not in html
+    assert "award" not in _extract_jsonld(html)[0]["mainEntity"]
 
 
 # ── Review selection: recent + longest + spread across courses (P1-5) ──
@@ -1020,3 +967,17 @@ def test_department_html_handles_zero_professors_without_crashing():
     assert html.count("<tr>") == 1  # header row only, no professor rows
     body = html.split("</h1>")[1].split("</p>")[0]
     assert "highest-rated" not in body
+
+
+def test_render_professor_route_uses_the_payload(render_client):
+    body = render_client.get("/render/professors/francis-georges").get_data(as_text=True)
+    assert "4.25/5 from 2686 RMP ratings" in body
+    assert 'href="https://ratemyhusky.com/courses/ECON1115"' in body
+    assert "<h2>More Economics professors at Northeastern</h2>" in body
+    assert "RateMyProfessor + Reddit." in body
+
+
+def test_course_html_lists_professors_with_links():
+    html = course_html(_course(), "https://ratemyhusky.com/courses/econ1115")
+    assert "<h2>Professors</h2>" in html
+    assert '<a href="https://ratemyhusky.com/professors/francis-georges">Francis Georges</a>' in html

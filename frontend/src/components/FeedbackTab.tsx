@@ -26,12 +26,16 @@ const feedbackOptions = [
   { value: 'incorrectdata', label: 'Incorrect Data' },
   { value: 'banappeal', label: 'Ask Ban Appeal' },
   { value: 'datadeletion', label: 'Data Deletion Request' },
+  { value: 'professor', label: 'Professor: Correct or Remove My Page' },
   { value: 'general', label: 'General Feedback' },
 ];
 
 // types where an email is required and (when signed in) the verified account id is sent,
 // so we can respond and act on the right account
 const ACCOUNT_TYPES = ['banappeal', 'datadeletion'];
+// also require an email, but carry no account id: a professor is confirmed at their
+// Northeastern address, which the FAQ, Privacy Policy and Terms say we need
+const EMAIL_REQUIRED_TYPES = [...ACCOUNT_TYPES, 'professor'];
 
 const FeedbackTab = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -90,7 +94,7 @@ const FeedbackTab = () => {
       setError('Please select a feedback type and enter a description.');
       return;
     }
-    if (ACCOUNT_TYPES.includes(feedbackType) && !email.trim()) {
+    if (EMAIL_REQUIRED_TYPES.includes(feedbackType) && !email.trim()) {
       setError('Email is required for this request so we can respond.');
       return;
     }
@@ -155,6 +159,8 @@ const FeedbackTab = () => {
         return "Explain why your access to Ask should be restored. Include any context about the questions you asked.";
       case 'datadeletion':
         return "Request deletion of your Ask data and bookmarks. Sign in first so we can verify your account; we'll delete all Ask logs and bookmarks tied to it.";
+      case 'professor':
+        return "Which page is yours, and what should we correct or remove? Use your Northeastern email below; we confirm every request there before acting.";
       case 'general':
         return "Share your thoughts, suggestions, or anything else on your mind.";
       default:
@@ -230,7 +236,7 @@ const FeedbackTab = () => {
                 />
 
                 <label className="feedback-label">
-                  Email {ACCOUNT_TYPES.includes(feedbackType)
+                  Email {EMAIL_REQUIRED_TYPES.includes(feedbackType)
                     ? <span className="feedback-required">*</span>
                     : '(Optional)'}
                 </label>

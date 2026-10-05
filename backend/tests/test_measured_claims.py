@@ -1,8 +1,8 @@
 """Guards the measured numbers that are written into comments.
 
 Several comments around the leaderboard quote numbers measured off the live
-corpus -- how many professors sit at exactly 5.00, how much of total_reviews is
-TRACE, how far the comment count exceeds the rating count. They are load-bearing:
+corpus -- how many professors sit at exactly 5.00, how long each college's board
+is at the review floor, how many ties the name tiebreak settles. They are load-bearing:
 each one is the evidence for a design decision sitting right next to it, and a
 reader who re-measures and gets something different has to work out whether the
 code broke or the comment rotted.
@@ -116,32 +116,6 @@ class Corpus:
             self._rows = [r for c in self.colleges for r in self.board(c)]
         return self._rows
 
-    @property
-    def comment_ratios(self):
-        """comments / ratings for every row on every board."""
-        if hasattr(self, "_ratios"):
-            return self._ratios
-        rows = self.all_board_rows
-        name_keys = [r["name_key"] for r in rows]
-        trace_keys = list({server.trace_key(r) for r in rows})
-        rmp = {r["name_key"]: int(r["c"]) for r in self.rows(
-            "SELECT name_key, COUNT(*) c FROM rmp_reviews WHERE name_key IN %s "
-            "AND comment IS NOT NULL AND comment != %s GROUP BY name_key",
-            (tuple(name_keys), ""))}
-        trace = {r["name_key"]: int(r["c"]) for r in self.rows(
-            "SELECT tc2.name_key, COUNT(*) c FROM trace_comments tc "
-            "JOIN trace_courses tc2 ON tc.tc_course_id = tc2.course_id "
-            "  AND tc.tc_instructor_id = tc2.instructor_id "
-            "  AND tc.tc_term_id = tc2.term_id "
-            "WHERE tc2.name_key IN %s AND tc.comment IS NOT NULL "
-            "  AND tc.comment != %s GROUP BY tc2.name_key",
-            (tuple(trace_keys), ""))}
-        self._ratios = [
-            (rmp.get(r["name_key"], 0) + trace.get(server.trace_key(r), 0))
-            / r["total_reviews"]
-            for r in rows if r["total_reviews"]]
-        return self._ratios
-
     def rating_inversions(self, college):
         """Adjacent pairs where the displayed rating goes up as rank goes down."""
         board = self.board(college)
@@ -218,41 +192,6 @@ CLAIMS = [
      lambda c: len(c.board("Professional Studies")),
      ("abs", 1)),
 
-    ("TRACE share of total_reviews (server)", SERVER_PY,
-     r"overall-question responses, ~(\d+)% the latter",
-     lambda c: _trace_share(c),
-     ("abs", 2)),
-
-    ("TRACE share of total_reviews (frontend)", HOMEPAGE_TSX,
-     r"survey responses \(~(\d+)% the latter\)",
-     lambda c: _trace_share(c),
-     ("abs", 2)),
-
-    ("Matherne comment count", SERVER_PY,
-     r"Matherne: ([\d,]+) comments vs [\d,]+ ratings",
-     lambda c: _matherne(c)[0],
-     ("rel", 0.10)),
-
-    ("Matherne rating count", SERVER_PY,
-     r"Matherne: [\d,]+ comments vs ([\d,]+) ratings",
-     lambda c: _matherne(c)[1],
-     ("rel", 0.10)),
-
-    ("median comments-per-rating multiple", SERVER_PY,
-     r"median ([\d.]+)x and ranging",
-     lambda c: _median(c.comment_ratios),
-     ("abs", 0.3)),
-
-    ("lowest comments-per-rating multiple", SERVER_PY,
-     r"ranging ([\d.]+)-[\d.]+x",
-     lambda c: min(c.comment_ratios),
-     ("abs", 0.3)),
-
-    ("highest comments-per-rating multiple", SERVER_PY,
-     r"ranging [\d.]+-([\d.]+)x",
-     lambda c: max(c.comment_ratios),
-     ("abs", 0.4)),
-
     ("score/review-count tie groups", SERVER_PY,
      r"\b(\d+) such groups across the catalog",
      lambda c: _tie_groups(c)[0],
@@ -262,15 +201,6 @@ CLAIMS = [
      r"covering (\d+) professors",
      lambda c: _tie_groups(c)[1],
      ("rel", 0.25)),
-
-    ("eligible professors with no written RMP review", HOMEPAGE_TSX,
-     r"the latter\), and ([\d,]+) of the professors",
-     lambda c: c.val(
-         "SELECT count(*) FROM professors_catalog p WHERE p.total_reviews >= %s "
-         "AND NOT EXISTS (SELECT 1 FROM rmp_reviews r WHERE r.name_key = p.name_key "
-         "  AND r.comment IS NOT NULL AND r.comment != %s)",
-         (server.BOARD_MIN_REVIEWS, "")),
-     ("rel", 0.10)),
 
     ("fewest rating inversions on a board", HOMEPAGE_TSX,
      r"moves backwards between adjacent rows, (\d+)-\d+ times per board",
@@ -304,32 +234,6 @@ def _reviews_to_reach(corpus, college):
     return n
 
 
-def _trace_share(corpus):
-    return 100.0 * corpus.val(
-        "SELECT sum(trace_reviews)::float / sum(total_reviews)::float "
-        "FROM professors_catalog WHERE total_reviews >= %s",
-        (server.BOARD_MIN_REVIEWS,))
-
-
-def _matherne(corpus):
-    """(comments, ratings) for the professor the comment names as its example."""
-    prof = corpus.one("SELECT * FROM professors_catalog WHERE name = %s",
-                      ("Marguerite Matherne",))
-    if prof is None:
-        pytest.skip("Marguerite Matherne is no longer in the catalog")
-    rmp = corpus.val("SELECT count(*) FROM rmp_reviews WHERE name_key = %s "
-                     "AND comment IS NOT NULL AND comment != %s",
-                     (prof["name_key"], ""))
-    trace = corpus.val(
-        "SELECT count(*) FROM trace_comments tc "
-        "JOIN trace_courses tc2 ON tc.tc_course_id = tc2.course_id "
-        "  AND tc.tc_instructor_id = tc2.instructor_id "
-        "  AND tc.tc_term_id = tc2.term_id "
-        "WHERE tc2.name_key = %s AND tc.comment IS NOT NULL AND tc.comment != %s",
-        (server.trace_key(prof), ""))
-    return rmp + trace, prof["total_reviews"]
-
-
 def _tie_group_sizes(corpus, college=None):
     """One row per group tied on both score and review count, so `name` decides.
 
@@ -360,14 +264,6 @@ def _tie_groups(corpus):
     """(groups, professors involved)."""
     rows = _tie_group_sizes(corpus)
     return len(rows), sum(int(r["c"]) for r in rows)
-
-
-def _median(values):
-    ordered = sorted(values)
-    mid = len(ordered) // 2
-    if len(ordered) % 2:
-        return ordered[mid]
-    return (ordered[mid - 1] + ordered[mid]) / 2
 
 
 def _find(path, pattern):
@@ -407,15 +303,6 @@ def test_claim_still_matches_the_corpus(label, path, pattern, measure, tol, corp
         f"  tolerance: +/-{slack:g}\n"
         f"Rewrite the comment with the measured value. If precompute.py has just "
         f"run, expect several of these together.")
-
-
-def test_comments_outnumber_ratings_on_every_board_row(corpus):
-    """server.py states this outright as the reason the column shows ratings."""
-    below = [r for r in corpus.comment_ratios if r < 1]
-    assert not below, (
-        f"{len(below)} board rows now have fewer comments than ratings. server.py "
-        f"claims comments 'exceed ratings on every single row' as the argument for "
-        f"the Ratings column -- that sentence needs rewriting.")
 
 
 # Law and Professional Studies are excluded from the floor comparison because
