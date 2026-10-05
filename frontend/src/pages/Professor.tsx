@@ -1062,6 +1062,9 @@ const Professor = () => {
             )}
           </>
         )}
+        <p className="prof-claim-note">
+          Are you {identity.name}? <Link to="/faq#professors">Correct or remove this page</Link>.
+        </p>
       </section>
 
       <Footer />

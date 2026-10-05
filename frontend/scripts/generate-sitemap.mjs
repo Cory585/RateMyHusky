@@ -23,6 +23,7 @@ const STATIC_ROUTES = [
   { path: '/courses', priority: '0.9', changefreq: 'daily' },
   { path: '/compare', priority: '0.5', changefreq: 'weekly' },
   { path: '/departments', priority: '0.7', changefreq: 'weekly' },
+  { path: '/faq', priority: '0.5', changefreq: 'monthly' },
 ];
 
 async function fetchAll(endpoint, key) {

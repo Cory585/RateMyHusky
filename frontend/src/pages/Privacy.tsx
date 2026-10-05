@@ -8,7 +8,7 @@ const Privacy = () => {
         <div className="terms-shell">
           <header className="terms-header">
             <h1>Privacy Policy</h1>
-            <p className="terms-meta">Effective October 1, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective October 3, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -67,7 +67,8 @@ const Privacy = () => {
                   (if you are signed in) your account identifier is included so we can locate
                   the data held for your account and delete it. That account identifier is
                   derived from your sign-in token at the time you submit and is not retained
-                  beyond handling your request.
+                  beyond handling your request. A professor's request to correct or remove their
+                  page also requires an email address, so we can confirm it with them.
                 </li>
                 <li>
                   <strong>Bookmarks:</strong> when you are signed in and bookmark a professor or
@@ -225,7 +226,7 @@ const Privacy = () => {
                   privacy policies.
                 </li>
                 <li>
-                  <strong>RateMyProfessors, Northeastern faculty pages, the Northeastern course catalog &amp; Reddit</strong>: these are data sources only. We do not send any user
+                  <strong>RateMyProfessors, Northeastern faculty and award pages, the Northeastern course catalog &amp; Reddit</strong>: these are data sources only. We do not send any user
                   data to these services.
                 </li>
               </ul>
@@ -331,6 +332,11 @@ const Privacy = () => {
                   with the subreddit and a link to the original, along with a sentiment label our
                   pipeline derives from the text. We do not display or store Reddit usernames.
                 </li>
+                <li>
+                  Teaching awards Northeastern has announced, with the year and a link to the
+                  announcement, taken from the award pages and news posts Northeastern
+                  publishes.
+                </li>
               </ul>
               <p>
                 We publish no contact details, no course rosters, and nothing that is not already
@@ -340,7 +346,12 @@ const Privacy = () => {
                 <strong>Removal requests.</strong> If you are a professor or instructor and want
                 your information taken down, email{' '}
                 <a href="mailto:legal@ratemyhusky.com">legal@ratemyhusky.com</a> or use the
-                feedback form. We honor these requests. Once processed, your name is added to a
+                feedback form (&ldquo;Professor: Correct or Remove My Page&rdquo;), and include
+                your Northeastern email address. We confirm each
+                request at that address before acting on it, so that no one can remove or
+                change a professor's information by using their name; a request without a
+                Northeastern email address cannot be verified or answered. We honor confirmed
+                requests. Once processed, your name is added to a
                 removal list that every data loader checks before writing, so a weekly refresh
                 cannot reinstate you, and the rows already loaded — your page, your ratings and
                 comments, your Reddit mentions, and the evidence corpus built from them — are
@@ -349,6 +360,12 @@ const Privacy = () => {
                 files can still contain your rows until the upstream source stops publishing
                 them, though nothing published on the site can reach them. If you
                 need removal from a source itself, contact that source directly.
+              </p>
+              <p>
+                <strong>Corrections.</strong> If something on your page is wrong or missing, such
+                as your photo, department, college, courses, or awards, contact us the same way,
+                with your Northeastern email address, and we will correct it after confirming the
+                request with you.
               </p>
             </section>
 
