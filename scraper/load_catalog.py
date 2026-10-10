@@ -1,8 +1,8 @@
-"""Load the NEU academic catalog scrape to CockroachDB.
+"""Load the NEU academic catalog scrape to PostgreSQL.
 
 Own tables, disjoint from the read models the pipeline rebuilds — a separation
 the Banner section loader also keeps, and here it is not optional. The
-pipeline rebuilds `course_catalog` wholesale (build into `_new`, then swap), so
+pipeline replaces every `course_catalog` row on each run, so
 any column written onto that table is destroyed by the next rebuild. Catalog
 fields therefore live in `catalog_courses`, and merging them into the course
 page is a read-side join, not a column graft.
@@ -34,8 +34,8 @@ import time
 import psycopg2
 from psycopg2.extras import execute_values
 
-# Same hazard as the Banner loader: CockroachDB runs SERIALIZABLE and a write
-# overlapping the live site's reads can be aborted with 40001.
+# Same hazard as the Banner loader: a write overlapping the live site's reads can
+# fail with a serialization failure (40001) or a deadlock; replay the transaction.
 RETRYABLE_ERRORS = (psycopg2.errors.SerializationFailure,
                     psycopg2.errors.DeadlockDetected)
 RETRY_ATTEMPTS = 6
@@ -359,7 +359,7 @@ def selftest():
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Load the NEU catalog scrape to CockroachDB")
+    ap = argparse.ArgumentParser(description="Load the NEU catalog scrape to PostgreSQL")
     ap.add_argument("--selftest", action="store_true", help="offline DDL check, then exit")
     ap.add_argument("--json", default=DEFAULT_JSON, help="catalog_scrape.py output")
     ap.add_argument("--dry-run", action="store_true", help="gate and report, write nothing")
