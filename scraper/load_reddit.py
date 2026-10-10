@@ -19,6 +19,9 @@ import tempfile
 import unicodedata
 
 import psycopg2
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backend", ".env"))
 
 DDL = """
 CREATE TABLE IF NOT EXISTS reddit_mentions (
@@ -127,11 +130,11 @@ def all_ddl() -> str:
 
 
 def connect():
-    """Open a CockroachDB connection with sslmode='require'."""
+    """Open a UTC database session over SSL."""
     url = os.getenv("CRDB_DATABASE_URL")
     if not url:
         raise RuntimeError("CRDB_DATABASE_URL is required")
-    return psycopg2.connect(url, sslmode="require")
+    return psycopg2.connect(url, sslmode="require", options="-c timezone=UTC")
 
 
 def create_tables(conn) -> None:

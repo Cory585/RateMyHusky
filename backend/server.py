@@ -252,7 +252,10 @@ def _get_pool():
     if _pool is None:
         _pool = ThreadedConnectionPool(5, 10, CRDB_DATABASE_URL, sslmode="require",
                                        connect_timeout=5,
-                                       options="-c statement_timeout=5000",
+                                       # UTC: the Groq budget, throttle and usage-alert
+                                       # queries take "today" from the session, and the
+                                       # Python side counts days in UTC.
+                                       options="-c statement_timeout=5000 -c timezone=UTC",
                                        keepalives=1, keepalives_idle=30,
                                        keepalives_interval=10, keepalives_count=3)
     return _pool

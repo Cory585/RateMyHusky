@@ -19,10 +19,10 @@ from denylist import denied_hashes, is_denied
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
-DATABASE_URL = os.getenv("NEW_CRDB_DATABASE_URL") or os.getenv("CRDB_DATABASE_URL")
+DATABASE_URL = os.getenv("CRDB_DATABASE_URL")
 
 if not DATABASE_URL:
-    sys.exit("Missing NEW_CRDB_DATABASE_URL / CRDB_DATABASE_URL in backend/.env")
+    sys.exit("Missing CRDB_DATABASE_URL in backend/.env")
 
 import psycopg2
 from psycopg2.extras import execute_values
@@ -32,10 +32,11 @@ BATCH_SIZE = 25000  # smaller batches to stay under CockroachDB lock-tracking bu
 
 
 def get_connection(attempts=20):
-    """The local resolver flakes on *.cockroachlabs.cloud; retry on DNS failure."""
+    """Open a UTC session, retrying on DNS failure (the local resolver has
+    flaked on the database host before)."""
     for i in range(attempts):
         try:
-            return psycopg2.connect(DATABASE_URL, sslmode="require")
+            return psycopg2.connect(DATABASE_URL, sslmode="require", options="-c timezone=UTC")
         except psycopg2.OperationalError as e:
             if "could not translate host name" not in str(e) or i == attempts - 1:
                 raise

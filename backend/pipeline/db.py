@@ -11,26 +11,26 @@ load_dotenv()
 
 
 def database_url():
-    # The local .env's CRDB_DATABASE_URL is the retired cluster; the new one wins.
-    url = os.getenv("NEW_CRDB_DATABASE_URL") or os.getenv("CRDB_DATABASE_URL")
+    url = os.getenv("CRDB_DATABASE_URL")
     if not url:
-        raise RuntimeError("NEW_CRDB_DATABASE_URL (or CRDB_DATABASE_URL) is required")
+        raise RuntimeError("CRDB_DATABASE_URL is required")
     return url
 
 
 def connect(attempts=20):
-    """The local resolver flakes on *.cockroachlabs.cloud; retry on DNS failure."""
+    """Open a UTC session, retrying on DNS failure (the local resolver has
+    flaked on the database host before)."""
     last = None
     for i in range(1, attempts + 1):
         try:
-            return psycopg2.connect(database_url(), sslmode="require")
+            return psycopg2.connect(database_url(), sslmode="require", options="-c timezone=UTC")
         except psycopg2.OperationalError as e:
             if "could not translate host name" not in str(e):
                 raise
             last = str(e)
             print(f"  DNS lookup flaked; retrying ({i}/{attempts})...")
             time.sleep(3)
-    raise RuntimeError(f"Could not resolve CRDB host after {attempts} attempts.\n{last}")
+    raise RuntimeError(f"Could not resolve the database host after {attempts} attempts.\n{last}")
 
 
 def chunk_insert(cur, sql, rows, page_size=5000):

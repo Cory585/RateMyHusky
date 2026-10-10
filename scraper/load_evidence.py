@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 import psycopg2
 
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), "backend", ".env"))
-URL = os.getenv("NEW_CRDB_DATABASE_URL") or os.getenv("CRDB_DATABASE_URL")
+URL = os.getenv("CRDB_DATABASE_URL")
 
 _counter = itertools.count()
 
@@ -67,7 +67,7 @@ def connect(attempts=20):
     last = None
     for i in range(1, attempts + 1):
         try:
-            return psycopg2.connect(URL, sslmode="require")
+            return psycopg2.connect(URL, sslmode="require", options="-c timezone=UTC")
         except psycopg2.OperationalError as e:
             if "could not translate host name" not in str(e):
                 raise

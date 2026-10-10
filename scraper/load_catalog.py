@@ -121,7 +121,7 @@ class SanityGateFailed(RuntimeError):
 
 
 def connect(dsn):
-    return psycopg2.connect(dsn, sslmode="require")
+    return psycopg2.connect(dsn, sslmode="require", options="-c timezone=UTC")
 
 
 def with_retry(open_conn, work, attempts=RETRY_ATTEMPTS, sleep=time.sleep):
@@ -389,9 +389,9 @@ def main(argv=None):
         print("Dry run: nothing written.")
         return 0
 
-    dsn = os.environ.get("NEW_CRDB_DATABASE_URL") or os.environ.get("CRDB_DATABASE_URL")
+    dsn = os.environ.get("CRDB_DATABASE_URL")
     if not dsn:
-        print("NEW_CRDB_DATABASE_URL (or CRDB_DATABASE_URL) is not set", file=sys.stderr)
+        print("CRDB_DATABASE_URL is not set", file=sys.stderr)
         return 1
 
     conn = connect(dsn)
