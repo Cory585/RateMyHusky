@@ -249,8 +249,9 @@ REPLACE_ALLOWED = {"rmp_professors"}
 def load_table(conn, table_name, csv_path, replace=False):
     """Load one table from its CSV.
 
-    With replace, the TRUNCATE and the reload commit as one transaction: readers
-    keep the old rows until COMMIT, and a failed reload rolls the TRUNCATE back.
+    With replace, the TRUNCATE and the reload commit as one transaction: a failed
+    reload rolls the TRUNCATE back, and nothing in the request path reads this
+    table, so the lock it takes until COMMIT blocks no page.
     """
     conf = TABLES[table_name]
     if replace:

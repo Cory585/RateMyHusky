@@ -1,6 +1,7 @@
 """backup_db: pg_dump version gate and file naming."""
 
 import datetime
+import io
 
 import pytest
 
@@ -14,15 +15,75 @@ def test_pg_dump_major_parses_real_version_strings():
     assert backup_db.pg_dump_major("garbage") is None
 
 
-def test_require_pg_dump_rejects_missing_and_old_versions():
-    with pytest.raises(SystemExit, match="not found"):
-        backup_db.require_pg_dump(which=lambda name: None)
-
+def _run_returning(version_line):
     class Out:
-        stdout = "pg_dump (PostgreSQL) 15.8\n"
+        stdout = version_line
 
-    with pytest.raises(SystemExit, match="too old"):
-        backup_db.require_pg_dump(which=lambda name: "/usr/bin/pg_dump", run=lambda *a, **k: Out())
+    return lambda *a, **k: Out()
+
+
+def test_require_matching_pg_dump_rejects_missing_and_mismatched_versions():
+    with pytest.raises(SystemExit, match="not found"):
+        backup_db.require_matching_pg_dump(16, which=lambda name: None)
+    for line, found in (("pg_dump (PostgreSQL) 17.2\n", "17"), ("pg_dump (PostgreSQL) 15.8\n", "15")):
+        with pytest.raises(SystemExit) as e:
+            backup_db.require_matching_pg_dump(16, which=lambda name: "/usr/bin/pg_dump",
+                                               run=_run_returning(line))
+        msg = str(e.value)
+        assert found in msg and "16" in msg and "install" in msg.lower()
+
+
+def test_require_matching_pg_dump_accepts_the_server_major():
+    assert backup_db.require_matching_pg_dump(
+        16, which=lambda name: "/usr/bin/pg_dump",
+        run=_run_returning("pg_dump (PostgreSQL) 16.10\n")) == "/usr/bin/pg_dump"
+
+
+def test_server_major_reads_server_version_num(monkeypatch):
+    seen = {}
+
+    class Cur:
+        def execute(self, q):
+            seen["q"] = q
+
+        def fetchone(self):
+            return ("160010",)
+
+        def close(self):
+            pass
+
+    class Conn:
+        def cursor(self):
+            return Cur()
+
+        def close(self):
+            pass
+
+    def connect(url, **kw):
+        seen["url"], seen["kw"] = url, kw
+        return Conn()
+
+    monkeypatch.setattr(backup_db.psycopg2, "connect", connect)
+    assert backup_db.server_major("postgresql://x") == 16
+    assert seen["q"] == "SHOW server_version_num"
+    assert seen["kw"]["sslmode"] == "require" and seen["kw"]["connect_timeout"] == 15
+
+
+def test_dump_passes_password_free_dsn_and_env(tmp_path, monkeypatch):
+    seen = {}
+
+    class P:
+        def __init__(self, cmd, **k):
+            seen["cmd"], seen["env"] = cmd, k.get("env")
+            self.stdout = io.BytesIO(b"x")
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(backup_db.subprocess, "Popen", P)
+    backup_db.dump("postgresql://u:pw@h/db", str(tmp_path / "b.sql.gz"))
+    assert not any("pw" in a for a in seen["cmd"])
+    assert seen["env"]["PGPASSWORD"] == "pw" and seen["env"]["PGSSLMODE"] == "require"
 
 
 def test_backup_path_is_timestamped_in_utc():

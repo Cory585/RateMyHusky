@@ -21,12 +21,14 @@ import shutil
 import subprocess
 import sys
 
+import psycopg2
 from dotenv import load_dotenv
+
+from restore_db import client_connection
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 BACKUP_DIR = os.path.join(os.path.dirname(__file__), "backups")
-MIN_PG_DUMP_MAJOR = 16
 PG_DUMP_ARGS = ["--data-only", "--column-inserts", "--rows-per-insert=500",
                 "--no-owner", "--no-privileges"]
 CHUNK = 1 << 20
@@ -38,14 +40,28 @@ def pg_dump_major(version_text):
     return int(m.group(1)) if m else None
 
 
-def require_pg_dump(which=shutil.which, run=subprocess.run):
+def server_major(url):
+    """The server's major version (16 for 16.10)."""
+    conn = psycopg2.connect(url, sslmode="require", connect_timeout=15)
+    try:
+        cur = conn.cursor()
+        cur.execute("SHOW server_version_num")
+        return int(cur.fetchone()[0]) // 10000
+    finally:
+        conn.close()
+
+
+def require_matching_pg_dump(server_major_version, which=shutil.which, run=subprocess.run):
+    """pg_dump's major must equal the server's: a newer pg_dump writes settings
+    (e.g. transaction_timeout) that an older server rejects on restore."""
     path = which("pg_dump")
     if not path:
         sys.exit("pg_dump not found on PATH. Install the PostgreSQL 16 client tools (README, Backups).")
     out = run([path, "--version"], capture_output=True, text=True, check=True).stdout
     major = pg_dump_major(out)
-    if major is None or major < MIN_PG_DUMP_MAJOR:
-        sys.exit(f"pg_dump {out.strip()!r} is too old; version {MIN_PG_DUMP_MAJOR} or newer is required.")
+    if major != server_major_version:
+        sys.exit(f"pg_dump is version {major} but the server is version {server_major_version}; "
+                 f"install the PostgreSQL {server_major_version} client tools so the dump can be restored.")
     return path
 
 
@@ -58,7 +74,8 @@ def dump(url, path, pg_dump="pg_dump"):
     """Stream pg_dump's output into a gzip file only its owner can read."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    proc = subprocess.Popen([pg_dump, f"--dbname={url}", *PG_DUMP_ARGS], stdout=subprocess.PIPE)
+    dsn, env = client_connection(url)
+    proc = subprocess.Popen([pg_dump, f"--dbname={dsn}", *PG_DUMP_ARGS], stdout=subprocess.PIPE, env=env)
     with os.fdopen(fd, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb") as gz:
         shutil.copyfileobj(proc.stdout, gz, CHUNK)
     proc.stdout.close()
@@ -72,7 +89,7 @@ def main():
     url = os.getenv("CRDB_DATABASE_URL")
     if not url:
         sys.exit("Missing CRDB_DATABASE_URL in backend/.env")
-    path = dump(url, backup_path(), require_pg_dump())
+    path = dump(url, backup_path(), require_matching_pg_dump(server_major(url)))
     print(f"Backup complete: {path} ({os.path.getsize(path) / 1024 / 1024:.1f} MB)")
 
 

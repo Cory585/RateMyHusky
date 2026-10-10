@@ -2,7 +2,11 @@
 
 The production database is PostgreSQL 16 with the pgvector extension, on an
 Oracle Cloud VM (US East – Ashburn). These files are the schema's single source
-of truth: no application code or script creates or alters tables.
+of truth: the application and the regular loaders never create or alter tables.
+Two exceptions remain: `scraper/load_catalog.py` keeps `CREATE TABLE IF NOT EXISTS`
+DDL for its SQLite test (a no-op against the live database), and
+`backend/moderate_backfill.py` adds the `mod_*` columns when run, so running it
+against production changes the schema; update `02_tables.sql` if you do.
 
 | File | Run as | When |
 |---|---|---|

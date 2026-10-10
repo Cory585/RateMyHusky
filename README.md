@@ -152,8 +152,10 @@ python backend/server.py     # → http://localhost:5001
 
 `backend/backup_db.py` writes a data-only `pg_dump` to `backend/backups/`, and
 `backend/restore_db.py` reloads chosen tables from one inside a single
-transaction (`--list`, `--tables a,b`, `--all`). Both need the PostgreSQL 16
-command-line tools (`pg_dump`, `psql`) on `PATH`. On Windows, install them from
+transaction (`--list`, `--tables a,b`, `--all`). Both need the PostgreSQL **16**
+command-line tools (`pg_dump`, `psql`) on `PATH`, matching the server: the backup
+refuses any other `pg_dump` version, because newer ones write settings
+PostgreSQL 16 rejects. On Windows, install them from
 the EDB installer at postgresql.org/download/windows (select only *Command Line
 Tools*) and add its `bin` folder to `PATH`.
 

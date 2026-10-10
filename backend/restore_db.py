@@ -8,9 +8,11 @@ Usage:
     python backend/restore_db.py --selftest
 
 The dump is data only; the schema comes from db/postgres/. For the chosen tables
-this TRUNCATEs them, reloads their rows and resets their identity counters, all
-in ONE transaction (psql --single-transaction): the live site keeps reading the
-old rows until the restore commits, and any failure rolls everything back.
+this DELETEs their rows, reloads them and resets their identity counters, all
+in ONE transaction (psql --single-transaction): a DELETE takes only row locks, so
+the live site keeps reading the old rows until the restore commits, and any
+failure rolls everything back. (TRUNCATE would hold an ACCESS EXCLUSIVE lock and
+block every query on those tables until COMMIT.)
 Choosing evidence also restores evidence_embeddings, which references it.
 
 Only dumps written by pg_dump (backup_db.py) are accepted; older backups used a
@@ -27,13 +29,13 @@ import os
 import re
 import subprocess
 import sys
-from urllib.parse import urlparse
+from urllib.parse import quote, unquote, urlparse
 
 HEADER_RE = re.compile(
     r"^-- (?:Data for )?Name: (?P<name>[^;]+); Type: (?P<type>TABLE DATA|SEQUENCE SET);")
 TRAILER = "-- PostgreSQL database dump complete"
 PG_DUMP_MARK = "-- PostgreSQL database dump"
-# Restoring a table without the tables that reference it would fail its TRUNCATE.
+# Restoring a table without the tables that reference it would fail its DELETE.
 DEPENDENTS = {"evidence": {"evidence_embeddings"}}
 
 _FIXTURE_SQL = """--
@@ -111,16 +113,45 @@ def expand_tables(tables):
     return out
 
 
-def truncate_sql(tables):
-    return "TRUNCATE " + ", ".join(f'public."{t}"' for t in sorted(tables)) + ";\n"
+def delete_sql(tables):
+    """Per-table DELETEs (dependents before the tables they reference) behind a
+    5s lock_timeout, so the restore fails fast instead of queueing behind readers."""
+    dependents = set().union(*(DEPENDENTS.get(t, set()) for t in tables)) & set(tables)
+    ordered = sorted(dependents) + sorted(set(tables) - dependents)
+    return "SET lock_timeout = '5s';\n" + "".join(f'DELETE FROM public."{t}";\n' for t in ordered)
+
+
+def added_note(requested, expanded):
+    """One line naming tables expand_tables added and why, or None."""
+    added = sorted(set(expanded) - set(requested))
+    if not added:
+        return None
+    parts = []
+    for table in added:
+        owners = sorted(o for o, deps in DEPENDENTS.items() if table in deps and o in requested)
+        parts.append(f"{table} references {', '.join(owners)}")
+    return "; ".join(parts) + ", so it is restored too."
+
+
+def client_connection(url):
+    """(dsn without the password, env) for a psql/pg_dump subprocess: the password
+    travels in PGPASSWORD, not on the command line, and SSL is required."""
+    u = urlparse(url)
+    env = {**os.environ, "PGSSLMODE": "require"}
+    netloc = u.netloc
+    if u.password is not None:
+        env["PGPASSWORD"] = unquote(u.password)
+        host = netloc.rsplit("@", 1)[1]
+        netloc = (quote(unquote(u.username), safe="") + "@" if u.username else "") + host
+    return u._replace(netloc=netloc).geturl(), env
 
 
 def filter_dump(lines, tables):
-    """Yield the dump restricted to `tables`, with one TRUNCATE of them injected
-    just before the first section. Streams line by line.
+    """Yield the dump restricted to `tables`, with their DELETEs injected
+    once, just before the first section. Streams line by line.
 
     The preamble (session SETs, pg_dump's \\restrict) and the trailer pass through;
-    each section passes iff its table is selected. The TRUNCATE is schema-qualified
+    each section passes iff its table is selected. The DELETEs are schema-qualified
     because the preamble empties search_path."""
     keep = True
     injected = False
@@ -128,7 +159,7 @@ def filter_dump(lines, tables):
         m = HEADER_RE.match(line)
         if m:
             if not injected:
-                yield truncate_sql(tables)
+                yield delete_sql(tables)
                 injected = True
             keep = section_table(m.group("type"), m.group("name")) in tables
         elif line.startswith(TRAILER):
@@ -149,14 +180,15 @@ def restore(url, path, tables, psql="psql"):
     """Stream the filtered dump into one psql transaction.
 
     If reading the dump fails partway, psql is killed BEFORE its stdin closes:
-    closing stdin would make psql COMMIT the TRUNCATE plus a partial reload.
+    closing stdin would make psql COMMIT the DELETEs plus a partial reload.
 
     Bytes in, bytes out: no newline translation, so a carriage return inside a quoted value
     reaches psql exactly as pg_dump wrote it."""
+    dsn, env = client_connection(url)
     proc = subprocess.Popen(
-        [psql, f"--dbname={url}", "--single-transaction", "--quiet",
+        [psql, f"--dbname={dsn}", "--single-transaction", "--quiet",
          "-v", "ON_ERROR_STOP=1", "-f", "-"],
-        stdin=subprocess.PIPE)
+        stdin=subprocess.PIPE, env=env)
     try:
         with gzip.open(path, "rt", encoding="utf-8", newline="") as f:
             for line in filter_dump(f, tables):
@@ -173,8 +205,8 @@ def restore(url, path, tables, psql="psql"):
 def confirm(host, tables, dump_name, input_fn=input, assume_yes=False):
     label = host if re.fullmatch(r"[\d.:]+", host or "") else host.split(".")[0]
     print(f"\n*** DESTRUCTIVE RESTORE ***\n  Target host: {host}\n  Dump: {dump_name}"
-          f"\n  Tables to TRUNCATE + reload: {', '.join(sorted(tables))}"
-          "\n  Runs as one transaction; the site keeps the old rows until it commits.")
+          f"\n  Tables to DELETE + reload: {', '.join(sorted(tables))}"
+          "\n  Runs as one transaction; the site keeps reading the old rows until it commits.")
     if assume_yes:
         return True
     return input_fn(f"Type '{label}' to proceed: ").strip() == label
@@ -197,8 +229,8 @@ def selftest():
     lines = _FIXTURE_SQL.splitlines(keepends=True)
     check("tables listed in dump order", dump_tables(lines) == ["rmp_reviews", "stats_cache"])
     out = "".join(filter_dump(lines, {"rmp_reviews"}))
-    check("one TRUNCATE, before the data", out.count("TRUNCATE") == 1
-          and out.index("TRUNCATE") < out.index("INSERT INTO public.rmp_reviews"))
+    check("one DELETE, before the data", out.count("DELETE FROM") == 1 and "TRUNCATE" not in out
+          and out.index("DELETE FROM") < out.index("INSERT INTO public.rmp_reviews"))
     check("sequence reset kept with its table", "rmp_reviews_id_seq" in out)
     check("unselected table dropped", "stats_cache" not in out)
     check("preamble and trailer kept", "\\restrict" in out and "\\unrestrict" in out)
@@ -242,7 +274,11 @@ def main():
     missing = sorted(tables - set(in_dump))
     if missing:
         sys.exit(f"Not in this dump: {', '.join(missing)}")
+    requested = tables
     tables = expand_tables(tables)
+    note = added_note(requested, tables)
+    if note:
+        print(note)
     added = sorted(tables - set(in_dump))
     if added:
         sys.exit(f"Restoring these requires {', '.join(added)}, which this dump does not contain.")

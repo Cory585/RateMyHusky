@@ -42,9 +42,11 @@ def test_backup_then_restore_round_trips_rows_and_identity(pg, pg_url, tmp_path)
 
     assert scalar(pg, "SELECT value FROM stats_cache WHERE key = 'professors'") == 1
     assert [r["user_sub"] for r in rows(pg, "SELECT user_sub FROM bookmarks")] == ["u1"]
+    restored_max = scalar(pg, "SELECT max(id) FROM bookmarks")
     with pg.cursor() as cur:
         cur.execute("INSERT INTO bookmarks (user_sub, item_type, item_key) "
                     "VALUES ('u3', 'course', 'CS2500') RETURNING id")
         new_id = cur.fetchone()[0]
     pg.commit()
-    assert new_id > scalar(pg, "SELECT min(id) FROM bookmarks")
+    # setval restored the counter: the next id is exactly the restored max + 1.
+    assert new_id == restored_max + 1

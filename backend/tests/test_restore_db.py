@@ -1,4 +1,4 @@
-"""restore_db: section filtering, TRUNCATE injection, and never a partial commit."""
+"""restore_db: section filtering, DELETE injection, and never a partial commit."""
 
 import gzip
 import os
@@ -25,10 +25,12 @@ def test_sequence_sections_belong_to_their_table():
     assert restore_db.section_table("TABLE DATA", "stats_cache") == "stats_cache"
 
 
-def test_filter_keeps_selected_sections_and_injects_one_truncate():
+def test_filter_keeps_selected_sections_and_injects_one_delete():
     out = "".join(restore_db.filter_dump(LINES, {"rmp_reviews"}))
-    assert out.count('TRUNCATE public."rmp_reviews";') == 1
-    assert out.index("TRUNCATE") < out.index("INSERT INTO public.rmp_reviews")
+    assert out.count('DELETE FROM public."rmp_reviews";') == 1
+    assert out.count("DELETE FROM") == 1
+    assert "TRUNCATE" not in out
+    assert out.index("DELETE FROM") < out.index("INSERT INTO public.rmp_reviews")
     assert "setval('public.rmp_reviews_id_seq'" in out
     assert "stats_cache" not in out
     assert "\\restrict abc123" in out and "\\unrestrict abc123" in out
@@ -37,8 +39,56 @@ def test_filter_keeps_selected_sections_and_injects_one_truncate():
 
 def test_evidence_pulls_in_its_embeddings():
     assert restore_db.expand_tables({"evidence"}) == {"evidence", "evidence_embeddings"}
-    assert restore_db.truncate_sql({"evidence_embeddings", "evidence"}) == \
-        'TRUNCATE public."evidence", public."evidence_embeddings";\n'
+
+def test_delete_sql_orders_dependents_first_and_sets_lock_timeout():
+    assert restore_db.delete_sql({"evidence", "evidence_embeddings", "stats_cache"}) == (
+        "SET lock_timeout = '5s';\n"
+        'DELETE FROM public."evidence_embeddings";\n'
+        'DELETE FROM public."evidence";\n'
+        'DELETE FROM public."stats_cache";\n')
+
+
+def test_connection_helper_strips_password_into_env(monkeypatch):
+    monkeypatch.delenv("PGPASSWORD", raising=False)
+    dsn, env = restore_db.client_connection("postgresql://appuser:s3cr%40t@db.example.com:5432/appdb?sslmode=require")
+    assert dsn == "postgresql://appuser@db.example.com:5432/appdb?sslmode=require"
+    assert env["PGPASSWORD"] == "s3cr@t"
+    assert env["PGSSLMODE"] == "require"
+    assert "PATH" in env or "Path" in env
+
+
+def test_connection_helper_without_password(monkeypatch):
+    monkeypatch.delenv("PGPASSWORD", raising=False)
+    dsn, env = restore_db.client_connection("postgresql://appuser@db.example.com/appdb")
+    assert dsn == "postgresql://appuser@db.example.com/appdb"
+    assert "PGPASSWORD" not in env
+    assert env["PGSSLMODE"] == "require"
+
+
+def test_restore_passes_password_free_dsn_and_env_to_psql(tmp_path, monkeypatch):
+    path = tmp_path / "d.sql.gz"
+    path.write_bytes(gzip.compress(restore_db._FIXTURE_SQL.encode()))
+    seen = {}
+
+    class P:
+        def __init__(self, cmd, **k):
+            seen["cmd"], seen["env"] = cmd, k.get("env")
+            self.stdin = type("S", (), {"write": lambda s, b: None, "close": lambda s: None})()
+            self.returncode = 0
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(restore_db.subprocess, "Popen", P)
+    restore_db.restore("postgresql://u:pw@h/db", str(path), {"rmp_reviews"})
+    assert not any("pw" in a for a in seen["cmd"])
+    assert seen["env"]["PGPASSWORD"] == "pw" and seen["env"]["PGSSLMODE"] == "require"
+
+
+def test_added_tables_note_names_what_was_added_and_why():
+    assert restore_db.added_note({"evidence"}, {"evidence", "evidence_embeddings"}) == (
+        "evidence_embeddings references evidence, so it is restored too.")
+    assert restore_db.added_note({"stats_cache"}, {"stats_cache"}) is None
 
 
 def test_pre_postgres_dumps_are_rejected(tmp_path):
