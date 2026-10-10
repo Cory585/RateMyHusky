@@ -1,11 +1,11 @@
 """--replace must refuse rmp_reviews, whatever the caller asks for.
 
 Truncating rmp_reviews regenerates every id, and evidence.source_ref for RMP is
-that rowid (scraper/load_evidence.py, build_rmp_rows) — a full replace orphans the
-RMP half of the RAG corpus and forces a re-embed. It also empties a table the
-site reads on every professor page, because the TRUNCATE commits before the
-reload starts. prune_rmp_reviews.py converges the table without either cost, so
-nothing needs the truncate any more and the workflow no longer asks for it.
+that id (scraper/load_evidence.py, build_rmp_rows) — a full replace orphans the
+RMP half of the RAG corpus and forces a re-embed. It would also lock a table the
+site reads on every professor page for the whole reload. prune_rmp_reviews.py
+converges the table without either cost, so nothing needs the truncate any more
+and the workflow no longer asks for it.
 
 The allowlist is the enforcement point: the workflow is one caller, and a hand-run
 `python load_rmp.py rmp_reviews --replace` has to fail too.
