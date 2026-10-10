@@ -161,9 +161,8 @@ CLAIMS = [
     ("share of those under 15 reviews", SERVER_PY,
      r"and (\d+)% of them have under 15 reviews",
      lambda c: 100.0 * c.val(
-         # Both sides cast: CockroachDB has no implicit numeric coercion, and
-         # count(*) comes back DECIMAL, so a bare float/count division fails with
-         # "unsupported binary operator: <float> / <decimal>".
+         # Both sides cast: count(*) is BIGINT, and integer division would
+         # truncate the share to 0.
          "SELECT count(*) FILTER (WHERE total_reviews < 15)::float "
          "     / count(*)::float "
          "FROM professors_catalog WHERE avg_rating = 5.0"),

@@ -7,9 +7,9 @@ the number described different sets.
 
 The shipped fix was a monthly TRUNCATE + full reload. That converges, but it
 regenerates every rmp_reviews.id, and evidence.source_ref for RMP *is* that
-rowid (scraper/load_evidence.py, build_rmp_rows) — so each full replace orphans the
-RMP half of the RAG corpus and forces a re-embed. It also leaves the table
-empty mid-load, since the TRUNCATE commits on its own.
+id (scraper/load_evidence.py, build_rmp_rows) — so each full replace orphans the
+RMP half of the RAG corpus and forces a re-embed. It also locks the table for
+the whole reload.
 
 Pruning deletes only the rows that actually went away, weekly, keeping ids
 stable. Two safety rails, because this is the one code path that deletes
@@ -60,7 +60,7 @@ class FakeConn:
     """Records executed SQL the way psycopg2 would deliver it.
 
     `has_evidence` models a database where the RAG corpus was never loaded: the
-    probe statement raises the way CockroachDB does, and every later statement
+    probe statement raises the way PostgreSQL does, and every later statement
     has to still run — a failed statement aborts the real transaction, which is
     why the probe is its own.
     """

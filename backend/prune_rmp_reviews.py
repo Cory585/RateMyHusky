@@ -6,11 +6,11 @@ beside it, which precompute derives from the fresh CSV, had already dropped.
 The list and the number described different sets.
 
 Truncate-and-reload also converges, but it regenerates every rmp_reviews.id,
-and evidence.source_ref for RMP *is* that rowid
+and evidence.source_ref for RMP *is* that id
 (scraper/load_evidence.py, build_rmp_rows) — so each full replace orphans the RMP
-half of the RAG corpus and forces a re-embed. It also leaves the table empty
-mid-load, because the TRUNCATE commits by itself. Pruning deletes only the rows
-that actually went away, weekly, and leaves ids alone.
+half of the RAG corpus and forces a re-embed. It would also lock the table for
+the whole reload. Pruning deletes only the rows that actually went away,
+weekly, and leaves ids alone.
 
 Deleting one review still orphans its own evidence row, for the same reason a
 truncate orphans all of them, so each batch deletes the matching evidence rows
@@ -47,8 +47,7 @@ DEFAULT_CSV = os.path.join(
     "Better_Scraper", "output_data", "rmp_reviews.csv",
 )
 
-# Rows per DELETE. Matches load_rmp.py's BATCH_SIZE rationale: stay
-# under CockroachDB's lock-tracking budget for a single statement.
+# Rows per DELETE: keeps each statement's lock set and WAL burst small.
 BATCH_SIZE = 5000
 
 # A prune bigger than this share of the table means the CSV is wrong, not that
@@ -123,7 +122,7 @@ def has_evidence_table(conn):
     """Is the RAG evidence corpus present in this database?
 
     Probed once, in its own transaction, rather than by catching the failure
-    inside the delete loop: on CockroachDB a failed statement aborts the whole
+    inside the delete loop: in PostgreSQL a failed statement aborts the whole
     transaction, so a missing table would take the rmp_reviews DELETE down with
     it and the prune would do nothing at all.
 
