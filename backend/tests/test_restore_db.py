@@ -101,3 +101,56 @@ def test_confirm_label_for_hostnames_and_ips():
     assert restore_db.confirm("h", {"t"}, "d",
                               input_fn=lambda _: (_ for _ in ()).throw(AssertionError("prompted")),
                               assume_yes=True) is True
+
+
+def test_filter_passes_carriage_returns_through_unchanged():
+    lines = ["-- Data for Name: t; Type: TABLE DATA; Schema: public; Owner: -\r\n",
+             "INSERT INTO public.t (c) VALUES\r\n",
+             "\t('a\r\nb\rc');\r\n"]
+    out = "".join(restore_db.filter_dump(lines, {"t"}))
+    assert "'a\r\nb\rc'" in out
+    assert out.endswith("INSERT INTO public.t (c) VALUES\r\n\t('a\r\nb\rc');\r\n")
+    assert restore_db.dump_tables(lines) == ["t"]
+
+
+def test_restore_sends_bytes_to_psql_without_newline_translation(tmp_path, monkeypatch):
+    dump = ("-- PostgreSQL database dump\n\n"
+            "-- Data for Name: t; Type: TABLE DATA; Schema: public; Owner: -\n\n"
+            "INSERT INTO public.t (c) VALUES\n\t('a\r\nb\rc');\n\n"
+            "-- PostgreSQL database dump complete\n")
+    path = tmp_path / "crlf.sql.gz"
+    path.write_bytes(gzip.compress(dump.encode("utf-8")))
+
+    class FakeStdin:
+        def __init__(self):
+            self.data = b""
+            self.closed = False
+
+        def write(self, b):
+            assert isinstance(b, bytes)
+            self.data += b
+
+        def close(self):
+            self.closed = True
+
+    class FakeProc:
+        def __init__(self, *a, **k):
+            self.stdin = FakeStdin()
+            self.killed = False
+            self.returncode = 0
+            procs.append(self)
+
+        def kill(self):
+            self.killed = True
+
+        def wait(self):
+            return self.returncode
+
+    procs = []
+    monkeypatch.setattr(restore_db.subprocess, "Popen", FakeProc)
+    restore_db.restore("postgresql://x", str(path), {"t"})
+    sent = procs[0].stdin.data
+    assert b"('a\r\nb\rc');\n" in sent
+    assert b"\n" in sent and sent.count(b"\r") == 2      # only the two inside the literal
+    assert b"VALUES\n\t(" in sent
+    assert procs[0].stdin.closed and not procs[0].killed

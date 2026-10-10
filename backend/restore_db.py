@@ -138,7 +138,7 @@ def filter_dump(lines, tables):
 
 
 def check_format(path):
-    with gzip.open(path, "rt", encoding="utf-8") as f:
+    with gzip.open(path, "rt", encoding="utf-8", newline="") as f:
         head = [f.readline() for _ in range(10)]
     if not any(line.startswith(PG_DUMP_MARK) for line in head):
         raise ValueError(f"{os.path.basename(path)} is not a pg_dump dump "
@@ -149,15 +149,18 @@ def restore(url, path, tables, psql="psql"):
     """Stream the filtered dump into one psql transaction.
 
     If reading the dump fails partway, psql is killed BEFORE its stdin closes:
-    closing stdin would make psql COMMIT the TRUNCATE plus a partial reload."""
+    closing stdin would make psql COMMIT the TRUNCATE plus a partial reload.
+
+    Bytes in, bytes out: no newline translation, so a carriage return inside a quoted value
+    reaches psql exactly as pg_dump wrote it."""
     proc = subprocess.Popen(
         [psql, f"--dbname={url}", "--single-transaction", "--quiet",
          "-v", "ON_ERROR_STOP=1", "-f", "-"],
-        stdin=subprocess.PIPE, text=True, encoding="utf-8")
+        stdin=subprocess.PIPE)
     try:
-        with gzip.open(path, "rt", encoding="utf-8") as f:
+        with gzip.open(path, "rt", encoding="utf-8", newline="") as f:
             for line in filter_dump(f, tables):
-                proc.stdin.write(line)
+                proc.stdin.write(line.encode("utf-8"))
     except BaseException:
         proc.kill()
         proc.wait()
@@ -227,7 +230,7 @@ def main():
     except ValueError as e:
         sys.exit(str(e))
 
-    with gzip.open(dump, "rt", encoding="utf-8") as f:
+    with gzip.open(dump, "rt", encoding="utf-8", newline="") as f:
         in_dump = dump_tables(f)
     if args.list:
         print("\n".join(in_dump))
