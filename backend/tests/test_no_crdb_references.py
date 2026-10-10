@@ -11,7 +11,8 @@ import subprocess
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 SCOPES = ["backend/*.py", "backend/**/*.py", "scraper/*.py", "scraper/**/*.py",
-          ".github/workflows/*.yml", "README.md"]
+          ".github/workflows/*.yml", "README.md",
+          "frontend/src/pages/Privacy.tsx", "frontend/src/pages/Terms.tsx"]
 SELF = "backend/tests/test_no_crdb_references.py"
 
 FORBIDDEN_I = re.compile(
