@@ -97,7 +97,7 @@ def main(argv=None):
     print(f"course codes changed: {course_codes.apply_codes(conn, pairs)}")
     print(f"name keys changed: {name_keys.apply_name_keys(conn, key_pairs)}")
     read_models.write(conn, catalog, courses, rows, counts)
-    print("swapped in professors_catalog, course_catalog, source_summary; data_version bumped")
+    print("replaced professors_catalog, course_catalog, source_summary; data_version bumped")
     return 0
 
 

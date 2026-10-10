@@ -1,4 +1,4 @@
-"""Database plumbing for the pipeline: connect, bulk insert, build-then-swap."""
+"""Database plumbing for the pipeline: connect, bulk insert, fetch."""
 
 import os
 import time
@@ -36,58 +36,6 @@ def connect(attempts=20):
 def chunk_insert(cur, sql, rows, page_size=5000):
     for i in range(0, len(rows), page_size):
         execute_values(cur, sql, rows[i:i + page_size])
-
-
-def swap_in(conn, table):
-    """Replace <table> with the freshly-built <table>_new without a
-    missing-table window.
-
-    CRDB v25.1+ autocommits before every DDL (autocommit_before_ddl=on), so a
-    DROP+CREATE+INSERT rebuild exposes live readers to a missing/empty table and
-    a crash mid-rebuild leaves no table at all. Instead: build into _new, then
-    swap via two renames committed together (renames are metadata-only and
-    allowed transactionally once the DDL autocommit is off for the session).
-    A stray _old/_new from a crashed run is cleaned by the next run's DROPs.
-    """
-    cur = conn.cursor()
-    cur.execute(f"DROP TABLE IF EXISTS {table}_old")
-    conn.commit()
-    try:
-        cur.execute("SET autocommit_before_ddl = off")
-        conn.commit()
-        cur.execute(
-            "SELECT 1 FROM information_schema.tables WHERE table_name = %s", (table,)
-        )
-        if cur.fetchone():
-            cur.execute(f"ALTER TABLE {table} RENAME TO {table}_old")
-        cur.execute(f"ALTER TABLE {table}_new RENAME TO {table}")
-        conn.commit()  # both renames land together — no missing-table window
-    except Exception as e:
-        conn.rollback()
-        cur = conn.cursor()
-        # Fallback: per-statement renames (millisecond window, still crash-safe
-        # — worst case is a stray _old plus one rename to redo, never a
-        # missing table for more than an instant).
-        print(f"  swap_in: transactional swap failed for {table} ({e}); using per-statement renames")
-        cur.execute(
-            "SELECT 1 FROM information_schema.tables WHERE table_name = %s", (table,)
-        )
-        if cur.fetchone():
-            cur.execute(f"ALTER TABLE {table} RENAME TO {table}_old")
-            conn.commit()
-        cur.execute(f"ALTER TABLE {table}_new RENAME TO {table}")
-        conn.commit()
-    finally:
-        try:
-            cur.execute("RESET autocommit_before_ddl")
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            print(f"  swap_in: RESET autocommit_before_ddl failed for {table} ({e}); "
-                  "later DDL in this run may fail")
-    cur.execute(f"DROP TABLE IF EXISTS {table}_old")
-    conn.commit()
-    cur.close()
 
 
 def fetch_all(conn, sql, params=None):

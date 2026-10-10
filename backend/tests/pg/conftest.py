@@ -76,16 +76,3 @@ def live_server(pg_url, monkeypatch):
     yield server
     if server._pool is not None:
         server._pool.closeall()
-
-
-@pytest.fixture
-def live_server(pg_url, monkeypatch):
-    """The server module with its pool on the test DB and the TTL cache off."""
-    import server
-    monkeypatch.setattr(server, "CRDB_DATABASE_URL", pg_url)
-    monkeypatch.setattr(server, "_pool", None)
-    monkeypatch.setattr(server, "cache_get", lambda key: None)
-    monkeypatch.setattr(server, "cache_set", lambda key, data: None)
-    yield server
-    if server._pool is not None:
-        server._pool.closeall()
