@@ -7,7 +7,7 @@ Usage:
 """
 import argparse, sys, os, time
 sys.path.insert(0, os.path.dirname(__file__))
-from load_evidence_to_crdb import connect
+from load_evidence import connect
 
 MODEL_VERSION = "bge-small-en-v1.5-q8-maskedmean"
 _EMBEDDER = None

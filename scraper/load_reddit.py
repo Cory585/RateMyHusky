@@ -6,7 +6,7 @@ including reddit_mentions, reddit_sentiment, reddit_text, and ask_log tables.
 
 Usage
 -----
-    python load_reddit_to_crdb.py --selftest  # offline DDL checks, then exit
+    python load_reddit.py --selftest  # offline DDL checks, then exit
 """
 
 import argparse

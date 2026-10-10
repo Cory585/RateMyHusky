@@ -3,9 +3,9 @@ Migrate CSV data into CockroachDB.
 Idempotent — safe to re-run. Pre-filters rows client-side to avoid sending
 data the DB already has, minimizing Request Units.
 
-Run:  python backend/migrate_to_crdb.py <table> [<table> ...] [--replace]
-      python backend/migrate_to_crdb.py all
-      python backend/migrate_to_crdb.py add-constraints
+Run:  python backend/load_rmp.py <table> [<table> ...] [--replace]
+      python backend/load_rmp.py all
+      python backend/load_rmp.py add-constraints
 
 Tables must be named: a bare run upserts nothing. Uploading every table from a
 stale local CSV would re-insert reviews prune_rmp_reviews.py already removed.
@@ -285,7 +285,7 @@ TABLES = {
 # cumulative artifact — replacing from it would destroy data.
 #
 # rmp_reviews meets the snapshot half but fails the second: evidence.source_ref
-# for RMP is the review's rowid (scraper/load_evidence_to_crdb.py:208), so
+# for RMP is the review's rowid (scraper/load_evidence.py, build_rmp_rows), so
 # truncating orphans the RMP half of the RAG corpus and forces a re-embed. The
 # TRUNCATE also commits before the reload starts, emptying a table the site
 # reads on every professor page. prune_rmp_reviews.py converges the table
@@ -324,7 +324,7 @@ def main():
     targets = [a for a in args if not a.startswith("--")]
     if not targets:
         # No default: "all" writes every table to prod, so it has to be asked for.
-        sys.exit("usage: migrate_to_crdb.py <table> [<table> ...] [--replace] | all | add-constraints\n"
+        sys.exit("usage: load_rmp.py <table> [<table> ...] [--replace] | all | add-constraints\n"
                  f"tables: {', '.join(TABLES)}")
 
     if targets == ["add-constraints"]:

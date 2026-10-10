@@ -3,7 +3,7 @@
     python -m pipeline.schema            # print the statements
     python -m pipeline.schema --apply    # run them; back up first (python backup_db.py)
 
-catalog_courses / catalog_nupath are created by scraper/load_catalog_to_crdb.py.
+catalog_courses / catalog_nupath are created by scraper/load_catalog.py.
 """
 
 import argparse

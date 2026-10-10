@@ -3,8 +3,8 @@ Build the unified `evidence` corpus (RMP + Reddit) in CockroachDB for Ask retrie
 Idempotent. Reads existing source tables; writes only `evidence` + `evidence_embeddings` schema.
 
 Usage:
-    python load_evidence_to_crdb.py --selftest        # offline checks, exit
-    python load_evidence_to_crdb.py --build-evidence  # populate evidence (Task 2)
+    python load_evidence.py --selftest        # offline checks, exit
+    python load_evidence.py --build-evidence  # populate evidence (Task 2)
 """
 import argparse, itertools, os, sys, time, re, hashlib, unicodedata
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend"))
@@ -81,7 +81,7 @@ def ensure_schema(conn):
         cur.execute(EVIDENCE_DDL)
     conn.commit()
 
-# ── Sanitization + injection screening (mirrored from load_reddit_to_crdb.py) ──
+# ── Sanitization + injection screening (mirrored from load_reddit.py) ──
 
 _ZERO_WIDTH = dict.fromkeys(map(ord, "​‌‍﻿"), None)
 

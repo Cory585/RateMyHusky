@@ -107,7 +107,7 @@ jobs:
       #
       # rmp_reviews is upserted, then pruned by the next step. It must NOT be
       # truncated: evidence.source_ref for RMP is the review's rowid
-      # (scraper/load_evidence_to_crdb.py:208), so regenerating ids orphans the
+      # (scraper/load_evidence.py, build_rmp_rows), so regenerating ids orphans the
       # RMP half of the RAG corpus and forces a re-embed. Truncating also empties
       # a table the site reads on every professor page, since the TRUNCATE
       # commits before the reload starts.
@@ -117,8 +117,8 @@ jobs:
         env:
           CRDB_DATABASE_URL: ${{ secrets.CRDB_DATABASE_URL }}
         run: |
-          python migrate_to_crdb.py rmp_professors --replace
-          python migrate_to_crdb.py rmp_reviews
+          python load_rmp.py rmp_professors --replace
+          python load_rmp.py rmp_reviews
 
       # Reviews deleted on RMP have to leave the table too, or the list keeps
       # rendering rows the count beside it (rebuilt from the DB by

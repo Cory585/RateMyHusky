@@ -18,9 +18,9 @@ distributes no root cert, so verify-full fails before any query runs. Do not
 
 Usage
 -----
-    python load_catalog_to_crdb.py --selftest        # offline DDL + row build, then exit
-    python load_catalog_to_crdb.py                   # load the default scrape JSON
-    python load_catalog_to_crdb.py --json path.json --dry-run
+    python load_catalog.py --selftest        # offline DDL + row build, then exit
+    python load_catalog.py                   # load the default scrape JSON
+    python load_catalog.py --json path.json --dry-run
 """
 
 import argparse
