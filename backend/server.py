@@ -1,6 +1,6 @@
 """
 Backend API server for NEU Professor Ratings.
-No pandas/numpy — queries CockroachDB directly per request.
+No pandas/numpy — queries PostgreSQL directly per request.
 
 Install deps:  pip install flask flask-cors flask-limiter psycopg2-binary pyjwt requests python-dotenv gunicorn
 Run:           python server.py
@@ -503,7 +503,7 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 # ──────────────────────────────────────────────
 def _professor_search(q, limit=5):
     """Search professors with tiered relevance ranking."""
-    # Normalize first: name_key is stored lowercase/ASCII, and CockroachDB LIKE is
+    # Normalize first: name_key is stored lowercase/ASCII, and LIKE is
     # case-sensitive. Callers like the chat/Ask path pass a raw gate hint ("Wu Chieh"),
     # so without this the LIKE filter (and the lowercase ALIAS_MAP) never match.
     q = normalize_name(q)
@@ -676,17 +676,14 @@ FALLBACK_PRIOR = 4.2   # only for an empty or brand-new catalog
 # So a short board is a feature. Do not backfill it to reach `limit`.
 BOARD_MIN_REVIEWS = 30
 
-# CockroachDB has no implicit int/float coercion, so total_reviews (INT) needs an
-# explicit cast against avg_rating (FLOAT) or the query fails with
-# "unsupported binary operator: <int> * <float>".
+# total_reviews (BIGINT) is cast to float so the shrinkage arithmetic is
+# floating-point throughout instead of leaning on implicit int/float coercion.
 # float(m), not "{m}.0" — the latter renders "0.9.0" and is a syntax error if
 # SHRINKAGE_M is ever tuned to a non-integer.
 # The prior arrives as a bound parameter rather than a subquery, so the sort does
 # not carry a full-table aggregate and the value can be measured under its own
-# filter.
-# The prior is cast explicitly: CockroachDB infers placeholder types from
-# context, and a bare %s inside an ORDER BY arithmetic expression is the kind of
-# position where it gives up with "could not determine data type of placeholder".
+# filter. It is cast explicitly (%s::float) so its type never depends on how the
+# driver renders the bound value.
 RANKING_SCORE_SQL = """
     ((total_reviews::float * avg_rating + {m} * %s::float)
      / (total_reviews::float + {m}))
