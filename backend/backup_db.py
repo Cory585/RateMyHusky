@@ -1,135 +1,79 @@
 """
-Back up the CockroachDB cluster to a single gzipped SQL dump, matching the
-existing format in backend/backups/ (DROP+CREATE+INSERT per table).
-Reads CRDB_DATABASE_URL from .env. Reuses transfer_db's DNS-retry connect logic
-(this machine's resolver intermittently fails on the CRDB Cloud hostname).
+Back up the PostgreSQL database to a gzipped, data-only SQL dump.
+
+The schema is not in the dump: it lives in db/postgres/, and restore_db.py loads
+rows back into that existing schema. Rows are INSERTs with explicit column
+lists (pg_dump --column-inserts), which scraper/match_professors.py parses, and
+pg_dump writes each identity column's setval so ids resume correctly.
+
+Needs the PostgreSQL 16 client tools (pg_dump) on PATH. Reads CRDB_DATABASE_URL
+from backend/.env.
 
 Run:  python backend/backup_db.py
-Output: backend/backups/ratemyhusky_new_<UTC>Z.sql.gz
+Output: backend/backups/ratemyhusky_<UTC>Z.sql.gz (readable by its owner only)
 """
 
-import os, sys, gzip, io, time, datetime
-from urllib.parse import urlparse
-from dotenv import load_dotenv
-import psycopg2
-from psycopg2.extensions import register_adapter
-from psycopg2.extras import Json
+import datetime
+import gzip
+import os
+import re
+import shutil
+import subprocess
+import sys
 
-# JSONB columns come back as dict; render them as JSON SQL literals
-# (mogrify has no adapter for a raw dict, which crashes the dump).
-register_adapter(dict, Json)
+from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
-DB_URL = os.getenv("NEW_CRDB_DATABASE_URL")
-if not DB_URL:
-    sys.exit("Missing CRDB_DATABASE_URL in backend/.env")
-
 BACKUP_DIR = os.path.join(os.path.dirname(__file__), "backups")
-BATCH_SIZE = 5000
+MIN_PG_DUMP_MAJOR = 16
+PG_DUMP_ARGS = ["--data-only", "--column-inserts", "--rows-per-insert=500",
+                "--no-owner", "--no-privileges"]
+CHUNK = 1 << 20
 
 
-def connect_database(label, url, attempts=8):
-    last_error = None
-    for attempt in range(1, attempts + 1):
-        try:
-            return psycopg2.connect(url, sslmode="require")
-        except psycopg2.OperationalError as exc:
-            message = str(exc)
-            if "could not translate host name" not in message:
-                raise
-            last_error = message
-            if attempt < attempts:
-                print(f"  DNS lookup failed for {label}; retrying ({attempt}/{attempts})...")
-                time.sleep(3)
-    sys.exit(f"Could not resolve the hostname in {label} after {attempts} attempts.\n"
-             f"Original error:\n{last_error}")
+def pg_dump_major(version_text):
+    """16 from 'pg_dump (PostgreSQL) 16.4', or None if it does not parse."""
+    m = re.search(r"\(PostgreSQL\)\s+(\d+)", version_text or "")
+    return int(m.group(1)) if m else None
 
 
-def get_tables(conn):
-    with conn.cursor() as cur:
-        cur.execute("""
-            SELECT table_name FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-            ORDER BY table_name
-        """)
-        return [r[0] for r in cur.fetchall()]
+def require_pg_dump(which=shutil.which, run=subprocess.run):
+    path = which("pg_dump")
+    if not path:
+        sys.exit("pg_dump not found on PATH. Install the PostgreSQL 16 client tools (README, Backups).")
+    out = run([path, "--version"], capture_output=True, text=True, check=True).stdout
+    major = pg_dump_major(out)
+    if major is None or major < MIN_PG_DUMP_MAJOR:
+        sys.exit(f"pg_dump {out.strip()!r} is too old; version {MIN_PG_DUMP_MAJOR} or newer is required.")
+    return path
 
 
-def dump_table(conn, out, table):
-    with conn.cursor() as cur:
-        cur.execute(f'SELECT count(*) FROM "{table}"')
-        total = cur.fetchone()[0]
-        cur.execute(f"SHOW CREATE TABLE {table}")
-        create_sql = cur.fetchone()[1]
+def backup_path(now=None):
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    return os.path.join(BACKUP_DIR, f"ratemyhusky_{now.strftime('%Y%m%dT%H%M%SZ')}.sql.gz")
 
-    out.write("\n-- ============================================\n")
-    out.write(f"-- Table: {table}  ({total:,} rows)\n")
-    out.write("-- ============================================\n")
-    out.write(f"DROP TABLE IF EXISTS {table} CASCADE;\n")
-    out.write(create_sql.rstrip().rstrip(";") + ";\n\n")
 
-    if total == 0:
-        return total
-
-    with conn.cursor() as col_cur:
-        col_cur.execute(f'SELECT * FROM "{table}" LIMIT 0')
-        cols = [d[0] for d in col_cur.description]
-    col_list = ", ".join(f'"{c}"' for c in cols)
-    prefix = f"INSERT INTO {table} ({col_list}) VALUES\n"
-    tmpl = "(" + ",".join(["%s"] * len(cols)) + ")"
-
-    written = 0
-    with conn.cursor(name=f"read_{table}") as read_cur:
-        read_cur.itersize = BATCH_SIZE
-        read_cur.execute(f'SELECT {col_list} FROM "{table}"')
-        with conn.cursor() as mog:  # plain cursor for mogrify
-            batch = []
-            def flush():
-                if not batch:
-                    return
-                out.write(prefix)
-                rows = [mog.mogrify(tmpl, r).decode("utf-8") for r in batch]
-                out.write(",\n".join(rows) + ";\n\n")
-            for row in read_cur:
-                batch.append(row)
-                if len(batch) >= BATCH_SIZE:
-                    flush(); written += len(batch)
-                    print(f"  {table}: {written:,} / {total:,}...", end="\r")
-                    batch = []
-            if batch:
-                flush(); written += len(batch)
-    print(f"  {table}: {written:,} / {total:,} rows written")
-    return written
+def dump(url, path, pg_dump="pg_dump"):
+    """Stream pg_dump's output into a gzip file only its owner can read."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    proc = subprocess.Popen([pg_dump, f"--dbname={url}", *PG_DUMP_ARGS], stdout=subprocess.PIPE)
+    with os.fdopen(fd, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb") as gz:
+        shutil.copyfileobj(proc.stdout, gz, CHUNK)
+    proc.stdout.close()
+    if proc.wait() != 0:
+        os.remove(path)
+        raise RuntimeError(f"pg_dump exited with status {proc.returncode}; partial dump removed.")
+    return path
 
 
 def main():
-    print("Connecting to CockroachDB (CRDB_DATABASE_URL)...")
-    conn = connect_database("CRDB_DATABASE_URL", DB_URL)
-
-    os.makedirs(BACKUP_DIR, exist_ok=True)
-    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    host = urlparse(DB_URL).hostname
-    path = os.path.join(BACKUP_DIR, f"ratemyhusky_new_{stamp}.sql.gz")
-
-    tables = get_tables(conn)
-    print(f"Found {len(tables)} tables. Writing {os.path.basename(path)}\n")
-
-    # Owner-only (0o600) from creation — the dump is a full copy of the prod DB.
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb") as gz, \
-            io.TextIOWrapper(gz, encoding="utf-8") as out:
-        out.write("-- ratemyhusky NEW cluster backup\n")
-        out.write(f"-- generated (UTC): {stamp}\n")
-        out.write(f"-- source host: {host}\n")
-        out.write(f"-- tables: {', '.join(tables)}\n")
-        out.write("SET sql_safe_updates = false;\n\n")
-        for t in tables:
-            dump_table(conn, out, t)
-
-    conn.close()
-    size_mb = os.path.getsize(path) / 1024 / 1024
-    print(f"\nBackup complete: {path} ({size_mb:.1f} MB)")
+    url = os.getenv("CRDB_DATABASE_URL")
+    if not url:
+        sys.exit("Missing CRDB_DATABASE_URL in backend/.env")
+    path = dump(url, backup_path(), require_pg_dump())
+    print(f"Backup complete: {path} ({os.path.getsize(path) / 1024 / 1024:.1f} MB)")
 
 
 if __name__ == "__main__":
