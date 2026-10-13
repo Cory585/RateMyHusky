@@ -111,6 +111,19 @@ def _size_sample(sections):
     return [s for s in sections if s.get("closed") and (s.get("enrollment") or 0) > 0]
 
 
+# From Summer 2026, one term code holds both summer sessions, so the code alone
+# can't order their labels. Before 2026 the codes already do (40 < 50 < 60).
+_SESSION_RANK = {"Summer 1": 0, "Summer 2": 2}
+
+
+def session_rank(label):
+    """Summer 1 before full summer before Summer 2, inside one term code."""
+    for session, rank in _SESSION_RANK.items():
+        if label.startswith(session + " "):
+            return rank
+    return 1
+
+
 def _labels_newest_first(term_rows):
     """[(term_code, label)] -> labels, newest first, one per label.
 
@@ -118,7 +131,8 @@ def _labels_newest_first(term_rows):
     the grain students see.
     """
     out, seen = [], set()
-    for code, label in sorted(term_rows, key=lambda t: int(t[0]), reverse=True):
+    for code, label in sorted(term_rows, key=lambda t: (int(t[0]), session_rank(t[1])),
+                              reverse=True):
         if label not in seen:
             seen.add(label)
             out.append(label)

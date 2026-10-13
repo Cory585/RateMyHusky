@@ -20,6 +20,7 @@ from banner_api import (  # noqa: E402
     parse_section,
     parse_term,
     section_end_dates,
+    section_label,
     select_season,
 )
 
@@ -295,3 +296,37 @@ def test_parse_section_tolerates_missing_counts():
 def test_parse_section_keeps_part_of_term():
     rows = fixture("search_summer_2026.json")["data"]
     assert [parse_section(r)["part_of_term"] for r in rows] == ["2A", "2B", "1", None, "2A"]
+
+
+# ── section_label ────────────────────────────────────────────────────────
+# Through 2025 each summer session was its own term; from 2026 one term holds
+# them and partOfTerm names the session.
+
+@pytest.mark.parametrize("label, season, track, year, part, want", [
+    ("Summer Full 2025", "Summer Full", "Semester", 2025, None, ("Summer 2025", "Summer")),
+    ("Summer 1 2025", "Summer 1", "Semester", 2025, None, ("Summer 1 2025", "Summer 1")),
+    ("Summer 2 2025", "Summer 2", "Semester", 2025, "1", ("Summer 2 2025", "Summer 2")),
+    ("Summer 2026", "Summer", "Semester", 2026, "2A", ("Summer 1 2026", "Summer 1")),
+    ("Summer 2026", "Summer", "Semester", 2026, "2B", ("Summer 2 2026", "Summer 2")),
+    ("Summer 2026", "Summer", "Semester", 2026, "1", ("Summer 2026", "Summer")),
+    ("Summer 2026", "Summer", "Semester", 2026, "3C", ("Summer 2026", "Summer")),
+    ("Summer 2026", "Summer", "Semester", 2026, None, ("Summer 2026", "Summer")),
+    ("Summer 2026", "Summer", "CPS Quarter", 2026, "2A", ("Summer 2026", "Summer")),
+    ("Summer 2025", "Summer", "Law Semester", 2025, "2B", ("Summer 2025", "Summer")),
+    ("Summer 2026", "Summer", None, 2026, "2A", ("Summer 2026", "Summer")),
+    ("Winter 2026", "Winter", "CPS Quarter", 2026, None, ("Winter 2026", "Spring")),
+    ("Fall 2025", "Fall", "Semester", 2025, "2A", ("Fall 2025", "Fall")),
+    ("Spring 2026", "Spring", "Semester", 2026, "2B", ("Spring 2026", "Spring")),
+])
+def test_section_label(label, season, track, year, part, want):
+    assert section_label(label, season, track, year, part) == want
+
+
+def test_section_label_on_summer_2026_rows():
+    """parse_term on termDesc, then the section's partOfTerm: CPS is left alone."""
+    got = []
+    for row in fixture("search_summer_2026.json")["data"]:
+        t = parse_term(row["termDesc"])
+        got.append(section_label(t["label"], t["season"], t["track"], t["year"],
+                                 parse_section(row)["part_of_term"])[0])
+    assert got == ["Summer 1 2026", "Summer 2 2026", "Summer 2026", "Summer 2026", "Summer 2026"]

@@ -4,10 +4,11 @@ import re
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
-from banner_history import (MAX_COURSES_PER_TERM, academic_year,  # noqa: E402
-                            build_course_instructors, build_course_offerings,
-                            offering_pattern, pattern_window, rename_candidates,
-                            roster_artifacts)
+from banner_history import (MAX_COURSES_PER_TERM, _labels_newest_first,  # noqa: E402
+                            academic_year, build_course_instructors,
+                            build_course_offerings, offering_pattern,
+                            pattern_window, rename_candidates,
+                            roster_artifacts, session_rank)
 
 LABELS = {"202710": ("Fall 2026", "Fall"), "202630": ("Spring 2026", "Spring"),
           "202650": ("Summer Full 2026", "Summer"), "202610": ("Fall 2025", "Fall"),
@@ -361,3 +362,26 @@ def test_match_gets_the_course_and_terms_it_is_judging():
 
     build_course_instructors([ins("202630", "1"), ins("202610", "2")], match)
     assert seen == [("annie witte", "CS3500", {"202630", "202610"})]
+
+
+# ── label order inside one term code ─────────────────────────────────────
+
+def test_session_rank_puts_summer_1_before_full_before_summer_2():
+    assert (session_rank("Summer 1 2026"), session_rank("Summer 2026"),
+            session_rank("Summer 2 2026")) == (0, 1, 2)
+    assert session_rank("Fall 2026") == 1
+
+
+def test_labels_order_summer_sessions_inside_one_term_code():
+    rows = [("202650", "Summer 1 2026"), ("202650", "Summer 2 2026"),
+            ("202650", "Summer 2026"), ("202630", "Spring 2026")]
+    assert _labels_newest_first(rows) == [
+        "Summer 2 2026", "Summer 2026", "Summer 1 2026", "Spring 2026"]
+
+
+def test_labels_keep_the_pre_2026_summer_order():
+    """Before 2026 each session had its own code; 40 < 50 < 60 already orders them."""
+    rows = [("202540", "Summer 1 2025"), ("202560", "Summer 2 2025"),
+            ("202550", "Summer 2025"), ("202530", "Spring 2025")]
+    assert _labels_newest_first(rows) == [
+        "Summer 2 2025", "Summer 2025", "Summer 1 2025", "Spring 2025"]

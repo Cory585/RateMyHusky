@@ -81,6 +81,35 @@ def pattern_season(season_group):
     return _PATTERN_SEASON.get(season_group, season_group)
 
 
+# partOfTerm codes for the two halves of summer. getTerms' get_partOfTerm lists
+# the same codes for every term; only summer's halves are labelled.
+_SUMMER_SESSIONS = {"2A": "Summer 1", "2B": "Summer 2"}
+
+
+def section_label(term_label, season, track, year, part_of_term):
+    """One section's display label, and the season it counts as for patterns.
+
+    Through 2025 the main campus ran each summer session as its own term, so
+    the term's season already names it ("Summer 1 2025"). From 2026 there is
+    one "Summer 2026 Semester" term and the session is only on the section:
+    2A is Summer 1 and 2B is Summer 2 (measured 2026-10-12: 971 and 638 of
+    3,504 sections). Full-summer sections, CPS and Law read plain "Summer",
+    and "Summer Full 2025" becomes "Summer 2025" to match. Fall and Spring
+    half-semester sessions are not labelled.
+
+    Returns (label, pattern season).
+    """
+    if season == "Summer Full":
+        return f"Summer {year}", "Summer"
+    if season in ("Summer 1", "Summer 2"):
+        return term_label, season
+    if season == "Summer" and track == "Semester":
+        session = _SUMMER_SESSIONS.get(part_of_term)
+        if session:
+            return f"{session} {year}", session
+    return term_label, pattern_season(season)
+
+
 def normalize_instructor_key(display_name):
     """Banner's "Last, First M" -> "first m last".
 

@@ -583,6 +583,58 @@ def test_read_banner_joins_terms_onto_sections_and_instructors(banner_db):
     assert (i["subject_course"], i["closed"]) == ("CS4500", False)
 
 
+def _summer_term(c, code, label, season, sections):
+    """A closed main-campus summer term: CS3500, taught by Annie in every section."""
+    write_term(c, code, {"label": label, "season": season, "season_group": "Summer",
+                         "year": int(label.split()[-1]), "track": "Semester",
+                         "view_only": True}, None,
+               {"sections": [{"crn": crn, "subject": "CS", "subject_course": "CS3500",
+                              "schedule_type": "Lecture", "campus": "Boston",
+                              "instructional_method": "Traditional",
+                              "course_title": "CS3500", "enrollment": 20,
+                              "credit_hours_low": 4.0, "part_of_term": part}
+                             for crn, part in sections],
+                "instructors": [{"term_code": code, "crn": crn,
+                                 "instructor_key": "annie witte",
+                                 "instructor_name": "Witte, Annie", "is_primary": True}
+                                for crn, _ in sections],
+                "stats": {"section_count": len(sections),
+                          "attributed_sections": len(sections), "instructor_count": 1}})
+
+
+def _write_summers(c):
+    _summer_term(c, "202650", "Summer 2026", "Summer",
+                 [("s1", "2A"), ("s2", "2B"), ("full", "1")])
+    _summer_term(c, "202550", "Summer Full 2025", "Summer Full", [("f", None)])
+    _summer_term(c, "202540", "Summer 1 2025", "Summer 1", [("a", None)])
+
+
+def test_read_banner_labels_each_summer_section_by_its_session(banner_db):
+    _write_summers(banner_db)
+    _, sections, instructors = read_banner(banner_db)
+    got = {(s["term_code"], s["crn"]): (s["term_label"], s["pattern_season"])
+           for s in sections}
+    assert got[("202650", "s1")] == ("Summer 1 2026", "Summer 1")
+    assert got[("202650", "s2")] == ("Summer 2 2026", "Summer 2")
+    assert got[("202650", "full")] == ("Summer 2026", "Summer")
+    assert got[("202550", "f")] == ("Summer 2025", "Summer")
+    assert got[("202540", "a")] == ("Summer 1 2025", "Summer 1")
+    assert got[("202630", "1")] == ("Spring 2026", "Spring")
+    assert {i["term_label"] for i in instructors if i["term_code"] == "202650"} == {
+        "Summer 1 2026", "Summer 2 2026", "Summer 2026"}
+
+
+def test_history_orders_summer_sessions_within_one_term(banner_db):
+    _write_summers(banner_db)
+    _, _, instructors = read_banner(banner_db)
+    pair = next(p for p in build_course_instructors(instructors, Identity({}))
+                if p["subject_course"] == "CS3500" and p["instructor_key"] == "annie witte")
+    assert pair["recent_terms"] == ("Summer 2 2026,Summer 2026,Summer 1 2026,"
+                                    "Spring 2026,Summer 2025,Summer 1 2025")
+    assert pair["last_term_label"] == "Summer 2 2026"
+    assert pair["terms_taught"] == 6
+
+
 def test_chip_rows_take_only_the_current_season(banner_db):
     terms, _, instructors = read_banner(banner_db)
     label, codes = current_season(terms)
