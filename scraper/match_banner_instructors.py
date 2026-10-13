@@ -51,7 +51,7 @@ from prof_aliases import ALIAS_MAP  # noqa: E402
 # override the DSN's verify-full or the connection fails outright, and the DNS
 # flake is retried. with_retry comes from the same place so both write paths
 # replay a 40001 identically.
-from load_banner_to_crdb import apply_ddl, connect, with_retry  # noqa: E402
+from load_banner_to_crdb import add_columns, apply_ddl, connect, with_retry  # noqa: E402
 
 # A run must keep at least this share of the previous run's matches. Not a
 # share of Banner: the catalog only holds professors with an RMP page, so most
@@ -220,7 +220,9 @@ CREATE TABLE IF NOT EXISTS banner_course_offerings (
     pattern               TEXT NOT NULL,
     fall_years            INT NOT NULL,
     spring_years          INT NOT NULL,
-    summer_years          INT NOT NULL,
+    summer_years          INT NOT NULL,  -- full summer, CPS and Law (sessions below)
+    summer1_years         INT NOT NULL DEFAULT 0,
+    summer2_years         INT NOT NULL DEFAULT 0,
     pattern_window_years  INT NOT NULL,
     avg_sections_per_term FLOAT,
     avg_section_size      FLOAT,
@@ -245,6 +247,12 @@ CREATE TABLE IF NOT EXISTS banner_course_renames (
     new_code              TEXT NOT NULL
 )
 """
+
+# Added after banner_course_offerings first shipped; see load_banner_to_crdb.add_columns.
+HISTORY_ADDED_COLUMNS = (
+    ("banner_course_offerings", "summer1_years", "INT NOT NULL DEFAULT 0"),
+    ("banner_course_offerings", "summer2_years", "INT NOT NULL DEFAULT 0"),
+)
 
 # Approved renumberings: old code -> the code it became. A course page for the
 # new code shows the old code's history too, labelled with the old code; the
@@ -273,7 +281,8 @@ COURSE_INSTRUCTOR_COLUMNS = (
 OFFERING_COLUMNS = (
     "subject_course", "subject", "course_title", "first_term_code",
     "last_term_code", "last_term_label", "terms_offered", "pattern",
-    "fall_years", "spring_years", "summer_years", "pattern_window_years",
+    "fall_years", "spring_years", "summer_years", "summer1_years",
+    "summer2_years", "pattern_window_years",
     "avg_sections_per_term", "avg_section_size", "median_section_size",
     "credit_hours", "instructor_count", "offered_now")
 
@@ -897,6 +906,7 @@ def main(argv=None):
         for stmt in ddl.split(";"):
             if stmt.strip():
                 cur.execute(stmt.replace("TIMESTAMPTZ", "TIMESTAMP") if args.local_db else stmt)
+    add_columns(cur, HISTORY_ADDED_COLUMNS)
     conn.commit()
 
     term_rows, sections, instructors = read_banner(cur)

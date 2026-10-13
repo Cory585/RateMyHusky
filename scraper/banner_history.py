@@ -25,8 +25,7 @@ import re
 from collections import defaultdict
 from statistics import median
 
-from banner_api import (NON_PLACE_CAMPUSES, NON_TEACHING_SCHEDULE_TYPES,
-                        pattern_season)
+from banner_api import NON_PLACE_CAMPUSES, NON_TEACHING_SCHEDULE_TYPES
 
 # A coordinator Banner lists on every lab of a programme is not teaching all of
 # them. Same threshold and same reasoning as backend/teaching_history.py's TEACHING_MAX_COURSES
@@ -42,7 +41,9 @@ PATTERN_YEARS = 4
 # Offered in at least this share of those years counts as regular.
 REGULAR_SHARE = 0.75
 
-SEASON_ORDER = ("Fall", "Spring", "Summer")
+# "Summer" is the full summer and everything without a session: Summer Full
+# before 2026, CPS, Law, and 2026+ full-term sections.
+SEASON_ORDER = ("Fall", "Spring", "Summer 1", "Summer 2", "Summer")
 
 # Titles too generic to suggest that one code replaced another. Measured on the
 # 2026-10-01 candidates: "Topics", "Projects for Professionals" and the like
@@ -246,7 +247,9 @@ def offering_pattern(years_by_season, window):
         return "Not offered recently", counts
     regular = [s for s in SEASON_ORDER if counts[s] >= REGULAR_SHARE * len(window)]
     if regular:
-        return " and ".join(regular), counts
+        if len(regular) == 1:
+            return regular[0], counts
+        return f"{', '.join(regular[:-1])} and {regular[-1]}", counts
     if any(counts.values()):
         return "Irregular", counts
     return "Not offered recently", counts
@@ -312,7 +315,7 @@ def build_course_offerings(sections, instructor_rows=()):
         years_by_season = defaultdict(set)
         sections_per_label = defaultdict(int)
         for s in secs:
-            years_by_season[pattern_season(s["season_group"])].add(academic_year(s["term_code"]))
+            years_by_season[s["pattern_season"]].add(academic_year(s["term_code"]))
             sections_per_label[s["term_label"]] += 1
         label, counts = offering_pattern(years_by_season, window)
         if label == "Not offered recently" and any(not s.get("closed") for s in secs):
@@ -332,6 +335,8 @@ def build_course_offerings(sections, instructor_rows=()):
             "pattern": label,
             "fall_years": counts["Fall"],
             "spring_years": counts["Spring"],
+            "summer1_years": counts["Summer 1"],
+            "summer2_years": counts["Summer 2"],
             "summer_years": counts["Summer"],
             "pattern_window_years": len(window),
             "avg_sections_per_term": round(len(secs) / len(labels), 1),

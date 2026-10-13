@@ -4,6 +4,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
+from banner_api import pattern_season  # noqa: E402
 from banner_history import (MAX_COURSES_PER_TERM, _labels_newest_first,  # noqa: E402
                             academic_year, build_course_instructors,
                             build_course_offerings, offering_pattern,
@@ -31,6 +32,7 @@ def sec(term, crn, course="CS3500", enrollment=30, cap=40, wait=0,
             "credit_hours_high": None, "enrollment": enrollment,
             "max_enrollment": cap, "wait_count": wait, "attributes": attributes,
             "term_label": label, "season_group": group,
+            "pattern_season": pattern_season(group),
             "closed": term != "202710"}
 
 
@@ -88,7 +90,7 @@ def test_pattern_names_every_regular_season():
                                       "Spring": {2023, 2024, 2025, 2026}},
                                      [2023, 2024, 2025, 2026])
     assert label == "Fall and Spring"
-    assert counts == {"Fall": 4, "Spring": 4, "Summer": 0}
+    assert counts == {"Fall": 4, "Spring": 4, "Summer 1": 0, "Summer 2": 0, "Summer": 0}
 
 
 def test_pattern_three_of_four_years_still_counts_as_regular():
@@ -238,6 +240,34 @@ def test_offering_leaves_registration_facts_to_searchneu():
 
 def test_offering_title_comes_from_the_newest_term():
     assert build_course_offerings(history())[0]["course_title"] == "Title 202710"
+
+
+def summer(term, crn, label, session, course="CS3500"):
+    """A closed summer section, labelled the way read_banner labels it."""
+    return {**sec("202630", crn, course=course), "term_code": term,
+            "term_label": label, "season_group": "Summer", "pattern_season": session}
+
+
+def test_pattern_joins_three_seasons_with_commas():
+    years = {2023, 2024, 2025, 2026}
+    label, counts = offering_pattern({"Fall": years, "Spring": years, "Summer 2": years},
+                                     sorted(years))
+    assert label == "Fall, Spring and Summer 2"
+    assert counts["Summer 2"] == 4 and counts["Summer"] == 0
+
+
+def test_offering_counts_summer_sessions_apart():
+    rows = history() + [
+        summer("202340", "s23", "Summer 1 2023", "Summer 1"),
+        summer("202440", "s24", "Summer 1 2024", "Summer 1"),
+        summer("202540", "s25", "Summer 1 2025", "Summer 1"),
+        summer("202650", "s26", "Summer 1 2026", "Summer 1"),
+        summer("202650", "f26", "Summer 2026", "Summer"),
+    ]
+    got = build_course_offerings(rows)[0]
+    assert got["pattern"] == "Fall, Spring and Summer 1"
+    assert (got["summer1_years"], got["summer2_years"], got["summer_years"]) == (4, 0, 1)
+    assert got["terms_offered"] == 14
 
 
 def test_offering_class_size_uses_closed_terms():

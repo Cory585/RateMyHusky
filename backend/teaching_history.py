@@ -79,7 +79,8 @@ def course_history(code, query, query_one):
     """A course page's history section, or None when Banner knows nothing."""
     offering = query_one("""
         SELECT subject_course, course_title, last_term_label, pattern,
-               fall_years, spring_years, summer_years, pattern_window_years,
+               fall_years, spring_years, summer1_years, summer2_years,
+               summer_years, pattern_window_years,
                median_section_size, credit_hours, instructor_count, offered_now
         FROM banner_course_offerings WHERE subject_course = %s
     """, (code,))
@@ -102,6 +103,8 @@ def course_history(code, query, query_one):
     return {
         "pattern": o.get("pattern"),
         "seasonYears": {"fall": o.get("fall_years"), "spring": o.get("spring_years"),
+                        "summer1": o.get("summer1_years"),
+                        "summer2": o.get("summer2_years"),
                         "summer": o.get("summer_years")} if offering else None,
         "windowYears": o.get("pattern_window_years"),
         "lastOffered": o.get("last_term_label"),
