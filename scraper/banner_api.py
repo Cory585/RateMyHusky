@@ -210,6 +210,10 @@ def parse_section(row):
         "credit_hours_low": low,
         "credit_hours_high": high,
         "enrollment": _num(row.get("enrollment")),
+        # Which session of the term. From Summer 2026 on, Banner runs summer as
+        # one term and this is the only place Summer 1 (2A) and Summer 2 (2B)
+        # show up; see section_label.
+        "part_of_term": row.get("partOfTerm"),
     }
 
 

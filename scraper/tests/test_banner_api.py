@@ -1,7 +1,9 @@
 """Banner response parsing and term selection — no network, no DB.
 
 Every fixture in fixtures/banner/ is a trimmed real response captured
-2026-08-04. The field names are Banner's; do not tidy them.
+2026-08-04, except search_summer_2026.json, which is built by hand in
+searchResults' shape from the 2026-10-12 partOfTerm measurement. The field
+names are Banner's; do not tidy them.
 """
 import json
 import os
@@ -277,11 +279,19 @@ def test_parse_section_keeps_no_registration_data():
     attributes are SearchNEU's job — the parser never carries them."""
     got = parse_section(fixture("search_history.json")["data"][0])
     for gone in ("max_enrollment", "wait_count", "wait_capacity", "meetings",
-                 "attributes", "is_linked", "link_identifier", "cross_list",
-                 "part_of_term"):
+                 "attributes", "is_linked", "link_identifier", "cross_list"):
         assert gone not in got
 
 
 def test_parse_section_tolerates_missing_counts():
     got = parse_section({"courseReferenceNumber": "1", "enrollment": None})
     assert got["enrollment"] is None
+
+
+# ── parse_section: part of term ──────────────────────────────────────────
+# search_summer_2026.json: Summer 2026 rows for Session A (2A), Session B (2B),
+# full term (1), no partOfTerm, and a CPS row in Session A.
+
+def test_parse_section_keeps_part_of_term():
+    rows = fixture("search_summer_2026.json")["data"]
+    assert [parse_section(r)["part_of_term"] for r in rows] == ["2A", "2B", "1", None, "2A"]

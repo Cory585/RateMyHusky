@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS banner_sections (
     credit_hours_low     FLOAT,
     credit_hours_high    FLOAT,
     enrollment           INT,
+    part_of_term         TEXT,               -- '1', '2A' (Summer 1), '2B' (Summer 2), ...
     PRIMARY KEY (term_code, crn)
 );
 CREATE INDEX IF NOT EXISTS bsec_course ON banner_sections (subject_course);
@@ -129,6 +130,11 @@ CREATE TABLE IF NOT EXISTS banner_roster_duplicates (
 )
 """
 
+# Columns added after their table first shipped. CREATE TABLE IF NOT EXISTS
+# leaves an existing table as it is, so prod and older stage files only get
+# these from add_columns.
+ADDED_COLUMNS = (("banner_sections", "part_of_term", "TEXT"),)
+
 TERM_COLUMNS = ("term_code", "term_desc_raw", "term_label", "season",
                 "season_group", "year", "track", "view_only", "scraped_closed",
                 "section_count", "attributed_sections", "instructor_count",
@@ -136,7 +142,8 @@ TERM_COLUMNS = ("term_code", "term_desc_raw", "term_label", "season",
 SECTION_COLUMNS = ("term_code", "crn", "subject", "subject_course",
                    "course_number", "section", "course_title", "campus",
                    "instructional_method", "schedule_type",
-                   "credit_hours_low", "credit_hours_high", "enrollment")
+                   "credit_hours_low", "credit_hours_high", "enrollment",
+                   "part_of_term")
 INSTRUCTOR_COLUMNS = ("term_code", "crn", "instructor_key", "instructor_name",
                       "is_primary", "source")
 DUPLICATE_COLUMNS = ("term_code", "instructor_key")
@@ -209,6 +216,21 @@ def apply_ddl(cur):
                 stmt = (stmt.replace("TIMESTAMPTZ", "TIMESTAMP")
                             .replace("DEFAULT now()", "DEFAULT CURRENT_TIMESTAMP"))
             cur.execute(stmt)
+    add_columns(cur, ADDED_COLUMNS)
+
+
+def add_columns(cur, columns):
+    """Add each (table, column, type) the table doesn't have yet.
+
+    sqlite has no ADD COLUMN IF NOT EXISTS, so it checks PRAGMA table_info first.
+    """
+    for table, column, decl in columns:
+        if isinstance(cur, sqlite3.Cursor):
+            have = {r[1] for r in cur.execute(f"PRAGMA table_info({table})")}
+            if column not in have:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+        else:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {decl}")
 
 
 def known_terms(cur):
@@ -465,7 +487,10 @@ def push(stage_path, open_conn):
     staleness check reads it, and an old stage must not look fresh.
     """
     stage = sqlite3.connect(stage_path)
-    codes = [r[0] for r in stage.execute(
+    # A stage from before a column was added reads it as NULL.
+    add_columns(stage.cursor(), ADDED_COLUMNS)
+    stage.commit()
+    codes =[r[0] for r in stage.execute(
         "SELECT term_code FROM banner_terms ORDER BY term_code")]
     if not codes:
         raise SystemExit(f"{stage_path}: no terms staged")
@@ -571,8 +596,12 @@ def selftest():
     """Run the DDL and one term write against in-memory sqlite. No network, no CRDB."""
     conn = sqlite3.connect(":memory:")
     cur = conn.cursor()
+    # banner_sections as prod has it, from before part_of_term: apply_ddl must add it.
+    cur.execute("CREATE TABLE banner_sections (" + ", ".join(
+        f"{c} TEXT" for c in SECTION_COLUMNS if c != "part_of_term")
+        + ", PRIMARY KEY (term_code, crn))")
     apply_ddl(cur)
-    parsed = {"label": "Fall 2026", "season": "Fall", "season_group": "Fall",
+    parsed ={"label": "Fall 2026", "season": "Fall", "season_group": "Fall",
               "year": 2026, "track": "Semester", "view_only": False}
     scrape = {"sections": [{c: "x" for c in SECTION_COLUMNS}],
               "instructors": [{c: "x" for c in INSTRUCTOR_COLUMNS}],
@@ -581,7 +610,7 @@ def selftest():
     write_term(cur, "x", parsed, "Fall 2026 Semester", scrape)
     for table in ("banner_terms", "banner_sections", "banner_section_instructors"):
         assert cur.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 1, table
-    print("selftest OK: DDL applies and a term write round-trips")
+    print("selftest OK: DDL applies over an older banner_sections and a term write round-trips")
     return 0
 
 

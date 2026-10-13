@@ -17,9 +17,10 @@ import psycopg2  # noqa: E402
 import banner_scrape  # noqa: E402
 import load_banner_to_crdb  # noqa: E402
 from banner_client import BannerRequestFailed  # noqa: E402
-from load_banner_to_crdb import (apply_ddl, connect, known_terms,  # noqa: E402
-                                 push, run, sync_view_only, with_retry,
-                                 write_term)
+from load_banner_to_crdb import (ADDED_COLUMNS, SECTION_COLUMNS,  # noqa: E402
+                                 add_columns, apply_ddl, connect, known_terms,
+                                 push, run, selftest, sync_view_only,
+                                 with_retry, write_term)
 from test_banner_scrape import ANNIE, PAT, FakeClient, section  # noqa: E402
 
 FALL = {"label": "Fall 2026", "season": "Fall", "season_group": "Fall",
@@ -541,3 +542,68 @@ def test_main_exits_75_on_a_rate_limit_so_the_workflow_skips_finalize(
     monkeypatch.setattr(load_banner_to_crdb, "run", rate_limited)
     assert load_banner_to_crdb.main(["--local-db", str(tmp_path / "x.db")]) == 75
     assert "RATE LIMITED" in capsys.readouterr().err
+
+
+# ── part_of_term on tables that predate it ───────────────────────────────
+
+def _legacy_sections(cur):
+    """banner_sections as prod has it: every column but part_of_term."""
+    cur.execute("CREATE TABLE banner_sections (" + ", ".join(
+        f"{c} TEXT" for c in SECTION_COLUMNS if c != "part_of_term")
+        + ", PRIMARY KEY (term_code, crn))")
+
+
+def _columns(cur, table):
+    return {r[1] for r in cur.execute(f"PRAGMA table_info({table})")}
+
+
+def test_apply_ddl_adds_part_of_term_to_a_table_that_predates_it():
+    cur = sqlite3.connect(":memory:").cursor()
+    _legacy_sections(cur)
+    apply_ddl(cur)
+    apply_ddl(cur)     # idempotent: the second pass must not re-add it
+    assert "part_of_term" in _columns(cur, "banner_sections")
+
+
+def test_add_columns_uses_if_not_exists_on_cockroach():
+    class Recorder:
+        def __init__(self):
+            self.sql = []
+
+        def execute(self, sql, params=None):
+            self.sql.append(sql)
+
+    rec = Recorder()
+    add_columns(rec, ADDED_COLUMNS)
+    assert rec.sql == ["ALTER TABLE banner_sections ADD COLUMN IF NOT EXISTS part_of_term TEXT"]
+
+
+def test_selftest_passes_against_a_table_that_predates_part_of_term():
+    assert selftest() == 0
+
+
+def test_part_of_term_round_trips_through_stage_and_push(db, tmp_path):
+    stage = str(tmp_path / "stage.db")
+    client = FakeClient({"202630": [{**section("5"), "partOfTerm": "2A"},
+                                    {**section("6"), "partOfTerm": None}]},
+                        {"5": ANNIE, "6": PAT}, terms=TERMS)
+    run(client, lambda: sqlite3.connect(stage), "backfill", since_term="202630",
+        instructors_from="202630")
+    assert dict(sqlite3.connect(stage).execute(
+        "SELECT crn, part_of_term FROM banner_sections")) == {"5": "2A", "6": None}
+    assert push(stage, db) == 0
+    assert dict(db().execute("SELECT crn, part_of_term FROM banner_sections")) == {
+        "5": "2A", "6": None}
+
+
+def test_push_reads_a_stage_from_before_part_of_term(db, tmp_path):
+    stage = str(tmp_path / "stage.db")
+    client = FakeClient({"202630": [section("5")]}, {"5": ANNIE}, terms=TERMS)
+    run(client, lambda: sqlite3.connect(stage), "backfill", since_term="202630",
+        instructors_from="202630")
+    old = sqlite3.connect(stage)
+    old.execute("ALTER TABLE banner_sections DROP COLUMN part_of_term")
+    old.commit()
+    old.close()
+    assert push(stage, db) == 0
+    assert db().execute("SELECT crn, part_of_term FROM banner_sections").fetchall() == [("5", None)]
