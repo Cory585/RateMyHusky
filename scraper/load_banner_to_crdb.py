@@ -27,8 +27,10 @@ Instructors for closed terms before --instructors-from (default Fall 2025)
 came from a one-off import instead of ~7,000 Banner requests a term; those
 terms are scraped sections-only here, and their instructor rows (source
 'import') are left as they are. The import is not Banner data, so the matcher
-reads only source = 'banner' rows; re-scraping those terms with instructors
-(--instructors-from set lower) is what would bring them into the history.
+reads only source = 'banner' rows. A backfill with --instructors-from set
+lower re-plans every closed term at or after it whose instructors aren't
+Banner's, and writing that term swaps its import rows for Banner's.
+--rescrape CODE[,CODE...] forces terms into the plan whatever their state.
 
 Staging: --local-db PATH writes to a sqlite file instead of CockroachDB, so the
 Banner traffic can happen once, offline from the database. --push-from PATH then
@@ -42,6 +44,17 @@ Usage
     python load_banner_to_crdb.py --backfill --max-sections 30000 --since 202410
     python load_banner_to_crdb.py --local-db stage.db --backfill
     python load_banner_to_crdb.py --push-from stage.db
+    python load_banner_to_crdb.py --backfill --rescrape 202650
+
+Bringing Fall 2021 - Summer 2025 instructors in from Banner, locally (2-3 hours,
+resumes term by term if interrupted):
+
+    python load_banner_to_crdb.py --local-db stage.db --backfill --instructors-from 202210 --rescrape 202650
+    python match_banner_instructors.py --local-db stage.db --dry-run
+        (copy professors_catalog's slug, name, name_key, department in first,
+         or nothing matches a profile)
+    python load_banner_to_crdb.py --push-from stage.db
+    python match_banner_instructors.py
 
 A stage pushed over prod is gated against prod's own counts, and a staged
 sections-only term never touches prod's instructor rows.
@@ -234,13 +247,15 @@ def add_columns(cur, columns):
 
 
 def known_terms(cur):
-    """{term_code: (closed when last scraped, section_count)}.
+    """{term_code: (closed when last scraped, section_count, instructors_source)}.
 
-    The first half drives plan_terms (a term last seen open needs one final
-    scrape); the second is the section-count baseline for the drop gate.
+    The first and third drive plan_terms (a term last seen open needs one final
+    scrape; one whose instructors aren't Banner's needs them from Banner); the
+    second is the section-count baseline for the drop gate.
     """
-    cur.execute("SELECT term_code, scraped_closed, section_count FROM banner_terms")
-    return {r[0]: (bool(r[1]), r[2]) for r in cur.fetchall()}
+    cur.execute("SELECT term_code, scraped_closed, section_count, instructors_source "
+                "FROM banner_terms")
+    return {r[0]: (bool(r[1]), r[2], r[3]) for r in cur.fetchall()}
 
 
 def _insert(cur, table, columns, rows, conflict=None):
@@ -367,7 +382,7 @@ def sync_view_only(cur, terms):
 
 def run(client, open_conn, mode, since_term=DEFAULT_SINCE_TERM,
         max_sections=None, dry_run=False,
-        instructors_from=DEFAULT_INSTRUCTORS_FROM):
+        instructors_from=DEFAULT_INSTRUCTORS_FROM, rescrape=()):
     """Scrape and write every term `plan_terms` picks. Returns (ok, failed).
 
     One transaction per term, so a backfill interrupted at term 40 keeps the
@@ -384,6 +399,8 @@ def run(client, open_conn, mode, since_term=DEFAULT_SINCE_TERM,
 
     Closed terms before `instructors_from` are scraped sections-only. Open
     terms always get instructors — they feed the live teaching chip.
+
+    `rescrape` term codes are scraped whatever their stored state.
     """
     conn = open_conn()
     try:
@@ -398,7 +415,9 @@ def run(client, open_conn, mode, since_term=DEFAULT_SINCE_TERM,
     if not terms:
         raise SanityGateFailed("getTerms returned nothing")
     desc_by_code = {str(t.get("code")): t.get("description") for t in terms}
-    plan = plan_terms(terms, {c: v for c, (v, _) in known.items()}, mode, since_term)
+    plan = plan_terms(terms, {c: v[0] for c, v in known.items()}, mode, since_term,
+                      instructors_from=instructors_from,
+                      sources={c: v[2] for c, v in known.items()}, rescrape=rescrape)
     print(f"{mode}: {len(plan)} term(s) to scrape")
 
     ok, failed, done_sections = [], [], 0
@@ -412,7 +431,7 @@ def run(client, open_conn, mode, since_term=DEFAULT_SINCE_TERM,
             with_instructors = (not parsed["view_only"]
                                 or int(code) >= int(instructors_from))
             scrape = scrape_term(client, code,
-                                 previous_count=(known.get(code) or (None, None))[1],
+                                 previous_count=(known.get(code) or (None, None, None))[1],
                                  view_only=parsed["view_only"],
                                  with_instructors=with_instructors)
         except (SanityGateFailed, BannerRequestFailed) as e:
@@ -624,6 +643,9 @@ def main(argv=None):
     ap.add_argument("--instructors-from", default=DEFAULT_INSTRUCTORS_FROM,
                     help="closed terms before this code are scraped sections-only "
                          f"(default {DEFAULT_INSTRUCTORS_FROM}, Fall 2025)")
+    ap.add_argument("--rescrape", default="",
+                    help="comma-separated term codes to scrape again whatever their "
+                         "state (e.g. 202650)")
     ap.add_argument("--max-sections", type=int,
                     help="stop starting new terms after this many sections")
     ap.add_argument("--concurrency", type=int,
@@ -661,7 +683,8 @@ def main(argv=None):
     try:
         ok, failed = run(BannerClient(concurrency=concurrency), open_conn,
                          mode, since_term=args.since, max_sections=args.max_sections,
-                         dry_run=args.dry_run, instructors_from=args.instructors_from)
+                         dry_run=args.dry_run, instructors_from=args.instructors_from,
+                         rescrape=[c.strip() for c in args.rescrape.split(",") if c.strip()])
     except BannerRateLimited as e:
         # Terms finished before this were committed; the rest wait for next week.
         print(f"RATE LIMITED {e}", file=sys.stderr)

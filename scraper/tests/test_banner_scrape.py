@@ -14,7 +14,8 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 import banner_scrape  # noqa: E402
 from banner_client import Roster  # noqa: E402
-from banner_scrape import (SanityGateFailed, plan_terms,  # noqa: E402
+from banner_scrape import (DEFAULT_INSTRUCTORS_FROM, SanityGateFailed,  # noqa: E402
+                           plan_terms,
                            scrape_season, scrape_term)
 
 
@@ -505,3 +506,47 @@ def test_plan_backfill_since_is_a_term_code_not_a_calendar_year():
 def test_plan_rejects_an_unknown_mode():
     with pytest.raises(ValueError):
         plan_terms(TERMS, {}, "everything")
+
+
+ALL_CLOSED = {"202650": True, "202630": True, "202615": True}
+
+
+def test_plan_backfill_replans_terms_whose_instructors_are_not_banners():
+    sources = {"202650": "banner", "202630": "import", "202615": "none"}
+    got = plan_terms(TERMS, ALL_CLOSED, "backfill", "201610",
+                     instructors_from="202615", sources=sources)
+    assert [c for c, _ in got] == ["202630", "202615"]
+
+
+def test_plan_backfill_leaves_imported_terms_before_instructors_from_alone():
+    sources = {"202650": "banner", "202630": "import", "202615": "import"}
+    got = plan_terms(TERMS, ALL_CLOSED, "backfill", "201610",
+                     instructors_from="202630", sources=sources)
+    assert [c for c, _ in got] == ["202630"]
+
+
+def test_plan_weekly_backfill_with_defaults_plans_nothing_against_prods_state():
+    """banner-refresh.yml runs --backfill with the default --instructors-from.
+    Prod's import terms all sit below it, so the Monday run must not start
+    re-scraping history."""
+    terms = [{"code": "202610", "description": "Fall 2025 Semester (View Only)"},
+             {"code": "202530", "description": "Spring 2025 Semester (View Only)"},
+             {"code": "202210", "description": "Fall 2021 Semester (View Only)"}]
+    known = {"202610": True, "202530": True, "202210": True}
+    sources = {"202610": "banner", "202530": "import", "202210": "import"}
+    assert plan_terms(terms, known, "backfill", instructors_from=DEFAULT_INSTRUCTORS_FROM,
+                      sources=sources) == []
+
+
+def test_plan_rescrape_forces_a_finished_banner_term():
+    sources = {c: "banner" for c in ALL_CLOSED}
+    got = plan_terms(TERMS, ALL_CLOSED, "backfill", "201610",
+                     instructors_from="202615", sources=sources, rescrape=["202650"])
+    assert [c for c, _ in got] == ["202650"]
+    got = plan_terms(TERMS, {}, "current", rescrape=["202650"])
+    assert [c for c, _ in got] == ["202710", "202650"]
+
+
+def test_plan_rescrape_refuses_a_code_getterms_does_not_list():
+    with pytest.raises(ValueError, match="20265"):
+        plan_terms(TERMS, ALL_CLOSED, "backfill", rescrape=["20265"])

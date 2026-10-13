@@ -62,23 +62,32 @@ class SanityGateFailed(RuntimeError):
     """A gate refused the term. Nothing has been written for it."""
 
 
-def plan_terms(terms, known, mode, since_term=DEFAULT_SINCE_TERM):
+def plan_terms(terms, known, mode, since_term=DEFAULT_SINCE_TERM,
+               instructors_from=None, sources=None, rescrape=()):
     """getTerms rows -> [(term_code, parsed term)] this run should scrape.
 
-    `known` is {term_code: closed_when_last_scraped} from banner_terms.
+    `known` is {term_code: closed_when_last_scraped} from banner_terms, and
+    `sources` is {term_code: instructors_source}.
 
     mode "current": every open term. Re-scraped each run, because rosters,
     reassignments and enrollment all move until the term closes. A term whose
     last meeting has passed is scraped once more as closed (see scrape_term)
     and then skipped here, even while Banner is slow to mark it View Only.
 
-    mode "backfill": closed terms from `since_term` on that are either missing
-    or were last scraped while still open. Newest first, so an interrupted
-    backfill has already covered the terms students are likeliest to ask about.
+    mode "backfill": closed terms from `since_term` on that are missing, were
+    last scraped while still open, or are at or after `instructors_from` with
+    instructors that aren't Banner's (the one-off import, or a sections-only
+    scrape). Newest first, so an interrupted backfill has already covered the
+    terms students are likeliest to ask about.
+
+    `rescrape` codes are planned whatever their state, in either mode. One
+    that getTerms doesn't list is refused rather than silently skipped.
 
     Rows getTerms can't parse (a renamed season, a malformed row) are skipped
     rather than guessed at.
     """
+    rescrape = {str(c) for c in rescrape}
+    sources = sources or {}
     picked = []
     for t in terms:
         code = t.get("code")
@@ -86,17 +95,26 @@ def plan_terms(terms, known, mode, since_term=DEFAULT_SINCE_TERM):
         if code is None or parsed is None:
             continue
         code = str(code)
-        if mode == "current":
+        if code in rescrape:
+            picked.append((code, parsed))
+        elif mode == "current":
             if not parsed["view_only"] and known.get(code) is not True:
                 picked.append((code, parsed))
         elif mode == "backfill":
             if not parsed["view_only"] or int(code) < int(since_term):
                 continue
-            if known.get(code) is True:     # already scraped after it closed
+            needs_instructors = (instructors_from is not None
+                                 and int(code) >= int(instructors_from)
+                                 and sources.get(code) != "banner")
+            if known.get(code) is True and not needs_instructors:   # already finished
                 continue
             picked.append((code, parsed))
         else:
             raise ValueError(f"unknown mode {mode!r}")
+    missing = rescrape - {c for c, _ in picked}
+    if missing:
+        raise ValueError(f"--rescrape {', '.join(sorted(missing))}: not a term in "
+                         f"getTerms that this scraper can read")
     return sorted(picked, key=lambda p: int(p[0]), reverse=True)
 
 
