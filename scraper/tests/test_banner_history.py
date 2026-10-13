@@ -256,6 +256,30 @@ def test_pattern_joins_three_seasons_with_commas():
     assert counts["Summer 2"] == 4 and counts["Summer"] == 0
 
 
+def test_pattern_keeps_summer_when_the_sessions_alternate():
+    """Every summer, but a different session each year: no one session is
+    regular, yet the course is a summer course."""
+    years = [2022, 2023, 2024, 2025]
+    label, counts = offering_pattern({"Fall": set(years), "Spring": set(years),
+                                      "Summer 1": {2022, 2024}, "Summer 2": {2023, 2025}},
+                                     years)
+    assert label == "Fall, Spring and Summer"
+    assert (counts["Summer 1"], counts["Summer 2"], counts["Summer"]) == (2, 2, 0)
+
+
+def test_pattern_of_a_summer_only_course_in_mixed_sessions_is_summer():
+    years = [2022, 2023, 2024, 2025]
+    label, _ = offering_pattern({"Summer 1": {2022, 2023}, "Summer": {2024},
+                                 "Summer 2": {2025}}, years)
+    assert label == "Summer"
+
+
+def test_pattern_names_the_session_when_one_is_regular_on_its_own():
+    years = [2022, 2023, 2024, 2025]
+    label, _ = offering_pattern({"Summer 1": set(years), "Summer 2": {2023}}, years)
+    assert label == "Summer 1"
+
+
 def test_offering_counts_summer_sessions_apart():
     rows = history() + [
         summer("202340", "s23", "Summer 1 2023", "Summer 1"),

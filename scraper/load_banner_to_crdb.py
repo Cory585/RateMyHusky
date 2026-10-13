@@ -509,7 +509,7 @@ def push(stage_path, open_conn):
     # A stage from before a column was added reads it as NULL.
     add_columns(stage.cursor(), ADDED_COLUMNS)
     stage.commit()
-    codes =[r[0] for r in stage.execute(
+    codes = [r[0] for r in stage.execute(
         "SELECT term_code FROM banner_terms ORDER BY term_code")]
     if not codes:
         raise SystemExit(f"{stage_path}: no terms staged")
@@ -620,7 +620,7 @@ def selftest():
         f"{c} TEXT" for c in SECTION_COLUMNS if c != "part_of_term")
         + ", PRIMARY KEY (term_code, crn))")
     apply_ddl(cur)
-    parsed ={"label": "Fall 2026", "season": "Fall", "season_group": "Fall",
+    parsed = {"label": "Fall 2026", "season": "Fall", "season_group": "Fall",
               "year": 2026, "track": "Semester", "view_only": False}
     scrape = {"sections": [{c: "x" for c in SECTION_COLUMNS}],
               "instructors": [{c: "x" for c in INSTRUCTOR_COLUMNS}],

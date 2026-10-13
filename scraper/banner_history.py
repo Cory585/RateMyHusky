@@ -245,7 +245,14 @@ def offering_pattern(years_by_season, window):
     counts = {s: len(years_by_season.get(s, set()) & set(window)) for s in SEASON_ORDER}
     if not window:
         return "Not offered recently", counts
-    regular = [s for s in SEASON_ORDER if counts[s] >= REGULAR_SHARE * len(window)]
+    needed = REGULAR_SHARE * len(window)
+    regular = [s for s in SEASON_ORDER if counts[s] >= needed]
+    # Every summer, but not always the same session: still a summer course.
+    summers = ("Summer 1", "Summer 2", "Summer")
+    if not any(s in regular for s in summers):
+        any_summer = set().union(*(years_by_season.get(s, set()) for s in summers))
+        if len(any_summer & set(window)) >= needed:
+            regular.append("Summer")
     if regular:
         if len(regular) == 1:
             return regular[0], counts
