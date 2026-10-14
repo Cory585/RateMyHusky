@@ -5,6 +5,8 @@ The DB is stubbed by keying on the SQL text, as in test_course_api.py.
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 import teaching_history as th
 
 NOW = datetime(2026, 10, 1, tzinfo=timezone.utc)
@@ -20,11 +22,13 @@ OFFERING = {
 
 INSTRUCTORS = [
     {"instructor_name": "Nunez, Lucia", "professor_slug": "lucia-nunez", "catalog_name": "Lucia Nunez",
-     "terms_taught": 3, "last_term_label": "Fall 2026",
-     "recent_terms": "Fall 2026,Spring 2026,Fall 2025", "avg_enrollment": 111.06},
+     "terms_taught": 3, "last_term_code": "202710", "last_term_label": "Fall 2026",
+     "recent_terms": "Fall 2026,Spring 2026,Fall 2025", "avg_enrollment": 111.06,
+     "image_url": "https://img/n.jpg", "focus_x": 40.0, "focus_y": 20.0},
     {"instructor_name": "Doe, Jane Q", "professor_slug": None, "catalog_name": None,
-     "terms_taught": 1, "last_term_label": "Spring 2026",
-     "recent_terms": "Spring 2026", "avg_enrollment": None},
+     "terms_taught": 1, "last_term_code": "202630", "last_term_label": "Spring 2026",
+     "recent_terms": "Spring 2026", "avg_enrollment": None,
+     "image_url": None, "focus_x": None, "focus_y": None},
 ]
 
 
@@ -82,10 +86,25 @@ def test_course_history_instructors_link_matched_and_name_the_rest():
     assert got[0] == {"name": "Lucia Nunez", "slug": "lucia-nunez", "termsTaught": 3,
                       "lastTerm": "Fall 2026",
                       "recentTerms": ["Fall 2026", "Spring 2026", "Fall 2025"],
-                      "avgClassSize": 111}
+                      "avgClassSize": 111, "imageUrl": "https://img/n.jpg",
+                      "focusX": 40.0, "focusY": 20.0}
     assert got[1]["name"] == "Jane Q Doe"
     assert got[1]["slug"] is None
     assert got[1]["avgClassSize"] is None
+
+
+def test_unmatched_instructor_has_no_photo_and_the_default_focus():
+    query, query_one, _ = course_db()
+    jane = th.course_history("CS3100", query, query_one)["instructors"][1]
+    assert (jane["imageUrl"], jane["focusX"], jane["focusY"]) == (None, 50.0, 30.0)
+
+
+def test_instructor_query_selects_term_code_and_photo():
+    query, query_one, seen = course_db()
+    th.course_history("CS3100", query, query_one)
+    sql = next(s for s, _ in seen if "FROM banner_course_instructors" in s)
+    assert "bci.last_term_code" in sql
+    assert "pc.image_url" in sql and "pc.focus_x" in sql and "pc.focus_y" in sql
 
 
 def test_course_history_is_none_without_banner_data():
@@ -130,6 +149,16 @@ def test_successors_are_khourys_published_mapping():
     }
 
 
+def test_summer_2_sorts_ahead_of_summer_1_on_their_shared_code():
+    # From 2026 both sessions are term 202650; the SQL order (most terms first) is wrong.
+    rows = [{**INSTRUCTORS[0], "last_term_code": "202650", "last_term_label": "Summer 1 2026",
+             "terms_taught": 8},
+            {**INSTRUCTORS[1], "last_term_code": "202650", "last_term_label": "Summer 2 2026"}]
+    query, query_one, _ = course_db(instructors=rows)
+    got = th.course_history("CS3100", query, query_one)["instructors"]
+    assert [i["lastTerm"] for i in got] == ["Summer 2 2026", "Summer 1 2026"]
+
+
 # ── professor course history ────────────────────────────────────────────
 
 PROF_ROWS = [
@@ -158,6 +187,15 @@ def test_professor_history_lists_courses_without_labs_or_recitations():
                       "recentTerms": ["Fall 2026", "Spring 2026", "Fall 2025"],
                       "avgClassSize": 111, "hasPage": True}
     assert seen[0][1] == ("lucia-nunez",)
+
+
+def test_professor_history_orders_summer_sessions_that_share_a_code():
+    rows = [{**PROF_ROWS[3], "last_term_code": "202650", "last_term_label": "Summer 1 2026"},
+            {**PROF_ROWS[0], "last_term_code": "202650", "last_term_label": "Summer 2 2026",
+             "terms_taught": 2}]
+    query, _, _ = stub(many=lambda s, p: rows)
+    got = th.professor_course_history("lucia-nunez", query)
+    assert [c["code"] for c in got] == ["CS3100", "CS3500"]
 
 
 # ── teaching chip ───────────────────────────────────────────────────────
@@ -208,6 +246,27 @@ def test_teaching_chip_hidden_for_roster_artifacts():
     codes = ",".join(f"PHYS{1000 + i}" for i in range(th.TEACHING_MAX_COURSES + 1))
     query, query_one, _ = chip_db({**TEACHING, "course_codes": codes})
     assert th.teaching_now("x", query, query_one, now=NOW) is None
+
+
+# ── label codes ─────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("label, code", [
+    ("Fall 2026", 202710),
+    ("Winter 2026", 202625),
+    ("Spring 2026", 202630),
+    ("Summer 1 2026", 202640),
+    ("Summer Full 2026", 202650),
+    ("Summer 2026", 202650),
+    ("Summer 2 2026", 202660),
+    ("Fall 2025", 202610),
+])
+def test_label_code_matches_banners_term_codes(label, code):
+    assert th.label_code(label) == code
+
+
+@pytest.mark.parametrize("label", [None, "", "Fall", "2026", "Autumn 2026", "Fall A 2026", "Fall 26"])
+def test_label_code_is_none_for_a_label_it_cannot_read(label):
+    assert th.label_code(label) is None
 
 
 # ── names ───────────────────────────────────────────────────────────────

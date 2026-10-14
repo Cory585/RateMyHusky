@@ -155,6 +155,11 @@
 	white-space: nowrap;
 }
 
+.course-stat-value--text {
+	font-size: clamp(1.1rem, 1.6vw, 1.5rem);
+	white-space: normal;
+}
+
 .course-stat-label {
 	font-size: 0.72rem;
 	font-weight: 700;
@@ -235,6 +240,11 @@
 	transform: translateY(-2px);
 	box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
 	border-color: rgba(214, 57, 76, 0.25);
+}
+
+.course-top-prof-card--static:hover {
+	transform: none;
+	box-shadow: none;
 }
 
 .course-top-prof-photo {
@@ -632,7 +642,7 @@
 
 	.instructor-header-row,
 	.instructor-row {
-		min-width: 360px;
+		min-width: 560px;
 	}
 }
 
@@ -875,3 +885,33 @@
 		grid-template-columns: 1fr;
 	}
 }
+
+.course-offering-pattern {
+	margin: 0 0 6px;
+	color: #1b1b1b;
+	font-weight: 800;
+}
+
+.course-offering-seasons {
+	margin: 0 0 10px;
+	color: #767676;
+	font-size: 0.85rem;
+	font-weight: 600;
+}
+
+.course-offering-badges {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-bottom: 10px;
+}
+
+.course-offering-successor {
+	margin: 0;
+	color: #3a3a3a;
+	font-size: 0.9rem;
+}
+
+.dark .course-offering-pattern { color: #e0e0e0; }
+.dark .course-offering-seasons,
+.dark .course-offering-successor { color: #c8c8c8; }

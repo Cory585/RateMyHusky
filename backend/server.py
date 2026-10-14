@@ -404,6 +404,7 @@ def return_db(exc):
 
 
 def query(sql, params=None):
+    conn = None
     try:
         conn = get_db()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -416,9 +417,20 @@ def query(sql, params=None):
         # Connection was stale — discard it and retry once with a fresh one
         _discard_db_conn()
         conn = get_db()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute(sql, params or ())
-        return cur.fetchall()
+        try:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute(sql, params or ())
+            return cur.fetchall()
+        except psycopg2.Error:
+            _rollback_after_cancel(conn)   # the sibling except below can't catch a failed retry
+            raise
+    except psycopg2.Error:
+        # Any failed statement aborts the transaction too (the pool is not
+        # autocommit). Roll back so a guarded read (teaching history) can fail
+        # without failing the request's later queries.
+        if conn is not None:
+            _rollback_after_cancel(conn)
+        raise
 
 
 def query_one(sql, params=None):
@@ -927,8 +939,19 @@ def professor_payload(slug):
         data = build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions)
         if data is None:
             return None
-        cache_set(cache_key, data)
+        if data.pop("_historyFailed", False):
+            g.history_failed = True   # a failed Banner read is not cached: see history_cache_control
+        else:
+            cache_set(cache_key, data)
     return data
+
+
+def history_cache_control(resp):
+    """A page built after a failed Banner read must not be cached downstream
+    either, or the CDN keeps the degraded page for a day. Also used by render.py."""
+    if g.get("history_failed"):
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.route("/api/professors/<slug>/full")
@@ -939,7 +962,7 @@ def professor_full(slug):
     resp = jsonify(data)
     resp.headers["Cache-Control"] = "private, max-age=3600" if _is_authed() else "public, max-age=3600"
     resp.headers["Vary"] = "Authorization"
-    return resp
+    return history_cache_control(resp)
 
 
 @app.route("/api/departments")
@@ -1336,7 +1359,10 @@ def course_payload(code):
         data = build_course(code_norm, query, query_one)
         if data is None:
             return None
-        cache_set(cache_key, data)
+        if data.pop("_historyFailed", False):
+            g.history_failed = True   # a failed Banner read is not cached: see history_cache_control
+        else:
+            cache_set(cache_key, data)
     return data
 
 
@@ -1348,7 +1374,7 @@ def course_profile(code):
     resp = jsonify(data)
     resp.headers["Cache-Control"] = "private, max-age=3600" if _is_authed() else "public, max-age=3600"
     resp.headers["Vary"] = "Authorization"
-    return resp
+    return history_cache_control(resp)
 
 
 # ──────────────────────────────────────────────

@@ -18,6 +18,16 @@ SITE = "https://ratemyhusky.com"
 # word boundary to stay safely under the ceiling.
 MAX_DESCRIPTION = 155
 
+# Banner lists every course a professor taught since Fall 2021, so lab
+# coordinators run to 20+ codes; the FAQ answer names this many.
+FAQ_COURSES_MAX = 8
+
+
+def _capped_list(items: list, cap: int) -> str:
+    """"A, B, C" or, past `cap`, "A, B, C and 4 more"."""
+    shown = ", ".join(items[:cap])
+    return f"{shown} and {len(items) - cap} more" if len(items) > cap else shown
+
 
 def _clip_description(text: str) -> str:
     if len(text) <= MAX_DESCRIPTION:
@@ -223,8 +233,11 @@ def professor_html(profile: dict, reviews: list, canonical: str) -> str:
     ])
 
     course_codes = profile.get("courses") or []
+    unlinked = set(profile.get("unlinkedCourses") or [])
     course_items = "".join(
-        f'<li><a href="{SITE}/courses/{_esc(code)}">{_esc(code)}</a></li>' for code in course_codes
+        f"<li>{_esc(code)}</li>" if code in unlinked
+        else f'<li><a href="{SITE}/courses/{_esc(code)}">{_esc(code)}</a></li>'
+        for code in course_codes
     )
     courses_block = f"<h2>Courses taught</h2><ul>{course_items}</ul>" if course_items else ""
 
@@ -267,7 +280,7 @@ def professor_html(profile: dict, reviews: list, canonical: str) -> str:
     if course_codes:
         faq_items.append((
             f"What courses does {name} teach at Northeastern?",
-            f"{name} has taught {', '.join(course_codes)} at Northeastern.",
+            f"{name} has taught {_capped_list(course_codes, FAQ_COURSES_MAX)} at Northeastern.",
         ))
     # Each label matches the Person.award strings Professor.tsx emits, so the
     # crawler copy and the page agree.
@@ -352,6 +365,7 @@ def course_html(detail: dict, canonical: str) -> str:
         ("Average rating", f"{avg:.1f}/5" if avg is not None else None),
         ("Difficulty", f"{diff:.1f}/5" if diff is not None else None),
         ("Ratings", n or None),
+        ("Last taught", (detail.get("history") or {}).get("lastOffered")),
         ("Credits", catalog.get("credits")),
         ("Prerequisites", catalog.get("prerequisites")),
         ("Corequisites", catalog.get("corequisites")),
@@ -643,6 +657,7 @@ def _professor_view(payload: dict, colleagues: list) -> dict:
         "professorUrl": rmp["professorUrl"],
         "totalRatings": payload["summary"]["numRatings"],
         "courses": [c["code"] for c in payload["courses"]],
+        "unlinkedCourses": [c["code"] for c in payload["courses"] if not c["hasPage"]],
         "colleagues": colleagues,
         "awards": payload.get("awards") or [],
     }
@@ -667,6 +682,11 @@ def _get_course_payload():
     return course_payload
 
 
+def _get_history_cache_control():
+    from server import history_cache_control
+    return history_cache_control
+
+
 def _json_or_404(resp):
     """Return (data, None) on success or (None, status) when the view returned
     an error tuple."""
@@ -688,7 +708,7 @@ def render_professor(slug):
                           payload["sources"]["rmp"]["reviews"], canonical)
     resp = Response(html, mimetype="text/html")
     resp.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
-    return resp
+    return _get_history_cache_control()(resp)
 
 
 @render_bp.route("/render/courses/<code>")
@@ -702,7 +722,7 @@ def render_course(code):
     html = course_html(data, canonical)
     resp = Response(html, mimetype="text/html")
     resp.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
-    return resp
+    return _get_history_cache_control()(resp)
 
 
 def _get_stats_view():
