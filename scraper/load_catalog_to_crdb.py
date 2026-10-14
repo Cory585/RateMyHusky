@@ -32,6 +32,7 @@ import sys
 import time
 
 import psycopg2
+from dotenv import load_dotenv
 from psycopg2.extras import execute_values
 
 # Same hazard as the Banner loader: CockroachDB runs SERIALIZABLE and a write
@@ -389,6 +390,7 @@ def main(argv=None):
         print("Dry run: nothing written.")
         return 0
 
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend", ".env"))
     dsn = os.environ.get("NEW_CRDB_DATABASE_URL") or os.environ.get("CRDB_DATABASE_URL")
     if not dsn:
         print("NEW_CRDB_DATABASE_URL (or CRDB_DATABASE_URL) is not set", file=sys.stderr)
