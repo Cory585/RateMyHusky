@@ -5,7 +5,7 @@ from render import (
     professor_html, course_html, not_found_html, home_html, _esc,
     _clip_description, MAX_DESCRIPTION,
     MAX_SNAPSHOT_REVIEWS, professors_listing_html, courses_listing_html,
-    department_html, departments_listing_html,
+    department_html, departments_listing_html, _professor_view,
 )
 
 
@@ -981,3 +981,40 @@ def test_course_html_lists_professors_with_links():
     html = course_html(_course(), "https://ratemyhusky.com/courses/econ1115")
     assert "<h2>Professors</h2>" in html
     assert '<a href="https://ratemyhusky.com/professors/francis-georges">Francis Georges</a>' in html
+
+
+# ── Banner teaching history ──
+
+def test_course_html_shows_last_taught():
+    html = course_html({**_course(), "history": {"lastOffered": "Fall 2026"}},
+                       "https://ratemyhusky.com/courses/econ1115")
+    assert "<dt>Last taught</dt><dd>Fall 2026</dd>" in html
+
+
+def test_course_html_omits_last_taught_without_history():
+    html = course_html({**_course(), "history": None}, "https://ratemyhusky.com/courses/econ1115")
+    assert "Last taught" not in html
+
+
+def test_render_course_route_shows_last_taught(render_client):
+    body = render_client.get("/render/courses/econ1115").get_data(as_text=True)
+    assert "<dt>Last taught</dt><dd>Fall 2026</dd>" in body
+
+
+def test_professor_html_courses_without_a_page_are_plain_text():
+    profile = _base_profile(courses=["CS3500", "CS9999"], unlinkedCourses=["CS9999"])
+    html = professor_html(profile, [], "https://ratemyhusky.com/professors/x")
+    assert 'href="https://ratemyhusky.com/courses/CS3500"' in html
+    assert "<li>CS9999</li>" in html
+    assert "courses/CS9999" not in html
+
+
+def test_professor_view_marks_courses_without_a_page():
+    rmp = {"rating": None, "numRatings": 0, "difficulty": None, "wouldTakeAgainPct": None,
+           "professorUrl": None}
+    payload = {"identity": {"name": "X", "department": "CS", "imageUrl": None},
+               "sources": {"rmp": rmp}, "summary": {"numRatings": 0}, "awards": [],
+               "courses": [{"code": "CS3500", "hasPage": True}, {"code": "CS9999", "hasPage": False}]}
+    view = _professor_view(payload, [])
+    assert view["courses"] == ["CS3500", "CS9999"]
+    assert view["unlinkedCourses"] == ["CS9999"]

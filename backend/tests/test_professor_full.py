@@ -61,6 +61,8 @@ class FakeDB:
             return [dict(r) for r in self.reviews]
         if "from source_summary" in s:
             return [dict(r) for r in self.summaries]
+        if "from banner_course_instructors" in s:
+            return []
         raise AssertionError(f"unexpected query: {sql}")
 
     def query_one(self, sql, params=None):
@@ -77,7 +79,9 @@ AWARDS = {"olin guha": [{"award": "University Excellence in Teaching Award", "aw
                           "year": 2023, "yearLabel": "2022\u201323", "sourceUrl": "https://example.edu/awards"}]}
 
 
-def _build(slug="olin-guha", db=None, mentions=MENTIONS, awards=AWARDS):
+def _build(slug="olin-guha", db=None, mentions=MENTIONS, awards=AWARDS, history=None):
+    """`history`: a fake course_history_for. None runs the real one against FakeDB,
+    which has no Banner rows."""
     db = db or FakeDB()
     seen = {}
 
@@ -86,8 +90,9 @@ def _build(slug="olin-guha", db=None, mentions=MENTIONS, awards=AWARDS):
         seen["slug"] = s
         return [dict(m) for m in mentions]
 
+    extra = {} if history is None else {"course_history_for": history}
     data = build_payload(slug, db.query, db.query_one, lambda t: t, fetch_reddit_mentions,
-                         awards_for=lambda key: [dict(a) for a in awards.get(key, [])])
+                         awards_for=lambda key: [dict(a) for a in awards.get(key, [])], **extra)
     return data, db, seen
 
 
@@ -95,7 +100,8 @@ def _build(slug="olin-guha", db=None, mentions=MENTIONS, awards=AWARDS):
 
 def test_top_level_keys():
     data, _, _ = _build()
-    assert set(data) == {"version", "identity", "summary", "sources", "courses", "redditMentions", "awards"}
+    assert set(data) == {"version", "identity", "summary", "sources", "courses", "redditMentions",
+                         "awards", "lastTaught"}
     assert data["version"] == 2
 
 
@@ -135,8 +141,8 @@ def test_sources_holds_rmp_only_with_exact_keys():
 
 def test_course_row_keys():
     data, _, _ = _build()
-    assert all(set(c) == {"code", "name", "rating", "difficulty", "numRatings", "ratingDistribution"}
-               for c in data["courses"])
+    assert all(set(c) == {"code", "name", "rating", "difficulty", "numRatings", "ratingDistribution",
+                          "terms", "lastTerm", "hasPage"} for c in data["courses"])
 
 
 # ── courses[] ──
@@ -166,6 +172,99 @@ def test_rmp_distributions_come_from_the_summary_row():
     data, _, _ = _build()
     assert data["sources"]["rmp"]["ratingDistribution"] == {"1": 1, "2": 2, "3": 4, "4": 20, "5": 30}
     assert data["sources"]["rmp"]["gradeDistribution"] == {"A": 9}
+
+
+# ── Banner teaching history ──
+
+HISTORY = [
+    {"code": "CS3100", "name": "Program Design and Implementation 2", "termsTaught": 3,
+     "lastTerm": "Fall 2026", "recentTerms": ["Fall 2026", "Spring 2026", "Fall 2025"],
+     "avgClassSize": 111, "hasPage": False},
+    {"code": "CS2500", "name": "Fundamentals of Computer Science 1", "termsTaught": 2,
+     "lastTerm": "Fall 2024", "recentTerms": ["Fall 2024", "Fall 2023"],
+     "avgClassSize": 80, "hasPage": False},
+]
+
+
+def _with_history(history=HISTORY, **kw):
+    calls = []
+
+    def course_history_for(slug, query):
+        calls.append(slug)
+        return [dict(h) for h in history]
+
+    data, db, seen = _build(history=course_history_for, **kw)
+    return data, calls
+
+
+def test_taught_courses_come_first_in_history_order_then_most_rated():
+    data, _ = _with_history()
+    assert [c["code"] for c in data["courses"]] == ["CS3100", "CS2500", "CS3500"]
+
+
+def test_banner_only_course_has_no_ratings():
+    data, _ = _with_history()
+    assert data["courses"][0] == {
+        "code": "CS3100", "name": "Program Design and Implementation 2", "rating": None,
+        "difficulty": None, "numRatings": 0, "ratingDistribution": None,
+        "terms": ["Fall 2026", "Spring 2026", "Fall 2025"], "lastTerm": "Fall 2026", "hasPage": False}
+
+
+def test_reviewed_course_with_history_keeps_its_ratings_and_gains_terms():
+    data, _ = _with_history()
+    cs2500 = data["courses"][1]
+    assert (cs2500["rating"], cs2500["numRatings"], cs2500["name"]) == (4.0, 1, None)
+    assert cs2500["terms"] == ["Fall 2024", "Fall 2023"]
+    assert cs2500["lastTerm"] == "Fall 2024"
+
+
+def test_two_history_rows_for_one_code_make_one_course_row_newest_wins():
+    older = {**HISTORY[1], "code": "CS2500", "lastTerm": "Fall 2020", "recentTerms": ["Fall 2020"]}
+    data, _ = _with_history(history=[HISTORY[1], older])
+    rows = [c for c in data["courses"] if c["code"] == "CS2500"]
+    assert len(rows) == 1
+    assert (rows[0]["lastTerm"], rows[0]["terms"]) == ("Fall 2024", ["Fall 2024", "Fall 2023"])
+    assert rows[0]["rating"] == 4.0 and rows[0]["numRatings"] == 1
+
+
+def test_reviewed_course_without_history_has_no_terms():
+    data, _ = _with_history()
+    cs3500 = data["courses"][2]
+    assert (cs3500["terms"], cs3500["lastTerm"], cs3500["hasPage"]) == ([], None, True)
+
+
+def test_reviewed_course_missing_from_the_catalog_has_no_page():
+    data, _, _ = _build()
+    by_code = {c["code"]: c for c in data["courses"]}
+    assert by_code["CS2500"]["hasPage"] is False   # course_name is None: no course_catalog row
+    assert by_code["CS3500"]["hasPage"] is True
+
+
+def test_last_taught_is_the_newest_history_row():
+    data, _ = _with_history()
+    assert data["lastTaught"] == "Fall 2026"
+
+
+def test_no_history_means_no_last_taught():
+    data, _ = _with_history(history=[])
+    assert data["lastTaught"] is None
+    assert [c["code"] for c in data["courses"]] == ["CS3500", "CS2500"]
+
+
+def test_history_is_read_for_the_canonical_slug():
+    _, calls = _with_history(slug="olin-guha", db=FakeDB(catalog={**CATALOG, "slug": "olin-guha-2"}))
+    assert calls == ["olin-guha-2"]
+
+
+def test_history_failure_leaves_courses_as_today(caplog):
+    def broken(slug, query):
+        raise RuntimeError("relation banner_course_instructors does not exist")
+
+    data, _, _ = _build(history=broken)
+    assert [c["code"] for c in data["courses"]] == ["CS3500", "CS2500"]
+    assert all(c["terms"] == [] and c["lastTerm"] is None for c in data["courses"])
+    assert data["lastTaught"] is None
+    assert len([r for r in caplog.records if r.levelname == "ERROR"]) == 1
 
 
 # ── edge cases ──
@@ -216,9 +315,9 @@ def test_missing_professor_is_none():
 
 # ── round trips ──
 
-def test_at_most_four_statements_and_only_live_tables():
+def test_at_most_five_statements_and_only_live_tables():
     _, db, _ = _build()
-    assert len(db.calls) <= 4
+    assert len(db.calls) <= 5
     tables = " ".join(sql.lower() for sql, _ in db.calls)
-    for table in ("professors_catalog", "rmp_reviews", "source_summary"):
+    for table in ("professors_catalog", "rmp_reviews", "source_summary", "banner_course_instructors"):
         assert table in tables

@@ -404,6 +404,7 @@ def return_db(exc):
 
 
 def query(sql, params=None):
+    conn = None
     try:
         conn = get_db()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -419,6 +420,13 @@ def query(sql, params=None):
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute(sql, params or ())
         return cur.fetchall()
+    except psycopg2.Error:
+        # Any failed statement aborts the transaction too (the pool is not
+        # autocommit). Roll back so a guarded read (teaching history) can fail
+        # without failing the request's later queries.
+        if conn is not None:
+            _rollback_after_cancel(conn)
+        raise
 
 
 def query_one(sql, params=None):

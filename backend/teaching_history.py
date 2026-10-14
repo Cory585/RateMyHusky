@@ -47,6 +47,14 @@ TEACHING_MAX_AGE_DAYS = 21
 # 94% of chips carry 1-3 courses.
 TEACHING_MAX_COURSES = 6
 
+# A term label -> Banner's term code. Codes lead with the academic year's
+# ending calendar year, so Fall is the one season whose code is a year ahead:
+# Fall 2026 is 202710, Spring 2026 202630. Session labels ("Summer 1 2026")
+# get their session's code so they window and order like terms.
+_LABEL_RE = re.compile(r"^(Fall|Winter|Spring|Summer 1|Summer 2|Summer Full|Summer) (\d{4})$")
+_SEASON_CODES = {"Fall": (1, 10), "Winter": (0, 25), "Spring": (0, 30), "Summer 1": (0, 40),
+                 "Summer Full": (0, 50), "Summer": (0, 50), "Summer 2": (0, 60)}
+
 
 def display_name(banner_name):
     """Banner's "Last, First Middle" -> "First Middle Last"."""
@@ -62,6 +70,15 @@ def _terms(joined):
 
 def _whole(value):
     return round(value) if value is not None else None
+
+
+def label_code(label):
+    """"Fall 2026" -> 202710, or None when the label isn't a term."""
+    m = _LABEL_RE.match((label or "").strip())
+    if not m:
+        return None
+    year_offset, suffix = _SEASON_CODES[m.group(1)]
+    return (int(m.group(2)) + year_offset) * 100 + suffix
 
 
 def _course_link(code, since, query_one):
@@ -91,8 +108,8 @@ def course_history(code, query, query_one):
 
     instructors = query("""
         SELECT bci.instructor_name, bci.professor_slug, pc.name AS catalog_name,
-               bci.terms_taught, bci.last_term_label, bci.recent_terms,
-               bci.avg_enrollment
+               bci.terms_taught, bci.last_term_code, bci.last_term_label, bci.recent_terms,
+               bci.avg_enrollment, pc.image_url, pc.focus_x, pc.focus_y
         FROM banner_course_instructors bci
         LEFT JOIN professors_catalog pc ON pc.slug = bci.professor_slug
         WHERE bci.subject_course = %s
@@ -117,8 +134,12 @@ def course_history(code, query, query_one):
             "slug": r["professor_slug"],
             "termsTaught": r["terms_taught"],
             "lastTerm": r["last_term_label"],
+            "lastTermCode": r["last_term_code"],
             "recentTerms": _terms(r["recent_terms"]),
             "avgClassSize": _whole(r["avg_enrollment"]),
+            "imageUrl": r["image_url"],
+            "focusX": r["focus_x"] if r["focus_x"] is not None else 50.0,
+            "focusY": r["focus_y"] if r["focus_y"] is not None else 30.0,
         } for r in instructors],
         "replacedBy": _course_link(*successor, query_one) if successor else None,
         "replaces": _course_link(*predecessor, query_one) if predecessor else None,

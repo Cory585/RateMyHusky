@@ -223,8 +223,11 @@ def professor_html(profile: dict, reviews: list, canonical: str) -> str:
     ])
 
     course_codes = profile.get("courses") or []
+    unlinked = set(profile.get("unlinkedCourses") or [])
     course_items = "".join(
-        f'<li><a href="{SITE}/courses/{_esc(code)}">{_esc(code)}</a></li>' for code in course_codes
+        f"<li>{_esc(code)}</li>" if code in unlinked
+        else f'<li><a href="{SITE}/courses/{_esc(code)}">{_esc(code)}</a></li>'
+        for code in course_codes
     )
     courses_block = f"<h2>Courses taught</h2><ul>{course_items}</ul>" if course_items else ""
 
@@ -352,6 +355,7 @@ def course_html(detail: dict, canonical: str) -> str:
         ("Average rating", f"{avg:.1f}/5" if avg is not None else None),
         ("Difficulty", f"{diff:.1f}/5" if diff is not None else None),
         ("Ratings", n or None),
+        ("Last taught", (detail.get("history") or {}).get("lastOffered")),
         ("Credits", catalog.get("credits")),
         ("Prerequisites", catalog.get("prerequisites")),
         ("Corequisites", catalog.get("corequisites")),
@@ -643,6 +647,7 @@ def _professor_view(payload: dict, colleagues: list) -> dict:
         "professorUrl": rmp["professorUrl"],
         "totalRatings": payload["summary"]["numRatings"],
         "courses": [c["code"] for c in payload["courses"]],
+        "unlinkedCourses": [c["code"] for c in payload["courses"] if not c["hasPage"]],
         "colleagues": colleagues,
         "awards": payload.get("awards") or [],
     }
