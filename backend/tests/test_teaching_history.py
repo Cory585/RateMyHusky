@@ -24,11 +24,13 @@ INSTRUCTORS = [
     {"instructor_name": "Nunez, Lucia", "professor_slug": "lucia-nunez", "catalog_name": "Lucia Nunez",
      "terms_taught": 3, "last_term_code": "202710", "last_term_label": "Fall 2026",
      "recent_terms": "Fall 2026,Spring 2026,Fall 2025", "avg_enrollment": 111.06,
-     "image_url": "https://img/n.jpg", "focus_x": 40.0, "focus_y": 20.0},
+     "image_url": "https://img/n.jpg", "focus_x": 40.0, "focus_y": 20.0,
+     "total_reviews": 57, "total_comments": 41, "would_take_again_pct": 86.66},
     {"instructor_name": "Doe, Jane Q", "professor_slug": None, "catalog_name": None,
      "terms_taught": 1, "last_term_code": "202630", "last_term_label": "Spring 2026",
      "recent_terms": "Spring 2026", "avg_enrollment": None,
-     "image_url": None, "focus_x": None, "focus_y": None},
+     "image_url": None, "focus_x": None, "focus_y": None,
+     "total_reviews": None, "total_comments": None, "would_take_again_pct": None},
 ]
 
 
@@ -87,7 +89,8 @@ def test_course_history_instructors_link_matched_and_name_the_rest():
                       "lastTerm": "Fall 2026",
                       "recentTerms": ["Fall 2026", "Spring 2026", "Fall 2025"],
                       "avgClassSize": 111, "imageUrl": "https://img/n.jpg",
-                      "focusX": 40.0, "focusY": 20.0}
+                      "focusX": 40.0, "focusY": 20.0,
+                      "totalReviews": 57, "totalComments": 41, "wouldTakeAgainPct": 86.7}
     assert got[1]["name"] == "Jane Q Doe"
     assert got[1]["slug"] is None
     assert got[1]["avgClassSize"] is None
@@ -105,6 +108,7 @@ def test_instructor_query_selects_term_code_and_photo():
     sql = next(s for s, _ in seen if "FROM banner_course_instructors" in s)
     assert "bci.last_term_code" in sql
     assert "pc.image_url" in sql and "pc.focus_x" in sql and "pc.focus_y" in sql
+    assert "pc.total_reviews" in sql and "pc.total_comments" in sql and "pc.would_take_again_pct" in sql
 
 
 def test_course_history_is_none_without_banner_data():

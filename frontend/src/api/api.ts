@@ -356,7 +356,10 @@ export interface RecentInstructor {
   rating: number | null;
   /** Terms they taught it in the last year, newest first. */
   terms: string[];
-  avgClassSize: number | null;
+  /** Their catalog-wide numbers, as the professor catalog shows them; null with no profile. */
+  totalReviews: number | null;
+  totalComments: number | null;
+  wouldTakeAgainPct: number | null;
 }
 
 /** NUBanner history (Fall 2021 on). The payload also carries instructors[]; the page reads recentInstructors. */

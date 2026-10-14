@@ -220,8 +220,9 @@ const Course = () => {
 									focusX={r.focusX}
 									focusY={r.focusY}
 									rating={r.rating}
-									footerLeft={r.terms.join(' · ')}
-									footerRight={r.avgClassSize != null ? `avg ${r.avgClassSize} students` : ''}
+									footerLeft={r.totalReviews != null ? `${r.totalReviews.toLocaleString()} ratings` : '—'}
+									footerCenter={r.totalComments != null ? `${r.totalComments.toLocaleString()} comments` : '—'}
+									footerRight={r.wouldTakeAgainPct != null ? `${Math.round(r.wouldTakeAgainPct)}% again` : '—'}
 									to={r.slug ? `/professors/${r.slug}` : undefined}
 									fromPage={fromPage}
 								/>
@@ -353,6 +354,8 @@ type ProfCardProps = {
 	focusY: number;
 	rating: number | null;
 	footerLeft: string;
+	/** Recent Professors' middle stat, as on the professor catalog's cards. */
+	footerCenter?: string;
 	footerRight: string;
 	/** Most-Rated numbers its cards; Recent Professors doesn't. */
 	rank?: number;
@@ -361,7 +364,7 @@ type ProfCardProps = {
 	fromPage: { label: string; url: string };
 };
 
-function ProfCard({ name, imageUrl, focusX, focusY, rating, footerLeft, footerRight, rank, to, fromPage }: ProfCardProps) {
+function ProfCard({ name, imageUrl, focusX, focusY, rating, footerLeft, footerCenter, footerRight, rank, to, fromPage }: ProfCardProps) {
 	const content = (
 		<>
 			<div className="course-top-prof-photo">
@@ -397,6 +400,7 @@ function ProfCard({ name, imageUrl, focusX, focusY, rating, footerLeft, footerRi
 				</div>
 				<div className="course-top-prof-footer">
 					<span>{footerLeft}</span>
+					{footerCenter != null && <span className="course-top-prof-footer--center">{footerCenter}</span>}
 					<span className="course-top-prof-footer--right">{footerRight}</span>
 				</div>
 			</div>
