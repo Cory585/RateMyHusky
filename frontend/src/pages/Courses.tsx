@@ -6,6 +6,7 @@ import {
 	fetchCoursesCatalog,
 	fetchSearchSuggestions,
 	type CatalogCourse,
+	type CourseSort,
 	type CourseSuggestion,
 } from '../api/api';
 import Dropdown from '../components/Dropdown';
@@ -19,7 +20,9 @@ import './Courses.css';
 
 const SORT_OPTIONS = [
 	{ value: 'alpha', label: 'A - Z' },
+	{ value: 'alpha_desc', label: 'Z - A' },
 	{ value: 'rating', label: 'Highest Rating' },
+	{ value: 'rating_asc', label: 'Lowest Rating' },
 	{ value: 'recent', label: 'Most Recent' },
 ];
 
@@ -28,7 +31,7 @@ interface Filters {
 	dept: string;
 	minRating: number;
 	maxRating: number;
-	sort: 'alpha' | 'rating' | 'recent';
+	sort: CourseSort;
 	page: number;
 }
 
@@ -44,8 +47,8 @@ const DEFAULT_FILTERS: Filters = {
 function getFiltersFromSearchParams(sp: URLSearchParams): Filters {
 	const sortValue = sp.get('sort');
 	const sort =
-		sortValue === 'rating' || sortValue === 'recent' || sortValue === 'alpha'
-			? sortValue
+		sortValue && SORT_OPTIONS.some((o) => o.value === sortValue)
+			? (sortValue as CourseSort)
 			: 'alpha';
 
 	const minRating = Number(sp.get('minRating') || '0');
@@ -166,6 +169,7 @@ export default function Courses() {
 			sort: filters.sort,
 			page: filters.page,
 			limit: pageSize,
+			rated: true,
 		})
 			.then((data) => {
 				if (cancelled) return;
@@ -476,7 +480,7 @@ export default function Courses() {
 								<div key={i} className="prof-card skeleton" />
 							))}
 						</div>
-					) : courses.filter((c) => c.avgRating != null).length === 0 ? (
+					) : courses.length === 0 ? (
 						<div className="catalog-empty">
 							<p>No courses match your filters.</p>
 							<button className="clear-btn prominent" onClick={clearFilters}>
@@ -485,7 +489,7 @@ export default function Courses() {
 						</div>
 					) : (
 						<div className="catalog-grid" ref={gridRef}>
-							{courses.filter((c) => c.avgRating != null).map((course) => (
+							{courses.map((course) => (
 								<div
 									key={course.code}
 									className="prof-card course-card"

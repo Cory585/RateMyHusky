@@ -356,7 +356,11 @@ export interface RecentInstructor {
   rating: number | null;
   /** Terms they taught it in the last year, newest first. */
   terms: string[];
-  avgClassSize: number | null;
+  /** Their ratings of this course: 0 with none, null when unmatched. */
+  numRatings: number | null;
+  /** Their catalog-wide numbers; null with no profile. 0% would-take-again is real. */
+  totalComments: number | null;
+  wouldTakeAgainPct: number | null;
 }
 
 /** NUBanner history (Fall 2021 on). The payload also carries instructors[]; the page reads recentInstructors. */
@@ -393,6 +397,8 @@ export interface CourseDetail {
   history: CourseHistory | null;
 }
 
+export type ProfessorSort = 'alpha' | 'alpha_desc' | 'rating' | 'rating_asc' | 'comments';
+
 export function fetchProfessorsCatalog(params: {
   q?: string;
   college?: string;
@@ -401,7 +407,7 @@ export function fetchProfessorsCatalog(params: {
   maxRating?: number;
   minReviews?: number;
   maxReviews?: number;
-  sort?: 'alpha' | 'rating' | 'comments';
+  sort?: ProfessorSort;
   page?: number;
   limit?: number;
 }): Promise<CatalogResponse> {
@@ -432,14 +438,17 @@ export const fetchDepartments = (college?: string) => {
 
 export const fetchCourseDepartments = () => get<string[]>('/api/course-departments');
 
+export type CourseSort = 'alpha' | 'alpha_desc' | 'rating' | 'rating_asc' | 'recent';
+
 export function fetchCoursesCatalog(params: {
   q?: string;
   dept?: string;
   minRating?: number;
   maxRating?: number;
-  sort?: 'alpha' | 'rating' | 'sections' | 'recent';
+  sort?: CourseSort | 'sections';
   page?: number;
   limit?: number;
+  rated?: boolean;
 }): Promise<CourseCatalogResponse> {
   const sp = new URLSearchParams();
   if (params.q) sp.set('q', params.q);
@@ -449,6 +458,7 @@ export function fetchCoursesCatalog(params: {
   if (params.sort) sp.set('sort', params.sort);
   if (params.page) sp.set('page', String(params.page));
   if (params.limit) sp.set('limit', String(params.limit));
+  if (params.rated) sp.set('rated', '1');
   return get<CourseCatalogResponse>(`/api/courses-catalog?${sp.toString()}`);
 }
 
