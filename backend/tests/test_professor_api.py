@@ -109,3 +109,24 @@ def test_wrong_method_is_a_json_405(client):
     resp = client.post("/api/stats")
     assert resp.status_code == 405
     assert "error" in resp.get_json()
+
+
+def _spy_cache(monkeypatch, payload):
+    sets = []
+    monkeypatch.setattr(server, "build_payload", lambda *a, **k: dict(payload))
+    monkeypatch.setattr(server, "cache_set", lambda key, data: sets.append(key))
+    return sets
+
+
+def test_failed_history_payload_is_served_but_not_cached(client, monkeypatch):
+    sets = _spy_cache(monkeypatch, {"version": 2, "_historyFailed": True})
+    resp = client.get("/api/professors/olin-guha/full")
+    assert resp.status_code == 200
+    assert "_historyFailed" not in resp.get_json()
+    assert sets == []
+
+
+def test_clean_payload_is_cached(client, monkeypatch):
+    sets = _spy_cache(monkeypatch, {"version": 2})
+    assert client.get("/api/professors/olin-guha/full").status_code == 200
+    assert sets == ["prof_full:olin-guha"]

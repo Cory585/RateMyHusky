@@ -267,6 +267,19 @@ def test_history_failure_leaves_courses_as_today(caplog):
     assert len([r for r in caplog.records if r.levelname == "ERROR"]) == 1
 
 
+def test_history_failure_flags_the_payload_so_it_is_not_cached():
+    def broken(slug, query):
+        raise RuntimeError("banner down")
+
+    data, _, _ = _build(history=broken)
+    assert data["_historyFailed"] is True
+
+
+def test_history_success_has_no_failure_flag():
+    data, _ = _with_history()
+    assert "_historyFailed" not in data
+
+
 # ── edge cases ──
 
 def test_unrated_professor_is_all_null():

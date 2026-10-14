@@ -87,13 +87,14 @@ def build_courses(course_rows, history):
 
 
 def _course_history(slug, query, course_history_for):
-    """Banner's courses for the professor, or [] when they can't be read:
-    history decorates the page and never fails it."""
+    """(courses, failed): Banner's courses for the professor, or [] when they
+    can't be read: history decorates the page and never fails it, and failed
+    True keeps the caller from caching the page."""
     try:
-        return course_history_for(slug, query)
+        return course_history_for(slug, query), False
     except Exception:
         log.exception("teaching history failed for professor %s", slug)
-        return []
+        return [], True
 
 
 def build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions,
@@ -119,8 +120,8 @@ def build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions,
     mentions = fetch_reddit_mentions(prof["slug"], query, moderation.sql_filter("t"))
     for m in mentions:
         m["body"] = sanitize(m["body"]) if m["body"] else ""
-    history = _course_history(prof["slug"], query, course_history_for)
-    return {
+    history, history_failed = _course_history(prof["slug"], query, course_history_for)
+    payload = {
         "version": 2,
         "identity": build_identity(prof),
         "summary": build_summary(own, mentions),
@@ -131,3 +132,6 @@ def build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions,
         "redditMentions": mentions,
         "awards": awards_for(prof["name_key"]),
     }
+    if history_failed:
+        payload["_historyFailed"] = True    # private: server.professor_payload pops it
+    return payload

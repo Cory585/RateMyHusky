@@ -28,7 +28,7 @@ ROWS = [
 
 
 class FakeDB:
-    def __init__(self, course=COURSE, rows=ROWS, newest="202710"):
+    def __init__(self, course=COURSE, rows=ROWS, newest="Fall 2026"):
         self.course, self.rows, self.newest, self.calls = course, rows, newest, []
 
     def query(self, sql, params=None):
@@ -39,13 +39,13 @@ class FakeDB:
     def query_one(self, sql, params=None):
         self.calls.append(sql)
         if "FROM banner_terms" in sql:
-            return {"code": self.newest}
+            return {"label": self.newest}
         assert "FROM course_catalog" in sql
         return dict(self.course) if self.course and params[0] == self.course["code"] else None
 
 
 def test_contract_keys():
-    data = build_course("CS3500", FakeDB().query, FakeDB().query_one)
+    data = build_course("CS3500", FakeDB().query, FakeDB().query_one, history_for=lambda c, q, qo: None)
     assert set(data) == {"code", "name", "department", "catalog", "summary", "professors", "history"}
     assert set(data["catalog"]) == {"description", "credits", "prerequisites", "corequisites", "nupath"}
     assert set(data["summary"]) == {"rating", "difficulty", "numRatings", "hoursPerWeek", "bySource"}
@@ -125,7 +125,7 @@ HISTORY = {
 }
 
 
-def _with_history(history=HISTORY, newest="202710"):
+def _with_history(history=HISTORY, newest="Fall 2026"):
     db = FakeDB(newest=newest)
     return build_course("CS3500", db.query, db.query_one,
                         history_for=lambda c, q, qo: copy.deepcopy(history))
@@ -145,8 +145,33 @@ def test_recent_is_a_year_back_from_the_newest_term():
 
 def test_recent_window_includes_the_cutoff_term():
     # newest 202630 -> cutoff 202530: Amal's last term is exactly the cutoff.
-    recent = _with_history(newest="202630")["history"]["recentInstructors"]
+    recent = _with_history(newest="Spring 2026")["history"]["recentInstructors"]
     assert "Amal Ahmed" in [r["name"] for r in recent]
+
+
+def test_cps_newest_term_does_not_shift_the_cutoff():
+    # Newest is CPS Spring 2027 (code 202735, label "Spring 2027"): cutoff is main-track
+    # Spring 2026 (202630), inclusive, so the Spring 2026 instructor stays in.
+    history = {**HISTORY, "instructors": [
+        _inst("olin-guha", "Olin Guha", "202735", ["Spring 2027"]),
+        _inst(None, "Jane Q Doe", "202630", ["Spring 2026"]),
+        _inst("amal-ahmed", "Amal Ahmed", "202530", ["Fall 2025"])]}
+    recent = _with_history(history, newest="Spring 2027")["history"]["recentInstructors"]
+    assert [r["name"] for r in recent] == ["Olin Guha", "Jane Q Doe"]
+    assert recent[1]["terms"] == ["Spring 2026"]
+
+
+def test_instructor_with_unreadable_last_term_drops():
+    history = {**HISTORY, "instructors": [
+        _inst("olin-guha", "Olin Guha", "202710", ["Fall A 2026"]),
+        _inst("amal-ahmed", "Amal Ahmed", "202710", ["Fall 2026"])]}
+    recent = _with_history(history)["history"]["recentInstructors"]
+    assert [r["slug"] for r in recent] == ["amal-ahmed"]
+
+
+def test_unreadable_newest_label_means_no_recent_instructors():
+    h = _with_history(newest="Fall A 2026")["history"]
+    assert h is not None and h["recentInstructors"] == []
 
 
 def test_recent_terms_are_cut_to_the_window():
@@ -232,6 +257,14 @@ def test_history_failure_still_builds_the_page(caplog):
     assert [p["slug"] for p in data["professors"]] == ["olin-guha", "amal-ahmed"]
     assert all(p["lastTerm"] is None for p in data["professors"])
     assert len([r for r in caplog.records if r.levelname == "ERROR"]) == 1
+    assert data["_historyFailed"] is True
+
+
+def test_unknown_to_banner_or_success_has_no_failure_flag():
+    db = FakeDB()
+    assert "_historyFailed" not in build_course("CS3500", db.query, db.query_one,
+                                                history_for=lambda c, q, qo: None)
+    assert "_historyFailed" not in _with_history()
 
 
 class _FailingConn:
@@ -297,3 +330,24 @@ def test_courses_catalog_sends_no_rating_filter_unless_asked(monkeypatch):
     assert resp.get_json()["courses"][0]["avgRating"] is None
     assert not any("avg_rating >=" in s for s in seen)
     assert any("avg_rating DESC NULLS LAST, lower(code) ASC" in s for s in seen)
+
+
+def _spy_cache(monkeypatch, payload):
+    sets = []
+    monkeypatch.setattr(server, "build_course", lambda *a, **k: dict(payload))
+    monkeypatch.setattr(server, "cache_set", lambda key, data: sets.append(key))
+    return sets
+
+
+def test_failed_history_payload_is_served_but_not_cached(client, monkeypatch):
+    sets = _spy_cache(monkeypatch, {"code": "CS3500", "_historyFailed": True})
+    resp = client.get("/api/courses/cs3500")
+    assert resp.status_code == 200
+    assert "_historyFailed" not in resp.get_json()
+    assert sets == []
+
+
+def test_clean_course_payload_is_cached(client, monkeypatch):
+    sets = _spy_cache(monkeypatch, {"code": "CS3500"})
+    assert client.get("/api/courses/cs3500").status_code == 200
+    assert sets == ["course:CS3500"]

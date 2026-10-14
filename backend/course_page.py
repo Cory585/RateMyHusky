@@ -2,7 +2,7 @@
 
 Two statements: the course (catalog details and NUpath in one row), then every
 source_summary row for the code, with professor names and photos joined on.
-Then Banner teaching history, guarded: course_history and the newest term code.
+Then Banner teaching history, guarded: course_history and the newest term label.
 """
 
 import logging
@@ -33,7 +33,8 @@ def build_recent(instructors, professors, cutoff):
     rating = {p["slug"]: p["rating"] for p in professors}
     recent, seen = [], set()
     for i in instructors:
-        if int(i["lastTermCode"]) < cutoff or (i["slug"] and i["slug"] in seen):
+        last = teaching_history.label_code(i["lastTerm"])
+        if last is None or last < cutoff or (i["slug"] and i["slug"] in seen):
             continue
         seen.add(i["slug"])
         recent.append({
@@ -47,19 +48,24 @@ def build_recent(instructors, professors, cutoff):
 
 
 def _history(code, query, query_one, history_for, professors):
-    """course_history plus recentInstructors, or None. Banner decorates the
-    page and never fails it, so any error reads as "no history"."""
+    """(history, failed): course_history plus recentInstructors, or None. Banner
+    decorates the page and never fails it, so any error reads as "no history"
+    with failed True, which keeps the caller from caching the page.
+    The cutoff and the instructors' terms are both in the label_code scheme: the
+    newest term's label (not its code, which may be a CPS/Law one) minus a year."""
     try:
         history = history_for(code, query, query_one)
         if history is None:
-            return None
-        newest = query_one("SELECT max(term_code) AS code FROM banner_terms")
-        cutoff = int(newest["code"]) - RECENT_SPAN if newest and newest["code"] else None
-        recent = build_recent(history["instructors"], professors, cutoff) if cutoff else []
-        return {**history, "recentInstructors": recent}
+            return None, False
+        newest = query_one(
+            "SELECT term_label AS label FROM banner_terms ORDER BY term_code DESC LIMIT 1")
+        newest_code = teaching_history.label_code(newest["label"]) if newest else None
+        recent = build_recent(history["instructors"], professors,
+                              newest_code - RECENT_SPAN) if newest_code else []
+        return {**history, "recentInstructors": recent}, False
     except Exception:
         log.exception("teaching history failed for course %s", code)
-        return None
+        return None, True
 
 
 def build_course(code, query, query_one, history_for=teaching_history.course_history):
@@ -91,7 +97,7 @@ def build_course(code, query, query_one, history_for=teaching_history.course_his
         "numRatings": int(r["num_ratings"] or 0),
     } for r in rows if r["professor_slug"] and r["source"] == "blend" and r["name"] is not None]
     professors.sort(key=lambda p: (-p["numRatings"], p["name"]))
-    history = _history(code, query, query_one, history_for, professors)
+    history, history_failed = _history(code, query, query_one, history_for, professors)
     banner = {}
     for i in (history or {}).get("instructors", []):
         if i["slug"]:
@@ -99,7 +105,7 @@ def build_course(code, query, query_one, history_for=teaching_history.course_his
     for p in professors:
         i = banner.get(p["slug"], {})
         p["lastTerm"], p["avgClassSize"] = i.get("lastTerm"), i.get("avgClassSize")
-    return {
+    payload = {
         "code": course["code"], "name": course["name"], "department": course["department"] or "",
         "catalog": build_catalog(course),
         "summary": {
@@ -111,3 +117,6 @@ def build_course(code, query, query_one, history_for=teaching_history.course_his
         "professors": professors,
         "history": history,
     }
+    if history_failed:
+        payload["_historyFailed"] = True    # private: server.course_payload pops it
+    return payload

@@ -935,7 +935,8 @@ def professor_payload(slug):
         data = build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions)
         if data is None:
             return None
-        cache_set(cache_key, data)
+        if not data.pop("_historyFailed", False):   # a failed Banner read is not cached
+            cache_set(cache_key, data)
     return data
 
 
@@ -1344,7 +1345,8 @@ def course_payload(code):
         data = build_course(code_norm, query, query_one)
         if data is None:
             return None
-        cache_set(cache_key, data)
+        if not data.pop("_historyFailed", False):   # a failed Banner read is not cached
+            cache_set(cache_key, data)
     return data
 
 
