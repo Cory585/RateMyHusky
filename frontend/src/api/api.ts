@@ -69,7 +69,7 @@ export interface RmpData {
 
 export interface ProfessorCourse {
   code: string;
-  /** The catalog name; Banner's title on a course no one has rated. null when neither has one. */
+  /** The catalog name, else Banner's title. null when neither has one. */
   name: string | null;
   /** null on a course Banner says they taught but no one has rated. */
   rating: number | null;
@@ -80,8 +80,9 @@ export interface ProfessorCourse {
   /** Terms they taught it, newest first, at most 6 (NUBanner, Fall 2021 on). Empty without a Banner record. */
   terms: string[];
   lastTerm: string | null;
-  /** The code has a course page to link to. */
-  hasPage: boolean;
+  /** The code has a course page to link to. Absent from payloads built before
+   *  teaching history (deploy rollout, cached /full): fall back to `name != null`. */
+  hasPage?: boolean;
 }
 
 /** A teaching award from a page Northeastern publishes; newest first. */

@@ -28,18 +28,21 @@ ROWS = [
 
 
 class FakeDB:
-    def __init__(self, course=COURSE, rows=ROWS, newest="Fall 2026"):
-        self.course, self.rows, self.newest, self.calls = course, rows, newest, []
+    def __init__(self, course=COURSE, rows=ROWS, newest="Fall 2026", terms=None):
+        self.course, self.rows, self.calls = course, rows, []
+        # banner_terms rows; by default one open term, the newest.
+        self.terms = terms if terms is not None else (
+            [{"label": newest, "view_only": False}] if newest else [])
 
     def query(self, sql, params=None):
         self.calls.append(sql)
+        if "FROM banner_terms" in sql:
+            return [dict(t) for t in self.terms]
         assert "FROM source_summary" in sql
         return [dict(r) for r in self.rows]
 
     def query_one(self, sql, params=None):
         self.calls.append(sql)
-        if "FROM banner_terms" in sql:
-            return {"label": self.newest}
         assert "FROM course_catalog" in sql
         return dict(self.course) if self.course and params[0] == self.course["code"] else None
 
@@ -105,9 +108,9 @@ def test_two_statements_before_banner_history():
 
 # ── Banner teaching history ──
 
-def _inst(slug, name, code, terms, size=None):
+def _inst(slug, name, terms, size=None):
     return {"name": name, "slug": slug, "termsTaught": len(terms), "lastTerm": terms[0],
-            "lastTermCode": code, "recentTerms": terms, "avgClassSize": size,
+            "recentTerms": terms, "avgClassSize": size,
             "imageUrl": f"https://img/{slug}.jpg" if slug else None, "focusX": 50.0, "focusY": 30.0}
 
 
@@ -117,16 +120,16 @@ HISTORY = {
     "creditHours": "4", "typicalClassSize": 43, "instructorCount": 3,
     "replacedBy": None, "replaces": None,
     "instructors": [
-        _inst("olin-guha", "Olin Guha", "202710",
+        _inst("olin-guha", "Olin Guha",
               ["Fall 2026", "Summer 1 2026", "Spring 2026", "Fall 2025", "Spring 2025"], 40),
-        _inst(None, "Jane Q Doe", "202630", ["Spring 2026"]),
-        _inst("amal-ahmed", "Amal Ahmed", "202530", ["Spring 2025", "Fall 2024"], 35),
+        _inst(None, "Jane Q Doe", ["Spring 2026"]),
+        _inst("amal-ahmed", "Amal Ahmed", ["Spring 2025", "Fall 2024"], 35),
     ],
 }
 
 
-def _with_history(history=HISTORY, newest="Fall 2026"):
-    db = FakeDB(newest=newest)
+def _with_history(history=HISTORY, newest="Fall 2026", terms=None):
+    db = FakeDB(newest=newest, terms=terms)
     return build_course("CS3500", db.query, db.query_one,
                         history_for=lambda c, q, qo: copy.deepcopy(history))
 
@@ -153,9 +156,9 @@ def test_cps_newest_term_does_not_shift_the_cutoff():
     # Newest is CPS Spring 2027 (code 202735, label "Spring 2027"): cutoff is main-track
     # Spring 2026 (202630), inclusive, so the Spring 2026 instructor stays in.
     history = {**HISTORY, "instructors": [
-        _inst("olin-guha", "Olin Guha", "202735", ["Spring 2027"]),
-        _inst(None, "Jane Q Doe", "202630", ["Spring 2026"]),
-        _inst("amal-ahmed", "Amal Ahmed", "202530", ["Fall 2025"])]}
+        _inst("olin-guha", "Olin Guha", ["Spring 2027"]),
+        _inst(None, "Jane Q Doe", ["Spring 2026"]),
+        _inst("amal-ahmed", "Amal Ahmed", ["Fall 2025"])]}
     recent = _with_history(history, newest="Spring 2027")["history"]["recentInstructors"]
     assert [r["name"] for r in recent] == ["Olin Guha", "Jane Q Doe"]
     assert recent[1]["terms"] == ["Spring 2026"]
@@ -163,15 +166,48 @@ def test_cps_newest_term_does_not_shift_the_cutoff():
 
 def test_instructor_with_unreadable_last_term_drops():
     history = {**HISTORY, "instructors": [
-        _inst("olin-guha", "Olin Guha", "202710", ["Fall A 2026"]),
-        _inst("amal-ahmed", "Amal Ahmed", "202710", ["Fall 2026"])]}
+        _inst("olin-guha", "Olin Guha", ["Fall A 2026"]),
+        _inst("amal-ahmed", "Amal Ahmed", ["Fall 2026"])]}
     recent = _with_history(history)["history"]["recentInstructors"]
     assert [r["slug"] for r in recent] == ["amal-ahmed"]
+
+
+def test_instructor_whose_last_label_is_unreadable_stays_on_an_in_window_term():
+    inst = {**_inst("olin-guha", "Olin Guha", ["Fall A 2026", "Spring 2026"]), "lastTerm": "Fall A 2026"}
+    recent = _with_history({**HISTORY, "instructors": [inst]})["history"]["recentInstructors"]
+    assert [(r["slug"], r["terms"]) for r in recent] == [("olin-guha", ["Spring 2026"])]
 
 
 def test_unreadable_newest_label_means_no_recent_instructors():
     h = _with_history(newest="Fall A 2026")["history"]
     assert h is not None and h["recentInstructors"] == []
+
+
+def test_a_future_term_open_for_registration_does_not_shift_the_cutoff():
+    # Spring 2027 opens while Fall 2026 runs: the window still starts at Fall 2025.
+    terms = [{"label": "Spring 2027", "view_only": False}, {"label": "Fall 2026", "view_only": False},
+             {"label": "Fall 2025", "view_only": True}]
+    recent = _with_history(terms=terms)["history"]["recentInstructors"]
+    assert [r["name"] for r in recent] == ["Olin Guha", "Jane Q Doe"]
+    assert recent[0]["terms"] == ["Fall 2026", "Summer 1 2026", "Spring 2026", "Fall 2025"]
+
+
+def test_cutoff_skips_unreadable_labels_and_falls_back_to_the_newest_term():
+    from course_page import recent_cutoff
+    assert recent_cutoff([{"label": "Fall A 2026", "view_only": False},
+                          {"label": "Fall 2026", "view_only": False}]) == 202610
+    assert recent_cutoff([{"label": "Fall 2025", "view_only": True},
+                          {"label": "Spring 2026", "view_only": True}]) == 202530
+    assert recent_cutoff([{"label": "Fall A 2026", "view_only": False}]) is None
+
+
+def test_unmatched_instructors_with_one_name_get_one_card():
+    history = {**HISTORY, "instructors": [
+        _inst(None, "Jane Q Doe", ["Fall 2026"]), _inst(None, "Jane Q Doe", ["Spring 2026"]),
+        _inst(None, "John Roe", ["Spring 2026"])]}
+    recent = _with_history(history)["history"]["recentInstructors"]
+    assert [(r["name"], r["terms"]) for r in recent] == [("Jane Q Doe", ["Fall 2026"]),
+                                                         ("John Roe", ["Spring 2026"])]
 
 
 def test_recent_terms_are_cut_to_the_window():
@@ -181,7 +217,7 @@ def test_recent_terms_are_cut_to_the_window():
 
 def test_recent_drops_terms_it_cannot_read():
     history = {**HISTORY, "instructors": [
-        _inst("olin-guha", "Olin Guha", "202710", ["Fall 2026", "Fall A 2026", "Spring 2026"])]}
+        _inst("olin-guha", "Olin Guha", ["Fall 2026", "Fall A 2026", "Spring 2026"])]}
     olin = _with_history(history)["history"]["recentInstructors"][0]
     assert olin["terms"] == ["Fall 2026", "Spring 2026"]
 
@@ -200,7 +236,7 @@ def test_unmatched_instructor_has_no_slug_photo_or_rating():
 
 
 def test_matched_instructor_with_no_reviews_here_has_no_rating():
-    history = {**HISTORY, "instructors": [_inst("new-prof", "New Prof", "202710", ["Fall 2026"])]}
+    history = {**HISTORY, "instructors": [_inst("new-prof", "New Prof", ["Fall 2026"])]}
     assert _with_history(history)["history"]["recentInstructors"][0]["rating"] is None
 
 
@@ -212,15 +248,15 @@ def test_dormant_course_has_no_recent_instructors_but_keeps_history():
 
 
 def test_recent_is_capped_at_ten_newest_first():
-    many = [_inst(f"p{i}", f"P{i}", "202710", ["Fall 2026"]) for i in range(12)]
+    many = [_inst(f"p{i}", f"P{i}", ["Fall 2026"]) for i in range(12)]
     recent = _with_history({**HISTORY, "instructors": many})["history"]["recentInstructors"]
     assert [r["slug"] for r in recent] == [f"p{i}" for i in range(10)]
 
 
 def test_one_professor_under_two_banner_names_gets_one_card():
     history = {**HISTORY, "instructors": [
-        _inst("olin-guha", "Olin Guha", "202710", ["Fall 2026"], 40),
-        _inst("olin-guha", "Olin Guha", "202630", ["Spring 2026"], 90),
+        _inst("olin-guha", "Olin Guha", ["Fall 2026"], 40),
+        _inst("olin-guha", "Olin Guha", ["Spring 2026"], 90),
     ]}
     data = _with_history(history)
     assert [r["slug"] for r in data["history"]["recentInstructors"]] == ["olin-guha"]
@@ -291,6 +327,21 @@ def test_a_failed_statement_rolls_back_so_the_requests_next_query_runs(monkeypat
     assert conn.rolled_back
 
 
+class _StaleConn(_FailingConn):
+    def execute(self, sql, params):
+        raise psycopg2.OperationalError("server closed the connection unexpectedly")
+
+
+def test_a_failed_retry_on_a_fresh_connection_rolls_back_too(monkeypatch):
+    stale, fresh = _StaleConn(), _FailingConn()
+    conns = iter([stale, fresh])
+    monkeypatch.setattr(server, "get_db", lambda: next(conns))
+    monkeypatch.setattr(server, "_discard_db_conn", lambda: None)
+    with pytest.raises(psycopg2.errors.UndefinedTable):
+        server.query("SELECT term_label AS label, view_only FROM banner_terms")
+    assert fresh.rolled_back
+
+
 @pytest.fixture
 def client(monkeypatch):
     db = FakeDB()
@@ -345,9 +396,12 @@ def test_failed_history_payload_is_served_but_not_cached(client, monkeypatch):
     assert resp.status_code == 200
     assert "_historyFailed" not in resp.get_json()
     assert sets == []
+    assert resp.headers["Cache-Control"] == "no-store"   # nor by the CDN or browser
 
 
 def test_clean_course_payload_is_cached(client, monkeypatch):
     sets = _spy_cache(monkeypatch, {"code": "CS3500"})
-    assert client.get("/api/courses/cs3500").status_code == 200
+    resp = client.get("/api/courses/cs3500")
+    assert resp.status_code == 200
     assert sets == ["course:CS3500"]
+    assert resp.headers["Cache-Control"] == "public, max-age=3600"

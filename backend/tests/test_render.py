@@ -289,6 +289,27 @@ def test_render_course_route_returns_html(render_client):
     assert resp.headers["Cache-Control"] == "public, max-age=3600, s-maxage=86400"
 
 
+def _flag_history_failed(monkeypatch, accessor):
+    import flask
+    import render
+    real = getattr(render, accessor)()
+
+    def failed(key):
+        flask.g.history_failed = True   # what server's *_payload sets after a failed Banner read
+        return real(key)
+
+    monkeypatch.setattr(render, accessor, lambda: failed)
+
+
+def test_render_pages_after_a_failed_banner_read_are_not_cached(render_client, monkeypatch):
+    _flag_history_failed(monkeypatch, "_get_professor_payload")
+    _flag_history_failed(monkeypatch, "_get_course_payload")
+    for path in ("/render/professors/francis-georges", "/render/courses/econ1115"):
+        resp = render_client.get(path)
+        assert resp.status_code == 200
+        assert resp.headers["Cache-Control"] == "no-store"
+
+
 def _course(**summary_over):
     summary = {"rating": 4.1, "difficulty": 2.5, "numRatings": 342, "hoursPerWeek": None,
                "bySource": {"rmp": {"rating": 4.1, "numRatings": 342}}}
@@ -657,6 +678,14 @@ def test_professor_html_faq_present_with_all_stats():
     assert "<h3>How hard are Francis Georges&#x27;s classes?</h3>" in html
     assert "<h3>What courses does Francis Georges teach at Northeastern?</h3>" in html
     assert "CS3500" in html.split("What courses does Francis Georges teach")[1]
+
+
+def test_professor_html_faq_names_at_most_eight_courses():
+    codes = [f"CS{1000 + i}" for i in range(11)]
+    html = professor_html(_base_profile(courses=codes), [], "https://ratemyhusky.com/professors/x")
+    assert ("Francis Georges has taught CS1000, CS1001, CS1002, CS1003, CS1004, CS1005, "
+            "CS1006, CS1007 and 3 more at Northeastern.") in html
+    assert '<li><a href="https://ratemyhusky.com/courses/CS1010">CS1010</a></li>' in html
 
 
 def test_professor_html_faq_has_no_faqpage_jsonld():

@@ -213,7 +213,9 @@ def test_banner_only_course_has_no_ratings():
 def test_reviewed_course_with_history_keeps_its_ratings_and_gains_terms():
     data, _ = _with_history()
     cs2500 = data["courses"][1]
-    assert (cs2500["rating"], cs2500["numRatings"], cs2500["name"]) == (4.0, 1, None)
+    assert (cs2500["rating"], cs2500["numRatings"]) == (4.0, 1)
+    # No course_catalog row (course_name None): Banner's title fills in.
+    assert cs2500["name"] == "Fundamentals of Computer Science 1"
     assert cs2500["terms"] == ["Fall 2024", "Fall 2023"]
     assert cs2500["lastTerm"] == "Fall 2024"
 

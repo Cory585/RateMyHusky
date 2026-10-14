@@ -84,7 +84,7 @@ def test_course_history_instructors_link_matched_and_name_the_rest():
     query, query_one, _ = course_db()
     got = th.course_history("CS3100", query, query_one)["instructors"]
     assert got[0] == {"name": "Lucia Nunez", "slug": "lucia-nunez", "termsTaught": 3,
-                      "lastTerm": "Fall 2026", "lastTermCode": "202710",
+                      "lastTerm": "Fall 2026",
                       "recentTerms": ["Fall 2026", "Spring 2026", "Fall 2025"],
                       "avgClassSize": 111, "imageUrl": "https://img/n.jpg",
                       "focusX": 40.0, "focusY": 20.0}
@@ -97,7 +97,6 @@ def test_unmatched_instructor_has_no_photo_and_the_default_focus():
     query, query_one, _ = course_db()
     jane = th.course_history("CS3100", query, query_one)["instructors"][1]
     assert (jane["imageUrl"], jane["focusX"], jane["focusY"]) == (None, 50.0, 30.0)
-    assert jane["lastTermCode"] == "202630"
 
 
 def test_instructor_query_selects_term_code_and_photo():
@@ -150,6 +149,16 @@ def test_successors_are_khourys_published_mapping():
     }
 
 
+def test_summer_2_sorts_ahead_of_summer_1_on_their_shared_code():
+    # From 2026 both sessions are term 202650; the SQL order (most terms first) is wrong.
+    rows = [{**INSTRUCTORS[0], "last_term_code": "202650", "last_term_label": "Summer 1 2026",
+             "terms_taught": 8},
+            {**INSTRUCTORS[1], "last_term_code": "202650", "last_term_label": "Summer 2 2026"}]
+    query, query_one, _ = course_db(instructors=rows)
+    got = th.course_history("CS3100", query, query_one)["instructors"]
+    assert [i["lastTerm"] for i in got] == ["Summer 2 2026", "Summer 1 2026"]
+
+
 # ── professor course history ────────────────────────────────────────────
 
 PROF_ROWS = [
@@ -178,6 +187,15 @@ def test_professor_history_lists_courses_without_labs_or_recitations():
                       "recentTerms": ["Fall 2026", "Spring 2026", "Fall 2025"],
                       "avgClassSize": 111, "hasPage": True}
     assert seen[0][1] == ("lucia-nunez",)
+
+
+def test_professor_history_orders_summer_sessions_that_share_a_code():
+    rows = [{**PROF_ROWS[3], "last_term_code": "202650", "last_term_label": "Summer 1 2026"},
+            {**PROF_ROWS[0], "last_term_code": "202650", "last_term_label": "Summer 2 2026",
+             "terms_taught": 2}]
+    query, _, _ = stub(many=lambda s, p: rows)
+    got = th.professor_course_history("lucia-nunez", query)
+    assert [c["code"] for c in got] == ["CS3100", "CS3500"]
 
 
 # ── teaching chip ───────────────────────────────────────────────────────

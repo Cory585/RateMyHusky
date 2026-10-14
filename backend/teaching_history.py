@@ -81,6 +81,14 @@ def label_code(label):
     return (int(m.group(2)) + year_offset) * 100 + suffix
 
 
+def _newest_first(rows):
+    """Rows re-sorted on the last term's label, most recent first. The SQL
+    orders by last_term_code, but from 2026 Summer 1 and Summer 2 share one
+    code (202650) and only the label names the session. Stable, so the SQL's
+    tiebreaks (most terms taught first) hold within a label."""
+    return sorted(rows, key=lambda r: -(label_code(r["last_term_label"]) or int(r["last_term_code"])))
+
+
 def _course_link(code, since, query_one):
     """The other end of a successor link. hasPage: a course page exists to
     link to (pages are built from course_catalog, i.e. reviewed courses)."""
@@ -134,13 +142,12 @@ def course_history(code, query, query_one):
             "slug": r["professor_slug"],
             "termsTaught": r["terms_taught"],
             "lastTerm": r["last_term_label"],
-            "lastTermCode": r["last_term_code"],
             "recentTerms": _terms(r["recent_terms"]),
             "avgClassSize": _whole(r["avg_enrollment"]),
             "imageUrl": r["image_url"],
             "focusX": r["focus_x"] if r["focus_x"] is not None else 50.0,
             "focusY": r["focus_y"] if r["focus_y"] is not None else 30.0,
-        } for r in instructors],
+        } for r in _newest_first(instructors)],
         "replacedBy": _course_link(*successor, query_one) if successor else None,
         "replaces": _course_link(*predecessor, query_one) if predecessor else None,
     }
@@ -151,7 +158,7 @@ def professor_course_history(slug, query):
     recently taught first. Labs and recitations are left out."""
     rows = query("""
         SELECT bci.subject_course, bco.course_title, bci.terms_taught,
-               bci.last_term_label, bci.recent_terms, bci.avg_enrollment,
+               bci.last_term_code, bci.last_term_label, bci.recent_terms, bci.avg_enrollment,
                cc.code IS NOT NULL AS has_page
         FROM banner_course_instructors bci
         LEFT JOIN banner_course_offerings bco ON bco.subject_course = bci.subject_course
@@ -167,7 +174,7 @@ def professor_course_history(slug, query):
         "recentTerms": _terms(r["recent_terms"]),
         "avgClassSize": _whole(r["avg_enrollment"]),
         "hasPage": bool(r["has_page"]),
-    } for r in rows if not _COMPANION_RE.match(r["course_title"] or "")]
+    } for r in _newest_first(rows) if not _COMPANION_RE.match(r["course_title"] or "")]
 
 
 def teaching_now(name_key, query, query_one, now=None):

@@ -81,7 +81,8 @@ def build_courses(course_rows, history):
         row = reviewed.pop(h["code"], None) or {
             "code": h["code"], "name": h["name"], "rating": None, "difficulty": None,
             "numRatings": 0, "ratingDistribution": None, "hasPage": h["hasPage"]}
-        taught.append({**row, "terms": h["recentTerms"], "lastTerm": h["lastTerm"]})
+        taught.append({**row, "name": row["name"] or h["name"],   # Banner's title when the catalog has none
+                       "terms": h["recentTerms"], "lastTerm": h["lastTerm"]})
     rest = sorted(reviewed.values(), key=lambda c: (-c["numRatings"], c["code"]))
     return taught + [{**c, "terms": [], "lastTerm": None} for c in rest]
 

@@ -625,6 +625,7 @@ const Professor = () => {
     const hiddenTermCount = terms.length - MAX_VISIBLE_TERMS;
     const reviewCount = reviewCountByCourse.get(c.code) ?? 0;
     const unrated = c.numRatings === 0;
+    const hasPage = c.hasPage ?? c.name != null;
     return (
     <div
       key={c.code}
@@ -643,7 +644,7 @@ const Professor = () => {
           )}
         </span>
       </div>
-      {(c.hasPage || terms.length > 0) && (
+      {(hasPage || terms.length > 0) && (
         <div className="prof-course-lower">
           {terms.length > 0 && (
             <div className="prof-course-term-tags">
@@ -679,7 +680,7 @@ const Professor = () => {
               )}
             </div>
           )}
-          {c.hasPage && (
+          {hasPage && (
           <div className="prof-course-view">
             <Link
               to={`/courses/${c.code.toLowerCase()}`}

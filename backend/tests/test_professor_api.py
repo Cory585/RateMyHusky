@@ -124,9 +124,12 @@ def test_failed_history_payload_is_served_but_not_cached(client, monkeypatch):
     assert resp.status_code == 200
     assert "_historyFailed" not in resp.get_json()
     assert sets == []
+    assert resp.headers["Cache-Control"] == "no-store"   # nor by the CDN or browser
 
 
 def test_clean_payload_is_cached(client, monkeypatch):
     sets = _spy_cache(monkeypatch, {"version": 2})
-    assert client.get("/api/professors/olin-guha/full").status_code == 200
+    resp = client.get("/api/professors/olin-guha/full")
+    assert resp.status_code == 200
     assert sets == ["prof_full:olin-guha"]
+    assert resp.headers["Cache-Control"] == "public, max-age=3600"
