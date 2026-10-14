@@ -188,7 +188,8 @@
 .prof-stat-value { font-size: clamp(1.6rem, 2.5vw, 2.3rem); font-weight: 900; color: #333; line-height: 1; }
 .prof-stat-value.accent { color: #d6394c; }
 .prof-stat-value.green { color: #27ae60; }
-.prof-stat-value-text { font-size: clamp(1.1rem, 1.8vw, 1.5rem); }
+/* Line box sized like .prof-stat-value's so the label lines up with the number cards. */
+.prof-stat-value-text { font-size: clamp(1.3rem, 2vw, 1.9rem); line-height: clamp(1.6rem, 2.5vw, 2.3rem); text-align: center; }
 .prof-stat-label {
   font-size: 0.72rem;
   font-weight: 700;

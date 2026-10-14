@@ -149,6 +149,12 @@ const Course = () => {
 						</h1>
 						<p className="course-dept">{course.department}</p>
 					</div>
+					{/* Up top, not in "When it's offered": next term is what a student registering looks for first. */}
+					{history && history.offeredNow.length > 0 && (
+						<div className="course-hero-offered">
+							{history.offeredNow.map(t => <span key={t} className="course-catalog-tag course-hero-offered-tag">Offered {t}</span>)}
+						</div>
+					)}
 				</header>
 
 				{course.catalog && (course.catalog.description || course.catalog.credits || course.catalog.prerequisites
@@ -197,7 +203,7 @@ const Course = () => {
 					<StatCard label="Professors" value={professors.length.toLocaleString()} />
 					{history?.lastOffered && <StatCard label="Last Taught" value={history.lastOffered} text />}
 					{history?.typicalClassSize != null && (
-						<StatCard label="Typical Class" value={`${history.typicalClassSize} students`} text />
+						<StatCard label="Typical Class Size" value={history.typicalClassSize.toLocaleString()} />
 					)}
 					{SHOW_SURVEY_STATS && (
 						<StatCard label="Avg Hrs / Week" value={summary.hoursPerWeek != null ? `${summary.hoursPerWeek.toFixed(1)}h` : '—'} />
@@ -434,11 +440,6 @@ function OfferingPanel({ history }: { history: CourseHistory }) {
 			</div>
 			{history.pattern && <p className="course-offering-pattern">{history.pattern}</p>}
 			{seasons.length > 0 && <p className="course-offering-seasons">{seasons.join(' · ')}</p>}
-			{history.offeredNow.length > 0 && (
-				<div className="course-offering-badges">
-					{history.offeredNow.map(t => <span key={t} className="course-catalog-tag">Offered {t}</span>)}
-				</div>
-			)}
 			{history.replacedBy && <SuccessorLine verb="Replaced by" link={history.replacedBy} />}
 			{history.replaces && <SuccessorLine verb="Replaced" link={history.replaces} />}
 		</section>

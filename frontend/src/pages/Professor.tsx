@@ -639,7 +639,7 @@ const Professor = () => {
           {unrated ? 'No ratings yet' : (
             <>
               {c.numRatings.toLocaleString()} rating{c.numRatings === 1 ? '' : 's'}
-              {' · '}{reviewCount.toLocaleString()} review{reviewCount === 1 ? '' : 's'}
+              {reviewCount > 0 && <>{' · '}{reviewCount.toLocaleString()} review{reviewCount === 1 ? '' : 's'}</>}
             </>
           )}
         </span>

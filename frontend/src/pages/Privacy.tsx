@@ -292,7 +292,7 @@ const Privacy = () => {
                   from Google and cannot be edited; we store it with your bookmarks, and a Data
                   Deletion Request removes it (see Right to deletion above).
                   If you believe professor or course data displayed on the site is inaccurate,
-                  you can report it through the feedback form under "Incorrect Data."
+                  you can report it through the feedback form under "Wrong or Missing Data."
                 </li>
                 <li>
                   <strong>Right to raise a concern:</strong> you may contact us at any time at{' '}

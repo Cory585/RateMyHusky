@@ -277,7 +277,7 @@ const Terms = () => {
               <p>
                 We encourage you to use RateMyHusky as one of several resources when making
                 course registration decisions, not as the sole basis for those decisions. If you
-                spot something wrong, report it through the feedback form under "Incorrect Data."
+                spot something wrong, report it through the feedback form under "Wrong or Missing Data."
               </p>
             </section>
 

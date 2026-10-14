@@ -31,3 +31,41 @@ def test_professor_requests_require_an_email(monkeypatch):
         "/api/feedback", json={"feedbackType": "professor", "description": "remove my page"})
     assert resp.status_code == 400
     assert "Email is required" in resp.get_json()["error"]
+
+
+def _post(monkeypatch, **body):
+    import server
+    monkeypatch.delenv("TURNSTILE_SECRET_KEY", raising=False)
+    # Unset so a request that passes validation stops at "not configured" instead of emailing.
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+    monkeypatch.setattr(server.limiter, "enabled", False)
+    return server.app.test_client().post("/api/feedback", json=body)
+
+
+def test_unknown_types_are_rejected(monkeypatch):
+    resp = _post(monkeypatch, feedbackType="Buy cheap watches", description="hi")
+    assert resp.status_code == 400
+    assert "Unknown feedback type" in resp.get_json()["error"]
+
+
+def test_retired_and_merged_types_still_pass_validation(monkeypatch):
+    # Cached bundles and the maintenance page can still send the old keys.
+    for t in ("bug", "feature", "missing", "incorrectdata", "general"):
+        resp = _post(monkeypatch, feedbackType=t, description="hi")
+        assert resp.get_json()["error"] == "Email service not configured", t
+    for t in ("banappeal", "datadeletion", "professor"):
+        resp = _post(monkeypatch, feedbackType=t, description="hi", email="a@northeastern.edu")
+        assert resp.get_json()["error"] == "Email service not configured", t
+
+
+def test_overlong_description_is_rejected(monkeypatch):
+    import server
+    resp = _post(monkeypatch, feedbackType="bug", description="x" * (server.FEEDBACK_MAX_DESCRIPTION + 1))
+    assert resp.status_code == 400
+    assert "too long" in resp.get_json()["error"]
+
+
+def test_overlong_email_is_rejected(monkeypatch):
+    resp = _post(monkeypatch, feedbackType="bug", description="hi", email="a" * 250 + "@x.com")
+    assert resp.status_code == 400
+    assert "Invalid email" in resp.get_json()["error"]

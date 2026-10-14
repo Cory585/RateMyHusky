@@ -156,8 +156,9 @@
 }
 
 .course-stat-value--text {
-	font-size: clamp(1.1rem, 1.6vw, 1.5rem);
+	font-size: clamp(1.3rem, 2vw, 1.9rem);
 	white-space: normal;
+	text-align: center;
 }
 
 .course-stat-label {
@@ -588,6 +589,10 @@
 		flex-direction: column;
 	}
 
+	.course-hero-offered {
+		justify-content: flex-start;
+	}
+
 }
 
 @media (max-width: 540px) {
@@ -923,11 +928,19 @@
 	font-weight: 600;
 }
 
-.course-offering-badges {
+.course-hero-offered {
 	display: flex;
 	flex-wrap: wrap;
+	justify-content: flex-end;
 	gap: 6px;
-	margin-bottom: 10px;
+	flex-shrink: 0;
+	animation: courseSlideUp 0.5s 0.2s ease both;
+}
+
+.course-hero-offered-tag {
+	padding: 5px 14px;
+	font-size: 0.85rem;
+	font-weight: 700;
 }
 
 .course-offering-successor {
