@@ -396,6 +396,8 @@ export interface CourseDetail {
   history: CourseHistory | null;
 }
 
+export type ProfessorSort = 'alpha' | 'alpha_desc' | 'rating' | 'rating_asc' | 'comments';
+
 export function fetchProfessorsCatalog(params: {
   q?: string;
   college?: string;
@@ -404,7 +406,7 @@ export function fetchProfessorsCatalog(params: {
   maxRating?: number;
   minReviews?: number;
   maxReviews?: number;
-  sort?: 'alpha' | 'rating' | 'comments';
+  sort?: ProfessorSort;
   page?: number;
   limit?: number;
 }): Promise<CatalogResponse> {
@@ -435,12 +437,14 @@ export const fetchDepartments = (college?: string) => {
 
 export const fetchCourseDepartments = () => get<string[]>('/api/course-departments');
 
+export type CourseSort = 'alpha' | 'alpha_desc' | 'rating' | 'rating_asc' | 'recent';
+
 export function fetchCoursesCatalog(params: {
   q?: string;
   dept?: string;
   minRating?: number;
   maxRating?: number;
-  sort?: 'alpha' | 'rating' | 'sections' | 'recent';
+  sort?: CourseSort | 'sections';
   page?: number;
   limit?: number;
   rated?: boolean;

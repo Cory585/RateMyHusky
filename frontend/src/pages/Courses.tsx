@@ -6,6 +6,7 @@ import {
 	fetchCoursesCatalog,
 	fetchSearchSuggestions,
 	type CatalogCourse,
+	type CourseSort,
 	type CourseSuggestion,
 } from '../api/api';
 import Dropdown from '../components/Dropdown';
@@ -19,7 +20,9 @@ import './Courses.css';
 
 const SORT_OPTIONS = [
 	{ value: 'alpha', label: 'A - Z' },
+	{ value: 'alpha_desc', label: 'Z - A' },
 	{ value: 'rating', label: 'Highest Rating' },
+	{ value: 'rating_asc', label: 'Lowest Rating' },
 	{ value: 'recent', label: 'Most Recent' },
 ];
 
@@ -28,7 +31,7 @@ interface Filters {
 	dept: string;
 	minRating: number;
 	maxRating: number;
-	sort: 'alpha' | 'rating' | 'recent';
+	sort: CourseSort;
 	page: number;
 }
 
@@ -44,8 +47,8 @@ const DEFAULT_FILTERS: Filters = {
 function getFiltersFromSearchParams(sp: URLSearchParams): Filters {
 	const sortValue = sp.get('sort');
 	const sort =
-		sortValue === 'rating' || sortValue === 'recent' || sortValue === 'alpha'
-			? sortValue
+		sortValue && SORT_OPTIONS.some((o) => o.value === sortValue)
+			? (sortValue as CourseSort)
 			: 'alpha';
 
 	const minRating = Number(sp.get('minRating') || '0');

@@ -434,3 +434,21 @@ def test_courses_catalog_recent_sorts_by_last_banner_term(monkeypatch):
     assert "banner_course_offerings" in seen[0]
     assert "WHERE subject_course = course_catalog.code) DESC NULLS LAST" in seen[0]
     assert "avg_rating DESC NULLS LAST, lower(code) ASC" in seen[0]
+
+
+@pytest.mark.parametrize("path, order", [
+    ("/api/courses-catalog?sort=alpha_desc", "ORDER BY lower(code) DESC"),
+    ("/api/courses-catalog?sort=rating_asc", "ORDER BY avg_rating ASC NULLS LAST, lower(code) ASC"),
+    ("/api/professors-catalog?sort=alpha_desc", "ORDER BY lower(name) DESC"),
+    ("/api/professors-catalog?sort=rating_asc", "ORDER BY avg_rating ASC NULLS LAST"),
+])
+def test_catalogs_sort_in_reverse(monkeypatch, path, order):
+    seen = []
+    monkeypatch.setattr(server, "cache_get", lambda key: None, raising=False)
+    monkeypatch.setattr(server, "cache_set", lambda key, data: None, raising=False)
+    monkeypatch.setattr(server.limiter, "enabled", False)
+    monkeypatch.setattr(server, "query_one", lambda sql, p=(): {"cnt": 0}, raising=False)
+    monkeypatch.setattr(server, "query", lambda sql, p=(): seen.append(sql) or [], raising=False)
+    resp = server.app.test_client().get(path)
+    assert resp.status_code == 200
+    assert any(order in s for s in seen)

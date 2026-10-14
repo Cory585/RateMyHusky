@@ -1201,6 +1201,10 @@ def professors_catalog():
         # No search - use SQL sorting
         if sort == "rating":
             order = "avg_rating DESC NULLS LAST"
+        elif sort == "rating_asc":
+            order = "avg_rating ASC NULLS LAST"
+        elif sort == "alpha_desc":
+            order = "lower(name) DESC"
         elif sort == "comments":
             order = "total_comments DESC"
         else:
@@ -1313,6 +1317,10 @@ def courses_catalog():
 
     if sort == "rating":
         order = "avg_rating DESC NULLS LAST, lower(code) ASC"
+    elif sort == "rating_asc":
+        order = "avg_rating ASC NULLS LAST, lower(code) ASC"
+    elif sort == "alpha_desc":
+        order = "lower(code) DESC"
     elif sort == "recent":
         # Last term Banner has the course on, best rated first within a term;
         # courses Banner never saw go last.
