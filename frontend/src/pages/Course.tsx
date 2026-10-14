@@ -4,7 +4,7 @@ import StarRating from '../components/StarRating';
 import NotFound from './NotFound';
 import LoadError from '../components/LoadError';
 import { fetchCourseData } from '../api/api';
-import type { CourseDetail } from '../api/api';
+import type { CourseDetail, CourseHistory, HistoryCourseLink } from '../api/api';
 import Footer from '../components/Footer';
 import { getInitials, stripPrefix } from '../utils/nameUtils';
 import Breadcrumbs from '../components/Breadcrumbs';
@@ -89,6 +89,9 @@ const Course = () => {
 	/* professors[] arrives sorted by rating count, most first. */
 	const topProfessors = professors.slice(0, TOP_PROFESSORS);
 	const breakdown = Object.entries(summary.bySource).filter(([, v]) => v.rating !== null);
+	const history = course.history;
+	const recentInstructors = history?.recentInstructors ?? [];
+	const fromPage = { label: `${course.code} – ${course.name}`, url: `/courses/${code}` };
 
 	/* Mirrors render.course_html's description exactly (crawler copy and page must agree). */
 	const courseSeoDescription =
@@ -192,62 +195,59 @@ const Course = () => {
 					<DifficultyStatCard value={summary.difficulty} />
 					<StatCard label="Ratings" value={summary.numRatings ? summary.numRatings.toLocaleString() : '—'} />
 					<StatCard label="Professors" value={professors.length.toLocaleString()} />
+					{history?.lastOffered && <StatCard label="Last Taught" value={history.lastOffered} text />}
+					{history?.typicalClassSize != null && (
+						<StatCard label="Typical Class" value={`${history.typicalClassSize} students`} text />
+					)}
 					{SHOW_SURVEY_STATS && (
 						<StatCard label="Avg Hrs / Week" value={summary.hoursPerWeek != null ? `${summary.hoursPerWeek.toFixed(1)}h` : '—'} />
 					)}
 				</section>
 
-				{topProfessors.length > 0 && (
+				{history && <OfferingPanel history={history} />}
+
+				{recentInstructors.length > 0 ? (
+					<section className="course-panel">
+						<div className="course-panel-header">
+							<h2>Recent Professors</h2>
+						</div>
+						<div className="course-top-prof-grid">
+							{recentInstructors.map((r) => (
+								<ProfCard
+									key={r.slug ?? `unmatched-${r.name}`}
+									name={r.name}
+									imageUrl={r.imageUrl}
+									focusX={r.focusX}
+									focusY={r.focusY}
+									rating={r.rating}
+									footerLeft={r.terms.join(' · ')}
+									footerRight={r.avgClassSize != null ? `avg ${r.avgClassSize} students` : ''}
+									to={r.slug ? `/professors/${r.slug}` : undefined}
+									fromPage={fromPage}
+								/>
+							))}
+						</div>
+					</section>
+				) : topProfessors.length > 0 && (
 					<section className="course-panel">
 						<div className="course-panel-header">
 							<h2>Most-Rated Professors</h2>
 						</div>
 						<div className="course-top-prof-grid">
 							{topProfessors.map((prof, index) => (
-								<Link
-									to={`/professors/${prof.slug}`}
-									state={{ fromPage: { label: `${course.code} – ${course.name}`, url: `/courses/${code}` } }}
-									className="course-top-prof-card"
+								<ProfCard
 									key={prof.slug}
-									aria-label={`View ${prof.name}`}
-								>
-									<div className="course-top-prof-photo">
-										{prof.imageUrl ? (
-											<img
-												className="course-top-prof-img"
-												src={prof.imageUrl}
-												alt={prof.name}
-												style={{ objectPosition: `${prof.focusX}% ${prof.focusY}%` }}
-											/>
-										) : (
-											<div className="course-top-prof-avatar" aria-hidden="true">
-												{getInitials(prof.name)}
-											</div>
-										)}
-										<span className="course-top-prof-rank">#{index + 1}</span>
-									</div>
-									<div className="course-top-prof-body">
-										<div className="course-top-prof-body-top">
-											<div className="course-top-prof-rating">
-												{prof.rating != null ? (
-													<>
-														<span className="course-top-prof-avg">{prof.rating.toFixed(1)}</span>
-														<StarRating rating={prof.rating} size="sm" />
-													</>
-												) : (
-													<span className="course-top-prof-avg">—</span>
-												)}
-											</div>
-											<h3 className="course-top-prof-name">
-												{stripPrefix(prof.name)}
-											</h3>
-										</div>
-										<div className="course-top-prof-footer">
-											<span>{prof.numRatings.toLocaleString()} rating{prof.numRatings === 1 ? '' : 's'}</span>
-											<span className="course-top-prof-footer--right">{prof.difficulty != null ? `${prof.difficulty.toFixed(1)} difficulty` : '—'}</span>
-										</div>
-									</div>
-								</Link>
+									name={prof.name}
+									imageUrl={prof.imageUrl}
+									focusX={prof.focusX}
+									focusY={prof.focusY}
+									rating={prof.rating}
+									footerLeft={`${prof.numRatings.toLocaleString()} rating${prof.numRatings === 1 ? '' : 's'}`}
+									footerRight={prof.difficulty != null ? `${prof.difficulty.toFixed(1)} difficulty` : '—'}
+									rank={index + 1}
+									to={`/professors/${prof.slug}`}
+									fromPage={fromPage}
+								/>
 							))}
 						</div>
 					</section>
@@ -267,6 +267,8 @@ const Course = () => {
 									<span>Rating</span>
 									<span>Difficulty</span>
 									<span>Ratings</span>
+									<span>Last Taught</span>
+									<span>Avg Class</span>
 								</div>
 								{visibleProfessors.map((p) => (
 									<div key={p.slug} className="instructor-row">
@@ -281,6 +283,8 @@ const Course = () => {
 										<span>{p.rating != null ? p.rating.toFixed(2) : '—'}</span>
 										<span>{p.difficulty != null ? p.difficulty.toFixed(2) : '—'}</span>
 										<span>{p.numRatings.toLocaleString()}</span>
+										<span>{p.lastTerm ?? '—'}</span>
+										<span>{p.avgClassSize != null ? p.avgClassSize.toLocaleString() : '—'}</span>
 									</div>
 								))}
 							</div>
@@ -314,10 +318,10 @@ const Course = () => {
 	);
 };
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatCard({ label, value, text = false }: { label: string; value: string; text?: boolean }) {
 	return (
 		<article className="course-stat-card">
-			<strong className="course-stat-value">{value}</strong>
+			<strong className={`course-stat-value${text ? ' course-stat-value--text' : ''}`}>{value}</strong>
 			<span className="course-stat-label">{label}</span>
 		</article>
 	);
@@ -339,6 +343,112 @@ function DifficultyStatCard({ value }: { value: number | null }) {
 			</div>
 			<span className="course-stat-label">Avg Difficulty</span>
 		</article>
+	);
+}
+
+type ProfCardProps = {
+	name: string;
+	imageUrl: string | null;
+	focusX: number;
+	focusY: number;
+	rating: number | null;
+	footerLeft: string;
+	footerRight: string;
+	/** Most-Rated numbers its cards; Recent Professors doesn't. */
+	rank?: number;
+	/** Omitted for an instructor with no profile: the card is not a link. */
+	to?: string;
+	fromPage: { label: string; url: string };
+};
+
+function ProfCard({ name, imageUrl, focusX, focusY, rating, footerLeft, footerRight, rank, to, fromPage }: ProfCardProps) {
+	const content = (
+		<>
+			<div className="course-top-prof-photo">
+				{imageUrl ? (
+					<img
+						className="course-top-prof-img"
+						src={imageUrl}
+						alt={name}
+						style={{ objectPosition: `${focusX}% ${focusY}%` }}
+					/>
+				) : (
+					<div className="course-top-prof-avatar" aria-hidden="true">
+						{getInitials(name)}
+					</div>
+				)}
+				{rank != null && <span className="course-top-prof-rank">#{rank}</span>}
+			</div>
+			<div className="course-top-prof-body">
+				<div className="course-top-prof-body-top">
+					<div className="course-top-prof-rating">
+						{rating != null ? (
+							<>
+								<span className="course-top-prof-avg">{rating.toFixed(1)}</span>
+								<StarRating rating={rating} size="sm" />
+							</>
+						) : (
+							<span className="course-top-prof-avg">—</span>
+						)}
+					</div>
+					<h3 className="course-top-prof-name">
+						{stripPrefix(name)}
+					</h3>
+				</div>
+				<div className="course-top-prof-footer">
+					<span>{footerLeft}</span>
+					<span className="course-top-prof-footer--right">{footerRight}</span>
+				</div>
+			</div>
+		</>
+	);
+	return to ? (
+		<Link to={to} state={{ fromPage }} className="course-top-prof-card" aria-label={`View ${name}`}>
+			{content}
+		</Link>
+	) : (
+		<div className="course-top-prof-card course-top-prof-card--static">{content}</div>
+	);
+}
+
+type SeasonYears = NonNullable<CourseHistory['seasonYears']>;
+const SEASONS: [keyof SeasonYears, string][] = [
+	['fall', 'Fall'], ['spring', 'Spring'], ['summer1', 'Summer 1'], ['summer2', 'Summer 2'], ['summer', 'Summer'],
+];
+
+function OfferingPanel({ history }: { history: CourseHistory }) {
+	const years = history.seasonYears;
+	const span = history.windowYears;
+	/* A season Banner never counted (summer1/summer2 before session labels) or that never ran is skipped. */
+	const seasons = years && span
+		? SEASONS.filter(([k]) => (years[k] ?? 0) > 0).map(([k, label]) => `${label} ${years[k]}/${span} yrs`)
+		: [];
+	return (
+		<section className="course-panel">
+			<div className="course-panel-header">
+				<h2>When it's offered</h2>
+			</div>
+			{history.pattern && <p className="course-offering-pattern">{history.pattern}</p>}
+			{seasons.length > 0 && <p className="course-offering-seasons">{seasons.join(' · ')}</p>}
+			{history.offeredNow.length > 0 && (
+				<div className="course-offering-badges">
+					{history.offeredNow.map(t => <span key={t} className="course-catalog-tag">Offered {t}</span>)}
+				</div>
+			)}
+			{history.replacedBy && <SuccessorLine verb="Replaced by" link={history.replacedBy} />}
+			{history.replaces && <SuccessorLine verb="Replaced" link={history.replaces} />}
+		</section>
+	);
+}
+
+function SuccessorLine({ verb, link }: { verb: string; link: HistoryCourseLink }) {
+	const label = link.name ? `${link.code} (${link.name})` : link.code;
+	return (
+		<p className="course-offering-successor">
+			{verb}{' '}
+			{link.hasPage ? <Link to={`/courses/${link.code.toLowerCase()}`}>{label}</Link> : label}
+			{' '}in {link.since}
+		</p>
 	);
 }
 
