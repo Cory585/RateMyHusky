@@ -1278,14 +1278,17 @@ def courses_catalog():
     except (ValueError, TypeError):
         max_rating = 5.0
 
-    cache_key = f"coursecat:{q}:{dept}:{sort}:{page}:{limit}:{min_rating}:{max_rating}"
+    # The catalog page shows rated courses only; the sitemap and prerender need every course.
+    rated_only = request.args.get("rated") == "1"
+
+    cache_key = f"coursecat:{q}:{dept}:{sort}:{page}:{limit}:{min_rating}:{max_rating}:{rated_only}"
     cached = cache_get(cache_key)
     if cached:
         return jsonify(cached)
 
     # avg_rating is precomputed on course_catalog (see precompute.py step 8),
     # so this is a plain indexed SELECT/WHERE/ORDER/LIMIT like professors_catalog.
-    conditions = []
+    conditions = ["avg_rating IS NOT NULL"] if rated_only else []
     params = []
 
     if dept and dept != "All":
@@ -1310,6 +1313,12 @@ def courses_catalog():
 
     if sort == "rating":
         order = "avg_rating DESC NULLS LAST, lower(code) ASC"
+    elif sort == "recent":
+        # Last term Banner has the course on, best rated first within a term;
+        # courses Banner never saw go last.
+        order = """(SELECT last_term_code FROM banner_course_offerings
+                    WHERE subject_course = course_catalog.code) DESC NULLS LAST,
+                   avg_rating DESC NULLS LAST, lower(code) ASC"""
     else:
         order = "lower(code) ASC"
 

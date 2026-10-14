@@ -166,6 +166,7 @@ export default function Courses() {
 			sort: filters.sort,
 			page: filters.page,
 			limit: pageSize,
+			rated: true,
 		})
 			.then((data) => {
 				if (cancelled) return;
@@ -476,7 +477,7 @@ export default function Courses() {
 								<div key={i} className="prof-card skeleton" />
 							))}
 						</div>
-					) : courses.filter((c) => c.avgRating != null).length === 0 ? (
+					) : courses.length === 0 ? (
 						<div className="catalog-empty">
 							<p>No courses match your filters.</p>
 							<button className="clear-btn prominent" onClick={clearFilters}>
@@ -485,7 +486,7 @@ export default function Courses() {
 						</div>
 					) : (
 						<div className="catalog-grid" ref={gridRef}>
-							{courses.filter((c) => c.avgRating != null).map((course) => (
+							{courses.map((course) => (
 								<div
 									key={course.code}
 									className="prof-card course-card"

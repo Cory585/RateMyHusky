@@ -380,7 +380,20 @@ def test_courses_catalog_sends_no_rating_filter_unless_asked(monkeypatch):
     assert resp.status_code == 200
     assert resp.get_json()["courses"][0]["avgRating"] is None
     assert not any("avg_rating >=" in s for s in seen)
+    assert not any("avg_rating IS NOT NULL" in s for s in seen)
     assert any("avg_rating DESC NULLS LAST, lower(code) ASC" in s for s in seen)
+
+
+def test_courses_catalog_rated_only_filters_count_and_page(monkeypatch):
+    seen = []
+    monkeypatch.setattr(server, "cache_get", lambda key: None, raising=False)
+    monkeypatch.setattr(server, "cache_set", lambda key, data: None, raising=False)
+    monkeypatch.setattr(server.limiter, "enabled", False)
+    monkeypatch.setattr(server, "query_one", lambda sql, p=(): seen.append(sql) or {"cnt": 0}, raising=False)
+    monkeypatch.setattr(server, "query", lambda sql, p=(): seen.append(sql) or [], raising=False)
+    resp = server.app.test_client().get("/api/courses-catalog?rated=1")
+    assert resp.status_code == 200
+    assert len(seen) == 2 and all("avg_rating IS NOT NULL" in s for s in seen)
 
 
 def _spy_cache(monkeypatch, payload):
@@ -405,3 +418,17 @@ def test_clean_course_payload_is_cached(client, monkeypatch):
     assert resp.status_code == 200
     assert sets == ["course:CS3500"]
     assert resp.headers["Cache-Control"] == "public, max-age=3600"
+
+
+def test_courses_catalog_recent_sorts_by_last_banner_term(monkeypatch):
+    seen = []
+    monkeypatch.setattr(server, "cache_get", lambda key: None, raising=False)
+    monkeypatch.setattr(server, "cache_set", lambda key, data: None, raising=False)
+    monkeypatch.setattr(server.limiter, "enabled", False)
+    monkeypatch.setattr(server, "query_one", lambda sql, p=(): {"cnt": 0}, raising=False)
+    monkeypatch.setattr(server, "query", lambda sql, p=(): seen.append(sql) or [], raising=False)
+    resp = server.app.test_client().get("/api/courses-catalog?sort=recent")
+    assert resp.status_code == 200
+    assert "banner_course_offerings" in seen[0]
+    assert "WHERE subject_course = course_catalog.code) DESC NULLS LAST" in seen[0]
+    assert "avg_rating DESC NULLS LAST, lower(code) ASC" in seen[0]

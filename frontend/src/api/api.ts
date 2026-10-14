@@ -440,6 +440,7 @@ export function fetchCoursesCatalog(params: {
   sort?: 'alpha' | 'rating' | 'sections' | 'recent';
   page?: number;
   limit?: number;
+  rated?: boolean;
 }): Promise<CourseCatalogResponse> {
   const sp = new URLSearchParams();
   if (params.q) sp.set('q', params.q);
@@ -449,6 +450,7 @@ export function fetchCoursesCatalog(params: {
   if (params.sort) sp.set('sort', params.sort);
   if (params.page) sp.set('page', String(params.page));
   if (params.limit) sp.set('limit', String(params.limit));
+  if (params.rated) sp.set('rated', '1');
   return get<CourseCatalogResponse>(`/api/courses-catalog?${sp.toString()}`);
 }
 
