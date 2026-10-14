@@ -583,6 +583,117 @@ def test_read_banner_joins_terms_onto_sections_and_instructors(banner_db):
     assert (i["subject_course"], i["closed"]) == ("CS4500", False)
 
 
+def _summer_term(c, code, label, season, sections):
+    """A closed main-campus summer term: CS3500, taught by Annie in every section."""
+    write_term(c, code, {"label": label, "season": season, "season_group": "Summer",
+                         "year": int(label.split()[-1]), "track": "Semester",
+                         "view_only": True}, None,
+               {"sections": [{"crn": crn, "subject": "CS", "subject_course": "CS3500",
+                              "schedule_type": "Lecture", "campus": "Boston",
+                              "instructional_method": "Traditional",
+                              "course_title": "CS3500", "enrollment": 20,
+                              "credit_hours_low": 4.0, "part_of_term": part}
+                             for crn, part in sections],
+                "instructors": [{"term_code": code, "crn": crn,
+                                 "instructor_key": "annie witte",
+                                 "instructor_name": "Witte, Annie", "is_primary": True}
+                                for crn, _ in sections],
+                "stats": {"section_count": len(sections),
+                          "attributed_sections": len(sections), "instructor_count": 1}})
+
+
+def _write_summers(c):
+    _summer_term(c, "202650", "Summer 2026", "Summer",
+                 [("s1", "2A"), ("s2", "2B"), ("full", "1")])
+    _summer_term(c, "202550", "Summer Full 2025", "Summer Full", [("f", None)])
+    _summer_term(c, "202540", "Summer 1 2025", "Summer 1", [("a", None)])
+
+
+def test_read_banner_labels_each_summer_section_by_its_session(banner_db):
+    _write_summers(banner_db)
+    _, sections, instructors = read_banner(banner_db)
+    got = {(s["term_code"], s["crn"]): (s["term_label"], s["pattern_season"])
+           for s in sections}
+    assert got[("202650", "s1")] == ("Summer 1 2026", "Summer 1")
+    assert got[("202650", "s2")] == ("Summer 2 2026", "Summer 2")
+    assert got[("202650", "full")] == ("Summer 2026", "Summer")
+    assert got[("202550", "f")] == ("Summer 2025", "Summer")
+    assert got[("202540", "a")] == ("Summer 1 2025", "Summer 1")
+    assert got[("202630", "1")] == ("Spring 2026", "Spring")
+    assert {i["term_label"] for i in instructors if i["term_code"] == "202650"} == {
+        "Summer 1 2026", "Summer 2 2026", "Summer 2026"}
+
+
+def test_history_orders_summer_sessions_within_one_term(banner_db):
+    _write_summers(banner_db)
+    _, _, instructors = read_banner(banner_db)
+    pair = next(p for p in build_course_instructors(instructors, Identity({}))
+                if p["subject_course"] == "CS3500" and p["instructor_key"] == "annie witte")
+    assert pair["recent_terms"] == ("Summer 2 2026,Summer 2026,Summer 1 2026,"
+                                    "Spring 2026,Summer 2025,Summer 1 2025")
+    assert pair["last_term_label"] == "Summer 2 2026"
+    assert pair["terms_taught"] == 6
+
+
+def test_offerings_count_summer_sessions_through_the_read_path(banner_db):
+    _write_summers(banner_db)
+    _, sections, instructors = read_banner(banner_db)
+    o = next(o for o in build_course_offerings(sections, instructors)
+             if o["subject_course"] == "CS3500")
+    # Window is 2025-2026: Summer 1 both years, Summer 2 once, full summer both.
+    assert (o["spring_years"], o["summer1_years"], o["summer2_years"],
+            o["summer_years"]) == (1, 2, 1, 2)
+    assert o["pattern"] == "Summer 1 and Summer"
+    write_history(banner_db, [], [o])
+    assert banner_db.execute("SELECT summer1_years, summer2_years FROM "
+                             "banner_course_offerings").fetchone() == (2, 1)
+
+
+def test_a_cps_winter_quarter_counts_as_spring_in_the_offering_pattern(banner_db):
+    write_term(banner_db, "202625", {"label": "Winter 2026", "season": "Winter",
+                                     "season_group": "Winter", "year": 2026,
+                                     "track": "CPS Quarter", "view_only": True}, None,
+               {"sections": [{"crn": "w1", "subject": "MGT", "subject_course": "MGT5000",
+                              "schedule_type": "Lecture", "enrollment": 12}],
+                "instructors": [], "stats": {"section_count": 1, "attributed_sections": 0,
+                                             "instructor_count": 0}})
+    _, sections, instructors = read_banner(banner_db)
+    o = next(o for o in build_course_offerings(sections, instructors)
+             if o["subject_course"] == "MGT5000")
+    assert (o["pattern"], o["spring_years"]) == ("Spring", 1)
+
+
+def test_matcher_upgrades_an_offerings_table_from_before_the_sessions(tmp_path):
+    import match_banner_instructors
+    path = str(tmp_path / "stage.db")
+    conn = sqlite3.connect(path)
+    c = conn.cursor()
+    apply_ddl(c)
+    for stmt in HISTORY_DDL.split(";"):
+        if stmt.strip():
+            c.execute(stmt)
+    c.execute("ALTER TABLE banner_course_offerings DROP COLUMN summer1_years")
+    c.execute("ALTER TABLE banner_course_offerings DROP COLUMN summer2_years")
+    stats = {"section_count": 1, "attributed_sections": 1, "instructor_count": 1}
+    for code, label, season, closed in (("202630", "Spring 2026", "Spring", True),
+                                        ("202710", "Fall 2026", "Fall", False)):
+        write_term(c, code, {"label": label, "season": season, "season_group": season,
+                             "year": 2026, "track": "Semester", "view_only": closed}, None,
+                   {"sections": [{"crn": "1", "subject": "CS", "subject_course": "CS3500",
+                                  "schedule_type": "Lecture", "enrollment": 30}],
+                    "instructors": [{"term_code": code, "crn": "1",
+                                     "instructor_key": "annie witte",
+                                     "instructor_name": "Witte, Annie", "is_primary": True}],
+                    "stats": stats})
+    conn.commit()
+    conn.close()
+
+    assert match_banner_instructors.main(["--local-db", path]) == 0
+    got = sqlite3.connect(path).execute(
+        "SELECT subject_course, summer1_years, summer2_years FROM banner_course_offerings")
+    assert got.fetchall() == [("CS3500", 0, 0)]
+
+
 def test_chip_rows_take_only_the_current_season(banner_db):
     terms, _, instructors = read_banner(banner_db)
     label, codes = current_season(terms)

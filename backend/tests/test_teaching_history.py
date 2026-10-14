@@ -12,7 +12,8 @@ NOW = datetime(2026, 10, 1, tzinfo=timezone.utc)
 OFFERING = {
     "subject_course": "CS3100", "course_title": "Program Design and Implementation 2",
     "last_term_label": "Fall 2026", "pattern": "Fall and Spring",
-    "fall_years": 1, "spring_years": 1, "summer_years": 0, "pattern_window_years": 1,
+    "fall_years": 1, "spring_years": 1, "summer1_years": 1, "summer2_years": 0,
+    "summer_years": 0, "pattern_window_years": 1,
     "median_section_size": 98.0, "credit_hours": "4", "instructor_count": 8,
     "offered_now": "Fall 2026",
 }
@@ -65,7 +66,8 @@ def test_course_history_summary():
     query, query_one, _ = course_db()
     got = th.course_history("CS3100", query, query_one)
     assert got["pattern"] == "Fall and Spring"
-    assert got["seasonYears"] == {"fall": 1, "spring": 1, "summer": 0}
+    assert got["seasonYears"] == {"fall": 1, "spring": 1, "summer1": 1, "summer2": 0,
+                                  "summer": 0}
     assert got["windowYears"] == 1
     assert got["lastOffered"] == "Fall 2026"
     assert got["offeredNow"] == ["Fall 2026"]

@@ -41,7 +41,7 @@ from psycopg2.extras import execute_values
 sys.path.insert(0, os.path.abspath(os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backend")))
 
-from banner_api import pattern_season  # noqa: E402
+from banner_api import pattern_season, section_label  # noqa: E402
 from banner_history import (academic_year,  # noqa: E402
                             build_course_instructors, build_course_offerings,
                             is_teaching, place, rename_candidates)
@@ -51,7 +51,7 @@ from prof_aliases import ALIAS_MAP  # noqa: E402
 # override the DSN's verify-full or the connection fails outright, and the DNS
 # flake is retried. with_retry comes from the same place so both write paths
 # replay a 40001 identically.
-from load_banner_to_crdb import apply_ddl, connect, with_retry  # noqa: E402
+from load_banner_to_crdb import add_columns, apply_ddl, connect, with_retry  # noqa: E402
 
 # A run must keep at least this share of the previous run's matches. Not a
 # share of Banner: the catalog only holds professors with an RMP page, so most
@@ -220,7 +220,9 @@ CREATE TABLE IF NOT EXISTS banner_course_offerings (
     pattern               TEXT NOT NULL,
     fall_years            INT NOT NULL,
     spring_years          INT NOT NULL,
-    summer_years          INT NOT NULL,
+    summer_years          INT NOT NULL,  -- full summer, CPS and Law (sessions below)
+    summer1_years         INT NOT NULL DEFAULT 0,
+    summer2_years         INT NOT NULL DEFAULT 0,
     pattern_window_years  INT NOT NULL,
     avg_sections_per_term FLOAT,
     avg_section_size      FLOAT,
@@ -245,6 +247,12 @@ CREATE TABLE IF NOT EXISTS banner_course_renames (
     new_code              TEXT NOT NULL
 )
 """
+
+# Added after banner_course_offerings first shipped; see load_banner_to_crdb.add_columns.
+HISTORY_ADDED_COLUMNS = (
+    ("banner_course_offerings", "summer1_years", "INT NOT NULL DEFAULT 0"),
+    ("banner_course_offerings", "summer2_years", "INT NOT NULL DEFAULT 0"),
+)
 
 # Approved renumberings: old code -> the code it became. A course page for the
 # new code shows the old code's history too, labelled with the old code; the
@@ -273,7 +281,8 @@ COURSE_INSTRUCTOR_COLUMNS = (
 OFFERING_COLUMNS = (
     "subject_course", "subject", "course_title", "first_term_code",
     "last_term_code", "last_term_label", "terms_offered", "pattern",
-    "fall_years", "spring_years", "summer_years", "pattern_window_years",
+    "fall_years", "spring_years", "summer_years", "summer1_years",
+    "summer2_years", "pattern_window_years",
     "avg_sections_per_term", "avg_section_size", "median_section_size",
     "credit_hours", "instructor_count", "offered_now")
 
@@ -794,20 +803,22 @@ SECTION_SELECT = """
     SELECT s.term_code, s.crn, s.subject, s.subject_course, s.course_title,
            s.campus, s.instructional_method, s.schedule_type,
            s.credit_hours_low, s.credit_hours_high, s.enrollment,
-           t.term_label, t.season_group, t.scraped_closed
+           t.term_label, t.season_group, t.scraped_closed,
+           t.season, t.track, t.year, s.part_of_term
     FROM banner_sections s JOIN banner_terms t ON t.term_code = s.term_code
 """
 SECTION_FIELDS = ("term_code", "crn", "subject", "subject_course", "course_title",
                   "campus", "instructional_method", "schedule_type",
                   "credit_hours_low", "credit_hours_high", "enrollment", "term_label",
-                  "season_group", "closed")
+                  "season_group", "closed", "season", "track", "year", "part_of_term")
 
 # Banner's own rows only; see the module docstring on the one-off import.
 INSTRUCTOR_SELECT = """
     SELECT i.term_code, i.crn, i.instructor_key, i.instructor_name,
            i.is_primary, s.subject_course, s.schedule_type,
            s.campus, s.instructional_method, s.enrollment,
-           t.term_label, t.scraped_closed
+           t.term_label, t.scraped_closed,
+           t.season, t.track, t.year, s.part_of_term
     FROM banner_section_instructors i
     JOIN banner_sections s ON s.term_code = i.term_code AND s.crn = i.crn
     JOIN banner_terms t ON t.term_code = i.term_code
@@ -816,7 +827,8 @@ INSTRUCTOR_SELECT = """
 INSTRUCTOR_FIELDS = ("term_code", "crn", "instructor_key", "instructor_name",
                      "is_primary", "subject_course",
                      "schedule_type", "campus", "instructional_method",
-                     "enrollment", "term_label", "closed")
+                     "enrollment", "term_label", "closed",
+                     "season", "track", "year", "part_of_term")
 
 
 TERM_FIELDS = ("term_code", "term_label", "season_group", "view_only", "scraped_at")
@@ -832,6 +844,10 @@ def read_banner(cur):
     instructors = [dict(zip(INSTRUCTOR_FIELDS, r)) for r in cur.fetchall()]
     for r in sections + instructors:
         r["closed"] = bool(r["closed"])
+        # The label a student reads: from Summer 2026 the session is on the
+        # section, not the term (banner_api.section_label).
+        r["term_label"], r["pattern_season"] = section_label(
+            r["term_label"], r["season"], r["track"], r["year"], r["part_of_term"])
     return terms, sections, instructors
 
 
@@ -890,6 +906,7 @@ def main(argv=None):
         for stmt in ddl.split(";"):
             if stmt.strip():
                 cur.execute(stmt.replace("TIMESTAMPTZ", "TIMESTAMP") if args.local_db else stmt)
+    add_columns(cur, HISTORY_ADDED_COLUMNS)
     conn.commit()
 
     term_rows, sections, instructors = read_banner(cur)

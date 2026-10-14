@@ -14,12 +14,14 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 import psycopg2  # noqa: E402
 
+import banner_client  # noqa: E402
 import banner_scrape  # noqa: E402
 import load_banner_to_crdb  # noqa: E402
 from banner_client import BannerRequestFailed  # noqa: E402
-from load_banner_to_crdb import (apply_ddl, connect, known_terms,  # noqa: E402
-                                 push, run, sync_view_only, with_retry,
-                                 write_term)
+from load_banner_to_crdb import (ADDED_COLUMNS, SECTION_COLUMNS,  # noqa: E402
+                                 add_columns, apply_ddl, connect, known_terms,
+                                 push, run, selftest, sync_view_only,
+                                 with_retry, write_term)
 from test_banner_scrape import ANNIE, PAT, FakeClient, section  # noqa: E402
 
 FALL = {"label": "Fall 2026", "season": "Fall", "season_group": "Fall",
@@ -116,7 +118,7 @@ def test_co_taught_section_keeps_both_instructors(cur):
 def test_known_terms_reports_closed_flag_and_baseline(cur):
     write_term(cur, "202630", SPRING, None, scrape([sec("7"), sec("8")], []))
     write_term(cur, "202710", FALL, None, scrape([sec("1")], []))
-    assert known_terms(cur) == {"202630": (True, 2), "202710": (False, 1)}
+    assert known_terms(cur) == {"202630": (True, 2, "banner"), "202710": (False, 1, "banner")}
 
 
 def test_sections_only_write_leaves_existing_instructor_rows_alone(cur):
@@ -167,7 +169,7 @@ def test_a_closed_term_with_failed_lookups_is_not_marked_finished(cur):
     final = scrape([sec("1"), sec("2")], [ins("202630", "1")])
     final["failed_crns"] = ["2"]
     write_term(cur, "202630", SPRING, None, final)
-    assert known_terms(cur)["202630"] == (False, 2)
+    assert known_terms(cur)["202630"] == (False, 2, "banner")
 
 
 def test_an_ended_term_is_stored_closed(cur):
@@ -204,7 +206,7 @@ def test_sync_marks_a_closed_term_without_clearing_its_final_scrape_debt(cur):
     n = sync_view_only(cur, [{"code": "202710", "description": "Fall 2026 Semester (View Only)"}])
     assert n == 1
     assert cur.execute("SELECT view_only, scraped_closed FROM banner_terms").fetchone() == (1, 0)
-    assert known_terms(cur)["202710"] == (False, 1)
+    assert known_terms(cur)["202710"] == (False, 1, "banner")
 
 
 def test_sync_leaves_open_terms_alone(cur):
@@ -267,7 +269,7 @@ def test_run_current_skips_a_term_already_stored_as_ended(db):
     while Banner still lists it as open."""
     client = FakeClient({"202710": [section("1", end="09/01/2026")]}, {"1": ANNIE}, terms=TERMS)
     assert run(client, db, "current") == (["202710"], [])
-    assert known_terms(db().cursor())["202710"] == (True, 1)
+    assert known_terms(db().cursor())["202710"] == (True, 1, "banner")
     assert run(client, db, "current") == ([], [])
 
 
@@ -293,6 +295,44 @@ def test_run_backfill_is_sections_only_before_instructors_from(db):
     cur = db().cursor()
     assert dict(cur.execute("SELECT term_code, instructors_source FROM banner_terms")) == {
         "202630": "banner", "202610": "none"}
+
+
+def test_run_backfill_swaps_imported_instructors_for_banners(db):
+    conn = db()
+    c = conn.cursor()
+    apply_ddl(c)
+    write_term(c, "202630", SPRING, None, scrape([sec("5")], [ins("202630", "5", "pat hurley")]))
+    c.execute("UPDATE banner_section_instructors SET source = 'import'")
+    c.execute("UPDATE banner_terms SET instructors_source = 'import'")
+    conn.commit()
+
+    client = FakeClient({"202630": [section("5")], "202610": [section("6")]},
+                        {"5": ANNIE, "6": PAT}, terms=TERMS)
+    assert run(client, db, "backfill", since_term="202610",
+               instructors_from="202610") == (["202630", "202610"], [])
+    cur = db().cursor()
+    assert cur.execute("SELECT instructor_key, source FROM banner_section_instructors "
+                       "WHERE term_code = '202630'").fetchall() == [("annie witte", "banner")]
+    assert known_terms(cur)["202630"] == (True, 1, "banner")
+
+
+def test_run_rescrape_scrapes_a_finished_term_again(db):
+    client = FakeClient({"202630": [section("5")], "202610": [section("6")]},
+                        {"5": ANNIE, "6": PAT}, terms=TERMS)
+    run(client, db, "backfill", since_term="202610", instructors_from="202610")
+    assert run(client, db, "backfill", since_term="202610", instructors_from="202610") == ([], [])
+    assert run(client, db, "backfill", since_term="202610", instructors_from="202610",
+               rescrape=["202630"]) == (["202630"], [])
+
+
+def test_main_passes_rescrape_codes_to_run(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(load_banner_to_crdb, "run",
+                        lambda *a, **kw: seen.update(kw) or ([], []))
+    monkeypatch.setattr(banner_client, "BannerClient", lambda concurrency: None)
+    assert load_banner_to_crdb.main(["--local-db", str(tmp_path / "s.db"), "--backfill",
+                                     "--rescrape", "202650, 202550"]) == 0
+    assert seen["rescrape"] == ["202650", "202550"]
 
 
 def test_push_copies_a_staged_file_and_is_idempotent(db, tmp_path):
@@ -541,3 +581,68 @@ def test_main_exits_75_on_a_rate_limit_so_the_workflow_skips_finalize(
     monkeypatch.setattr(load_banner_to_crdb, "run", rate_limited)
     assert load_banner_to_crdb.main(["--local-db", str(tmp_path / "x.db")]) == 75
     assert "RATE LIMITED" in capsys.readouterr().err
+
+
+# ── part_of_term on tables that predate it ───────────────────────────────
+
+def _legacy_sections(cur):
+    """banner_sections as prod has it: every column but part_of_term."""
+    cur.execute("CREATE TABLE banner_sections (" + ", ".join(
+        f"{c} TEXT" for c in SECTION_COLUMNS if c != "part_of_term")
+        + ", PRIMARY KEY (term_code, crn))")
+
+
+def _columns(cur, table):
+    return {r[1] for r in cur.execute(f"PRAGMA table_info({table})")}
+
+
+def test_apply_ddl_adds_part_of_term_to_a_table_that_predates_it():
+    cur = sqlite3.connect(":memory:").cursor()
+    _legacy_sections(cur)
+    apply_ddl(cur)
+    apply_ddl(cur)     # idempotent: the second pass must not re-add it
+    assert "part_of_term" in _columns(cur, "banner_sections")
+
+
+def test_add_columns_uses_if_not_exists_on_cockroach():
+    class Recorder:
+        def __init__(self):
+            self.sql = []
+
+        def execute(self, sql, params=None):
+            self.sql.append(sql)
+
+    rec = Recorder()
+    add_columns(rec, ADDED_COLUMNS)
+    assert rec.sql == ["ALTER TABLE banner_sections ADD COLUMN IF NOT EXISTS part_of_term TEXT"]
+
+
+def test_selftest_passes_against_a_table_that_predates_part_of_term():
+    assert selftest() == 0
+
+
+def test_part_of_term_round_trips_through_stage_and_push(db, tmp_path):
+    stage = str(tmp_path / "stage.db")
+    client = FakeClient({"202630": [{**section("5"), "partOfTerm": "2A"},
+                                    {**section("6"), "partOfTerm": None}]},
+                        {"5": ANNIE, "6": PAT}, terms=TERMS)
+    run(client, lambda: sqlite3.connect(stage), "backfill", since_term="202630",
+        instructors_from="202630")
+    assert dict(sqlite3.connect(stage).execute(
+        "SELECT crn, part_of_term FROM banner_sections")) == {"5": "2A", "6": None}
+    assert push(stage, db) == 0
+    assert dict(db().execute("SELECT crn, part_of_term FROM banner_sections")) == {
+        "5": "2A", "6": None}
+
+
+def test_push_reads_a_stage_from_before_part_of_term(db, tmp_path):
+    stage = str(tmp_path / "stage.db")
+    client = FakeClient({"202630": [section("5")]}, {"5": ANNIE}, terms=TERMS)
+    run(client, lambda: sqlite3.connect(stage), "backfill", since_term="202630",
+        instructors_from="202630")
+    old = sqlite3.connect(stage)
+    old.execute("ALTER TABLE banner_sections DROP COLUMN part_of_term")
+    old.commit()
+    old.close()
+    assert push(stage, db) == 0
+    assert db().execute("SELECT crn, part_of_term FROM banner_sections").fetchall() == [("5", None)]

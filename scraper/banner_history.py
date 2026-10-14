@@ -25,8 +25,7 @@ import re
 from collections import defaultdict
 from statistics import median
 
-from banner_api import (NON_PLACE_CAMPUSES, NON_TEACHING_SCHEDULE_TYPES,
-                        pattern_season)
+from banner_api import NON_PLACE_CAMPUSES, NON_TEACHING_SCHEDULE_TYPES
 
 # A coordinator Banner lists on every lab of a programme is not teaching all of
 # them. Same threshold and same reasoning as backend/teaching_history.py's TEACHING_MAX_COURSES
@@ -42,7 +41,9 @@ PATTERN_YEARS = 4
 # Offered in at least this share of those years counts as regular.
 REGULAR_SHARE = 0.75
 
-SEASON_ORDER = ("Fall", "Spring", "Summer")
+# "Summer" is the full summer and everything without a session: Summer Full
+# before 2026, CPS, Law, and 2026+ full-term sections.
+SEASON_ORDER = ("Fall", "Spring", "Summer 1", "Summer 2", "Summer")
 
 # Titles too generic to suggest that one code replaced another. Measured on the
 # 2026-10-01 candidates: "Topics", "Projects for Professionals" and the like
@@ -111,6 +112,19 @@ def _size_sample(sections):
     return [s for s in sections if s.get("closed") and (s.get("enrollment") or 0) > 0]
 
 
+# From Summer 2026, one term code holds both summer sessions, so the code alone
+# can't order their labels. Before 2026 the codes already do (40 < 50 < 60).
+_SESSION_RANK = {"Summer 1": 0, "Summer 2": 2}
+
+
+def session_rank(label):
+    """Summer 1 before full summer before Summer 2, inside one term code."""
+    for session, rank in _SESSION_RANK.items():
+        if label.startswith(session + " "):
+            return rank
+    return 1
+
+
 def _labels_newest_first(term_rows):
     """[(term_code, label)] -> labels, newest first, one per label.
 
@@ -118,7 +132,8 @@ def _labels_newest_first(term_rows):
     the grain students see.
     """
     out, seen = [], set()
-    for code, label in sorted(term_rows, key=lambda t: int(t[0]), reverse=True):
+    for code, label in sorted(term_rows, key=lambda t: (int(t[0]), session_rank(t[1])),
+                              reverse=True):
         if label not in seen:
             seen.add(label)
             out.append(label)
@@ -230,9 +245,18 @@ def offering_pattern(years_by_season, window):
     counts = {s: len(years_by_season.get(s, set()) & set(window)) for s in SEASON_ORDER}
     if not window:
         return "Not offered recently", counts
-    regular = [s for s in SEASON_ORDER if counts[s] >= REGULAR_SHARE * len(window)]
+    needed = REGULAR_SHARE * len(window)
+    regular = [s for s in SEASON_ORDER if counts[s] >= needed]
+    # Every summer, but not always the same session: still a summer course.
+    summers = ("Summer 1", "Summer 2", "Summer")
+    if not any(s in regular for s in summers):
+        any_summer = set().union(*(years_by_season.get(s, set()) for s in summers))
+        if len(any_summer & set(window)) >= needed:
+            regular.append("Summer")
     if regular:
-        return " and ".join(regular), counts
+        if len(regular) == 1:
+            return regular[0], counts
+        return f"{', '.join(regular[:-1])} and {regular[-1]}", counts
     if any(counts.values()):
         return "Irregular", counts
     return "Not offered recently", counts
@@ -298,7 +322,7 @@ def build_course_offerings(sections, instructor_rows=()):
         years_by_season = defaultdict(set)
         sections_per_label = defaultdict(int)
         for s in secs:
-            years_by_season[pattern_season(s["season_group"])].add(academic_year(s["term_code"]))
+            years_by_season[s["pattern_season"]].add(academic_year(s["term_code"]))
             sections_per_label[s["term_label"]] += 1
         label, counts = offering_pattern(years_by_season, window)
         if label == "Not offered recently" and any(not s.get("closed") for s in secs):
@@ -318,6 +342,8 @@ def build_course_offerings(sections, instructor_rows=()):
             "pattern": label,
             "fall_years": counts["Fall"],
             "spring_years": counts["Spring"],
+            "summer1_years": counts["Summer 1"],
+            "summer2_years": counts["Summer 2"],
             "summer_years": counts["Summer"],
             "pattern_window_years": len(window),
             "avg_sections_per_term": round(len(secs) / len(labels), 1),
