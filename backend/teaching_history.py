@@ -118,7 +118,7 @@ def course_history(code, query, query_one):
         SELECT bci.instructor_name, bci.professor_slug, pc.name AS catalog_name,
                bci.terms_taught, bci.last_term_code, bci.last_term_label, bci.recent_terms,
                bci.avg_enrollment, pc.image_url, pc.focus_x, pc.focus_y,
-               pc.total_reviews, pc.total_comments, pc.would_take_again_pct
+               pc.total_comments, pc.would_take_again_pct
         FROM banner_course_instructors bci
         LEFT JOIN professors_catalog pc ON pc.slug = bci.professor_slug
         WHERE bci.subject_course = %s
@@ -148,9 +148,8 @@ def course_history(code, query, query_one):
             "imageUrl": r["image_url"],
             "focusX": r["focus_x"] if r["focus_x"] is not None else 50.0,
             "focusY": r["focus_y"] if r["focus_y"] is not None else 30.0,
-            # Their catalog-wide numbers, as the professor catalog shows them;
-            # None for an instructor with no profile.
-            "totalReviews": r["total_reviews"],
+            # Their catalog-wide numbers; None for an instructor with no
+            # profile. 0% would-take-again is real, as on their page (rmp.pct).
             "totalComments": r["total_comments"],
             "wouldTakeAgainPct": round(r["would_take_again_pct"], 1)
                                  if r["would_take_again_pct"] is not None else None,

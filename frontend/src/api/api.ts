@@ -356,8 +356,9 @@ export interface RecentInstructor {
   rating: number | null;
   /** Terms they taught it in the last year, newest first. */
   terms: string[];
-  /** Their catalog-wide numbers, as the professor catalog shows them; null with no profile. */
-  totalReviews: number | null;
+  /** Their ratings of this course: 0 with none, null when unmatched. */
+  numRatings: number | null;
+  /** Their catalog-wide numbers; null with no profile. 0% would-take-again is real. */
   totalComments: number | null;
   wouldTakeAgainPct: number | null;
 }

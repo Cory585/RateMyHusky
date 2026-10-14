@@ -220,8 +220,8 @@ const Course = () => {
 									focusX={r.focusX}
 									focusY={r.focusY}
 									rating={r.rating}
-									footerLeft={r.totalReviews != null ? `${r.totalReviews.toLocaleString()} ratings` : '—'}
-									footerCenter={r.totalComments != null ? `${r.totalComments.toLocaleString()} comments` : '—'}
+									footerLeft={r.numRatings != null ? `${r.numRatings.toLocaleString()} rating${r.numRatings === 1 ? '' : 's'}` : '—'}
+									footerCenter={r.totalComments != null ? `${r.totalComments.toLocaleString()} comment${r.totalComments === 1 ? '' : 's'}` : '—'}
 									footerRight={r.wouldTakeAgainPct != null ? `${Math.round(r.wouldTakeAgainPct)}% again` : '—'}
 									to={r.slug ? `/professors/${r.slug}` : undefined}
 									fromPage={fromPage}

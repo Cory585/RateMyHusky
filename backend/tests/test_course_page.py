@@ -112,7 +112,7 @@ def _inst(slug, name, terms, size=None):
     return {"name": name, "slug": slug, "termsTaught": len(terms), "lastTerm": terms[0],
             "recentTerms": terms, "avgClassSize": size,
             "imageUrl": f"https://img/{slug}.jpg" if slug else None, "focusX": 50.0, "focusY": 30.0,
-            "totalReviews": 120 if slug else None, "totalComments": 80 if slug else None,
+            "totalComments": 80 if slug else None,
             "wouldTakeAgainPct": 91.2 if slug else None}
 
 
@@ -229,17 +229,18 @@ def test_recent_card_fields_and_this_courses_rating():
     assert olin == {"slug": "olin-guha", "name": "Olin Guha", "imageUrl": "https://img/olin-guha.jpg",
                     "focusX": 50.0, "focusY": 30.0, "rating": 4.5,
                     "terms": ["Fall 2026", "Summer 1 2026", "Spring 2026", "Fall 2025"],
-                    "totalReviews": 120, "totalComments": 80, "wouldTakeAgainPct": 91.2}
+                    "numRatings": 30, "totalComments": 80, "wouldTakeAgainPct": 91.2}
 
 
 def test_unmatched_instructor_has_no_slug_photo_or_rating():
     jane = _with_history()["history"]["recentInstructors"][1]
-    assert (jane["slug"], jane["imageUrl"], jane["rating"]) == (None, None, None)
+    assert (jane["slug"], jane["imageUrl"], jane["rating"], jane["numRatings"]) == (None, None, None, None)
 
 
 def test_matched_instructor_with_no_reviews_here_has_no_rating():
     history = {**HISTORY, "instructors": [_inst("new-prof", "New Prof", ["Fall 2026"])]}
-    assert _with_history(history)["history"]["recentInstructors"][0]["rating"] is None
+    new = _with_history(history)["history"]["recentInstructors"][0]
+    assert (new["rating"], new["numRatings"]) == (None, 0)
 
 
 def test_dormant_course_has_no_recent_instructors_but_keeps_history():
@@ -431,16 +432,37 @@ def test_courses_catalog_recent_sorts_by_last_banner_term(monkeypatch):
     monkeypatch.setattr(server, "query", lambda sql, p=(): seen.append(sql) or [], raising=False)
     resp = server.app.test_client().get("/api/courses-catalog?sort=recent")
     assert resp.status_code == 200
-    assert "banner_course_offerings" in seen[0]
-    assert "WHERE subject_course = course_catalog.code) DESC NULLS LAST" in seen[0]
+    assert "LEFT JOIN banner_course_offerings bco ON bco.subject_course = course_catalog.code" in seen[0]
+    assert "bco.last_term_code DESC NULLS LAST" in seen[0]
+    assert "LIKE 'Summer 2 %%' THEN 2" in seen[0]
     assert "avg_rating DESC NULLS LAST, lower(code) ASC" in seen[0]
+
+
+def test_courses_catalog_recent_without_banner_tables_sorts_by_rating(monkeypatch):
+    seen = []
+    monkeypatch.setattr(server, "cache_get", lambda key: None, raising=False)
+    monkeypatch.setattr(server, "cache_set", lambda key, data: None, raising=False)
+    monkeypatch.setattr(server.limiter, "enabled", False)
+    monkeypatch.setattr(server, "query_one", lambda sql, p=(): {"cnt": 1}, raising=False)
+
+    def query(sql, p=()):
+        seen.append(sql)
+        if "banner_course_offerings" in sql:
+            raise psycopg2.errors.UndefinedTable('relation "banner_course_offerings" does not exist')
+        return [{"code": "CS3500", "name": "OOD", "department": "CS", "avg_rating": 4.2}]
+    monkeypatch.setattr(server, "query", query, raising=False)
+    resp = server.app.test_client().get("/api/courses-catalog?sort=recent")
+    assert resp.status_code == 200
+    assert resp.get_json()["courses"][0]["code"] == "CS3500"
+    assert "banner_course_offerings" not in seen[1]
+    assert "ORDER BY avg_rating DESC NULLS LAST, lower(code) ASC" in seen[1]
 
 
 @pytest.mark.parametrize("path, order", [
     ("/api/courses-catalog?sort=alpha_desc", "ORDER BY lower(code) DESC"),
     ("/api/courses-catalog?sort=rating_asc", "ORDER BY avg_rating ASC NULLS LAST, lower(code) ASC"),
-    ("/api/professors-catalog?sort=alpha_desc", "ORDER BY lower(name) DESC"),
-    ("/api/professors-catalog?sort=rating_asc", "ORDER BY avg_rating ASC NULLS LAST"),
+    ("/api/professors-catalog?sort=alpha_desc", "ORDER BY lower(name) DESC, slug DESC"),
+    ("/api/professors-catalog?sort=rating_asc", "ORDER BY avg_rating ASC NULLS LAST, slug ASC"),
 ])
 def test_catalogs_sort_in_reverse(monkeypatch, path, order):
     seen = []

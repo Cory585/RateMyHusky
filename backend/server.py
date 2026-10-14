@@ -1202,9 +1202,9 @@ def professors_catalog():
         if sort == "rating":
             order = "avg_rating DESC NULLS LAST"
         elif sort == "rating_asc":
-            order = "avg_rating ASC NULLS LAST"
+            order = "avg_rating ASC NULLS LAST, slug ASC"
         elif sort == "alpha_desc":
-            order = "lower(name) DESC"
+            order = "lower(name) DESC, slug DESC"
         elif sort == "comments":
             order = "total_comments DESC"
         else:
@@ -1315,6 +1315,7 @@ def courses_catalog():
 
     where_str = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
+    join = ""
     if sort == "rating":
         order = "avg_rating DESC NULLS LAST, lower(code) ASC"
     elif sort == "rating_asc":
@@ -1323,9 +1324,13 @@ def courses_catalog():
         order = "lower(code) DESC"
     elif sort == "recent":
         # Last term Banner has the course on, best rated first within a term;
-        # courses Banner never saw go last.
-        order = """(SELECT last_term_code FROM banner_course_offerings
-                    WHERE subject_course = course_catalog.code) DESC NULLS LAST,
+        # courses Banner never saw go last. From 2026 Summer 1 and Summer 2
+        # share one code (202650), so the label orders the sessions, as in
+        # teaching_history.label_code.
+        join = "LEFT JOIN banner_course_offerings bco ON bco.subject_course = course_catalog.code"
+        order = """bco.last_term_code DESC NULLS LAST,
+                   CASE WHEN bco.last_term_label LIKE 'Summer 2 %%' THEN 2
+                        WHEN bco.last_term_label LIKE 'Summer 1 %%' THEN 0 ELSE 1 END DESC,
                    avg_rating DESC NULLS LAST, lower(code) ASC"""
     else:
         order = "lower(code) ASC"
@@ -1337,12 +1342,20 @@ def courses_catalog():
     page = max(1, min(page, total_pages))
     offset = (page - 1) * limit
 
-    rows = query(f"""
-        SELECT code, name, department, avg_rating FROM course_catalog
-        {where_str}
-        ORDER BY {order}
-        LIMIT %s OFFSET %s
-    """, params + [limit, offset])
+    def page_rows(join, order):
+        return query(f"""
+            SELECT code, name, department, avg_rating FROM course_catalog {join}
+            {where_str}
+            ORDER BY {order}
+            LIMIT %s OFFSET %s
+        """, params + [limit, offset])
+
+    try:
+        rows = page_rows(join, order)
+    except psycopg2.errors.UndefinedTable:
+        # Banner decorates the catalog and never fails it: without its tables
+        # (a fresh database), Most Recent sorts like Highest Rated.
+        rows = page_rows("", "avg_rating DESC NULLS LAST, lower(code) ASC")
 
     courses = [
         {

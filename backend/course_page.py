@@ -40,13 +40,14 @@ def recent_cutoff(terms):
 
 def build_recent(instructors, professors, cutoff):
     """Instructors who taught the course at or after `cutoff`, newest first
-    (instructors' order), one card per professor, with this course's rating,
-    their catalog-wide ratings, comments and would-take-again, and only their
-    in-window terms; with none, they're left out. Unreadable
+    (instructors' order), one card per professor, with this course's rating
+    and rating count, their catalog-wide comments and would-take-again, and
+    only their in-window terms; with none, they're left out. Unreadable
     labels (label_code None) never count as in-window.
     An unmatched instructor has no slug, so is one card per name, which is
     also how the page keys them."""
     rating = {p["slug"]: p["rating"] for p in professors}
+    num_ratings = {p["slug"]: p["numRatings"] for p in professors}
     recent, seen = [], set()
     for i in instructors:
         terms = [t for t in i["recentTerms"] if (teaching_history.label_code(t) or 0) >= cutoff]
@@ -59,7 +60,8 @@ def build_recent(instructors, professors, cutoff):
             "focusX": i["focusX"], "focusY": i["focusY"],
             "rating": rating.get(i["slug"]),
             "terms": terms,
-            "totalReviews": i["totalReviews"],
+            # 0 for a professor with no reviews of this course; None unmatched.
+            "numRatings": num_ratings.get(i["slug"], 0) if i["slug"] else None,
             "totalComments": i["totalComments"],
             "wouldTakeAgainPct": i["wouldTakeAgainPct"],
         })
