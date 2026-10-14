@@ -48,14 +48,21 @@ def test_unknown_types_are_rejected(monkeypatch):
     assert "Unknown feedback type" in resp.get_json()["error"]
 
 
-def test_retired_and_merged_types_still_pass_validation(monkeypatch):
-    # Cached bundles and the maintenance page can still send the old keys.
+def test_every_accepted_type_passes_validation(monkeypatch):
+    # Includes the merged "missing"/"feature" keys that cached bundles can still send.
     for t in ("bug", "feature", "missing", "incorrectdata", "general"):
         resp = _post(monkeypatch, feedbackType=t, description="hi")
         assert resp.get_json()["error"] == "Email service not configured", t
     for t in ("banappeal", "datadeletion", "professor"):
         resp = _post(monkeypatch, feedbackType=t, description="hi", email="a@northeastern.edu")
         assert resp.get_json()["error"] == "Email service not configured", t
+
+
+def test_non_string_fields_are_rejected_not_crashed(monkeypatch):
+    resp = _post(monkeypatch, feedbackType=123, description="hi")
+    assert resp.status_code == 400
+    resp = _post(monkeypatch, feedbackType="bug", description="hi", email=None)
+    assert resp.get_json()["error"] == "Email service not configured"
 
 
 def test_overlong_description_is_rejected(monkeypatch):

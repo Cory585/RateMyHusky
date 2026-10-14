@@ -53,6 +53,15 @@
 	margin-left: 12px;
 }
 
+.course-hero-offered {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 6px;
+	flex-shrink: 0;
+	animation: courseSlideUp 0.5s 0.2s ease both;
+}
+
 .course-code {
 	margin: 0 0 8px;
 	font-size: 0.76rem;
@@ -155,8 +164,10 @@
 	white-space: nowrap;
 }
 
+/* Line box sized like .course-stat-value's so the label lines up with the number cards. */
 .course-stat-value--text {
 	font-size: clamp(1.3rem, 2vw, 1.9rem);
+	line-height: clamp(1.6rem, 2.5vw, 2.3rem);
 	white-space: normal;
 	text-align: center;
 }
@@ -926,15 +937,6 @@
 	color: #767676;
 	font-size: 0.85rem;
 	font-weight: 600;
-}
-
-.course-hero-offered {
-	display: flex;
-	flex-wrap: wrap;
-	justify-content: flex-end;
-	gap: 6px;
-	flex-shrink: 0;
-	animation: courseSlideUp 0.5s 0.2s ease both;
 }
 
 .course-hero-offered-tag {

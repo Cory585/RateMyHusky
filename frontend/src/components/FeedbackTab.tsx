@@ -45,7 +45,7 @@ const ACCOUNT_TYPES = ['banappeal', 'datadeletion'];
 const EMAIL_REQUIRED_TYPES = [...ACCOUNT_TYPES, 'professor'];
 
 const FeedbackTab = () => {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [feedbackType, setFeedbackType] = useState('');
   const [description, setDescription] = useState('');
@@ -100,6 +100,10 @@ const FeedbackTab = () => {
   const handleSubmit = async () => {
     if (!feedbackType || !description.trim()) {
       setError('Please select a feedback type and enter a description.');
+      return;
+    }
+    if (feedbackType === 'datadeletion' && !user) {
+      setError("Please sign in first so we know which account's data to delete.");
       return;
     }
     if (EMAIL_REQUIRED_TYPES.includes(feedbackType) && !email.trim()) {
@@ -233,7 +237,7 @@ const FeedbackTab = () => {
                   onChange={setFeedbackType}
                   placeholder="Select Feedback Type"
                 />
-                {feedbackType === 'datadeletion' && !user && (
+                {feedbackType === 'datadeletion' && !authLoading && !user && (
                   <p className="feedback-note">
                     You're not signed in, so we can't tell which account's data to delete. Sign in first, then send this request.
                   </p>

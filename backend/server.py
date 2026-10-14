@@ -283,7 +283,9 @@ _PAGE_CHANGE_FEEDBACK_TYPES = {"missing", "incorrectdata", "professor"}
 
 # Every type the endpoint accepts, with its email subject label. "missing" and
 # "feature" were merged into "incorrectdata" and "general" on the form but stay
-# accepted for cached bundles; "banappeal" is hidden while Ask is off.
+# accepted for cached bundles; "banappeal" is hidden while Ask is off. Drop the two
+# old keys once no tab can still be running a pre-merge bundle (a couple of weeks
+# after the merge ships).
 _FEEDBACK_TYPE_LABELS = {
     "bug": "Bug Report",
     "incorrectdata": "Wrong or Missing Data",
@@ -1631,11 +1633,16 @@ def submit_feedback():
     global _feedback_count, _feedback_date
 
     data = request.get_json(silent=True) or {}
-    feedback_type = data.get("feedbackType", "").strip()
-    description = data.get("description", "").strip()
-    reply_email = data.get("email", "").strip()
-    turnstile_token = data.get("turnstileToken", "").strip()
-    account_token = (data.get("accountSub") or "").strip()
+    # Non-string values (123, null) count as missing instead of crashing .strip().
+    def field(name):
+        value = data.get(name)
+        return value.strip() if isinstance(value, str) else ""
+
+    feedback_type = field("feedbackType")
+    description = field("description")
+    reply_email = field("email")
+    turnstile_token = field("turnstileToken")
+    account_token = field("accountSub")
 
     # Verify Cloudflare Turnstile CAPTCHA
     turnstile_secret = os.getenv("TURNSTILE_SECRET_KEY")
