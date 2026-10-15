@@ -607,17 +607,22 @@ def test_apply_ddl_adds_part_of_term_to_a_table_that_predates_it():
     assert "part_of_term" in _columns(cur, "banner_sections")
 
 
-def test_add_columns_uses_if_not_exists_on_postgres():
+def test_add_columns_never_alters_a_postgres_table():
     class Recorder:
-        def __init__(self):
-            self.sql = []
+        def __init__(self, rows):
+            self.sql, self.rows = [], rows
 
         def execute(self, sql, params=None):
             self.sql.append(sql)
 
-    rec = Recorder()
-    add_columns(rec, ADDED_COLUMNS)
-    assert rec.sql == ["ALTER TABLE banner_sections ADD COLUMN IF NOT EXISTS part_of_term TEXT"]
+        def fetchall(self):
+            return self.rows
+
+    have = Recorder([("banner_sections", "part_of_term")])
+    add_columns(have, ADDED_COLUMNS)
+    assert not any("ALTER" in s.upper() for s in have.sql)
+    with pytest.raises(RuntimeError, match="banner_sections.part_of_term"):
+        add_columns(Recorder([("banner_sections", "crn")]), ADDED_COLUMNS)
 
 
 def test_selftest_passes_against_a_table_that_predates_part_of_term():

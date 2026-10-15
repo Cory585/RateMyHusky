@@ -1,5 +1,9 @@
 """Load the NEU academic catalog scrape to PostgreSQL.
 
+The PostgreSQL tables come from db/postgres/02_tables.sql; this loader creates
+nothing there and stops with a list of what is missing if the schema is behind
+(schema_check.py). The DDL below runs only on sqlite, in the tests and selftest.
+
 Own tables, disjoint from the read models the pipeline rebuilds — a separation
 the Banner section loader also keeps, and here it is not optional. The
 pipeline replaces every `course_catalog` row on each run, so
@@ -34,6 +38,8 @@ import time
 import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extras import execute_values
+
+from schema_check import expected_columns, require_columns
 
 # Same hazard as the Banner loader: a write overlapping the live site's reads can
 # fail with a serialization failure (40001) or a deadlock; replay the transaction.
@@ -110,6 +116,12 @@ CREATE TABLE IF NOT EXISTS catalog_nupath (
 );
 CREATE INDEX IF NOT EXISTS cn_attribute ON catalog_nupath (attribute)
 """
+
+
+def expected_schema():
+    """{table: [column, ...]} this module's DDL defines, for schema_check."""
+    return expected_columns(DDL.split(";"))
+
 
 COLUMNS = ("code", "subject", "number", "name", "department", "credit_hours",
            "credit_min", "credit_max", "description", "prerequisites",
@@ -399,10 +411,7 @@ def main(argv=None):
     conn = connect(dsn)
     try:
         cur = conn.cursor()
-        for stmt in DDL.split(";"):
-            if stmt.strip():
-                cur.execute(stmt)
-        conn.commit()
+        require_columns(cur, expected_schema())
         baseline = previous_count(cur)
     finally:
         conn.close()

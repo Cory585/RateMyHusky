@@ -1,5 +1,10 @@
 """Load NUBanner sections to PostgreSQL.
 
+The PostgreSQL tables come from db/postgres/02_tables.sql; this loader creates
+and alters nothing there and stops with a list of what is missing if the schema
+is behind (schema_check.py). It creates its tables only on sqlite stage files
+(--local-db) and in tests, from the DDL below.
+
 Own tables, disjoint from everything backend/pipeline rebuilds. That separation
 is the point: the pipeline replaces its read-model rows in one transaction every run,
 while this history is expensive to re-fetch (one request per section) and
@@ -74,6 +79,8 @@ from banner_client import BannerRateLimited, BannerRequestFailed
 from banner_scrape import (DEFAULT_INSTRUCTORS_FROM, DEFAULT_SINCE_TERM,
                            MIN_SECTION_RATIO, SanityGateFailed, plan_terms,
                            scrape_term)
+from schema_check import (expected_columns, require_columns,
+                          sqlite_flavour)
 
 # PostgreSQL can abort a write that overlaps the live site's reads or other
 # writers (40001 serialization failure, 40P01 deadlock) and the client has to
@@ -144,8 +151,8 @@ CREATE TABLE IF NOT EXISTS banner_roster_duplicates (
 """
 
 # Columns added after their table first shipped. CREATE TABLE IF NOT EXISTS
-# leaves an existing table as it is, so prod and older stage files only get
-# these from add_columns.
+# leaves an existing table as it is, so older sqlite stage files only get
+# these from add_columns. PostgreSQL gets them from db/postgres/.
 ADDED_COLUMNS = (("banner_sections", "part_of_term", "TEXT"),)
 
 TERM_COLUMNS = ("term_code", "term_desc_raw", "term_label", "season",
@@ -225,28 +232,39 @@ def _placeholder(cur):
     return "?" if isinstance(cur, sqlite3.Cursor) else "%s"
 
 
+def expected_schema():
+    """{table: [column, ...]} this module's DDL defines, for schema_check."""
+    return expected_columns(DDL.split(";"), ADDED_COLUMNS)
+
+
 def apply_ddl(cur):
+    """Create the tables on sqlite; on PostgreSQL only check that they exist.
+
+    db/postgres/02_tables.sql owns the PostgreSQL schema, so no CREATE or ALTER
+    is issued there: a missing table or column raises RuntimeError instead.
+    """
+    if not isinstance(cur, sqlite3.Cursor):
+        require_columns(cur, expected_schema())
+        return
     for stmt in DDL.split(";"):
         if stmt.strip():
-            if isinstance(cur, sqlite3.Cursor):
-                stmt = (stmt.replace("TIMESTAMPTZ", "TIMESTAMP")
-                            .replace("DEFAULT now()", "DEFAULT CURRENT_TIMESTAMP"))
-            cur.execute(stmt)
+            cur.execute(sqlite_flavour(stmt))
     add_columns(cur, ADDED_COLUMNS)
 
 
 def add_columns(cur, columns):
-    """Add each (table, column, type) the table doesn't have yet.
+    """Add each (table, column, type) a sqlite table doesn't have yet.
 
     sqlite has no ADD COLUMN IF NOT EXISTS, so it checks PRAGMA table_info first.
+    PostgreSQL is never altered here: it is checked against db/postgres/.
     """
+    if not isinstance(cur, sqlite3.Cursor):
+        require_columns(cur, expected_columns([], columns))
+        return
     for table, column, decl in columns:
-        if isinstance(cur, sqlite3.Cursor):
-            have = {r[1] for r in cur.execute(f"PRAGMA table_info({table})")}
-            if column not in have:
-                cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
-        else:
-            cur.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {decl}")
+        have = {r[1] for r in cur.execute(f"PRAGMA table_info({table})")}
+        if column not in have:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
 def known_terms(cur):
