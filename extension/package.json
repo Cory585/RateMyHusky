@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite build --watch",
-    "build:ext": "tsc --noEmit && vite build"
+    "build": "tsc --noEmit && vite build"
   },
   "dependencies": {
     "react": "^19.2.0",

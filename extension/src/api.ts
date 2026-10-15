@@ -24,33 +24,50 @@ export type CourseSuggestion = {
 
 export type Suggestion = ProfessorSuggestion | CourseSuggestion;
 
-/** A maintenance redirect arrives as HTML, so a parse failure is expected. */
+/** The site is down: maintenance, a 503, or no network. Anything else — a 403
+ *  from an origin that isn't allowlisted, a 429, a 500 — is a real error and
+ *  must not be reported as maintenance. */
 class Unavailable extends Error {}
 
 async function get<T>(path: string): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`, { credentials: 'omit' });
-  if (!resp.ok) throw new Unavailable(`${resp.status} ${resp.statusText}`);
+  let resp: Response;
+  try {
+    resp = await fetch(`${API_BASE}${path}`, { credentials: 'omit' });
+  } catch (err) {
+    throw new Unavailable(`network error: ${(err as Error).message}`);
+  }
+
+  if (!resp.ok) {
+    const detail = `${resp.status} ${resp.statusText}`;
+    if (resp.status === 503) throw new Unavailable(detail);
+    throw new Error(detail);
+  }
+
   const text = await resp.text();
   try {
     return JSON.parse(text) as T;
   } catch {
-    throw new Unavailable('expected JSON, got a page — site may be in maintenance');
+    // The maintenance redirect lands here: a 200 carrying HTML, not JSON.
+    throw new Unavailable('expected JSON, got a page');
   }
 }
 
-export async function searchProfessors(query: string, limit = 5): Promise<Suggestion[]> {
+export async function searchProfessors(
+  query: string,
+  limit = 5,
+): Promise<ProfessorSuggestion[]> {
   const q = query.trim();
   if (q.length < 2) return [];
 
   if (USE_FIXTURES) {
-    const all = searchFixture as Suggestion[];
     const needle = q.toLowerCase();
-    return all
-      .filter((s) => (s.type === 'professor' ? s.name : s.code).toLowerCase().includes(needle))
+    return (searchFixture as Suggestion[])
+      .filter((s): s is ProfessorSuggestion => s.type === 'professor')
+      .filter((s) => s.name.toLowerCase().includes(needle))
       .slice(0, limit);
   }
 
-  return get<Suggestion[]>(
+  return get<ProfessorSuggestion[]>(
     `/api/search?q=${encodeURIComponent(q)}&type=Professor&limit=${limit}`,
   );
 }
@@ -60,5 +77,5 @@ export function isUnavailable(err: unknown): boolean {
 }
 
 export function professorUrl(slug: string): string {
-  return `${API_BASE}/professors/${slug}`;
+  return `${API_BASE}/professors/${encodeURIComponent(slug)}`;
 }

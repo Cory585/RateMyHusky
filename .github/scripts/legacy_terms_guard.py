@@ -20,13 +20,14 @@ ALLOWED = re.compile(r"(?i)traceback|trace-deprecation|stack trace|reasoning tra
 HERE = pathlib.Path(__file__).resolve().parent
 FIXTURE = HERE / "legacy_terms_fixture.txt"
 EXCLUDED = {".github/scripts/legacy_terms_guard.py", ".github/scripts/legacy_terms_fixture.txt"}
-# Lockfiles are generated, and npm dependency names are outside our control:
+# Generated, and npm dependency names are outside our control:
 # @jridgewell/trace-mapping ships with Vite and reappears on every install.
-EXCLUDED_NAMES = {"package-lock.json"}
+# Listed one path at a time so a new lockfile is a deliberate decision.
+EXCLUDED |= {"extension/package-lock.json"}
 
 
 def skipped(path: str) -> bool:
-    return path in EXCLUDED or pathlib.PurePosixPath(path).name in EXCLUDED_NAMES
+    return path in EXCLUDED
 
 
 def violates(line: str) -> bool:
