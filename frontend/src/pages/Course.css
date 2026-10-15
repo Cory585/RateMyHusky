@@ -53,6 +53,15 @@
 	margin-left: 12px;
 }
 
+.course-hero-offered {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 6px;
+	max-width: 50%;
+	animation: courseSlideUp 0.5s 0.2s ease both;
+}
+
 .course-code {
 	margin: 0 0 8px;
 	font-size: 0.76rem;
@@ -155,6 +164,14 @@
 	white-space: nowrap;
 }
 
+/* Line box sized like .course-stat-value's so the label lines up with the number cards. */
+.course-stat-value--text {
+	font-size: clamp(1.3rem, 2vw, 1.9rem);
+	line-height: clamp(1.6rem, 2.5vw, 2.3rem);
+	white-space: normal;
+	text-align: center;
+}
+
 .course-stat-label {
 	font-size: 0.72rem;
 	font-weight: 700;
@@ -235,6 +252,11 @@
 	transform: translateY(-2px);
 	box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
 	border-color: rgba(214, 57, 76, 0.25);
+}
+
+.course-top-prof-card--static:hover {
+	transform: none;
+	box-shadow: none;
 }
 
 .course-top-prof-photo {
@@ -331,6 +353,12 @@
 	word-break: break-word;
 }
 
+.course-top-prof-footer--center {
+	flex: 0 0 auto !important;
+	margin: 0 auto;
+	text-align: center;
+}
+
 .course-top-prof-footer--right {
 	text-align: right;
 }
@@ -409,6 +437,15 @@
 
 .instructor-row:last-child {
 	border-bottom: none;
+}
+
+.instructor-row a {
+	color: inherit;
+	text-decoration: none;
+}
+
+.instructor-row a:hover {
+	text-decoration: underline;
 }
 
 .course-expand-controls {
@@ -563,6 +600,11 @@
 		flex-direction: column;
 	}
 
+	.course-hero-offered {
+		justify-content: flex-start;
+		max-width: none;
+	}
+
 }
 
 @media (max-width: 540px) {
@@ -604,6 +646,10 @@
 		white-space: normal;
 	}
 
+	.course-stat-value--text {
+		line-height: 1.5rem;
+	}
+
 	/* Top prof cards: 2 columns on small screens */
 	.course-top-prof-grid {
 		grid-template-columns: repeat(2, 1fr);
@@ -632,7 +678,16 @@
 
 	.instructor-header-row,
 	.instructor-row {
-		min-width: 360px;
+		min-width: 640px;
+	}
+
+	/* Two-word labels ("Last Taught") wrap instead of running into the next column. */
+	.instructor-header-row {
+		height: auto;
+		min-height: 40px;
+		padding-top: 6px;
+		padding-bottom: 6px;
+		white-space: normal;
 	}
 }
 
@@ -875,3 +930,33 @@
 		grid-template-columns: 1fr;
 	}
 }
+
+.course-offering-pattern {
+	margin: 0 0 6px;
+	color: #1b1b1b;
+	font-weight: 800;
+}
+
+.course-offering-seasons {
+	margin: 0 0 10px;
+	color: #767676;
+	font-size: 0.85rem;
+	font-weight: 600;
+}
+
+.course-hero-offered-tag {
+	padding: 5px 14px;
+	font-size: 0.85rem;
+	font-weight: 700;
+	white-space: nowrap;
+}
+
+.course-offering-successor {
+	margin: 0;
+	color: #3a3a3a;
+	font-size: 0.9rem;
+}
+
+.dark .course-offering-pattern { color: #e0e0e0; }
+.dark .course-offering-seasons,
+.dark .course-offering-successor { color: #c8c8c8; }

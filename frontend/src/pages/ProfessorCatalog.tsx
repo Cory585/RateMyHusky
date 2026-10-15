@@ -6,6 +6,7 @@ import {
   fetchDepartments,
   fetchSearchSuggestions,
   type CatalogProfessor,
+  type ProfessorSort,
   type ProfessorSuggestion,
 } from '../api/api';
 import Footer from '../components/Footer';
@@ -20,7 +21,9 @@ import './ProfessorCatalog.css';
 
 const SORT_OPTIONS = [
   { value: 'alpha',   label: 'A – Z' },
+  { value: 'alpha_desc', label: 'Z – A' },
   { value: 'rating',  label: 'Highest Rating' },
+  { value: 'rating_asc', label: 'Lowest Rating' },
   { value: 'comments', label: 'Most Comments' },
 ];
 
@@ -53,7 +56,7 @@ const DEFAULT_FILTERS: Filters = {
 
 function getFiltersFromSearchParams(sp: URLSearchParams): Filters {
   const sortValue = sp.get('sort');
-  const sort = sortValue === 'rating' || sortValue === 'comments' || sortValue === 'alpha'
+  const sort = sortValue && SORT_OPTIONS.some(o => o.value === sortValue)
     ? sortValue
     : 'alpha';
 
@@ -204,7 +207,7 @@ export default function ProfessorCatalog() {
       maxRating:  filters.maxRating  < 5 ? filters.maxRating  : undefined,
       minReviews: filters.minReviews > 0 ? filters.minReviews : undefined,
       maxReviews: filters.maxReviews ?? undefined,
-      sort:       filters.sort as 'alpha' | 'rating' | 'comments',
+      sort:       filters.sort as ProfessorSort,
       page:       filters.page,
       limit:      pageSize,
     })

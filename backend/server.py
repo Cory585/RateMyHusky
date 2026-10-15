@@ -284,6 +284,27 @@ _EMAIL_REQUIRED_FEEDBACK_TYPES = _ACCOUNT_FEEDBACK_TYPES | {"professor"}
 # address before acting, so the support email says up front whether that is possible.
 _PAGE_CHANGE_FEEDBACK_TYPES = {"missing", "incorrectdata", "professor"}
 
+# Every type the endpoint accepts, with its email subject label. "missing" and
+# "feature" were merged into "incorrectdata" and "general" on the form but stay
+# accepted for cached bundles; "banappeal" is hidden while Ask is off. Drop the two
+# old keys once no tab can still be running a pre-merge bundle (a couple of weeks
+# after the merge ships).
+_FEEDBACK_TYPE_LABELS = {
+    "bug": "Bug Report",
+    "incorrectdata": "Wrong or Missing Data",
+    "missing": "Missing Data",
+    "general": "Idea or General Feedback",
+    "feature": "Feature Request",
+    "professor": "Professor Request",
+    "datadeletion": "Data Deletion Request",
+    "banappeal": "Ask Ban Appeal",
+}
+# These limits and the email pattern in submit_feedback are copied in
+# frontend/src/components/FeedbackTab.tsx and frontend/public/maintenance.html
+# (maxlength attributes and the submit handler's regex). Change all three together.
+FEEDBACK_MAX_DESCRIPTION = 5000
+FEEDBACK_MAX_EMAIL = 254   # RFC 5321's limit on a full address
+
 
 def _is_northeastern_address(email):
     """@northeastern.edu, or a college subdomain such as @khoury.northeastern.edu."""
@@ -407,6 +428,7 @@ def return_db(exc):
 
 
 def query(sql, params=None):
+    conn = None
     try:
         conn = get_db()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -419,9 +441,20 @@ def query(sql, params=None):
         # Connection was stale — discard it and retry once with a fresh one
         _discard_db_conn()
         conn = get_db()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute(sql, params or ())
-        return cur.fetchall()
+        try:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute(sql, params or ())
+            return cur.fetchall()
+        except psycopg2.Error:
+            _rollback_after_cancel(conn)   # the sibling except below can't catch a failed retry
+            raise
+    except psycopg2.Error:
+        # Any failed statement aborts the transaction too (the pool is not
+        # autocommit). Roll back so a guarded read (teaching history) can fail
+        # without failing the request's later queries.
+        if conn is not None:
+            _rollback_after_cancel(conn)
+        raise
 
 
 def query_one(sql, params=None):
@@ -927,8 +960,19 @@ def professor_payload(slug):
         data = build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions)
         if data is None:
             return None
-        cache_set(cache_key, data)
+        if data.pop("_historyFailed", False):
+            g.history_failed = True   # a failed Banner read is not cached: see history_cache_control
+        else:
+            cache_set(cache_key, data)
     return data
+
+
+def history_cache_control(resp):
+    """A page built after a failed Banner read must not be cached downstream
+    either, or the CDN keeps the degraded page for a day. Also used by render.py."""
+    if g.get("history_failed"):
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.route("/api/professors/<slug>/full")
@@ -939,7 +983,7 @@ def professor_full(slug):
     resp = jsonify(data)
     resp.headers["Cache-Control"] = "private, max-age=3600" if _is_authed() else "public, max-age=3600"
     resp.headers["Vary"] = "Authorization"
-    return resp
+    return history_cache_control(resp)
 
 
 @app.route("/api/departments")
@@ -1178,6 +1222,10 @@ def professors_catalog():
         # No search - use SQL sorting
         if sort == "rating":
             order = "avg_rating DESC NULLS LAST"
+        elif sort == "rating_asc":
+            order = "avg_rating ASC NULLS LAST, slug ASC"
+        elif sort == "alpha_desc":
+            order = "lower(name) DESC, slug DESC"
         elif sort == "comments":
             order = "total_comments DESC"
         else:
@@ -1255,14 +1303,17 @@ def courses_catalog():
     except (ValueError, TypeError):
         max_rating = 5.0
 
-    cache_key = f"coursecat:{q}:{dept}:{sort}:{page}:{limit}:{min_rating}:{max_rating}"
+    # The catalog page shows rated courses only; the sitemap and prerender need every course.
+    rated_only = request.args.get("rated") == "1"
+
+    cache_key = f"coursecat:{q}:{dept}:{sort}:{page}:{limit}:{min_rating}:{max_rating}:{rated_only}"
     cached = cache_get(cache_key)
     if cached:
         return jsonify(cached)
 
     # avg_rating is precomputed on course_catalog (see precompute.py step 8),
     # so this is a plain indexed SELECT/WHERE/ORDER/LIMIT like professors_catalog.
-    conditions = []
+    conditions = ["avg_rating IS NOT NULL"] if rated_only else []
     params = []
 
     if dept and dept != "All":
@@ -1285,8 +1336,23 @@ def courses_catalog():
 
     where_str = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
+    join = ""
     if sort == "rating":
         order = "avg_rating DESC NULLS LAST, lower(code) ASC"
+    elif sort == "rating_asc":
+        order = "avg_rating ASC NULLS LAST, lower(code) ASC"
+    elif sort == "alpha_desc":
+        order = "lower(code) DESC"
+    elif sort == "recent":
+        # Last term Banner has the course on, best rated first within a term;
+        # courses Banner never saw go last. From 2026 Summer 1 and Summer 2
+        # share one code (202650), so the label orders the sessions, as in
+        # teaching_history.label_code.
+        join = "LEFT JOIN banner_course_offerings bco ON bco.subject_course = course_catalog.code"
+        order = """bco.last_term_code DESC NULLS LAST,
+                   CASE WHEN bco.last_term_label LIKE 'Summer 2 %%' THEN 2
+                        WHEN bco.last_term_label LIKE 'Summer 1 %%' THEN 0 ELSE 1 END DESC,
+                   avg_rating DESC NULLS LAST, lower(code) ASC"""
     else:
         order = "lower(code) ASC"
 
@@ -1297,12 +1363,20 @@ def courses_catalog():
     page = max(1, min(page, total_pages))
     offset = (page - 1) * limit
 
-    rows = query(f"""
-        SELECT code, name, department, avg_rating FROM course_catalog
-        {where_str}
-        ORDER BY {order}
-        LIMIT %s OFFSET %s
-    """, params + [limit, offset])
+    def page_rows(join, order):
+        return query(f"""
+            SELECT code, name, department, avg_rating FROM course_catalog {join}
+            {where_str}
+            ORDER BY {order}
+            LIMIT %s OFFSET %s
+        """, params + [limit, offset])
+
+    try:
+        rows = page_rows(join, order)
+    except psycopg2.errors.UndefinedTable:
+        # Banner decorates the catalog and never fails it: without its tables
+        # (a fresh database), Most Recent sorts like Highest Rated.
+        rows = page_rows("", "avg_rating DESC NULLS LAST, lower(code) ASC")
 
     courses = [
         {
@@ -1336,7 +1410,10 @@ def course_payload(code):
         data = build_course(code_norm, query, query_one)
         if data is None:
             return None
-        cache_set(cache_key, data)
+        if data.pop("_historyFailed", False):
+            g.history_failed = True   # a failed Banner read is not cached: see history_cache_control
+        else:
+            cache_set(cache_key, data)
     return data
 
 
@@ -1348,7 +1425,7 @@ def course_profile(code):
     resp = jsonify(data)
     resp.headers["Cache-Control"] = "private, max-age=3600" if _is_authed() else "public, max-age=3600"
     resp.headers["Vary"] = "Authorization"
-    return resp
+    return history_cache_control(resp)
 
 
 # ──────────────────────────────────────────────
@@ -1559,11 +1636,49 @@ def submit_feedback():
     global _feedback_count, _feedback_date
 
     data = request.get_json(silent=True) or {}
-    feedback_type = data.get("feedbackType", "").strip()
-    description = data.get("description", "").strip()
-    reply_email = data.get("email", "").strip()
-    turnstile_token = data.get("turnstileToken", "").strip()
-    account_token = (data.get("accountSub") or "").strip()
+    # Non-string values (123, null) count as missing instead of crashing .strip().
+    def field(name):
+        value = data.get(name)
+        return value.strip() if isinstance(value, str) else ""
+
+    feedback_type = field("feedbackType")
+    description = field("description")
+    reply_email = field("email")
+    turnstile_token = field("turnstileToken")
+    account_token = field("accountSub")
+
+    # Validate before Turnstile: a bad request shouldn't cost a siteverify call
+    # or use up the user's one-time CAPTCHA token.
+    if not feedback_type or not description:
+        return jsonify({"error": "feedbackType and description are required"}), 400
+
+    if feedback_type not in _FEEDBACK_TYPE_LABELS:
+        return jsonify({"error": "Unknown feedback type"}), 400
+
+    if len(description) > FEEDBACK_MAX_DESCRIPTION:
+        return jsonify({"error": f"Description is too long (max {FEEDBACK_MAX_DESCRIPTION} characters)"}), 400
+
+    # Ask ban appeals, data-deletion and professor requests are useless without a reply
+    # address — require it (other types stay optional).
+    if feedback_type in _EMAIL_REQUIRED_FEEDBACK_TYPES and not reply_email:
+        return jsonify({"error": "Email is required for this request"}), 400
+
+    if reply_email and (len(reply_email) > FEEDBACK_MAX_EMAIL
+                        or not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', reply_email)):
+        return jsonify({"error": "Invalid email address"}), 400
+
+    # Resolve the account from its JWT (verified server-side, never trust a client-supplied id)
+    # so we can locate/clear its ask_log rows by session_token (appeal review or data erasure).
+    appeal_account = None
+    if feedback_type in _ACCOUNT_FEEDBACK_TYPES and account_token:
+        try:
+            appeal_account = pyjwt.decode(account_token, JWT_SECRET, algorithms=["HS256"]).get("sub")
+        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+            appeal_account = None
+
+    # Support can't erase data that isn't tied to an account, so don't send it on.
+    if feedback_type == "datadeletion" and appeal_account is None:
+        return jsonify({"error": "Sign in required"}), 401
 
     # Verify Cloudflare Turnstile CAPTCHA
     turnstile_secret = os.getenv("TURNSTILE_SECRET_KEY")
@@ -1581,26 +1696,6 @@ def submit_feedback():
         except Exception:
             return jsonify({"error": "CAPTCHA verification failed"}), 500
 
-    if not feedback_type or not description:
-        return jsonify({"error": "feedbackType and description are required"}), 400
-
-    # Ask ban appeals, data-deletion and professor requests are useless without a reply
-    # address — require it (other types stay optional).
-    if feedback_type in _EMAIL_REQUIRED_FEEDBACK_TYPES and not reply_email:
-        return jsonify({"error": "Email is required for this request"}), 400
-
-    if reply_email and not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', reply_email):
-        return jsonify({"error": "Invalid email address"}), 400
-
-    # Resolve the account from its JWT (verified server-side, never trust a client-supplied id)
-    # so we can locate/clear its ask_log rows by session_token (appeal review or data erasure).
-    appeal_account = None
-    if feedback_type in _ACCOUNT_FEEDBACK_TYPES and account_token:
-        try:
-            appeal_account = pyjwt.decode(account_token, JWT_SECRET, algorithms=["HS256"]).get("sub")
-        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
-            appeal_account = None
-
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     with _feedback_lock:
         if _feedback_date != today:
@@ -1615,17 +1710,7 @@ def submit_feedback():
         print("[feedback] RESEND_API_KEY not configured")
         return jsonify({"error": "Email service not configured"}), 500
 
-    type_labels = {
-        "bug": "Bug Report",
-        "feature": "Feature Request",
-        "missing": "Missing Data",
-        "incorrectdata": "Incorrect Data",
-        "banappeal": "Ask Ban Appeal",
-        "datadeletion": "Data Deletion Request",
-        "professor": "Professor Request",
-        "general": "General Feedback",
-    }
-    type_label = type_labels.get(feedback_type, feedback_type)
+    type_label = _FEEDBACK_TYPE_LABELS[feedback_type]
     submitted_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     lines = [

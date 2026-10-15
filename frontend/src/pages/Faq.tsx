@@ -103,8 +103,8 @@ const Faq = () => {
               <h3>Something on the site is wrong. How do I report it?</h3>
               <p>
                 Use the Feedback tab on the left edge of any page (a round button in the
-                bottom-right corner on phones) and choose &ldquo;Incorrect Data&rdquo; or
-                &ldquo;Missing Data.&rdquo; A link to the page in question helps.
+                bottom-right corner on phones) and choose &ldquo;Wrong or Missing
+                Data.&rdquo; A link to the page in question helps.
               </p>
             </section>
 

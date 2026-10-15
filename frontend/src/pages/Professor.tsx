@@ -122,7 +122,8 @@ const redditSentimentOptions = [
 // Strictly extract "Season Year" from messy term titles
 const cleanTerm = (t: string): string => {
   // Match terms like "Fall 2025", "Fall A 2025", "Summer 2 2025"
-  const fullMatch = t.match(/(Spring|Fall|Summer|Winter)\s*([A-Z]|\d)?\s*(20\d{2})/i);
+  // Match terms like "Fall 2025", "Fall A 2025", "Summer 2 2025", "Summer Full 2025"
+  const fullMatch = t.match(/(Spring|Fall|Summer|Winter)\s*(Full|[A-Z]|\d)?\s*(20\d{2})/i);
   if (fullMatch) {
     const season = fullMatch[1].charAt(0).toUpperCase() + fullMatch[1].slice(1).toLowerCase();
     const modifier = (fullMatch[2] ?? '').trim();
@@ -327,6 +328,8 @@ const Professor = () => {
   const reviews = useMemo(() => profile?.sources.rmp.reviews ?? [], [profile]);
   const redditMentions = useMemo(() => profile?.redditMentions ?? [], [profile]);
   const courses = useMemo(() => profile?.courses ?? [], [profile]);
+  /* Banner-only rows (taught, never rated) have no reviews to filter to. */
+  const ratedCourses = useMemo(() => courses.filter(c => c.numRatings > 0), [courses]);
 
   /* ── Ask citation pins: switch to the cited source's tab and scroll to reviews ── */
   useEffect(() => {
@@ -423,7 +426,7 @@ const Professor = () => {
       return n > 0 ? sum / n : null;
     };
     const distribution = emptyDistribution();
-    for (const c of rows) for (const k of STARS) distribution[k] += c.ratingDistribution[k];
+    for (const c of rows) for (const k of STARS) distribution[k] += c.ratingDistribution?.[k] ?? 0;
     return {
       rating: weighted(c => c.rating),
       difficulty: weighted(c => c.difficulty),
@@ -524,8 +527,8 @@ const Professor = () => {
   };
 
   const courseOptions = useMemo(
-    () => [{ value: 'all', label: 'All courses' }, ...courses.map(c => ({ value: c.code, label: c.code }))],
-    [courses]);
+    () => [{ value: 'all', label: 'All courses' }, ...ratedCourses.map(c => ({ value: c.code, label: c.code }))],
+    [ratedCourses]);
 
   const toggleCourse = (code: string) => {
     setSelectedCourses(prev => {
@@ -534,7 +537,7 @@ const Professor = () => {
       else next.add(code);
       /* Picking the last unpicked course is the same as no filter: snap back to it so the
          stats match "All courses" and the next click filters instead of removing. */
-      return next.size === courses.length ? new Set() : next;
+      return next.size === ratedCourses.length ? new Set() : next;
     });
   };
 
@@ -621,21 +624,27 @@ const Professor = () => {
     const termsExpanded = expandedTerms.has(code);
     const hiddenTermCount = terms.length - MAX_VISIBLE_TERMS;
     const reviewCount = reviewCountByCourse.get(c.code) ?? 0;
+    const unrated = c.numRatings === 0;
+    const hasPage = c.hasPage ?? c.name != null;
     return (
     <div
       key={c.code}
-      className={`prof-course-row ${selectedCourses.has(c.code) ? 'selected' : ''}`}
-      onClick={() => toggleCourse(c.code)}
+      className={`prof-course-row ${unrated ? 'prof-course-row-unrated' : selectedCourses.has(c.code) ? 'selected' : ''}`}
+      onClick={unrated ? undefined : () => toggleCourse(c.code)}
     >
       <div className="prof-course-row-main">
         <span className="prof-course-code">{c.code}</span>
         <span className="prof-course-title">{c.name ?? ''}</span>
         <span className="prof-course-terms">
-          {c.numRatings.toLocaleString()} rating{c.numRatings === 1 ? '' : 's'}
-          {' · '}{reviewCount.toLocaleString()} review{reviewCount === 1 ? '' : 's'}
+          {unrated ? 'No ratings yet' : (
+            <>
+              {c.numRatings.toLocaleString()} rating{c.numRatings === 1 ? '' : 's'}
+              {reviewCount > 0 && <>{' · '}{reviewCount.toLocaleString()} review{reviewCount === 1 ? '' : 's'}</>}
+            </>
+          )}
         </span>
       </div>
-      {(c.name || terms.length > 0) && (
+      {(hasPage || terms.length > 0) && (
         <div className="prof-course-lower">
           {terms.length > 0 && (
             <div className="prof-course-term-tags">
@@ -671,7 +680,7 @@ const Professor = () => {
               )}
             </div>
           )}
-          {c.name && (
+          {hasPage && (
           <div className="prof-course-view">
             <Link
               to={`/courses/${c.code.toLowerCase()}`}
@@ -821,6 +830,12 @@ const Professor = () => {
           <span className="prof-stat-label">Total Ratings</span>
           <span className="prof-stat-hint">View distribution ↓</span>
         </div>
+        {profile.lastTaught && (
+          <div className="prof-stat-card">
+            <span className="prof-stat-value prof-stat-value-text">{profile.lastTaught}</span>
+            <span className="prof-stat-label">Last Taught</span>
+          </div>
+        )}
         {SHOW_SURVEY_STATS && (
           <div className="prof-stat-card prof-stat-clickable" onClick={() => reviewsRef.current?.scrollIntoView({ behavior: 'smooth' })}>
             <span className="prof-stat-value">{summary.numComments.toLocaleString()}</span>
@@ -892,7 +907,7 @@ const Professor = () => {
             <h2 className="prof-section-title">Courses Taught</h2>
             <div className="prof-section-actions">
               {unfiltered
-                ? <span className="prof-section-hint">Click a course to filter reviews</span>
+                ? (ratedCourses.length > 1 && <span className="prof-section-hint">Click a course to filter reviews</span>)
                 : <button className="prof-action-link" onClick={() => setSelectedCourses(new Set())}>Show all courses</button>}
             </div>
           </div>
@@ -943,7 +958,7 @@ const Professor = () => {
         {reviewTab === 'rmp' && (
           <>
             <div className="prof-reviews-filters">
-              {courses.length > 1 && (
+              {ratedCourses.length > 1 && (
                 <Dropdown
                   className="feedback-dropdown"
                   options={courseOptions}

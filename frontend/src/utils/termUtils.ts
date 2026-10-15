@@ -3,7 +3,7 @@
  * Primary sort is by year; secondary is by season/modifier within the year.
  *
  * Order within a year (highest → most recent):
- *   Fall (7) > Fall A (6) > Full Summer (5) > Summer 2 (4) > Summer 1 (3) > Spring (2) > Spring A (1)
+ *   Fall (7) > Fall A (6) > Summer 2 (5) > Summer / Full Summer (4) > Summer 1 (3) > Spring (2) > Spring A (1)
  */
 export function termSortKey(title: string): number {
   if (!title) return 0;
@@ -17,12 +17,11 @@ export function termSortKey(title: string): number {
   if (/\bfall\b/.test(lower)) {
     // "Fall A 2025" has "fall a" directly; "Fall 2024 Law A Term" does NOT
     subKey = /\bfall\s+a\b/.test(lower) ? 6 : 7;
-  } else if (/\bfull\s+summer\b/.test(lower)) {
-    subKey = 5;
   } else if (/\bsummer\b/.test(lower)) {
-    if (/\bsummer\s+2\b/.test(lower)) subKey = 4;
+    // Summer 1 ends first, the full session next, Summer 2 last.
+    if (/\bsummer\s+2\b/.test(lower)) subKey = 5;
     else if (/\bsummer\s+1\b/.test(lower)) subKey = 3;
-    else subKey = 4; // generic summer (no number)
+    else subKey = 4; // Summer, Full Summer, Summer Full
   } else if (/\bspring\b/.test(lower)) {
     subKey = /\bspring\s+a\b/.test(lower) ? 1 : 2;
   }

@@ -44,6 +44,8 @@ def client(monkeypatch):
             return [dict(r) for r in SUMMARY_ROWS]
         if "FROM reddit_mentions" in s:
             return []
+        if "FROM banner_course_instructors" in s:
+            return []
         raise AssertionError(f"unexpected query: {s}")
 
     monkeypatch.setattr(server, "query", fake_query, raising=False)
@@ -56,7 +58,7 @@ def test_full_serves_the_contract(client):
     resp = client.get("/api/professors/olin-guha/full")
     assert resp.status_code == 200
     assert set(resp.get_json()) == {"version", "identity", "summary", "sources", "courses", "redditMentions",
-                                    "awards"}
+                                    "awards", "lastTaught"}
 
 
 def test_full_is_identical_for_anonymous_and_signed_in(client):
@@ -70,9 +72,9 @@ def test_full_is_identical_for_anonymous_and_signed_in(client):
     assert authed.headers["Cache-Control"] == "private, max-age=3600"
 
 
-def test_full_makes_at_most_four_round_trips(client):
+def test_full_makes_at_most_five_round_trips(client):
     client.get("/api/professors/olin-guha/full")
-    assert len(client.calls) <= 4
+    assert len(client.calls) <= 5
 
 
 def test_unknown_professor_is_a_json_404(client):
@@ -107,3 +109,27 @@ def test_wrong_method_is_a_json_405(client):
     resp = client.post("/api/stats")
     assert resp.status_code == 405
     assert "error" in resp.get_json()
+
+
+def _spy_cache(monkeypatch, payload):
+    sets = []
+    monkeypatch.setattr(server, "build_payload", lambda *a, **k: dict(payload))
+    monkeypatch.setattr(server, "cache_set", lambda key, data: sets.append(key))
+    return sets
+
+
+def test_failed_history_payload_is_served_but_not_cached(client, monkeypatch):
+    sets = _spy_cache(monkeypatch, {"version": 2, "_historyFailed": True})
+    resp = client.get("/api/professors/olin-guha/full")
+    assert resp.status_code == 200
+    assert "_historyFailed" not in resp.get_json()
+    assert sets == []
+    assert resp.headers["Cache-Control"] == "no-store"   # nor by the CDN or browser
+
+
+def test_clean_payload_is_cached(client, monkeypatch):
+    sets = _spy_cache(monkeypatch, {"version": 2})
+    resp = client.get("/api/professors/olin-guha/full")
+    assert resp.status_code == 200
+    assert sets == ["prof_full:olin-guha"]
+    assert resp.headers["Cache-Control"] == "public, max-age=3600"

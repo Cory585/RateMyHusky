@@ -69,14 +69,20 @@ export interface RmpData {
 
 export interface ProfessorCourse {
   code: string;
-  /** null when the code is not in the course catalog (no course page to link to). */
+  /** The catalog name, else Banner's title. null when neither has one. */
   name: string | null;
+  /** null on a course Banner says they taught but no one has rated. */
   rating: number | null;
   difficulty: number | null;
+  /** 0 on a Banner-only course. */
   numRatings: number;
-  ratingDistribution: RatingDistribution;
-  /** Terms taught. Not sent yet: it arrives with student-submitted data, and no term tags show until then. */
-  terms?: string[];
+  ratingDistribution: RatingDistribution | null;
+  /** Terms they taught it, newest first, at most 6 (NUBanner, Fall 2021 on). Empty without a Banner record. */
+  terms: string[];
+  lastTerm: string | null;
+  /** The code has a course page to link to. Absent from payloads built before
+   *  teaching history (deploy rollout, cached /full): fall back to `name != null`. */
+  hasPage?: boolean;
 }
 
 /** A teaching award from a page Northeastern publishes; newest first. */
@@ -98,6 +104,8 @@ export interface ProfessorPage {
   courses: ProfessorCourse[];
   redditMentions: RedditMention[];
   awards: TeachingAward[];
+  /** The newest term Banner has them teaching; null when unknown (most instructors have no profile match). */
+  lastTaught: string | null;
 }
 
 export interface ProfessorReview {
@@ -315,6 +323,9 @@ export interface CourseProfessor {
   rating: number | null;
   difficulty: number | null;
   numRatings: number;
+  /** The newest term Banner has them teaching this course; null without a Banner record. */
+  lastTerm: string | null;
+  avgClassSize: number | null;
 }
 
 export interface CourseCatalog {
@@ -325,6 +336,57 @@ export interface CourseCatalog {
   nupath: string[];
 }
 
+/** The other end of a redesign link (CS3500 → CS3100). */
+export interface HistoryCourseLink {
+  code: string;
+  name: string | null;
+  since: string;
+  /** The code has a course page to link to. */
+  hasPage: boolean;
+}
+
+export interface RecentInstructor {
+  /** null for an instructor with no professor profile: an initials card with no link. */
+  slug: string | null;
+  name: string;
+  imageUrl: string | null;
+  focusX: number;
+  focusY: number;
+  /** Their rating for this course; null when unrated. */
+  rating: number | null;
+  /** Terms they taught it in the last year, newest first. */
+  terms: string[];
+  /** Their ratings of this course: 0 with none, null when unmatched. */
+  numRatings: number | null;
+  /** Their catalog-wide numbers; null with no profile. 0% would-take-again is real. */
+  totalComments: number | null;
+  wouldTakeAgainPct: number | null;
+}
+
+/** NUBanner history (Fall 2021 on). The payload also carries instructors[]; the page reads recentInstructors. */
+export interface CourseHistory {
+  /** "Fall and Spring", "New", "Not offered recently"…; null for a retired code with only a successor link. */
+  pattern: string | null;
+  /** Academic years each season ran, out of windowYears. summer1/summer2 arrive with session labels. */
+  seasonYears: {
+    fall: number | null;
+    spring: number | null;
+    summer: number | null;
+    summer1?: number | null;
+    summer2?: number | null;
+  } | null;
+  windowYears: number | null;
+  lastOffered: string | null;
+  offeredNow: string[];
+  creditHours: string | null;
+  typicalClassSize: number | null;
+  instructorCount: number | null;
+  /** Taught it in the 12 months up to the newest term, newest first, at most 10. */
+  recentInstructors: RecentInstructor[];
+  replacedBy: HistoryCourseLink | null;
+  replaces: HistoryCourseLink | null;
+}
+
 export interface CourseDetail {
   code: string;
   name: string;
@@ -332,7 +394,10 @@ export interface CourseDetail {
   catalog: CourseCatalog | null;
   summary: CourseSummary;
   professors: CourseProfessor[];
+  history: CourseHistory | null;
 }
+
+export type ProfessorSort = 'alpha' | 'alpha_desc' | 'rating' | 'rating_asc' | 'comments';
 
 export function fetchProfessorsCatalog(params: {
   q?: string;
@@ -342,7 +407,7 @@ export function fetchProfessorsCatalog(params: {
   maxRating?: number;
   minReviews?: number;
   maxReviews?: number;
-  sort?: 'alpha' | 'rating' | 'comments';
+  sort?: ProfessorSort;
   page?: number;
   limit?: number;
 }): Promise<CatalogResponse> {
@@ -373,14 +438,17 @@ export const fetchDepartments = (college?: string) => {
 
 export const fetchCourseDepartments = () => get<string[]>('/api/course-departments');
 
+export type CourseSort = 'alpha' | 'alpha_desc' | 'rating' | 'rating_asc' | 'recent';
+
 export function fetchCoursesCatalog(params: {
   q?: string;
   dept?: string;
   minRating?: number;
   maxRating?: number;
-  sort?: 'alpha' | 'rating' | 'sections' | 'recent';
+  sort?: CourseSort | 'sections';
   page?: number;
   limit?: number;
+  rated?: boolean;
 }): Promise<CourseCatalogResponse> {
   const sp = new URLSearchParams();
   if (params.q) sp.set('q', params.q);
@@ -390,6 +458,7 @@ export function fetchCoursesCatalog(params: {
   if (params.sort) sp.set('sort', params.sort);
   if (params.page) sp.set('page', String(params.page));
   if (params.limit) sp.set('limit', String(params.limit));
+  if (params.rated) sp.set('rated', '1');
   return get<CourseCatalogResponse>(`/api/courses-catalog?${sp.toString()}`);
 }
 

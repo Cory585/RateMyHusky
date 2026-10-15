@@ -58,7 +58,9 @@ def render_client(monkeypatch):
                              "date": "2024", "comment": "Excellent lecturer."}]}},
             "courses": [{"code": "ECON1115", "name": "Macroeconomics", "rating": 5.0,
                          "difficulty": 3.0, "numRatings": 1,
-                         "ratingDistribution": {"1": 0, "2": 0, "3": 0, "4": 0, "5": 1}}],
+                         "ratingDistribution": {"1": 0, "2": 0, "3": 0, "4": 0, "5": 1},
+                         "terms": ["Fall 2026"], "lastTerm": "Fall 2026", "hasPage": True}],
+            "lastTaught": "Fall 2026",
             "redditMentions": [],
         }
 
@@ -78,6 +80,7 @@ def render_client(monkeypatch):
             "professors": [{"slug": "francis-georges", "name": "Francis Georges", "imageUrl": None,
                             "focusX": 50.0, "focusY": 30.0, "rating": 4.1, "difficulty": 2.5,
                             "numRatings": 342}],
+            "history": {"lastOffered": "Fall 2026"},
         }
 
     def fake_stats():

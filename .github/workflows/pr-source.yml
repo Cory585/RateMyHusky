@@ -1,0 +1,30 @@
+# Required check on main: PRs into main must come from this repo's dev branch.
+# Runs on every PR (and on "edited", so retargeting a PR to main re-checks it)
+# and passes for any other base, so a skipped run can't satisfy main's rule.
+name: PR source
+
+permissions: {}
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  source:
+    name: PR into main comes from dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [ "$BASE" != main ]; then
+            echo "Base is $BASE, not main: nothing to check."
+          elif [ "$HEAD" = dev ] && [ "$HEAD_REPO" = "$GITHUB_REPOSITORY" ]; then
+            echo "dev -> main: OK."
+          else
+            echo "::error::PRs into main must come from dev (this one is $HEAD_REPO:$HEAD). Open it against dev instead."
+            exit 1
+          fi
