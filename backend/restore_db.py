@@ -9,11 +9,13 @@ Usage:
 
 The dump is data only; the schema comes from db/postgres/. For the chosen tables
 this DELETEs their rows, reloads them and resets their identity counters, all
-in ONE transaction (psql --single-transaction): a DELETE takes only row locks, so
+in ONE transaction (an explicit BEGIN ... COMMIT): a DELETE takes only row locks, so
 the live site keeps reading the old rows until the restore commits, and any
 failure rolls everything back. (TRUNCATE would hold an ACCESS EXCLUSIVE lock and
 block every query on those tables until COMMIT.)
 Choosing evidence also restores evidence_embeddings, which references it.
+--all skips tables the target schema doesn't have (e.g. tables dropped from
+db/postgres/ that an older database still dumps).
 
 Only dumps written by pg_dump (backup_db.py) are accepted; older backups used a
 different format and cannot be restored with this tool.
@@ -23,13 +25,15 @@ Reads CRDB_DATABASE_URL from backend/.env.
 """
 
 import argparse
+import contextlib
+import errno
 import glob
 import gzip
 import os
 import re
 import subprocess
 import sys
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse
 
 HEADER_RE = re.compile(
     r"^-- (?:Data for )?Name: (?P<name>[^;]+); Type: (?P<type>TABLE DATA|SEQUENCE SET);")
@@ -135,7 +139,9 @@ def added_note(requested, expanded):
 
 def client_connection(url):
     """(dsn without the password, env) for a psql/pg_dump subprocess: the password
-    travels in PGPASSWORD, not on the command line, and SSL is required."""
+    travels in PGPASSWORD, not on the command line, and SSL is required. The URL's
+    own sslmode is dropped: it would override PGSSLMODE, as the psycopg2 helpers'
+    sslmode="require" overrides it."""
     u = urlparse(url)
     env = {**os.environ, "PGSSLMODE": "require"}
     netloc = u.netloc
@@ -143,7 +149,8 @@ def client_connection(url):
         env["PGPASSWORD"] = unquote(u.password)
         host = netloc.rsplit("@", 1)[1]
         netloc = (quote(unquote(u.username), safe="") + "@" if u.username else "") + host
-    return u._replace(netloc=netloc).geturl(), env
+    query = urlencode([(k, v) for k, v in parse_qsl(u.query, keep_blank_values=True) if k != "sslmode"])
+    return u._replace(netloc=netloc, query=query).geturl(), env
 
 
 def filter_dump(lines, tables):
@@ -179,27 +186,50 @@ def check_format(path):
 def restore(url, path, tables, psql="psql"):
     """Stream the filtered dump into one psql transaction.
 
-    If reading the dump fails partway, psql is killed BEFORE its stdin closes:
-    closing stdin would make psql COMMIT the DELETEs plus a partial reload.
+    The transaction is an explicit BEGIN, with COMMIT written only after the last
+    line, not psql --single-transaction: that flag COMMITs whenever psql's input
+    ends, so a restore cut short (a corrupt dump, or this process killed) would
+    commit the DELETEs plus a partial reload. Without the COMMIT, psql exits at
+    end of input and the server rolls back. If reading the dump fails, psql is
+    also killed so it stops at once.
 
     Bytes in, bytes out: no newline translation, so a carriage return inside a quoted value
     reaches psql exactly as pg_dump wrote it."""
     dsn, env = client_connection(url)
     proc = subprocess.Popen(
-        [psql, f"--dbname={dsn}", "--single-transaction", "--quiet",
-         "-v", "ON_ERROR_STOP=1", "-f", "-"],
+        [psql, f"--dbname={dsn}", "--quiet", "-v", "ON_ERROR_STOP=1", "-f", "-"],
         stdin=subprocess.PIPE, env=env)
     try:
+        proc.stdin.write(b"BEGIN;\n")
         with gzip.open(path, "rt", encoding="utf-8", newline="") as f:
             for line in filter_dump(f, tables):
                 proc.stdin.write(line.encode("utf-8"))
-    except BaseException:
-        proc.kill()
-        proc.wait()
-        raise
-    proc.stdin.close()
+        proc.stdin.write(b"COMMIT;\n")
+        proc.stdin.close()
+    except BaseException as e:
+        # A write to a pipe psql has closed (Windows raises EINVAL): psql stopped on
+        # an error (ON_ERROR_STOP), never saw COMMIT, and its exit status is reported below.
+        if not (isinstance(e, BrokenPipeError) or getattr(e, "errno", None) == errno.EINVAL):
+            proc.kill()
+            proc.wait()
+            raise
+        with contextlib.suppress(OSError):
+            proc.stdin.close()
     if proc.wait() != 0:
         raise RuntimeError(f"psql exited with status {proc.returncode}; the restore was rolled back.")
+
+
+def schema_tables(url):
+    """The target database's tables in the public schema."""
+    import psycopg2
+    conn = psycopg2.connect(url, sslmode="require", connect_timeout=15)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT table_name FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")
+        return {r[0] for r in cur.fetchall()}
+    finally:
+        conn.close()
 
 
 def confirm(host, tables, dump_name, input_fn=input, assume_yes=False):
@@ -288,6 +318,13 @@ def main():
     db_url = os.getenv("CRDB_DATABASE_URL")
     if not db_url:
         sys.exit("Missing CRDB_DATABASE_URL in backend/.env")
+
+    absent = sorted(tables - schema_tables(db_url))
+    if absent and args.all:
+        print(f"Skipping {', '.join(absent)}: not in the target schema (db/postgres/02_tables.sql).")
+        tables -= set(absent)
+    elif absent:
+        sys.exit(f"Not in the target schema: {', '.join(absent)}")
 
     if not confirm(urlparse(db_url).hostname, tables, os.path.basename(dump), assume_yes=args.yes):
         sys.exit("Aborted: confirmation not given.")

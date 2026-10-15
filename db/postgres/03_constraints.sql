@@ -45,7 +45,11 @@ CREATE INDEX idx_rr_name_key    ON public.rmp_reviews (name_key);
 CREATE INDEX idx_rr_course_code ON public.rmp_reviews (course_code);
 -- NOTE: PostgreSQL limits a single B-tree index entry to roughly 2.7 KB.
 -- If any review comment is very long, this line fails with
--- "index row size ... exceeds btree version 4 maximum". See the chat notes for the fix.
+-- "index row size ... exceeds btree version 4 maximum". Production's rows fit today.
+-- If it fails, find the rows with
+--   SELECT id, length(comment) FROM public.rmp_reviews WHERE length(comment) > 2000;
+-- An md5(comment) expression index is not a drop-in fix: load_rmp.py's
+-- ON CONFLICT (professor_name, course, date, comment) needs this exact column list.
 CREATE UNIQUE INDEX uq_rmp_reviews ON public.rmp_reviews (professor_name, course, date, comment);
 
 -- banner_sections

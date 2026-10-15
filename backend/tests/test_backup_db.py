@@ -86,6 +86,31 @@ def test_dump_passes_password_free_dsn_and_env(tmp_path, monkeypatch):
     assert seen["env"]["PGPASSWORD"] == "pw" and seen["env"]["PGSSLMODE"] == "require"
 
 
+def test_failed_write_removes_the_partial_dump(tmp_path, monkeypatch):
+    class Stdout(io.BytesIO):
+        def read(self, *a):
+            raise OSError("No space left on device")
+
+    class P:
+        def __init__(self, cmd, **k):
+            self.stdout = Stdout()
+            self.killed = False
+            procs.append(self)
+
+        def kill(self):
+            self.killed = True
+
+        def wait(self):
+            return -9
+
+    procs = []
+    monkeypatch.setattr(backup_db.subprocess, "Popen", P)
+    path = tmp_path / "b.sql.gz"
+    with pytest.raises(OSError, match="No space"):
+        backup_db.dump("postgresql://x", str(path))
+    assert not path.exists() and procs[0].killed
+
+
 def test_backup_path_is_timestamped_in_utc():
     now = datetime.datetime(2026, 10, 10, 12, 0, 0, tzinfo=datetime.timezone.utc)
     assert backup_db.backup_path(now).endswith("ratemyhusky_20261010T120000Z.sql.gz")

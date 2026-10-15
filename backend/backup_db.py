@@ -76,8 +76,15 @@ def dump(url, path, pg_dump="pg_dump"):
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     dsn, env = client_connection(url)
     proc = subprocess.Popen([pg_dump, f"--dbname={dsn}", *PG_DUMP_ARGS], stdout=subprocess.PIPE, env=env)
-    with os.fdopen(fd, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb") as gz:
-        shutil.copyfileobj(proc.stdout, gz, CHUNK)
+    try:
+        with os.fdopen(fd, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb") as gz:
+            shutil.copyfileobj(proc.stdout, gz, CHUNK)
+    except BaseException:
+        # A partial file would become the newest dump restore_db picks by default.
+        proc.kill()
+        proc.wait()
+        os.remove(path)
+        raise
     proc.stdout.close()
     if proc.wait() != 0:
         os.remove(path)

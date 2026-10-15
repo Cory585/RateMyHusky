@@ -51,7 +51,7 @@ def test_delete_sql_orders_dependents_first_and_sets_lock_timeout():
 def test_connection_helper_strips_password_into_env(monkeypatch):
     monkeypatch.delenv("PGPASSWORD", raising=False)
     dsn, env = restore_db.client_connection("postgresql://appuser:s3cr%40t@db.example.com:5432/appdb?sslmode=require")
-    assert dsn == "postgresql://appuser@db.example.com:5432/appdb?sslmode=require"
+    assert dsn == "postgresql://appuser@db.example.com:5432/appdb"
     assert env["PGPASSWORD"] == "s3cr@t"
     assert env["PGSSLMODE"] == "require"
     assert "PATH" in env or "Path" in env
@@ -62,6 +62,13 @@ def test_connection_helper_without_password(monkeypatch):
     dsn, env = restore_db.client_connection("postgresql://appuser@db.example.com/appdb")
     assert dsn == "postgresql://appuser@db.example.com/appdb"
     assert "PGPASSWORD" not in env
+    assert env["PGSSLMODE"] == "require"
+
+
+def test_url_sslmode_cannot_override_the_required_ssl(monkeypatch):
+    dsn, env = restore_db.client_connection(
+        "postgresql://appuser@db.example.com/appdb?sslmode=disable&connect_timeout=10")
+    assert dsn == "postgresql://appuser@db.example.com/appdb?connect_timeout=10"
     assert env["PGSSLMODE"] == "require"
 
 
@@ -204,3 +211,87 @@ def test_restore_sends_bytes_to_psql_without_newline_translation(tmp_path, monke
     assert b"\n" in sent and sent.count(b"\r") == 2      # only the two inside the literal
     assert b"VALUES\n\t(" in sent
     assert procs[0].stdin.closed and not procs[0].killed
+
+
+def _fixture_dump(tmp_path):
+    path = tmp_path / "d.sql.gz"
+    path.write_bytes(gzip.compress(restore_db._FIXTURE_SQL.encode()))
+    return path
+
+
+def test_commit_is_written_last_not_left_to_end_of_input(tmp_path, monkeypatch):
+    seen = {}
+
+    class FakeStdin:
+        data = b""
+
+        def write(self, b):
+            self.data += b
+
+        def close(self):
+            pass
+
+    class FakeProc:
+        def __init__(self, cmd, **k):
+            seen["cmd"], self.stdin = cmd, FakeStdin()
+            seen["stdin"] = self.stdin
+            self.returncode = 0
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(restore_db.subprocess, "Popen", FakeProc)
+    restore_db.restore("postgresql://x", str(_fixture_dump(tmp_path)), {"rmp_reviews"})
+    sent = seen["stdin"].data
+    # --single-transaction would COMMIT on any end of input, including a cut-off stream.
+    assert "--single-transaction" not in seen["cmd"]
+    assert sent.startswith(b"BEGIN;\n") and sent.endswith(b"COMMIT;\n")
+    assert sent.count(b"COMMIT") == 1
+
+
+@pytest.mark.parametrize("closed_pipe", [BrokenPipeError(32, "Broken pipe"),
+                                         OSError(22, "Invalid argument")])   # Windows
+def test_psql_stopping_on_an_error_reports_the_rollback(tmp_path, monkeypatch, closed_pipe):
+    class FakeStdin:
+        def write(self, b):
+            raise closed_pipe
+
+        def close(self):
+            pass
+
+    class FakeProc:
+        def __init__(self, *a, **k):
+            self.stdin = FakeStdin()
+            self.returncode = 3
+
+        def kill(self):
+            raise AssertionError("psql had already exited")
+
+        def wait(self):
+            return 3
+
+    monkeypatch.setattr(restore_db.subprocess, "Popen", FakeProc)
+    with pytest.raises(RuntimeError, match="rolled back"):
+        restore_db.restore("postgresql://x", str(_fixture_dump(tmp_path)), {"rmp_reviews"})
+
+
+def _run_main(monkeypatch, argv, in_schema):
+    restored = {}
+    monkeypatch.setenv("CRDB_DATABASE_URL", "postgresql://u@db.example.com/appdb")
+    monkeypatch.setattr(restore_db.sys, "argv", ["restore_db.py", *argv])
+    monkeypatch.setattr(restore_db, "schema_tables", lambda url: in_schema)
+    monkeypatch.setattr(restore_db, "restore", lambda url, path, tables: restored.update(tables=tables))
+    restore_db.main()
+    return restored.get("tables")
+
+
+def test_all_skips_tables_the_target_schema_lacks(tmp_path, monkeypatch, capsys):
+    dump = str(_fixture_dump(tmp_path))
+    assert _run_main(monkeypatch, [dump, "--all", "--yes"], {"rmp_reviews"}) == {"rmp_reviews"}
+    assert "Skipping stats_cache" in capsys.readouterr().out
+
+
+def test_named_table_missing_from_the_target_schema_stops(tmp_path, monkeypatch):
+    dump = str(_fixture_dump(tmp_path))
+    with pytest.raises(SystemExit, match="Not in the target schema: stats_cache"):
+        _run_main(monkeypatch, [dump, "--tables", "stats_cache", "--yes"], {"rmp_reviews"})
