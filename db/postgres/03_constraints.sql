@@ -48,14 +48,6 @@ CREATE INDEX idx_rr_course_code ON public.rmp_reviews (course_code);
 -- "index row size ... exceeds btree version 4 maximum". See the chat notes for the fix.
 CREATE UNIQUE INDEX uq_rmp_reviews ON public.rmp_reviews (professor_name, course, date, comment);
 
--- prof_identity
-CREATE INDEX idx_pi_name_key ON public.prof_identity (name_key);
-
--- prof_rmp_link
-CREATE INDEX idx_prl_slug ON public.prof_rmp_link (slug);
-ALTER TABLE public.prof_rmp_link ADD CONSTRAINT check_match_method
-    CHECK (match_method IN ('exact', 'alias', 'fuzzy', 'manual'));
-
 -- banner_sections
 CREATE INDEX bsec_course ON public.banner_sections (subject_course);
 
