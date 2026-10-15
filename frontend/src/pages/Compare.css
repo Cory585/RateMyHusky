@@ -474,6 +474,104 @@
 	font-weight: 800;
 }
 
+.compare-row-hint {
+	display: block;
+	font-size: 0.7rem;
+	font-weight: 600;
+	text-transform: none;
+	letter-spacing: 0;
+	color: #8e8e8e;
+}
+
+.compare-col-name {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	min-width: 0;
+	max-width: 100%;
+}
+
+.compare-col-dot {
+	flex: none;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+}
+
+.compare-col-dot.tone-0 { background: #5f9e72; }
+.compare-col-dot.tone-1 { background: #c46d79; }
+.compare-col-dot.tone-2 { background: #6b88bd; }
+.compare-col-dot.tone-3 { background: #b4955a; }
+
+.compare-value {
+	font-variant-numeric: tabular-nums;
+}
+
+.compare-best {
+	margin-left: 6px;
+	font-size: 0.66rem;
+	font-weight: 800;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: #2f8a4e;
+	white-space: nowrap;
+}
+
+/* Thin bar on a fixed scale, so a close lead looks close */
+.compare-bar {
+	display: block;
+	width: 100%;
+	max-width: 120px;
+	height: 5px;
+	margin-top: 2px;
+	border-radius: 3px;
+	background: #eceef1;
+	overflow: hidden;
+}
+
+.compare-bar i {
+	display: block;
+	height: 100%;
+	border-radius: 3px;
+	background: #b3b8c0;
+}
+
+.compare-cell-winner .compare-bar i {
+	background: #3f9a5e;
+}
+
+.compare-cell-winner small {
+	font-weight: 600;
+}
+
+.compare-cell small.compare-low-sample {
+	align-self: flex-start;
+	padding: 1px 7px;
+	border-radius: 999px;
+	background: #f8edd6;
+	color: #8a5d0e;
+	font-weight: 700;
+}
+
+.compare-table-note {
+	padding: 12px 24px 14px;
+	border-top: 1px solid #eef0f2;
+	font-size: 0.78rem;
+	color: #868686;
+}
+
+.compare-sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
 .compare-lock-prompt {
 	display: inline-flex;
 	align-items: center;
@@ -675,6 +773,36 @@
 	background: rgba(93, 207, 128, 0.14);
 }
 
+.dark .compare-row-hint,
+.dark .compare-table-note {
+	color: #8f96a0;
+}
+
+.dark .compare-table-note {
+	border-top-color: #2c3035;
+}
+
+.dark .compare-best {
+	color: #7fd99a;
+}
+
+.dark .compare-bar {
+	background: #33373d;
+}
+
+.dark .compare-bar i {
+	background: #6b727c;
+}
+
+.dark .compare-cell-winner .compare-bar i {
+	background: #6fcf8e;
+}
+
+.dark .compare-cell small.compare-low-sample {
+	background: #3a2f1a;
+	color: #e9bd66;
+}
+
 /* ---- Responsive ---- */
 @media (max-width: 1000px) {
 	.compare-controls,
@@ -865,6 +993,42 @@
 
 	.compare-row.is-desktop-only {
 		display: none;
+	}
+
+	.compare-row-hint {
+		font-size: 0.66rem;
+	}
+
+	.compare-col-name {
+		gap: 4px;
+	}
+
+	.compare-col-dot {
+		width: 6px;
+		height: 6px;
+	}
+
+	/* Narrow columns: the check mark alone carries "best" (plus the screen-reader text) */
+	.compare-best {
+		margin-left: 3px;
+	}
+
+	.compare-best-word {
+		display: none;
+	}
+
+	.compare-bar {
+		max-width: 64px;
+	}
+
+	.compare-cell small.compare-low-sample {
+		align-self: center;
+		padding: 1px 5px;
+	}
+
+	.compare-table-note {
+		padding: 10px 14px 12px;
+		font-size: 0.72rem;
 	}
 
 	.compare-row-head {
