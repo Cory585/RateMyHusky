@@ -30,9 +30,12 @@ def test_schema_files_define_every_column_the_module_uses(pg, module):
 
 def test_apply_ddl_checks_instead_of_creating_on_postgres(pg):
     cur = pg.cursor()
+    tables = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+    cur.execute(tables)
+    before = {r[0] for r in cur.fetchall()}
     load_banner.apply_ddl(cur)
-    cur.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'")
-    assert cur.fetchone()[0] == 29
+    cur.execute(tables)
+    assert {r[0] for r in cur.fetchall()} == before
 
 
 def test_a_missing_column_is_reported(pg):
