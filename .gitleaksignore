@@ -21,3 +21,5 @@ a5a12d457dffef72c1286cb7a7bb6fcbc0cc777c:scraper/main.py:jwt:21
 a5a12d457dffef72c1286cb7a7bb6fcbc0cc777c:scraper/main.py:generic-api-key:19
 a5a12d457dffef72c1286cb7a7bb6fcbc0cc777c:scraper/main.py:generic-api-key:24
 faf1ed2588f872e38ccc665dc59eaf80b397b54f:extension/manifest.json:generic-api-key:6
+e737413ea38be7de022fb90e47d112e39c7f2e34:extension/manifest.json:generic-api-key:6
+d66e294e8394b83419944508517ca9469a5f05c0:extension/manifest.json:generic-api-key:6
