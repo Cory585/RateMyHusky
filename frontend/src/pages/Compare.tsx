@@ -414,11 +414,9 @@ function Compare() {
 	};
 	const firstName = (slot: SlotData) => slot.name.trim().split(/\s+/)[0] || `Prof. ${slot.label}`;
 
-	/* Professor data shape (api.ts v2): summary = blended numbers, sources.rmp = RMP only,
-	   summary.bySource = per-source ratings. Catalog values are the fallback. */
-	const overall = slots.map((s) => (isReady(s) ? s.profile?.summary.rating ?? s.catalogProf?.avgRating ?? null : null));
-	const rmp = slots.map((s) => (isReady(s) ? s.profile?.sources.rmp.rating ?? s.catalogProf?.rmpRating ?? null : null));
-	const trace = slots.map((s) => (isReady(s) ? s.profile?.summary.bySource.trace?.rating ?? null : null));
+	/* Professor data shape (api.ts v2): summary = blended numbers across sources.
+	   RMP is the only live source, so one Rating row covers it. Catalog values are the fallback. */
+	const rating = slots.map((s) => (isReady(s) ? s.profile?.summary.rating ?? s.catalogProf?.avgRating ?? null : null));
 	const difficulty = slots.map((s) => (isReady(s) ? s.profile?.summary.difficulty ?? null : null));
 	const reviews = slots.map((s) => (isReady(s) ? s.profile?.summary.numRatings ?? s.catalogProf?.totalReviews ?? null : null));
 	const takeAgain = slots.map((s) =>
@@ -436,13 +434,11 @@ function Compare() {
 	const compareRows: CompareRow[] = [
 		{ label: 'Department', values: departments, winner: null, weight: 0 },
 		{
-			label: 'Overall Rating',
-			values: overall.map((v) => formatMetric(v)),
-			winner: pickWinnerIndex(overall),
+			label: 'Rating',
+			values: rating.map((v) => formatMetric(v)),
+			winner: pickWinnerIndex(rating),
 			weight: 3,
 		},
-		{ label: 'RMP Rating', values: rmp.map((v) => formatMetric(v)), winner: pickWinnerIndex(rmp), weight: 2 },
-		{ label: 'TRACE Rating', values: trace.map((v) => formatMetric(v)), winner: pickWinnerIndex(trace), weight: 2 },
 		{
 			label: 'Difficulty',
 			values: difficulty.map((v) => formatMetric(v)),
@@ -495,7 +491,7 @@ function Compare() {
 
 	const heroSubtitle = (() => {
 		if (selectedCount === 0) {
-			return `Pick up to ${MAX_SLOTS} professors and compare rating quality, difficulty, review volume, and recent TRACE performance.`;
+			return `Pick up to ${MAX_SLOTS} professors and compare ratings, difficulty, and how many students would take them again.`;
 		}
 		if (selectedCount === 1) return 'Add at least one more professor to start comparing.';
 		if (selectedCount < MAX_SLOTS) {
