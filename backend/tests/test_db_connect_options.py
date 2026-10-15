@@ -25,6 +25,7 @@ CONNECTORS = [
     ("load_evidence", lambda m: m.connect()),
     ("load_reddit", lambda m: m.connect()),
     ("load_catalog", lambda m: m.connect(os.environ["CRDB_DATABASE_URL"])),
+    ("load_banner", lambda m: m.connect(os.environ["CRDB_DATABASE_URL"])),
 ]
 
 
