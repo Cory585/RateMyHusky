@@ -1,0 +1,3 @@
+# Main devs. The main ruleset requires one of these to approve every PR into
+# main; the dev ruleset ignores code owners, so any collaborator can approve there.
+* @Cory585 @gRain-is-grainy @Max2k06 @RayanR000
