@@ -706,6 +706,8 @@
           <option value="general">Idea or General Feedback</option>
         </select>
 
+        <!-- maxlength values and the email regex in the submit handler mirror server.py's
+             FEEDBACK_MAX_DESCRIPTION / FEEDBACK_MAX_EMAIL and FeedbackTab.tsx. -->
         <label class="feedback-label">Description <span class="feedback-required">*</span></label>
         <textarea class="feedback-textarea" id="feedback-description" rows="4" maxlength="5000"
           placeholder="Describe your feedback here."></textarea>

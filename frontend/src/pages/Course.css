@@ -58,7 +58,7 @@
 	flex-wrap: wrap;
 	justify-content: flex-end;
 	gap: 6px;
-	flex-shrink: 0;
+	max-width: 50%;
 	animation: courseSlideUp 0.5s 0.2s ease both;
 }
 
@@ -602,6 +602,7 @@
 
 	.course-hero-offered {
 		justify-content: flex-start;
+		max-width: none;
 	}
 
 }
@@ -643,6 +644,10 @@
 	.course-stat-value {
 		font-size: 1.5rem;
 		white-space: normal;
+	}
+
+	.course-stat-value--text {
+		line-height: 1.5rem;
 	}
 
 	/* Top prof cards: 2 columns on small screens */
@@ -943,6 +948,7 @@
 	padding: 5px 14px;
 	font-size: 0.85rem;
 	font-weight: 700;
+	white-space: nowrap;
 }
 
 .course-offering-successor {

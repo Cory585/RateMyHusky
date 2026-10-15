@@ -32,7 +32,8 @@ const feedbackOptions = [
   { value: 'banappeal', label: 'Ask Ban Appeal' },
 ].filter((o) => ASK_ENABLED || o.value !== 'banappeal');
 
-// Mirror server.py's FEEDBACK_MAX_DESCRIPTION / FEEDBACK_MAX_EMAIL and its email pattern.
+// Mirror server.py's FEEDBACK_MAX_DESCRIPTION / FEEDBACK_MAX_EMAIL and its email pattern;
+// public/maintenance.html copies them too (maxlength attributes and its submit handler).
 const MAX_DESCRIPTION = 5000;
 const MAX_EMAIL = 254;
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -43,6 +44,8 @@ const ACCOUNT_TYPES = ['banappeal', 'datadeletion'];
 // also require an email, but carry no account id: a professor is confirmed at their
 // Northeastern address, which the FAQ, Privacy Policy and Terms say we need
 const EMAIL_REQUIRED_TYPES = [...ACCOUNT_TYPES, 'professor'];
+
+const SIGN_IN_FOR_DELETION = "Please sign in first so we know which account's data to delete.";
 
 const FeedbackTab = () => {
   const { user, loading: authLoading } = useAuth();
@@ -103,7 +106,7 @@ const FeedbackTab = () => {
       return;
     }
     if (feedbackType === 'datadeletion' && !user) {
-      setError("Please sign in first so we know which account's data to delete.");
+      setError(SIGN_IN_FOR_DELETION);
       return;
     }
     if (EMAIL_REQUIRED_TYPES.includes(feedbackType) && !email.trim()) {
@@ -130,7 +133,10 @@ const FeedbackTab = () => {
       setSubmitted(true);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '';
-      if (msg.includes('429') || msg.includes('limit')) {
+      if (msg.includes('Sign in required')) {
+        // the token expired after the page loaded, or there never was one
+        setError(SIGN_IN_FOR_DELETION);
+      } else if (msg.includes('429') || msg.includes('limit')) {
         setError('Daily feedback limit reached. Please try again tomorrow.');
       } else if (msg.includes('Invalid email')) {
         setError('Please enter a valid email address.');
@@ -271,7 +277,7 @@ const FeedbackTab = () => {
 
                 <div ref={turnstileRef} className="feedback-turnstile" />
 
-                <button className="feedback-submit" onClick={handleSubmit} disabled={loading || !turnstileToken}>
+                <button className="feedback-submit" onClick={handleSubmit} disabled={loading || !turnstileToken || (feedbackType === 'datadeletion' && authLoading)}>
                   {loading ? 'Sending...' : 'Submit'}
                 </button>
               </>

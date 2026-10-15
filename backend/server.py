@@ -296,6 +296,9 @@ _FEEDBACK_TYPE_LABELS = {
     "datadeletion": "Data Deletion Request",
     "banappeal": "Ask Ban Appeal",
 }
+# These limits and the email pattern in submit_feedback are copied in
+# frontend/src/components/FeedbackTab.tsx and frontend/public/maintenance.html
+# (maxlength attributes and the submit handler's regex). Change all three together.
 FEEDBACK_MAX_DESCRIPTION = 5000
 FEEDBACK_MAX_EMAIL = 254   # RFC 5321's limit on a full address
 
@@ -1644,22 +1647,8 @@ def submit_feedback():
     turnstile_token = field("turnstileToken")
     account_token = field("accountSub")
 
-    # Verify Cloudflare Turnstile CAPTCHA
-    turnstile_secret = os.getenv("TURNSTILE_SECRET_KEY")
-    if turnstile_secret:
-        if not turnstile_token:
-            return jsonify({"error": "CAPTCHA verification required"}), 400
-        try:
-            verify_resp = http_requests.post(
-                "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-                data={"secret": turnstile_secret, "response": turnstile_token, "remoteip": get_real_ip()},
-                timeout=5,
-            )
-            if not verify_resp.ok or not verify_resp.json().get("success"):
-                return jsonify({"error": "CAPTCHA verification failed"}), 403
-        except Exception:
-            return jsonify({"error": "CAPTCHA verification failed"}), 500
-
+    # Validate before Turnstile: a bad request shouldn't cost a siteverify call
+    # or use up the user's one-time CAPTCHA token.
     if not feedback_type or not description:
         return jsonify({"error": "feedbackType and description are required"}), 400
 
@@ -1686,6 +1675,26 @@ def submit_feedback():
             appeal_account = pyjwt.decode(account_token, JWT_SECRET, algorithms=["HS256"]).get("sub")
         except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
             appeal_account = None
+
+    # Support can't erase data that isn't tied to an account, so don't send it on.
+    if feedback_type == "datadeletion" and appeal_account is None:
+        return jsonify({"error": "Sign in required"}), 401
+
+    # Verify Cloudflare Turnstile CAPTCHA
+    turnstile_secret = os.getenv("TURNSTILE_SECRET_KEY")
+    if turnstile_secret:
+        if not turnstile_token:
+            return jsonify({"error": "CAPTCHA verification required"}), 400
+        try:
+            verify_resp = http_requests.post(
+                "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+                data={"secret": turnstile_secret, "response": turnstile_token, "remoteip": get_real_ip()},
+                timeout=5,
+            )
+            if not verify_resp.ok or not verify_resp.json().get("success"):
+                return jsonify({"error": "CAPTCHA verification failed"}), 403
+        except Exception:
+            return jsonify({"error": "CAPTCHA verification failed"}), 500
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     with _feedback_lock:

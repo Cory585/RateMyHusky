@@ -54,8 +54,37 @@ def test_every_accepted_type_passes_validation(monkeypatch):
         resp = _post(monkeypatch, feedbackType=t, description="hi")
         assert resp.get_json()["error"] == "Email service not configured", t
     for t in ("banappeal", "datadeletion", "professor"):
-        resp = _post(monkeypatch, feedbackType=t, description="hi", email="a@northeastern.edu")
+        resp = _post(monkeypatch, feedbackType=t, description="hi", email="a@northeastern.edu",
+                     accountSub=_account_token())
         assert resp.get_json()["error"] == "Email service not configured", t
+
+
+def _account_token():
+    import jwt
+    import server
+    return jwt.encode({"sub": "user-123"}, server.JWT_SECRET, algorithm="HS256")
+
+
+def test_data_deletion_requires_a_valid_account(monkeypatch):
+    for token in (None, "not-a-jwt"):
+        resp = _post(monkeypatch, feedbackType="datadeletion", description="hi",
+                     email="a@northeastern.edu", accountSub=token)
+        assert resp.status_code == 401
+        assert resp.get_json()["error"] == "Sign in required"
+
+
+def test_invalid_requests_are_rejected_before_captcha(monkeypatch):
+    import server
+    monkeypatch.setattr(server.limiter, "enabled", False)
+    monkeypatch.setenv("TURNSTILE_SECRET_KEY", "secret")
+    def no_siteverify(*a, **kw):
+        raise AssertionError("siteverify called for an invalid request")
+    monkeypatch.setattr(server.http_requests, "post", no_siteverify)
+    resp = server.app.test_client().post("/api/feedback", json={
+        "feedbackType": "bug", "description": "x" * (server.FEEDBACK_MAX_DESCRIPTION + 1),
+        "turnstileToken": "tok"})
+    assert resp.status_code == 400
+    assert "too long" in resp.get_json()["error"]
 
 
 def test_non_string_fields_are_rejected_not_crashed(monkeypatch):

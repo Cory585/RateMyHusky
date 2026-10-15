@@ -63,9 +63,9 @@ const Privacy = () => {
                   the RateMyHusky team via email and are not stored in a database. Submitted
                   information is used solely to improve the service. The form is protected by
                   a CAPTCHA challenge (see Third-Party Services). If you submit a
-                  "Data Deletion Request," an email address is required so we can respond, and
-                  (if you are signed in) your account identifier is included so we can locate
-                  the data held for your account and delete it. That account identifier is
+                  "Data Deletion Request," you must be signed in and an email address is
+                  required so we can respond; your account identifier is included so we can
+                  locate the data held for your account and delete it. That account identifier is
                   derived from your sign-in token at the time you submit and is not retained
                   beyond handling your request. A professor's request to correct or remove their
                   page also requires an email address, so we can confirm it with them.

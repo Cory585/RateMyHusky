@@ -120,8 +120,8 @@ const Terms = () => {
                 the RateMyHusky team via email and are not stored in our database. Submitted
                 information is used solely to improve the service and will not be shared with
                 third parties. The email address is optional for most message types but is
-                required for a "Data Deletion Request," for which (if you are signed in) your
-                account identifier is also included so we can act on the correct account. It is
+                required for a "Data Deletion Request," which also requires you to be signed in
+                so your account identifier can be included and we can act on the correct account. It is
                 also required for a professor's request to correct or remove their page, so we
                 can confirm the request with them.
               </p>
