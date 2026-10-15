@@ -125,7 +125,10 @@ EXTENSION_ORIGINS = [
     o.strip() for o in os.getenv("EXTENSION_ORIGINS", "").split(",") if o.strip()
 ]
 
-CORS(app, supports_credentials=True, origins=[FRONTEND_URL, *EXTENSION_ORIGINS])
+# Not EXTENSION_ORIGINS: a popup holding host_permissions for the site isn't
+# subject to CORS, and the extension sends credentials: 'omit'. It still needs
+# the ALLOWED_ORIGINS entry below, because Chrome does send an Origin header.
+CORS(app, supports_credentials=True, origins=[FRONTEND_URL])
 def get_real_ip():
     """Get the real client IP from X-Forwarded-For (set by Vercel/Railway proxy)."""
     xff = request.headers.get("X-Forwarded-For", "")

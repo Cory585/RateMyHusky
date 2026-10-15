@@ -9,7 +9,9 @@ useDefault = true
 [[allowlists]]
 description = "Chrome extension public manifest key"
 condition = "AND"
-paths = ['''^extension/public/manifest\.json$''']
+# Both paths: the manifest moved into public/ mid-branch, and the scan
+# covers every commit in the range, including the one before the move.
+paths = ['''^extension/(public/)?manifest\.json$''']
 # Against the whole line, not the matched secret: the finding is the bare
 # base64 value, which carries nothing to anchor on.
 regexTarget = "line"

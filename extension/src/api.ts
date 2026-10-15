@@ -24,7 +24,9 @@ export type CourseSuggestion = {
 
 export type Suggestion = ProfessorSuggestion | CourseSuggestion;
 
-/** The site is down: maintenance, a 503, or no network. Anything else — a 403
+const MAINTENANCE_PATH = '/maintenance.html';
+
+/** The site is unreachable: maintenance, or no network. Anything else — a 403
  *  from an origin that isn't allowlisted, a 429, a 500 — is a real error and
  *  must not be reported as maintenance. */
 class Unavailable extends Error {}
@@ -37,17 +39,18 @@ async function get<T>(path: string): Promise<T> {
     throw new Unavailable(`network error: ${(err as Error).message}`);
   }
 
-  if (!resp.ok) {
-    const detail = `${resp.status} ${resp.statusText}`;
-    if (resp.status === 503) throw new Unavailable(detail);
-    throw new Error(detail);
+  // Maintenance is a 307 to /maintenance.html, which then serves 200 HTML —
+  // never a 503. fetch follows the redirect, so the landing url is the signal.
+  if (resp.redirected && new URL(resp.url).pathname === MAINTENANCE_PATH) {
+    throw new Unavailable('site is in maintenance');
   }
+
+  if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
 
   const text = await resp.text();
   try {
     return JSON.parse(text) as T;
   } catch {
-    // The maintenance redirect lands here: a 200 carrying HTML, not JSON.
     throw new Unavailable('expected JSON, got a page');
   }
 }
