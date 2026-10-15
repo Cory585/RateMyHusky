@@ -400,13 +400,18 @@
 	overflow-x: auto;
 }
 
+/* --cols is the number of picked professors (4 when none are picked yet) */
 .compare-table {
-	min-width: 760px;
+	min-width: calc(160px + var(--cols, 4) * 140px);
+}
+
+.compare-table.has-selection .is-empty-col {
+	display: none;
 }
 
 .compare-row {
 	display: grid;
-	grid-template-columns: minmax(160px, 1fr) repeat(4, minmax(140px, 1fr));
+	grid-template-columns: minmax(160px, 1fr) repeat(var(--cols, 4), minmax(140px, 1fr));
 	border-top: 1px solid #eef0f2;
 	animation: compareFadeUp 0.4s ease both;
 }
@@ -858,8 +863,7 @@
 		animation: none;
 	}
 
-	.compare-row.is-desktop-only,
-	.compare-table.has-selection .is-empty-col {
+	.compare-row.is-desktop-only {
 		display: none;
 	}
 
