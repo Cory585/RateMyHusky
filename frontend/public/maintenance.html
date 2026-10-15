@@ -702,18 +702,18 @@
         <select class="feedback-select" id="feedback-type">
           <option value="" disabled selected>Select Feedback Type</option>
           <option value="bug">Bug Report</option>
-          <option value="feature">Feature Request</option>
-          <option value="missing">Missing Data</option>
-          <option value="incorrectdata">Incorrect Data</option>
-          <option value="general">General Feedback</option>
+          <option value="incorrectdata">Wrong or Missing Data</option>
+          <option value="general">Idea or General Feedback</option>
         </select>
 
+        <!-- maxlength values and the email regex in the submit handler mirror server.py's
+             FEEDBACK_MAX_DESCRIPTION / FEEDBACK_MAX_EMAIL and FeedbackTab.tsx. -->
         <label class="feedback-label">Description <span class="feedback-required">*</span></label>
-        <textarea class="feedback-textarea" id="feedback-description" rows="4"
+        <textarea class="feedback-textarea" id="feedback-description" rows="4" maxlength="5000"
           placeholder="Describe your feedback here."></textarea>
 
         <label class="feedback-label">Email (Optional)</label>
-        <input class="feedback-input" id="feedback-email" type="email"
+        <input class="feedback-input" id="feedback-email" type="email" maxlength="254"
           placeholder="How should we contact you?" />
 
         <div class="feedback-turnstile" id="feedback-turnstile"></div>
@@ -829,10 +829,8 @@
 
       var placeholders = {
         bug: 'Describe the bug. What happened, and what did you expect to happen?',
-        feature: 'What feature would you like to see? Describe what it would do and why it would be useful.',
-        missing: 'What data is missing? Please include the professor name and any relevant links.',
-        incorrectdata: 'What data is incorrect? Please include the professor name and what the correct information should be.',
-        general: 'Share your thoughts, suggestions, or anything else on your mind.'
+        incorrectdata: "What's wrong or missing? Include the professor or course, a link to the page, and what it should say.",
+        general: 'Share an idea for a feature, a suggestion, or anything else on your mind.'
       };
 
       typeEl.addEventListener('change', function () {
@@ -892,6 +890,10 @@
       submitBtn.addEventListener('click', function () {
         if (!typeEl.value || !descEl.value.trim()) {
           showError('Please select a feedback type and enter a description.');
+          return;
+        }
+        if (emailEl.value.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailEl.value.trim())) {
+          showError('Please enter a valid email address.');
           return;
         }
         if (!tsToken) {

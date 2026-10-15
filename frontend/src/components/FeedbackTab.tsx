@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import logo from '../assets/logo.jpg';
 import Dropdown from './Dropdown';
 import { submitFeedback } from '../api/api';
+import { useAuth } from '../context/AuthContext';
+import { ASK_ENABLED } from '../config';
 import './FeedbackTab.css';
 
 declare global {
@@ -19,16 +21,22 @@ if (!TURNSTILE_SITE_KEY && import.meta.env.PROD) {
   throw new Error('VITE_TURNSTILE_SITE_KEY environment variable is required in production');
 }
 
+// "incorrectdata" and "general" also stand for the merged "missing" and "feature",
+// which server.py still accepts from cached bundles.
 const feedbackOptions = [
   { value: 'bug', label: 'Bug Report' },
-  { value: 'feature', label: 'Feature Request' },
-  { value: 'missing', label: 'Missing Data' },
-  { value: 'incorrectdata', label: 'Incorrect Data' },
-  { value: 'banappeal', label: 'Ask Ban Appeal' },
-  { value: 'datadeletion', label: 'Data Deletion Request' },
+  { value: 'incorrectdata', label: 'Wrong or Missing Data' },
+  { value: 'general', label: 'Idea or General Feedback' },
   { value: 'professor', label: 'Professor: Correct or Remove My Page' },
-  { value: 'general', label: 'General Feedback' },
-];
+  { value: 'datadeletion', label: 'Data Deletion Request' },
+  { value: 'banappeal', label: 'Ask Ban Appeal' },
+].filter((o) => ASK_ENABLED || o.value !== 'banappeal');
+
+// Mirror server.py's FEEDBACK_MAX_DESCRIPTION / FEEDBACK_MAX_EMAIL and its email pattern;
+// public/maintenance.html copies them too (maxlength attributes and its submit handler).
+const MAX_DESCRIPTION = 5000;
+const MAX_EMAIL = 254;
+const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 // types where an email is required and (when signed in) the verified account id is sent,
 // so we can respond and act on the right account
@@ -37,7 +45,10 @@ const ACCOUNT_TYPES = ['banappeal', 'datadeletion'];
 // Northeastern address, which the FAQ, Privacy Policy and Terms say we need
 const EMAIL_REQUIRED_TYPES = [...ACCOUNT_TYPES, 'professor'];
 
+const SIGN_IN_FOR_DELETION = "Please sign in first so we know which account's data to delete.";
+
 const FeedbackTab = () => {
+  const { user, loading: authLoading } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [feedbackType, setFeedbackType] = useState('');
   const [description, setDescription] = useState('');
@@ -94,8 +105,16 @@ const FeedbackTab = () => {
       setError('Please select a feedback type and enter a description.');
       return;
     }
+    if (feedbackType === 'datadeletion' && !user) {
+      setError(SIGN_IN_FOR_DELETION);
+      return;
+    }
     if (EMAIL_REQUIRED_TYPES.includes(feedbackType) && !email.trim()) {
       setError('Email is required for this request so we can respond.');
+      return;
+    }
+    if (email.trim() && !EMAIL_PATTERN.test(email.trim())) {
+      setError('Please enter a valid email address.');
       return;
     }
     if (!turnstileToken) {
@@ -114,10 +133,15 @@ const FeedbackTab = () => {
       setSubmitted(true);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '';
-      if (msg.includes('429') || msg.includes('limit')) {
+      if (msg.includes('Sign in required')) {
+        // the token expired after the page loaded, or there never was one
+        setError(SIGN_IN_FOR_DELETION);
+      } else if (msg.includes('429') || msg.includes('limit')) {
         setError('Daily feedback limit reached. Please try again tomorrow.');
       } else if (msg.includes('Invalid email')) {
         setError('Please enter a valid email address.');
+      } else if (msg.includes('too long')) {
+        setError(`Please keep the description under ${MAX_DESCRIPTION.toLocaleString()} characters.`);
       } else if (msg.includes('CAPTCHA') || msg.includes('captcha')) {
         setError('CAPTCHA verification failed. Please try again.');
         if (widgetIdRef.current !== null && window.turnstile) {
@@ -149,20 +173,16 @@ const FeedbackTab = () => {
     switch (feedbackType) {
       case 'bug':
         return "Describe the bug. What happened, and what did you expect to happen?";
-      case 'feature':
-        return "What feature would you like to see? Describe what it would do and why it would be useful.";
-      case 'missing':
-        return "What data is missing? Please include the professor name and any relevant links.";
       case 'incorrectdata':
-        return "What data is incorrect? Please include the professor name and what the correct information should be.";
+        return "What's wrong or missing? Include the professor or course, a link to the page, and what it should say.";
       case 'banappeal':
         return "Explain why your access to Ask should be restored. Include any context about the questions you asked.";
       case 'datadeletion':
-        return "Request deletion of your Ask data and bookmarks. Sign in first so we can verify your account; we'll delete all Ask logs and bookmarks tied to it.";
+        return "Request deletion of your Ask data and bookmarks. We'll delete all Ask logs and bookmarks tied to your signed-in account.";
       case 'professor':
         return "Which page is yours, and what should we correct or remove? Use your Northeastern email below; we confirm every request there before acting.";
       case 'general':
-        return "Share your thoughts, suggestions, or anything else on your mind.";
+        return "Share an idea for a feature, a suggestion, or anything else on your mind.";
       default:
         return "Describe your feedback here.";
     }
@@ -223,6 +243,11 @@ const FeedbackTab = () => {
                   onChange={setFeedbackType}
                   placeholder="Select Feedback Type"
                 />
+                {feedbackType === 'datadeletion' && !authLoading && !user && (
+                  <p className="feedback-note">
+                    You're not signed in, so we can't tell which account's data to delete. Sign in first, then send this request.
+                  </p>
+                )}
 
                 <label className="feedback-label">
                   Description <span className="feedback-required">*</span>
@@ -231,6 +256,7 @@ const FeedbackTab = () => {
                   className="feedback-textarea"
                   placeholder={getPlaceholder()}
                   rows={4}
+                  maxLength={MAX_DESCRIPTION}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                 />
@@ -243,6 +269,7 @@ const FeedbackTab = () => {
                 <input
                   className="feedback-input"
                   type="email"
+                  maxLength={MAX_EMAIL}
                   placeholder="How should we contact you?"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -250,7 +277,7 @@ const FeedbackTab = () => {
 
                 <div ref={turnstileRef} className="feedback-turnstile" />
 
-                <button className="feedback-submit" onClick={handleSubmit} disabled={loading || !turnstileToken}>
+                <button className="feedback-submit" onClick={handleSubmit} disabled={loading || !turnstileToken || (feedbackType === 'datadeletion' && authLoading)}>
                   {loading ? 'Sending...' : 'Submit'}
                 </button>
               </>

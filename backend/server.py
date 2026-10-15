@@ -281,6 +281,27 @@ _EMAIL_REQUIRED_FEEDBACK_TYPES = _ACCOUNT_FEEDBACK_TYPES | {"professor"}
 # address before acting, so the support email says up front whether that is possible.
 _PAGE_CHANGE_FEEDBACK_TYPES = {"missing", "incorrectdata", "professor"}
 
+# Every type the endpoint accepts, with its email subject label. "missing" and
+# "feature" were merged into "incorrectdata" and "general" on the form but stay
+# accepted for cached bundles; "banappeal" is hidden while Ask is off. Drop the two
+# old keys once no tab can still be running a pre-merge bundle (a couple of weeks
+# after the merge ships).
+_FEEDBACK_TYPE_LABELS = {
+    "bug": "Bug Report",
+    "incorrectdata": "Wrong or Missing Data",
+    "missing": "Missing Data",
+    "general": "Idea or General Feedback",
+    "feature": "Feature Request",
+    "professor": "Professor Request",
+    "datadeletion": "Data Deletion Request",
+    "banappeal": "Ask Ban Appeal",
+}
+# These limits and the email pattern in submit_feedback are copied in
+# frontend/src/components/FeedbackTab.tsx and frontend/public/maintenance.html
+# (maxlength attributes and the submit handler's regex). Change all three together.
+FEEDBACK_MAX_DESCRIPTION = 5000
+FEEDBACK_MAX_EMAIL = 254   # RFC 5321's limit on a full address
+
 
 def _is_northeastern_address(email):
     """@northeastern.edu, or a college subdomain such as @khoury.northeastern.edu."""
@@ -1615,11 +1636,49 @@ def submit_feedback():
     global _feedback_count, _feedback_date
 
     data = request.get_json(silent=True) or {}
-    feedback_type = data.get("feedbackType", "").strip()
-    description = data.get("description", "").strip()
-    reply_email = data.get("email", "").strip()
-    turnstile_token = data.get("turnstileToken", "").strip()
-    account_token = (data.get("accountSub") or "").strip()
+    # Non-string values (123, null) count as missing instead of crashing .strip().
+    def field(name):
+        value = data.get(name)
+        return value.strip() if isinstance(value, str) else ""
+
+    feedback_type = field("feedbackType")
+    description = field("description")
+    reply_email = field("email")
+    turnstile_token = field("turnstileToken")
+    account_token = field("accountSub")
+
+    # Validate before Turnstile: a bad request shouldn't cost a siteverify call
+    # or use up the user's one-time CAPTCHA token.
+    if not feedback_type or not description:
+        return jsonify({"error": "feedbackType and description are required"}), 400
+
+    if feedback_type not in _FEEDBACK_TYPE_LABELS:
+        return jsonify({"error": "Unknown feedback type"}), 400
+
+    if len(description) > FEEDBACK_MAX_DESCRIPTION:
+        return jsonify({"error": f"Description is too long (max {FEEDBACK_MAX_DESCRIPTION} characters)"}), 400
+
+    # Ask ban appeals, data-deletion and professor requests are useless without a reply
+    # address — require it (other types stay optional).
+    if feedback_type in _EMAIL_REQUIRED_FEEDBACK_TYPES and not reply_email:
+        return jsonify({"error": "Email is required for this request"}), 400
+
+    if reply_email and (len(reply_email) > FEEDBACK_MAX_EMAIL
+                        or not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', reply_email)):
+        return jsonify({"error": "Invalid email address"}), 400
+
+    # Resolve the account from its JWT (verified server-side, never trust a client-supplied id)
+    # so we can locate/clear its ask_log rows by session_token (appeal review or data erasure).
+    appeal_account = None
+    if feedback_type in _ACCOUNT_FEEDBACK_TYPES and account_token:
+        try:
+            appeal_account = pyjwt.decode(account_token, JWT_SECRET, algorithms=["HS256"]).get("sub")
+        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+            appeal_account = None
+
+    # Support can't erase data that isn't tied to an account, so don't send it on.
+    if feedback_type == "datadeletion" and appeal_account is None:
+        return jsonify({"error": "Sign in required"}), 401
 
     # Verify Cloudflare Turnstile CAPTCHA
     turnstile_secret = os.getenv("TURNSTILE_SECRET_KEY")
@@ -1637,26 +1696,6 @@ def submit_feedback():
         except Exception:
             return jsonify({"error": "CAPTCHA verification failed"}), 500
 
-    if not feedback_type or not description:
-        return jsonify({"error": "feedbackType and description are required"}), 400
-
-    # Ask ban appeals, data-deletion and professor requests are useless without a reply
-    # address — require it (other types stay optional).
-    if feedback_type in _EMAIL_REQUIRED_FEEDBACK_TYPES and not reply_email:
-        return jsonify({"error": "Email is required for this request"}), 400
-
-    if reply_email and not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', reply_email):
-        return jsonify({"error": "Invalid email address"}), 400
-
-    # Resolve the account from its JWT (verified server-side, never trust a client-supplied id)
-    # so we can locate/clear its ask_log rows by session_token (appeal review or data erasure).
-    appeal_account = None
-    if feedback_type in _ACCOUNT_FEEDBACK_TYPES and account_token:
-        try:
-            appeal_account = pyjwt.decode(account_token, JWT_SECRET, algorithms=["HS256"]).get("sub")
-        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
-            appeal_account = None
-
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     with _feedback_lock:
         if _feedback_date != today:
@@ -1671,17 +1710,7 @@ def submit_feedback():
         print("[feedback] RESEND_API_KEY not configured")
         return jsonify({"error": "Email service not configured"}), 500
 
-    type_labels = {
-        "bug": "Bug Report",
-        "feature": "Feature Request",
-        "missing": "Missing Data",
-        "incorrectdata": "Incorrect Data",
-        "banappeal": "Ask Ban Appeal",
-        "datadeletion": "Data Deletion Request",
-        "professor": "Professor Request",
-        "general": "General Feedback",
-    }
-    type_label = type_labels.get(feedback_type, feedback_type)
+    type_label = _FEEDBACK_TYPE_LABELS[feedback_type]
     submitted_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     lines = [

@@ -53,6 +53,15 @@
 	margin-left: 12px;
 }
 
+.course-hero-offered {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 6px;
+	max-width: 50%;
+	animation: courseSlideUp 0.5s 0.2s ease both;
+}
+
 .course-code {
 	margin: 0 0 8px;
 	font-size: 0.76rem;
@@ -155,9 +164,12 @@
 	white-space: nowrap;
 }
 
+/* Line box sized like .course-stat-value's so the label lines up with the number cards. */
 .course-stat-value--text {
-	font-size: clamp(1.1rem, 1.6vw, 1.5rem);
+	font-size: clamp(1.3rem, 2vw, 1.9rem);
+	line-height: clamp(1.6rem, 2.5vw, 2.3rem);
 	white-space: normal;
+	text-align: center;
 }
 
 .course-stat-label {
@@ -588,6 +600,11 @@
 		flex-direction: column;
 	}
 
+	.course-hero-offered {
+		justify-content: flex-start;
+		max-width: none;
+	}
+
 }
 
 @media (max-width: 540px) {
@@ -627,6 +644,10 @@
 	.course-stat-value {
 		font-size: 1.5rem;
 		white-space: normal;
+	}
+
+	.course-stat-value--text {
+		line-height: 1.5rem;
 	}
 
 	/* Top prof cards: 2 columns on small screens */
@@ -923,11 +944,11 @@
 	font-weight: 600;
 }
 
-.course-offering-badges {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 6px;
-	margin-bottom: 10px;
+.course-hero-offered-tag {
+	padding: 5px 14px;
+	font-size: 0.85rem;
+	font-weight: 700;
+	white-space: nowrap;
 }
 
 .course-offering-successor {
