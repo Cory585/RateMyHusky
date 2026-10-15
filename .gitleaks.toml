@@ -1,0 +1,16 @@
+# Extends gitleaks' built-in rules — it does not replace them.
+[extend]
+useDefault = true
+
+# A Chrome extension's manifest carries the *public* half of its signing key.
+# Chrome derives the extension id from it, so it has to ship, and it is not a
+# secret. Scoped to that one file and that one field rather than a commit
+# fingerprint, which stops matching the moment a branch is rebased or squashed.
+[[allowlists]]
+description = "Chrome extension public manifest key"
+condition = "AND"
+paths = ['''^extension/manifest\.json$''']
+# Against the whole line, not the matched secret: the finding is the bare
+# base64 value, which carries nothing to anchor on.
+regexTarget = "line"
+regexes = ['''"key"\s*:\s*"[A-Za-z0-9+/=]+"''']
