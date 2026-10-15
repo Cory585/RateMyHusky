@@ -117,10 +117,8 @@ app.config["COMPRESS_MIN_SIZE"] = 256
 Compress(app)
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
-# The browser extension (extension/manifest.json) is a second read-only client.
-# Its id is pinned by the `key` field in that manifest, so it is stable across
-# dev reloads; the Chrome Web Store assigns its own id at publish, which gets
-# added here then. Comma-separated so both can be listed during that handover.
+# Id is pinned by the `key` in extension/manifest.json. The Web Store assigns a
+# different one at publish, so this is comma-separated to run both for a while.
 EXTENSION_ORIGINS = [
     o.strip() for o in os.getenv(
         "EXTENSION_ORIGINS",
