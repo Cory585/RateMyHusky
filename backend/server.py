@@ -117,13 +117,12 @@ app.config["COMPRESS_MIN_SIZE"] = 256
 Compress(app)
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
-# Id is pinned by the `key` in extension/manifest.json. The Web Store assigns a
-# different one at publish, so this is comma-separated to run both for a while.
+# Set per environment, never defaulted: the id derives from the public key in
+# extension/manifest.json, so anyone could copy that key into their own
+# unpacked extension and inherit whatever this trusts. Comma-separated, so the
+# dev id and the Web Store's can both run during the handover.
 EXTENSION_ORIGINS = [
-    o.strip() for o in os.getenv(
-        "EXTENSION_ORIGINS",
-        "chrome-extension://efcamhdgilkmhojinbolmldbngbcmoph",
-    ).split(",") if o.strip()
+    o.strip() for o in os.getenv("EXTENSION_ORIGINS", "").split(",") if o.strip()
 ]
 
 CORS(app, supports_credentials=True, origins=[FRONTEND_URL, *EXTENSION_ORIGINS])

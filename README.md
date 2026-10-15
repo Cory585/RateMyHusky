@@ -139,6 +139,10 @@ GOOGLE_CLIENT_ID=<your-google-oauth-client-id>
 GOOGLE_CLIENT_SECRET=<your-google-oauth-client-secret>
 FRONTEND_URL=http://localhost:5173
 
+# Optional — browser extension. Load extension/dist at chrome://extensions and
+# copy the id it shows. Unset means no extension can reach the API.
+EXTENSION_ORIGINS=chrome-extension://<your-unpacked-extension-id>
+
 # Optional — AI Ask mode
 GROQ_API_KEYS=<key1>,<key2>
 ```
