@@ -474,6 +474,11 @@
 	font-weight: 800;
 }
 
+.compare-cell-second {
+	background: #fdf3e6;
+	font-weight: 700;
+}
+
 .compare-row-hint {
 	display: block;
 	font-size: 0.7rem;
@@ -517,6 +522,16 @@
 	white-space: nowrap;
 }
 
+.compare-second {
+	margin-left: 6px;
+	font-size: 0.66rem;
+	font-weight: 800;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: #b35a07;
+	white-space: nowrap;
+}
+
 /* Thin bar on a fixed scale, so a close lead looks close */
 .compare-bar {
 	display: block;
@@ -540,7 +555,12 @@
 	background: #3f9a5e;
 }
 
-.compare-cell-winner small {
+.compare-cell-second .compare-bar i {
+	background: #e08a2e;
+}
+
+.compare-cell-winner small,
+.compare-cell-second small {
 	font-weight: 600;
 }
 
@@ -771,6 +791,18 @@
 
 .dark .compare-cell-winner {
 	background: rgba(93, 207, 128, 0.14);
+}
+
+.dark .compare-cell-second {
+	background: rgba(240, 150, 60, 0.13);
+}
+
+.dark .compare-second {
+	color: #f2a65a;
+}
+
+.dark .compare-cell-second .compare-bar i {
+	background: #e8954a;
 }
 
 .dark .compare-row-hint,
@@ -1009,8 +1041,14 @@
 	}
 
 	/* Narrow columns: the check mark alone carries "best" (plus the screen-reader text) */
-	.compare-best {
+	.compare-best,
+	.compare-second {
 		margin-left: 3px;
+	}
+
+	.compare-second {
+		font-size: 0.6rem;
+		letter-spacing: 0;
 	}
 
 	.compare-best-word {
@@ -1098,6 +1136,21 @@
 		font-weight: 800;
 	}
 
+	/* Second best: orange pill, same shape as the winner's */
+	.compare-cell.compare-cell-second {
+		background: transparent;
+	}
+
+	.compare-cell-second > span:first-child {
+		display: block;
+		width: 100%;
+		padding: 7px 4px;
+		border-radius: 6px;
+		background: #fdf0df;
+		color: #b35a07;
+		font-weight: 700;
+	}
+
 	.dark .compare-chip {
 		background: #242628;
 		border-color: #2f343a;
@@ -1133,6 +1186,15 @@
 	.dark .compare-cell-winner > span:first-child {
 		background: rgba(93, 207, 128, 0.16);
 		color: #7fd99a;
+	}
+
+	.dark .compare-cell.compare-cell-second {
+		background: transparent;
+	}
+
+	.dark .compare-cell-second > span:first-child {
+		background: rgba(240, 150, 60, 0.16);
+		color: #f2a65a;
 	}
 }
 
