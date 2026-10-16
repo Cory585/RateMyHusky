@@ -636,14 +636,14 @@ function Compare() {
 									Tie
 								</span>
 							)}
-							<span className="compare-sr-only">{bestTied ? ', tied for best' : `, best among ${row.ranked}`}</span>
+							<span className="visually-hidden">{bestTied ? ', tied for best' : `, best among ${row.ranked}`}</span>
 						</span>
 					)}
 					{isSecond && (
 						<span className="compare-second">
 							<span className="compare-rank-long" aria-hidden="true">{secondTied ? 'Tied 2nd' : '2nd'}</span>
 							<span className="compare-rank-short" aria-hidden="true">{secondTied ? 'T-2nd' : '2nd'}</span>
-							<span className="compare-sr-only">{secondTied ? ', tied for second best' : ', second best'}</span>
+							<span className="visually-hidden">{secondTied ? ', tied for second best' : ', second best'}</span>
 						</span>
 					)}
 				</span>
