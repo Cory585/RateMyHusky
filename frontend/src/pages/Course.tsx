@@ -435,6 +435,7 @@ function OfferingPanel({ history }: { history: CourseHistory }) {
 	const oy = history.offeringYears;
 	/* A row from before the scraper stored the years shows the pattern alone. */
 	let body = null;
+	let pattern = history.pattern;
 	if (oy && oy.window.length > 0) {
 		const years = oy.window;
 		const last = years[years.length - 1];
@@ -451,10 +452,14 @@ function OfferingPanel({ history }: { history: CourseHistory }) {
 		if (oy.first > last) {
 			body = <p className="course-offering-note">First offered {history.firstOffered}</p>;
 		} else if (TILES.every(([k]) => oy[k].length === 0)) {
-			/* Ran only before the window and is back on the schedule now: not "not offered". */
-			body = history.offeredNow.length > 0
-				? <p className="course-offering-note">Back for {history.offeredNow.join(' and ')}, after no runs from {schoolYear(years[0])} to {schoolYear(last)}</p>
-				: <p className="course-offering-note">Not offered since {history.lastOffered}</p>;
+			if (history.offeredNow.length > 0) {
+				/* Ran only before the window and is back on the schedule now: not "not offered".
+				   The note explains the gap, so the header's "Not offered recently" would contradict it. */
+				pattern = null;
+				body = <p className="course-offering-note">Back for {history.offeredNow.join(' and ')}, after no runs from {schoolYear(years[0])} to {schoolYear(last)}</p>;
+			} else {
+				body = <p className="course-offering-note">Not offered since {history.lastOffered}</p>;
+			}
 		} else {
 			body = (
 				<>
@@ -498,7 +503,7 @@ function OfferingPanel({ history }: { history: CourseHistory }) {
 		<section className="course-panel">
 			<div className="course-panel-header course-offering-header">
 				<h2>When it's offered</h2>
-				{history.pattern && <span className="course-offering-pattern">{history.pattern}</span>}
+				{pattern && <span className="course-offering-pattern">{pattern}</span>}
 			</div>
 			{body}
 			{history.replacedBy && <SuccessorLine verb="Replaced by" link={history.replacedBy} />}

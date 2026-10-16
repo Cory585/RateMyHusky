@@ -117,7 +117,11 @@ def _inst(slug, name, terms, size=None):
 
 
 HISTORY = {
-    "pattern": "Fall and Spring", "lastOffered": "Fall 2026", "offeredNow": ["Fall 2026"],
+    "pattern": "Fall and Spring",
+    "offeringYears": {"window": [2023, 2024, 2025, 2026], "first": 2022,
+                      "fall": [2023, 2024, 2025, 2026], "spring": [2023, 2024, 2025, 2026],
+                      "summer1": [], "summer2": [], "summer": []},
+    "firstOffered": "Fall 2021", "lastOffered": "Fall 2026", "offeredNow": ["Fall 2026"],
     "creditHours": "4", "typicalClassSize": 43, "instructorCount": 3,
     "replacedBy": None, "replaces": None,
     "instructors": [
@@ -139,6 +143,7 @@ def test_history_is_course_history_plus_recent_instructors():
     h = _with_history()["history"]
     assert set(h) == set(HISTORY) | {"recentInstructors"}
     assert h["lastOffered"] == "Fall 2026"
+    assert (h["offeringYears"], h["firstOffered"]) == (HISTORY["offeringYears"], "Fall 2021")
 
 
 def test_recent_is_a_year_back_from_the_newest_term():
