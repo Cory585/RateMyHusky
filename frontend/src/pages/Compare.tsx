@@ -583,7 +583,10 @@ function Compare() {
 						<div className="compare-avatar-fallback">{fallbackIcon}</div>
 					)}
 				</div>
-				<h3>{slot.name}</h3>
+				<h3>
+					<span className={`compare-col-dot tone-${slot.index}`} aria-hidden="true" />
+					{slot.name}
+				</h3>
 				<p>{dept}</p>
 				<div className="compare-rating-line">
 					<strong>{formatMetric(rating)}</strong>

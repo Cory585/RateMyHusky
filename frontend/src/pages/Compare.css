@@ -1,5 +1,10 @@
 .compare-page {
 	--compare-gutter: clamp(16px, 3.5vw, 50px);
+	/* One color per slot: chip avatars, table header dots and profile card dots */
+	--compare-tone-0: #4d7a5c;
+	--compare-tone-1: #9b5560;
+	--compare-tone-2: #56709b;
+	--compare-tone-3: #8d7442;
 	min-height: 100vh;
 	padding-top: 60px;
 	background: #f4f5f7;
@@ -503,10 +508,17 @@
 	border-radius: 50%;
 }
 
-.compare-col-dot.tone-0 { background: #5f9e72; }
-.compare-col-dot.tone-1 { background: #c46d79; }
-.compare-col-dot.tone-2 { background: #6b88bd; }
-.compare-col-dot.tone-3 { background: #b4955a; }
+.compare-col-dot.tone-0 { background: var(--compare-tone-0); }
+.compare-col-dot.tone-1 { background: var(--compare-tone-1); }
+.compare-col-dot.tone-2 { background: var(--compare-tone-2); }
+.compare-col-dot.tone-3 { background: var(--compare-tone-3); }
+
+/* The same dot before each name on the desktop profile cards */
+.compare-profile-card h3 .compare-col-dot {
+	display: inline-block;
+	margin-right: 8px;
+	vertical-align: middle;
+}
 
 .compare-value {
 	font-variant-numeric: tabular-nums;
@@ -960,10 +972,10 @@
 		height: 14px;
 	}
 
-	.compare-chip-avatar.tone-0 { background: #d9eee0; color: #4d7a5c; }
-	.compare-chip-avatar.tone-1 { background: #f5dcdf; color: #9b5560; }
-	.compare-chip-avatar.tone-2 { background: #dbe5f6; color: #56709b; }
-	.compare-chip-avatar.tone-3 { background: #f3e8cf; color: #8d7442; }
+	.compare-chip-avatar.tone-0 { background: #d9eee0; color: var(--compare-tone-0); }
+	.compare-chip-avatar.tone-1 { background: #f5dcdf; color: var(--compare-tone-1); }
+	.compare-chip-avatar.tone-2 { background: #dbe5f6; color: var(--compare-tone-2); }
+	.compare-chip-avatar.tone-3 { background: #f3e8cf; color: var(--compare-tone-3); }
 
 	.compare-chip-remove {
 		border: none;
