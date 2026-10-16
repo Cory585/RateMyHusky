@@ -596,13 +596,15 @@ function Compare() {
 	const renderMetricCell = (row: MetricRow, i: number) => {
 		const value = row.values[i];
 		const isBest = selectedCount >= 2 && row.winners.includes(i);
+		const isSecond = selectedCount >= 2 && row.runnersUp.includes(i);
 		const count = numRatings[i];
 		const withValues = row.values.filter((v) => v !== null).length;
+		const rankClass = isBest ? 'compare-cell-winner' : isSecond ? 'compare-cell-second' : '';
 
 		return (
 			<div
 				key={SLOT_LABELS[i]}
-				className={`compare-cell ${slots[i].slug ? '' : 'is-empty-col'} ${isBest ? 'compare-cell-winner' : ''}`}
+				className={`compare-cell ${slots[i].slug ? '' : 'is-empty-col'} ${rankClass}`}
 				role="cell"
 			>
 				<span className="compare-value">
@@ -613,6 +615,14 @@ function Compare() {
 							<span className="compare-best-word"> Best</span>
 							<span className="compare-sr-only">
 								{row.winners.length > 1 ? ', tied for best' : `, best among ${withValues}`}
+							</span>
+						</span>
+					)}
+					{isSecond && (
+						<span className="compare-second">
+							<span aria-hidden="true">2nd</span>
+							<span className="compare-sr-only">
+								{row.runnersUp.length > 1 ? ', tied for second best' : ', second best'}
 							</span>
 						</span>
 					)}
