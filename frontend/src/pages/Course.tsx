@@ -462,7 +462,10 @@ function OfferingPanel({ history }: { history: CourseHistory }) {
 	if (oy.first > last) {
 		body = <p className="course-offering-note">First offered {history.firstOffered}</p>;
 	} else if (TILES.every(([k]) => oy[k].length === 0)) {
-		body = <p className="course-offering-note">Not offered since {history.lastOffered}</p>;
+		/* Ran only before the window and is back on the schedule now: not "not offered". */
+		body = history.offeredNow.length > 0
+			? <p className="course-offering-note">Back for {history.offeredNow.join(' and ')}, after no runs from {schoolYear(years[0])} to {schoolYear(last)}</p>
+			: <p className="course-offering-note">Not offered since {history.lastOffered}</p>;
 	} else {
 		body = (
 			<>
