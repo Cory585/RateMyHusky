@@ -5,6 +5,7 @@ lie to someone. A wrong match puts a course on the wrong professor's public
 profile, so every ambiguous case must land in banner_unmatched instead of being
 guessed.
 """
+import json
 import os
 import sqlite3
 import sys
@@ -692,6 +693,39 @@ def test_matcher_upgrades_an_offerings_table_from_before_the_sessions(tmp_path):
     got = sqlite3.connect(path).execute(
         "SELECT subject_course, summer1_years, summer2_years FROM banner_course_offerings")
     assert got.fetchall() == [("CS3500", 0, 0)]
+
+
+def test_matcher_upgrades_an_offerings_table_from_before_offering_years(tmp_path):
+    import match_banner_instructors
+    path = str(tmp_path / "stage.db")
+    conn = sqlite3.connect(path)
+    c = conn.cursor()
+    apply_ddl(c)
+    for stmt in HISTORY_DDL.split(";"):
+        if stmt.strip():
+            c.execute(stmt)
+    c.execute("ALTER TABLE banner_course_offerings DROP COLUMN first_term_label")
+    c.execute("ALTER TABLE banner_course_offerings DROP COLUMN offering_years")
+    stats = {"section_count": 1, "attributed_sections": 1, "instructor_count": 1}
+    for code, label, season, closed in (("202630", "Spring 2026", "Spring", True),
+                                        ("202710", "Fall 2026", "Fall", False)):
+        write_term(c, code, {"label": label, "season": season, "season_group": season,
+                             "year": 2026, "track": "Semester", "view_only": closed}, None,
+                   {"sections": [{"crn": "1", "subject": "CS", "subject_course": "CS3500",
+                                  "schedule_type": "Lecture", "enrollment": 30}],
+                    "instructors": [{"term_code": code, "crn": "1",
+                                     "instructor_key": "annie witte",
+                                     "instructor_name": "Witte, Annie", "is_primary": True}],
+                    "stats": stats})
+    conn.commit()
+    conn.close()
+
+    assert match_banner_instructors.main(["--local-db", path]) == 0
+    label, years = sqlite3.connect(path).execute(
+        "SELECT first_term_label, offering_years FROM banner_course_offerings").fetchone()
+    assert label == "Spring 2026"
+    assert json.loads(years) == {"window": [2026], "Fall": [], "Spring": [2026],
+                                 "Summer 1": [], "Summer 2": [], "Summer": []}
 
 
 def test_chip_rows_take_only_the_current_season(banner_db):

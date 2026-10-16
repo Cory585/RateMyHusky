@@ -21,6 +21,7 @@ Nothing here touches the network or a database; match_banner_instructors.py
 reads the rows and writes the results.
 """
 
+import json
 import re
 from collections import defaultdict
 from statistics import median
@@ -324,8 +325,16 @@ def build_course_offerings(sections, instructor_rows=()):
         for s in secs:
             years_by_season[s["pattern_season"]].add(academic_year(s["term_code"]))
             sections_per_label[s["term_label"]] += 1
-        label, counts = offering_pattern(years_by_season, window)
-        if label == "Not offered recently" and any(not s.get("closed") for s in secs):
+        # A course is judged only over the window years since its first term:
+        # one that started in Fall 2025 can't have missed 2022-23. Its counts
+        # are the same either way, since it never ran before its first term.
+        first_code = min(int(s["term_code"]) for s in secs)
+        judged = [y for y in window if y >= academic_year(first_code)]
+        label, counts = offering_pattern(years_by_season, judged)
+        # In a one-year window (a fresh stage file) every course would be new.
+        if len(judged) == 1 and len(window) > 1:
+            label = f"New since {labels[-1]}"
+        elif label == "Not offered recently" and any(not s.get("closed") for s in secs):
             label = "New"     # first runs in the year still in progress
 
         size = _size_sample(secs)
@@ -335,7 +344,8 @@ def build_course_offerings(sections, instructor_rows=()):
             "subject_course": course,
             "subject": newest.get("subject"),
             "course_title": newest.get("course_title"),
-            "first_term_code": str(min(int(s["term_code"]) for s in secs)),
+            "first_term_code": str(first_code),
+            "first_term_label": labels[-1],
             "last_term_code": str(int(newest["term_code"])),
             "last_term_label": labels[0],
             "terms_offered": len(labels),
@@ -346,6 +356,12 @@ def build_course_offerings(sections, instructor_rows=()):
             "summer2_years": counts["Summer 2"],
             "summer_years": counts["Summer"],
             "pattern_window_years": len(window),
+            # Which window years each season ran, not just how many, so a page
+            # can place them. The window is stored: it can skip a year the
+            # backfill hasn't reached.
+            "offering_years": json.dumps({"window": window, **{
+                season: sorted(years_by_season[season] & set(window))
+                for season in SEASON_ORDER}}),
             "avg_sections_per_term": round(len(secs) / len(labels), 1),
             "avg_section_size": _avg([s["enrollment"] for s in size]),
             "median_section_size": median([s["enrollment"] for s in size]) if size else None,

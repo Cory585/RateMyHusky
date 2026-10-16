@@ -16,6 +16,7 @@ They raise when the tables are missing; server.py turns that into "no
 history" so a page never fails over a decoration.
 """
 
+import json
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -89,6 +90,22 @@ def _newest_first(rows):
     return sorted(rows, key=lambda r: -(label_code(r["last_term_label"]) or int(r["last_term_code"])))
 
 
+# The scraper's season names -> the keys seasonYears already uses.
+_SEASON_KEYS = {"Fall": "fall", "Spring": "spring", "Summer 1": "summer1",
+                "Summer 2": "summer2", "Summer": "summer"}
+
+
+def _offering_years(o):
+    """Which window years each season ran, plus the course's first academic
+    year so a page can tell "not offered" from "didn't exist yet". None for a
+    row from before the scraper stored them."""
+    if not o.get("offering_years"):
+        return None
+    stored = json.loads(o["offering_years"])
+    return {"window": stored["window"], "first": int(o["first_term_code"][:4]),
+            **{key: stored[season] for season, key in _SEASON_KEYS.items()}}
+
+
 def _course_link(code, since, query_one):
     """The other end of a successor link. hasPage: a course page exists to
     link to (pages are built from course_catalog, i.e. reviewed courses)."""
@@ -105,7 +122,8 @@ def course_history(code, query, query_one):
     offering = query_one("""
         SELECT subject_course, course_title, last_term_label, pattern,
                fall_years, spring_years, summer1_years, summer2_years,
-               summer_years, pattern_window_years,
+               summer_years, pattern_window_years, offering_years,
+               first_term_code, first_term_label,
                median_section_size, credit_hours, instructor_count, offered_now
         FROM banner_course_offerings WHERE subject_course = %s
     """, (code,))
@@ -133,6 +151,8 @@ def course_history(code, query, query_one):
                         "summer2": o.get("summer2_years"),
                         "summer": o.get("summer_years")} if offering else None,
         "windowYears": o.get("pattern_window_years"),
+        "offeringYears": _offering_years(o),
+        "firstOffered": o.get("first_term_label"),
         "lastOffered": o.get("last_term_label"),
         "offeredNow": _terms(o.get("offered_now")),
         "creditHours": o.get("credit_hours"),
