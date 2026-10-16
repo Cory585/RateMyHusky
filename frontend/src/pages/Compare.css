@@ -522,6 +522,11 @@
 	white-space: nowrap;
 }
 
+/* Rank labels: long form on desktop, short form on mobile */
+.compare-rank-short {
+	display: none;
+}
+
 .compare-second {
 	margin-left: 6px;
 	font-size: 0.66rem;
@@ -1040,19 +1045,23 @@
 		height: 6px;
 	}
 
-	/* Narrow columns: the check mark alone carries "best" (plus the screen-reader text) */
+	/* Narrow columns: short labels ("✓", "✓ Tie", "T-2nd"), plus the screen-reader text */
 	.compare-best,
 	.compare-second {
 		margin-left: 3px;
 	}
 
+	.compare-rank-long {
+		display: none;
+	}
+
+	.compare-rank-short {
+		display: inline;
+	}
+
 	.compare-second {
 		font-size: 0.6rem;
 		letter-spacing: 0;
-	}
-
-	.compare-best-word {
-		display: none;
 	}
 
 	.compare-bar {

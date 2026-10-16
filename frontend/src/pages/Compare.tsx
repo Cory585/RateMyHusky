@@ -600,6 +600,8 @@ function Compare() {
 		const count = numRatings[i];
 		const withValues = row.values.filter((v) => v !== null).length;
 		const rankClass = isBest ? 'compare-cell-winner' : isSecond ? 'compare-cell-second' : '';
+		const bestTied = row.winners.length > 1;
+		const secondTied = row.runnersUp.length > 1;
 
 		return (
 			<div
@@ -612,18 +614,21 @@ function Compare() {
 					{isBest && (
 						<span className="compare-best">
 							<span aria-hidden="true">✓</span>
-							<span className="compare-best-word"> Best</span>
-							<span className="compare-sr-only">
-								{row.winners.length > 1 ? ', tied for best' : `, best among ${withValues}`}
-							</span>
+							<span className="compare-rank-long" aria-hidden="true">{bestTied ? ' Tied best' : ' Best'}</span>
+							{bestTied && (
+								<span className="compare-rank-short" aria-hidden="true">
+									{' '}
+									Tie
+								</span>
+							)}
+							<span className="compare-sr-only">{bestTied ? ', tied for best' : `, best among ${withValues}`}</span>
 						</span>
 					)}
 					{isSecond && (
 						<span className="compare-second">
-							<span aria-hidden="true">2nd</span>
-							<span className="compare-sr-only">
-								{row.runnersUp.length > 1 ? ', tied for second best' : ', second best'}
-							</span>
+							<span className="compare-rank-long" aria-hidden="true">{secondTied ? 'Tied 2nd' : '2nd'}</span>
+							<span className="compare-rank-short" aria-hidden="true">{secondTied ? 'T-2nd' : '2nd'}</span>
+							<span className="compare-sr-only">{secondTied ? ', tied for second best' : ', second best'}</span>
 						</span>
 					)}
 				</span>
