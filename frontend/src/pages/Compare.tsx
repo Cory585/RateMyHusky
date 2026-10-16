@@ -16,7 +16,6 @@ const MAX_SLOTS = SLOT_KEYS.length;
 const MIN_OPEN_SLOTS = 2; // A and B always show a search box
 
 const CATALOG_LIMIT = 10000;
-const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four'];
 const MIN_RATINGS = 10; // below this a professor is flagged and can't be marked best
 
 // Module-level cache so catalog survives component unmounts
@@ -525,9 +524,6 @@ function Compare() {
 			return `Pick up to ${MAX_SLOTS} professors and compare ratings, difficulty, and how many students would take them again.`;
 		}
 		if (selectedCount === 1) return 'Add at least one more professor to start comparing.';
-		if (selectedCount < MAX_SLOTS) {
-			return `Comparing ${selectedCount} professors side-by-side. Add ${NUMBER_WORDS[MAX_SLOTS - selectedCount]} more to complete your comparison pool.`;
-		}
 		return `Comparing ${selectedCount} professors side-by-side.`;
 	})();
 
