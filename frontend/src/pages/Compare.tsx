@@ -46,6 +46,7 @@ interface MetricRow {
 	scale: (value: number) => number; // 0..1 on a fixed scale for the bar; longer is better
 	winners: number[]; // slot indexes sharing the best value; empty for no best
 	runnersUp: number[]; // slot indexes sharing the second-best value; empty for none
+	ranked: number; // how many slots were ranked (eligible and with a value)
 	weight: number;
 	showCount?: boolean;
 }
@@ -73,7 +74,7 @@ const pickRanks = (
 	eligible: boolean[],
 	mode: 'higher' | 'lower' = 'higher',
 	decimals = 2,
-): { winners: number[]; runnersUp: number[] } => {
+): { winners: number[]; runnersUp: number[]; ranked: number } => {
 	const factor = 10 ** decimals;
 	const valid = values
 		.map((value, index) => {
@@ -93,6 +94,7 @@ const pickRanks = (
 	return {
 		winners,
 		runnersUp: distinct.length >= 3 && winners.length === 1 ? slotsAt(distinct[1]) : [],
+		ranked: valid.length,
 	};
 };
 
@@ -598,7 +600,6 @@ function Compare() {
 		const isBest = allReady && row.winners.includes(i);
 		const isSecond = allReady && row.runnersUp.includes(i);
 		const count = numRatings[i];
-		const withValues = row.values.filter((v) => v !== null).length;
 		const rankClass = isBest ? 'compare-cell-winner' : isSecond ? 'compare-cell-second' : '';
 		const bestTied = row.winners.length > 1;
 		const secondTied = row.runnersUp.length > 1;
@@ -621,7 +622,7 @@ function Compare() {
 									Tie
 								</span>
 							)}
-							<span className="compare-sr-only">{bestTied ? ', tied for best' : `, best among ${withValues}`}</span>
+							<span className="compare-sr-only">{bestTied ? ', tied for best' : `, best among ${row.ranked}`}</span>
 						</span>
 					)}
 					{isSecond && (
