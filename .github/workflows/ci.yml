@@ -43,6 +43,29 @@ jobs:
         env:
           SITEMAP_API_URL: http://127.0.0.1:9
 
+  extension:
+    name: Extension build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+      - run: npm ci
+      # Type-checks and bundles. Without this a broken vite config or a type
+      # error in extension/src merges with the rest of CI green.
+      - run: npm run build
+      - name: dist is loadable by Chrome
+        run: |
+          test -f dist/manifest.json
+          test -f "dist/$(python3 -c "import json;print(json.load(open('dist/manifest.json'))['action']['default_popup'])")"
+
   lint:
     name: Frontend lint (soft)
     runs-on: ubuntu-latest

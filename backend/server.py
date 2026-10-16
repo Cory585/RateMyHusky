@@ -116,6 +116,18 @@ app.config["COMPRESS_MIMETYPES"] = ["application/json", "text/html"]
 app.config["COMPRESS_MIN_SIZE"] = 256
 Compress(app)
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+# Set per environment, never defaulted: the id derives from the public key in
+# extension/manifest.json, so anyone could copy that key into their own
+# unpacked extension and inherit whatever this trusts. Comma-separated, so the
+# dev id and the Web Store's can both run during the handover.
+EXTENSION_ORIGINS = [
+    o.strip() for o in os.getenv("EXTENSION_ORIGINS", "").split(",") if o.strip()
+]
+
+# Not EXTENSION_ORIGINS: a popup holding host_permissions for the site isn't
+# subject to CORS, and the extension sends credentials: 'omit'. It still needs
+# the ALLOWED_ORIGINS entry below, because Chrome does send an Origin header.
 CORS(app, supports_credentials=True, origins=[FRONTEND_URL])
 def get_real_ip():
     """Get the real client IP from X-Forwarded-For (set by Vercel/Railway proxy)."""
@@ -158,6 +170,7 @@ ALLOWED_ORIGINS = {
         FRONTEND_URL,
         "http://localhost:5173",
         "http://localhost:3000",
+        *EXTENSION_ORIGINS,
     ) if _origin_host(o)
 }
 

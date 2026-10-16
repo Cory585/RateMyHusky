@@ -20,6 +20,14 @@ ALLOWED = re.compile(r"(?i)traceback|trace-deprecation|stack trace|reasoning tra
 HERE = pathlib.Path(__file__).resolve().parent
 FIXTURE = HERE / "legacy_terms_fixture.txt"
 EXCLUDED = {".github/scripts/legacy_terms_guard.py", ".github/scripts/legacy_terms_fixture.txt"}
+# Generated, and npm dependency names are outside our control:
+# @jridgewell/trace-mapping ships with Vite and is already in the frontend and
+# promo lockfiles, so this matches by basename rather than one path at a time.
+EXCLUDED_NAMES = {"package-lock.json"}
+
+
+def skipped(path: str) -> bool:
+    return path in EXCLUDED or pathlib.PurePosixPath(path).name in EXCLUDED_NAMES
 
 
 def violates(line: str) -> bool:
@@ -65,7 +73,7 @@ def main() -> int:
     args = ap.parse_args()
     if args.selftest:
         return selftest()
-    hits = [(p, n, t) for p, n, t in added_lines(args.base) if p not in EXCLUDED and violates(t)]
+    hits = [(p, n, t) for p, n, t in added_lines(args.base) if not skipped(p) and violates(t)]
     for p, n, t in hits:
         print(f"::error file={p},line={n}::retired source name in an added line: {t.strip()[:120]}")
     print(f"{len(hits)} violation(s)")
