@@ -500,6 +500,14 @@ function Compare() {
 	const recommendation = (() => {
 		if (!allReady) return null;
 
+		// Rows only rank professors with enough ratings; with fewer than two, say why there's no pick
+		const rankable = selectedSlots.filter((s) => eligible[s.index]);
+		if (rankable.length < 2) {
+			const flagged = selectedSlots.filter((s) => lowSample[s.index]);
+			if (flagged.length === 0) return null;
+			return { kind: 'lowSample' as const, names: flagged.map(displayName) };
+		}
+
 		const scores = slots.map(() => 0);
 		const keyWins: string[][] = slots.map(() => []);
 
@@ -846,7 +854,16 @@ function Compare() {
 				{recommendation && (
 					<section className="compare-verdict">
 						<div className="compare-verdict-inner">
-							{recommendation.kind === 'tie' ? (
+							{recommendation.kind === 'lowSample' ? (
+								<>
+									<p className="compare-verdict-title">Not enough ratings to recommend</p>
+									<p className="compare-verdict-body">
+										{joinNames(recommendation.names)} {recommendation.names.length === 1 ? 'has' : 'have'} fewer
+										than {MIN_RATINGS} ratings, so there aren't two professors with enough ratings to compare
+										fairly.
+									</p>
+								</>
+							) : recommendation.kind === 'tie' ? (
 								<>
 									<p className="compare-verdict-title">It's a tie</p>
 									<p className="compare-verdict-body">
