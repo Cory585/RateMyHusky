@@ -440,7 +440,13 @@ function OfferingPanel({ history }: { history: CourseHistory }) {
 		const last = years[years.length - 1];
 		/* "N of M": M counts only the years since the course existed. */
 		const existed = years.filter((y) => y >= oy.first).length;
-		const tiles = TILES.filter(([k]) => k !== 'summer' || oy.summer.length > 0);
+		/* A full-summer-only course (Summer Full, CPS, Law) didn't skip the halves: hide them. */
+		const fullSummerOnly = oy.summer.length > 0 && oy.summer1.length === 0 && oy.summer2.length === 0;
+		const tiles = TILES.filter(([k]) => {
+			if (k === 'summer') return oy.summer.length > 0;
+			if (k === 'summer1' || k === 'summer2') return !fullSummerOnly;
+			return true;
+		});
 
 		if (oy.first > last) {
 			body = <p className="course-offering-note">First offered {history.firstOffered}</p>;
