@@ -67,7 +67,8 @@ const formatMetric = (value: number | null | undefined, digits = 2) => {
 /* Ranks the eligible slots (enough ratings) that have a value, best value first.
    Tied slots share a place. Best needs at least two distinct values, so nobody stands
    out when everyone ties. Second best needs a third, lower value: with two values it
-   would just be the worst, so it is left empty. */
+   would just be the worst, so it is left empty. Like Olympic medals, a tie for best
+   uses up second place too ("1, 1, 3"), so there is no second best after it. */
 const pickRanks = (
 	values: (number | null | undefined)[],
 	eligible: boolean[],
@@ -89,9 +90,10 @@ const pickRanks = (
 	);
 	const slotsAt = (value: number) => valid.filter((entry) => entry.value === value).map((entry) => entry.index);
 
+	const winners = distinct.length >= 2 ? slotsAt(distinct[0]) : [];
 	return {
-		winners: distinct.length >= 2 ? slotsAt(distinct[0]) : [],
-		runnersUp: distinct.length >= 3 ? slotsAt(distinct[1]) : [],
+		winners,
+		runnersUp: distinct.length >= 3 && winners.length === 1 ? slotsAt(distinct[1]) : [],
 	};
 };
 
