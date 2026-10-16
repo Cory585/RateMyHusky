@@ -601,13 +601,16 @@ function Compare() {
 		const isSecond = allReady && row.runnersUp.includes(i);
 		const count = numRatings[i];
 		const rankClass = isBest ? 'compare-cell-winner' : isSecond ? 'compare-cell-second' : '';
+		// Too few ratings to rank: mute the value on every row and say why
+		const unranked = lowSample[i] && value !== null;
+		const lowSampleTitle = `Fewer than ${MIN_RATINGS} ratings, so this professor isn't marked best`;
 		const bestTied = row.winners.length > 1;
 		const secondTied = row.runnersUp.length > 1;
 
 		return (
 			<div
 				key={SLOT_LABELS[i]}
-				className={`compare-cell ${slots[i].slug ? '' : 'is-empty-col'} ${rankClass}`}
+				className={`compare-cell ${slots[i].slug ? '' : 'is-empty-col'} ${rankClass} ${unranked ? 'is-low-sample' : ''}`}
 				role="cell"
 			>
 				<span className="compare-value">
@@ -641,9 +644,14 @@ function Compare() {
 				{row.showCount && count !== null && (
 					<small
 						className={lowSample[i] ? 'compare-low-sample' : undefined}
-						title={lowSample[i] ? `Fewer than ${MIN_RATINGS} ratings, so this professor isn't marked best` : undefined}
+						title={lowSample[i] ? lowSampleTitle : undefined}
 					>
 						{count.toLocaleString()} {count === 1 ? 'rating' : 'ratings'}
+					</small>
+				)}
+				{!row.showCount && unranked && (
+					<small className="compare-low-sample" title={lowSampleTitle}>
+						Few ratings
 					</small>
 				)}
 			</div>
@@ -829,7 +837,7 @@ function Compare() {
 
 						{anyLowSample && (
 							<p className="compare-table-note">
-								Professors with fewer than {MIN_RATINGS} ratings are flagged and aren't marked best.
+								Professors with fewer than {MIN_RATINGS} ratings are shown in grey and aren't ranked.
 							</p>
 						)}
 					</div>

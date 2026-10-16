@@ -569,6 +569,15 @@
 	font-weight: 600;
 }
 
+/* Too few ratings to rank: value and bar are muted on every row */
+.compare-cell.is-low-sample .compare-value {
+	color: #8e8e8e;
+}
+
+.compare-cell.is-low-sample .compare-bar i {
+	background: #d3d6db;
+}
+
 .compare-cell small.compare-low-sample {
 	align-self: flex-start;
 	padding: 1px 7px;
@@ -833,6 +842,14 @@
 
 .dark .compare-cell-winner .compare-bar i {
 	background: #6fcf8e;
+}
+
+.dark .compare-cell.is-low-sample .compare-value {
+	color: #8f96a0;
+}
+
+.dark .compare-cell.is-low-sample .compare-bar i {
+	background: #4a4f57;
 }
 
 .dark .compare-cell small.compare-low-sample {
