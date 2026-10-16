@@ -32,6 +32,7 @@ def writes(monkeypatch):
     monkeypatch.setattr(run.roster, "apply_roster", lambda conn, l, p: calls.append(("roster", l, p)))
     monkeypatch.setattr(run.course_codes, "apply_codes", lambda conn, p: calls.append(("codes", p)) or 0)
     monkeypatch.setattr(run.name_keys, "apply_name_keys", lambda conn, p: calls.append(("name_keys", p)) or 0)
+    monkeypatch.setattr(run.review_tags, "rebuild_if_present", lambda conn: calls.append(("tags",)))
     monkeypatch.setattr(run.read_models, "write", lambda conn, *a: calls.append(("read_models",)))
     return calls
 
@@ -50,7 +51,7 @@ def test_a_dry_run_writes_nothing(writes, monkeypatch):
 def test_writes_happen_after_verify_in_order(writes, monkeypatch):
     monkeypatch.setattr(run.read_models, "verify", lambda *a: [])
     assert run.main([]) == 0
-    assert [c[0] for c in writes] == ["roster", "codes", "name_keys", "read_models"]
+    assert [c[0] for c in writes] == ["roster", "codes", "name_keys", "tags", "read_models"]
     _, new_links, new_professors = writes[0]
     assert [l["rmp_id"] for l in new_links] == [2] and [p["name"] for p in new_professors] == ["Ada Lovelace"]
     assert writes[1][1] == [(10, "CS2500")]
