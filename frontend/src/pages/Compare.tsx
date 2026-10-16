@@ -16,7 +16,7 @@ const MAX_SLOTS = SLOT_KEYS.length;
 const MIN_OPEN_SLOTS = 2; // A and B always show a search box
 
 const CATALOG_LIMIT = 10000;
-const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four'];
+const MIN_RATINGS = 10; // below this a professor is flagged and can't be marked best
 
 // Module-level cache so catalog survives component unmounts
 let cachedCatalog: CatalogProfessor[] | null = null;
@@ -37,12 +37,18 @@ interface SlotData {
 	name: string;
 }
 
-interface CompareRow {
+interface MetricRow {
 	label: string;
-	values: string[];
-	footnotes?: (string | undefined)[];
-	winner: number | null; // slot index, or null for no winner
+	hint: string; // which way is better, shown under the label
+	verdictLabel: string;
+	values: (number | null)[];
+	format: (value: number) => string;
+	scale: (value: number) => number; // 0..1 on a fixed scale for the bar; longer is better
+	winners: number[]; // slot indexes sharing the best value; empty for no best
+	runnersUp: number[]; // slot indexes sharing the second-best value; empty for none
+	ranked: number; // how many slots were ranked (eligible and with a value)
 	weight: number;
+	showCount?: boolean;
 }
 
 /* ---- Helpers ---- */
@@ -58,29 +64,41 @@ const formatMetric = (value: number | null | undefined, digits = 2) => {
 	return parsed === null ? '—' : parsed.toFixed(digits);
 };
 
-/* Picks the single best slot among those that have a value.
-   Needs at least two values to compare, and returns null on a tie for first. */
-const pickWinnerIndex = (
+/* Ranks the eligible slots (enough ratings) that have a value, best value first.
+   Tied slots share a place. Best needs at least two distinct values, so nobody stands
+   out when everyone ties. Second best needs a third, lower value: with two values it
+   would just be the worst, so it is left empty. Like Olympic medals, a tie for best
+   uses up second place too ("1, 1, 3"), so there is no second best after it. */
+const pickRanks = (
 	values: (number | null | undefined)[],
+	eligible: boolean[],
 	mode: 'higher' | 'lower' = 'higher',
 	decimals = 2,
-): number | null => {
+): { winners: number[]; runnersUp: number[]; ranked: number } => {
 	const factor = 10 ** decimals;
 	const valid = values
 		.map((value, index) => {
 			const parsed = parseMaybeNumber(value);
+			if (parsed === null || !eligible[index]) return null;
 			// Round to displayed precision so ties match what the user sees
-			return parsed === null ? null : { index, value: Math.round(parsed * factor) / factor };
+			return { index, value: Math.round(parsed * factor) / factor };
 		})
 		.filter((entry): entry is { index: number; value: number } => entry !== null);
 
-	if (valid.length < 2) return null;
+	const distinct = Array.from(new Set(valid.map((entry) => entry.value))).sort((a, b) =>
+		mode === 'higher' ? b - a : a - b,
+	);
+	const slotsAt = (value: number) => valid.filter((entry) => entry.value === value).map((entry) => entry.index);
 
-	const nums = valid.map((entry) => entry.value);
-	const best = mode === 'higher' ? Math.max(...nums) : Math.min(...nums);
-	const top = valid.filter((entry) => entry.value === best);
-	return top.length === 1 ? top[0].index : null;
+	const winners = distinct.length >= 2 ? slotsAt(distinct[0]) : [];
+	return {
+		winners,
+		runnersUp: distinct.length >= 3 && winners.length === 1 ? slotsAt(distinct[1]) : [],
+		ranked: valid.length,
+	};
 };
+
+const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 
 const joinNames = (names: string[]) => {
 	if (names.length <= 2) return names.join(' and ');
@@ -414,16 +432,19 @@ function Compare() {
 	};
 	const firstName = (slot: SlotData) => slot.name.trim().split(/\s+/)[0] || `Prof. ${slot.label}`;
 
-	/* Professor data shape (api.ts v2): summary = blended numbers, sources.rmp = RMP only,
-	   summary.bySource = per-source ratings. Catalog values are the fallback. */
-	const overall = slots.map((s) => (isReady(s) ? s.profile?.summary.rating ?? s.catalogProf?.avgRating ?? null : null));
-	const rmp = slots.map((s) => (isReady(s) ? s.profile?.sources.rmp.rating ?? s.catalogProf?.rmpRating ?? null : null));
-	const trace = slots.map((s) => (isReady(s) ? s.profile?.summary.bySource.trace?.rating ?? null : null));
+	/* Professor data shape (api.ts v2): summary = blended numbers across sources.
+	   RMP is the only live source, so the Overall Rating row is the RMP rating. Catalog values are the fallback. */
+	const rating = slots.map((s) => (isReady(s) ? s.profile?.summary.rating ?? s.catalogProf?.avgRating ?? null : null));
 	const difficulty = slots.map((s) => (isReady(s) ? s.profile?.summary.difficulty ?? null : null));
-	const reviews = slots.map((s) => (isReady(s) ? s.profile?.summary.numRatings ?? s.catalogProf?.totalReviews ?? null : null));
 	const takeAgain = slots.map((s) =>
 		isReady(s) ? s.profile?.summary.wouldTakeAgainPct ?? s.catalogProf?.wouldTakeAgainPct ?? null : null,
 	);
+	const numRatings = slots.map((s) =>
+		isReady(s) ? s.profile?.summary.numRatings ?? s.catalogProf?.totalReviews ?? null : null,
+	);
+	// Too few ratings to trust: still shown, but flagged and never marked best
+	const lowSample = numRatings.map((n) => n !== null && n < MIN_RATINGS);
+	const eligible = slots.map((s, i) => isReady(s) && !lowSample[i]);
 
 	const departments = slots.map((s) => {
 		if (!isReady(s)) return '—';
@@ -433,32 +454,38 @@ function Compare() {
 		return identity.college ? `${identity.department} (${identity.college})` : identity.department;
 	});
 
-	const compareRows: CompareRow[] = [
-		{ label: 'Department', values: departments, winner: null, weight: 0 },
+	const outOfFive = (v: number) => v / 5;
+	const metricRows: MetricRow[] = [
 		{
 			label: 'Overall Rating',
-			values: overall.map((v) => formatMetric(v)),
-			winner: pickWinnerIndex(overall),
+			hint: 'out of 5',
+			verdictLabel: 'overall rating',
+			values: rating,
+			format: (v) => v.toFixed(2),
+			scale: outOfFive,
+			...pickRanks(rating, eligible),
 			weight: 3,
+			showCount: true,
 		},
-		{ label: 'RMP Rating', values: rmp.map((v) => formatMetric(v)), winner: pickWinnerIndex(rmp), weight: 2 },
-		{ label: 'TRACE Rating', values: trace.map((v) => formatMetric(v)), winner: pickWinnerIndex(trace), weight: 2 },
 		{
 			label: 'Difficulty',
-			values: difficulty.map((v) => formatMetric(v)),
-			winner: pickWinnerIndex(difficulty, 'lower'),
+			hint: 'lower is easier',
+			verdictLabel: 'difficulty',
+			values: difficulty,
+			format: (v) => v.toFixed(2),
+			// Inverted so a longer bar always means better: 1 (easiest) is full, 5 is empty
+			scale: (v) => (5 - v) / 4,
+			...pickRanks(difficulty, eligible, 'lower'),
 			weight: 1.5,
 		},
 		{
-			label: 'Total Reviews',
-			values: reviews.map((v) => (v === null ? '—' : v.toLocaleString())),
-			winner: pickWinnerIndex(reviews, 'higher', 0),
-			weight: 0.5,
-		},
-		{
 			label: 'Would Take Again',
-			values: takeAgain.map((v) => (v === null ? '—' : `${v.toFixed(0)}%`)),
-			winner: pickWinnerIndex(takeAgain, 'higher', 0),
+			hint: 'of raters',
+			verdictLabel: 'would-take-again rate',
+			values: takeAgain,
+			format: (v) => `${v.toFixed(0)}%`,
+			scale: (v) => v / 100,
+			...pickRanks(takeAgain, eligible, 'higher', 0),
 			weight: 2,
 		},
 	];
@@ -473,13 +500,23 @@ function Compare() {
 	const recommendation = (() => {
 		if (!allReady) return null;
 
+		// Rows only rank professors with enough ratings; with fewer than two, say why there's no pick
+		const rankable = selectedSlots.filter((s) => eligible[s.index]);
+		if (rankable.length < 2) {
+			const flagged = selectedSlots.filter((s) => lowSample[s.index]);
+			if (flagged.length === 0) return null;
+			return { kind: 'lowSample' as const, names: flagged.map(displayName) };
+		}
+
 		const scores = slots.map(() => 0);
 		const keyWins: string[][] = slots.map(() => []);
 
-		for (const row of compareRows) {
-			if (!row.weight || row.winner === null) continue;
-			scores[row.winner] += row.weight;
-			if (row.weight >= 2) keyWins[row.winner].push(row.label);
+		// Only an outright lead scores; a shared best is shown in the table but splits nothing here
+		for (const row of metricRows) {
+			if (row.winners.length !== 1) continue;
+			const [winner] = row.winners;
+			scores[winner] += row.weight;
+			if (row.weight >= 2) keyWins[winner].push(row.verdictLabel);
 		}
 
 		const contenders = selectedSlots.map((s) => s.index);
@@ -495,12 +532,9 @@ function Compare() {
 
 	const heroSubtitle = (() => {
 		if (selectedCount === 0) {
-			return `Pick up to ${MAX_SLOTS} professors and compare rating quality, difficulty, review volume, and recent TRACE performance.`;
+			return `Pick up to ${MAX_SLOTS} professors and compare ratings, difficulty, and how many students would take them again.`;
 		}
 		if (selectedCount === 1) return 'Add at least one more professor to start comparing.';
-		if (selectedCount < MAX_SLOTS) {
-			return `Comparing ${selectedCount} professors side-by-side. Add ${NUMBER_WORDS[MAX_SLOTS - selectedCount]} more to complete your comparison pool.`;
-		}
 		return `Comparing ${selectedCount} professors side-by-side.`;
 	})();
 
@@ -549,7 +583,10 @@ function Compare() {
 						<div className="compare-avatar-fallback">{fallbackIcon}</div>
 					)}
 				</div>
-				<h3>{slot.name}</h3>
+				<h3>
+					<span className={`compare-col-dot tone-${slot.index}`} aria-hidden="true" />
+					{slot.name}
+				</h3>
 				<p>{dept}</p>
 				<div className="compare-rating-line">
 					<strong>{formatMetric(rating)}</strong>
@@ -566,7 +603,71 @@ function Compare() {
 		);
 	};
 
-	const renderValue = (value: string) => <span>{value}</span>;
+	const anyLowSample = lowSample.some(Boolean);
+
+	const renderMetricCell = (row: MetricRow, i: number) => {
+		const value = row.values[i];
+		// Wait for every profile, so Best and 2nd don't move as late ones arrive
+		const isBest = allReady && row.winners.includes(i);
+		const isSecond = allReady && row.runnersUp.includes(i);
+		const count = numRatings[i];
+		const rankClass = isBest ? 'compare-cell-winner' : isSecond ? 'compare-cell-second' : '';
+		// Too few ratings to rank: mute the value on every row and say why
+		const unranked = lowSample[i] && value !== null;
+		const lowSampleTitle = `Fewer than ${MIN_RATINGS} ratings, so this professor isn't marked best`;
+		const bestTied = row.winners.length > 1;
+		const secondTied = row.runnersUp.length > 1;
+
+		return (
+			<div
+				key={SLOT_LABELS[i]}
+				className={`compare-cell ${slots[i].slug ? '' : 'is-empty-col'} ${rankClass} ${unranked ? 'is-low-sample' : ''}`}
+				role="cell"
+			>
+				<span className="compare-value">
+					{value === null ? '—' : row.format(value)}
+					{isBest && (
+						<span className="compare-best">
+							<span aria-hidden="true">✓</span>
+							<span className="compare-rank-long" aria-hidden="true">{bestTied ? ' Tied best' : ' Best'}</span>
+							{bestTied && (
+								<span className="compare-rank-short" aria-hidden="true">
+									{' '}
+									Tie
+								</span>
+							)}
+							<span className="visually-hidden">{bestTied ? ', tied for best' : `, best among ${row.ranked}`}</span>
+						</span>
+					)}
+					{isSecond && (
+						<span className="compare-second">
+							<span className="compare-rank-long" aria-hidden="true">{secondTied ? 'Tied 2nd' : '2nd'}</span>
+							<span className="compare-rank-short" aria-hidden="true">{secondTied ? 'T-2nd' : '2nd'}</span>
+							<span className="visually-hidden">{secondTied ? ', tied for second best' : ', second best'}</span>
+						</span>
+					)}
+				</span>
+				{value !== null && (
+					<span className="compare-bar" aria-hidden="true">
+						<i style={{ width: `${clamp01(row.scale(value)) * 100}%` }} />
+					</span>
+				)}
+				{row.showCount && count !== null && (
+					<small
+						className={lowSample[i] ? 'compare-low-sample' : undefined}
+						title={lowSample[i] ? lowSampleTitle : undefined}
+					>
+						{count.toLocaleString()} {count === 1 ? 'rating' : 'ratings'}
+					</small>
+				)}
+				{!row.showCount && unranked && (
+					<small className="compare-low-sample" title={lowSampleTitle}>
+						Few ratings
+					</small>
+				)}
+			</div>
+		);
+	};
 
 	return (
 		<>
@@ -708,43 +809,64 @@ function Compare() {
 											className={`compare-cell compare-col-head ${slot.slug ? '' : 'is-empty is-empty-col'}`}
 											role="columnheader"
 										>
-											<span className="compare-name-full">{slot.slug ? displayName(slot) : `Professor ${slot.label}`}</span>
-											<span className="compare-name-short">{slot.slug ? firstName(slot) : `Prof. ${slot.label}`}</span>
+											<span className="compare-col-name">
+												{slot.slug && <span className={`compare-col-dot tone-${slot.index}`} aria-hidden="true" />}
+												<span className="compare-name-full">{slot.slug ? displayName(slot) : `Professor ${slot.label}`}</span>
+												<span className="compare-name-short">{slot.slug ? firstName(slot) : `Prof. ${slot.label}`}</span>
+											</span>
 										</div>
 									))}
 								</div>
 
-								{compareRows.map((row, rowIndex) => (
+								<div className="compare-row is-desktop-only" role="row">
+									<div className="compare-cell compare-cell-label" role="rowheader">
+										Department
+									</div>
+									{departments.map((value, i) => (
+										<div key={SLOT_LABELS[i]} className={`compare-cell ${slots[i].slug ? '' : 'is-empty-col'}`} role="cell">
+											<span>{value}</span>
+										</div>
+									))}
+								</div>
+
+								{metricRows.map((row, rowIndex) => (
 									<div
-										className={`compare-row ${row.label === 'Department' ? 'is-desktop-only' : ''}`}
+										className="compare-row"
 										role="row"
 										key={row.label}
-										style={{ animationDelay: `${rowIndex * 0.05}s` }}
+										style={{ animationDelay: `${(rowIndex + 1) * 0.05}s` }}
 									>
 										<div className="compare-cell compare-cell-label" role="rowheader">
 											{row.label}
+											<span className="compare-row-hint">{row.hint}</span>
 										</div>
-										{row.values.map((value, i) => (
-											<div
-												key={SLOT_LABELS[i]}
-												className={`compare-cell ${slots[i].slug ? '' : 'is-empty-col'} ${selectedCount >= 2 && row.winner === i ? 'compare-cell-winner' : ''}`}
-												role="cell"
-											>
-												{renderValue(value)}
-												{row.footnotes?.[i] && <small>{row.footnotes[i]}</small>}
-											</div>
-										))}
+										{slots.map((_, i) => renderMetricCell(row, i))}
 									</div>
 								))}
 							</div>
 						</div>
+
+						{anyLowSample && (
+							<p className="compare-table-note">
+								Professors with fewer than {MIN_RATINGS} ratings are shown in grey and aren't ranked.
+							</p>
+						)}
 					</div>
 				</section>
 
 				{recommendation && (
 					<section className="compare-verdict">
 						<div className="compare-verdict-inner">
-							{recommendation.kind === 'tie' ? (
+							{recommendation.kind === 'lowSample' ? (
+								<>
+									<p className="compare-verdict-title">Not enough ratings to recommend</p>
+									<p className="compare-verdict-body">
+										{joinNames(recommendation.names)} {recommendation.names.length === 1 ? 'has' : 'have'} fewer
+										than {MIN_RATINGS} ratings, so there aren't two professors with enough ratings to compare
+										fairly.
+									</p>
+								</>
+							) : recommendation.kind === 'tie' ? (
 								<>
 									<p className="compare-verdict-title">It's a tie</p>
 									<p className="compare-verdict-body">
