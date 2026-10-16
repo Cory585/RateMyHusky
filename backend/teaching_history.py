@@ -90,7 +90,7 @@ def _newest_first(rows):
     return sorted(rows, key=lambda r: -(label_code(r["last_term_label"]) or int(r["last_term_code"])))
 
 
-# The scraper's season names -> the keys seasonYears already uses.
+# The scraper's season names -> the API's keys.
 _SEASON_KEYS = {"Fall": "fall", "Spring": "spring", "Summer 1": "summer1",
                 "Summer 2": "summer2", "Summer": "summer"}
 
@@ -121,9 +121,7 @@ def course_history(code, query, query_one):
     """A course page's history section, or None when Banner knows nothing."""
     offering = query_one("""
         SELECT subject_course, course_title, last_term_label, pattern,
-               fall_years, spring_years, summer1_years, summer2_years,
-               summer_years, pattern_window_years, offering_years,
-               first_term_code, first_term_label,
+               offering_years, first_term_code, first_term_label,
                median_section_size, credit_hours, instructor_count, offered_now
         FROM banner_course_offerings WHERE subject_course = %s
     """, (code,))
@@ -146,11 +144,6 @@ def course_history(code, query, query_one):
     o = offering or {}
     return {
         "pattern": o.get("pattern"),
-        "seasonYears": {"fall": o.get("fall_years"), "spring": o.get("spring_years"),
-                        "summer1": o.get("summer1_years"),
-                        "summer2": o.get("summer2_years"),
-                        "summer": o.get("summer_years")} if offering else None,
-        "windowYears": o.get("pattern_window_years"),
         "offeringYears": _offering_years(o),
         "firstOffered": o.get("first_term_label"),
         "lastOffered": o.get("last_term_label"),

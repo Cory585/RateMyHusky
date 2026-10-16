@@ -117,8 +117,7 @@ def _inst(slug, name, terms, size=None):
 
 
 HISTORY = {
-    "pattern": "Fall and Spring", "seasonYears": {"fall": 4, "spring": 4, "summer": 0},
-    "windowYears": 4, "lastOffered": "Fall 2026", "offeredNow": ["Fall 2026"],
+    "pattern": "Fall and Spring", "lastOffered": "Fall 2026", "offeredNow": ["Fall 2026"],
     "creditHours": "4", "typicalClassSize": 43, "instructorCount": 3,
     "replacedBy": None, "replaces": None,
     "instructors": [

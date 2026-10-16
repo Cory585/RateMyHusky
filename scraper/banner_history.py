@@ -334,7 +334,7 @@ def build_course_offerings(sections, instructor_rows=()):
         # In a one-year window (a fresh stage file) every course would be new.
         if len(judged) == 1 and len(window) > 1:
             label = f"New since {labels[-1]}"
-        elif label == "Not offered recently" and any(not s.get("closed") for s in secs):
+        elif not judged and any(not s.get("closed") for s in secs):
             label = "New"     # first runs in the year still in progress
 
         size = _size_sample(secs)
@@ -355,7 +355,7 @@ def build_course_offerings(sections, instructor_rows=()):
             "summer1_years": counts["Summer 1"],
             "summer2_years": counts["Summer 2"],
             "summer_years": counts["Summer"],
-            "pattern_window_years": len(window),
+            "pattern_window_years": len(judged),   # what the counts are out of
             # Which window years each season ran, not just how many, so a page
             # can place them. The window is stored: it can skip a year the
             # backfill hasn't reached.

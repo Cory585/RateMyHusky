@@ -244,6 +244,7 @@ def test_a_course_two_years_old_is_judged_over_those_two_years():
     got = young("CS2000", ("202510", "202530", "202610", "202630", "202710"))
     assert got["pattern"] == "Fall and Spring"
     assert (got["fall_years"], got["spring_years"]) == (2, 2)
+    assert got["pattern_window_years"] == 2
 
 
 def test_a_course_one_year_old_is_new_since_its_first_term():
@@ -263,6 +264,11 @@ def test_a_course_first_seen_in_the_oldest_stored_year_is_judged_over_the_full_w
     assert got["pattern"] == "Irregular"
     assert got["spring_years"] == 1
     assert json.loads(got["offering_years"])["window"] == [2023, 2024, 2025, 2026]
+
+
+def test_a_course_back_on_the_schedule_after_the_window_is_not_new():
+    """Last run in 2021-22, open for Fall 2026: returning, not new."""
+    assert young("CS1500", ("202230", "202710"))["pattern"] == "Not offered recently"
 
 
 def test_a_one_year_window_never_makes_a_course_young():
