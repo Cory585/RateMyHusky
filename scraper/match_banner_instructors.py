@@ -214,6 +214,7 @@ CREATE TABLE IF NOT EXISTS banner_course_offerings (
     subject               TEXT,
     course_title          TEXT,
     first_term_code       TEXT NOT NULL,
+    first_term_label      TEXT,
     last_term_code        TEXT NOT NULL,
     last_term_label       TEXT NOT NULL,
     terms_offered         INT NOT NULL,
@@ -224,6 +225,7 @@ CREATE TABLE IF NOT EXISTS banner_course_offerings (
     summer1_years         INT NOT NULL DEFAULT 0,
     summer2_years         INT NOT NULL DEFAULT 0,
     pattern_window_years  INT NOT NULL,
+    offering_years        TEXT,          -- JSON: the window and the years each season ran in it
     avg_sections_per_term FLOAT,
     avg_section_size      FLOAT,
     median_section_size   FLOAT,
@@ -252,6 +254,8 @@ CREATE TABLE IF NOT EXISTS banner_course_renames (
 HISTORY_ADDED_COLUMNS = (
     ("banner_course_offerings", "summer1_years", "INT NOT NULL DEFAULT 0"),
     ("banner_course_offerings", "summer2_years", "INT NOT NULL DEFAULT 0"),
+    ("banner_course_offerings", "first_term_label", "TEXT"),
+    ("banner_course_offerings", "offering_years", "TEXT"),
 )
 
 # Approved renumberings: old code -> the code it became. A course page for the
@@ -284,7 +288,8 @@ OFFERING_COLUMNS = (
     "fall_years", "spring_years", "summer_years", "summer1_years",
     "summer2_years", "pattern_window_years",
     "avg_sections_per_term", "avg_section_size", "median_section_size",
-    "credit_hours", "instructor_count", "offered_now")
+    "credit_hours", "instructor_count", "offered_now", "first_term_label",
+    "offering_years")
 
 TEACHING_COLUMNS = ("professor_slug", "name_key", "term_desc", "term_codes",
                     "course_codes", "campuses", "match_method", "scraped_at")

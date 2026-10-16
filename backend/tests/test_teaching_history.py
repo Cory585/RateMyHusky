@@ -3,6 +3,7 @@
 The DB is stubbed by keying on the SQL text, as in test_course_api.py.
 """
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -14,10 +15,11 @@ NOW = datetime(2026, 10, 1, tzinfo=timezone.utc)
 OFFERING = {
     "subject_course": "CS3100", "course_title": "Program Design and Implementation 2",
     "last_term_label": "Fall 2026", "pattern": "Fall and Spring",
-    "fall_years": 1, "spring_years": 1, "summer1_years": 1, "summer2_years": 0,
-    "summer_years": 0, "pattern_window_years": 1,
     "median_section_size": 98.0, "credit_hours": "4", "instructor_count": 8,
     "offered_now": "Fall 2026",
+    "first_term_code": "202610", "first_term_label": "Fall 2025",
+    "offering_years": json.dumps({"window": [2026], "Fall": [2026], "Spring": [2026],
+                                  "Summer 1": [2026], "Summer 2": [], "Summer": []}),
 }
 
 INSTRUCTORS = [
@@ -72,14 +74,32 @@ def test_course_history_summary():
     query, query_one, _ = course_db()
     got = th.course_history("CS3100", query, query_one)
     assert got["pattern"] == "Fall and Spring"
-    assert got["seasonYears"] == {"fall": 1, "spring": 1, "summer1": 1, "summer2": 0,
-                                  "summer": 0}
-    assert got["windowYears"] == 1
     assert got["lastOffered"] == "Fall 2026"
     assert got["offeredNow"] == ["Fall 2026"]
     assert got["creditHours"] == "4"
     assert got["typicalClassSize"] == 98
     assert got["instructorCount"] == 8
+
+
+def test_course_history_offering_years_use_the_season_keys_and_the_first_year():
+    query, query_one, _ = course_db()
+    got = th.course_history("CS3100", query, query_one)
+    assert got["offeringYears"] == {"window": [2026], "first": 2026,
+                                    "fall": [2026], "spring": [2026], "summer1": [2026],
+                                    "summer2": [], "summer": []}
+    assert got["firstOffered"] == "Fall 2025"
+
+
+def test_offering_years_are_null_before_the_scraper_stores_them():
+    query, query_one, _ = course_db(offerings={"CS3100": {**OFFERING, "offering_years": None}})
+    assert th.course_history("CS3100", query, query_one)["offeringYears"] is None
+
+
+def test_offering_query_selects_the_years_and_first_term():
+    query, query_one, seen = course_db()
+    th.course_history("CS3100", query, query_one)
+    sql = next(s for s, _ in seen if "FROM banner_course_offerings" in s)
+    assert "offering_years" in sql and "first_term_code" in sql and "first_term_label" in sql
 
 
 def test_course_history_instructors_link_matched_and_name_the_rest():
@@ -143,6 +163,7 @@ def test_successor_link_alone_still_yields_history():
     assert got["replacedBy"]["code"] == "CS3100"
     assert got["pattern"] is None
     assert got["instructors"] == []
+    assert (got["offeringYears"], got["firstOffered"]) == (None, None)
 
 
 def test_successors_are_khourys_published_mapping():
