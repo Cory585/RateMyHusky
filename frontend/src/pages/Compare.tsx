@@ -430,7 +430,7 @@ function Compare() {
 	const firstName = (slot: SlotData) => slot.name.trim().split(/\s+/)[0] || `Prof. ${slot.label}`;
 
 	/* Professor data shape (api.ts v2): summary = blended numbers across sources.
-	   RMP is the only live source, so one Rating row covers it. Catalog values are the fallback. */
+	   RMP is the only live source, so the Overall Rating row is the RMP rating. Catalog values are the fallback. */
 	const rating = slots.map((s) => (isReady(s) ? s.profile?.summary.rating ?? s.catalogProf?.avgRating ?? null : null));
 	const difficulty = slots.map((s) => (isReady(s) ? s.profile?.summary.difficulty ?? null : null));
 	const takeAgain = slots.map((s) =>
@@ -454,9 +454,9 @@ function Compare() {
 	const outOfFive = (v: number) => v / 5;
 	const metricRows: MetricRow[] = [
 		{
-			label: 'Rating',
+			label: 'Overall Rating',
 			hint: 'out of 5',
-			verdictLabel: 'rating',
+			verdictLabel: 'overall rating',
 			values: rating,
 			format: (v) => v.toFixed(2),
 			scale: outOfFive,
