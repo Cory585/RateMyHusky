@@ -46,6 +46,7 @@ interface MetricRow {
 	format: (value: number) => string;
 	scale: (value: number) => number; // 0..1 on a fixed scale, for the bar
 	winners: number[]; // slot indexes sharing the best value; empty for no best
+	runnersUp: number[]; // slot indexes sharing the second-best value; empty for none
 	weight: number;
 	showCount?: boolean;
 }
@@ -63,15 +64,16 @@ const formatMetric = (value: number | null | undefined, digits = 2) => {
 	return parsed === null ? '—' : parsed.toFixed(digits);
 };
 
-/* Picks the best slots among the eligible ones (enough ratings) that have a value.
-   Needs at least two eligible values to compare. A tie for first returns every tied
-   slot, unless all of them tie, in which case nobody stands out and it returns none. */
-const pickWinners = (
+/* Ranks the eligible slots (enough ratings) that have a value, best value first.
+   Tied slots share a place. Best needs at least two distinct values, so nobody stands
+   out when everyone ties. Second best needs a third, lower value: with two values it
+   would just be the worst, so it is left empty. */
+const pickRanks = (
 	values: (number | null | undefined)[],
 	eligible: boolean[],
 	mode: 'higher' | 'lower' = 'higher',
 	decimals = 2,
-): number[] => {
+): { winners: number[]; runnersUp: number[] } => {
 	const factor = 10 ** decimals;
 	const valid = values
 		.map((value, index) => {
@@ -82,12 +84,15 @@ const pickWinners = (
 		})
 		.filter((entry): entry is { index: number; value: number } => entry !== null);
 
-	if (valid.length < 2) return [];
+	const distinct = Array.from(new Set(valid.map((entry) => entry.value))).sort((a, b) =>
+		mode === 'higher' ? b - a : a - b,
+	);
+	const slotsAt = (value: number) => valid.filter((entry) => entry.value === value).map((entry) => entry.index);
 
-	const nums = valid.map((entry) => entry.value);
-	const best = mode === 'higher' ? Math.max(...nums) : Math.min(...nums);
-	const top = valid.filter((entry) => entry.value === best);
-	return top.length === valid.length ? [] : top.map((entry) => entry.index);
+	return {
+		winners: distinct.length >= 2 ? slotsAt(distinct[0]) : [],
+		runnersUp: distinct.length >= 3 ? slotsAt(distinct[1]) : [],
+	};
 };
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
@@ -455,7 +460,7 @@ function Compare() {
 			values: rating,
 			format: (v) => v.toFixed(2),
 			scale: outOfFive,
-			winners: pickWinners(rating, eligible),
+			...pickRanks(rating, eligible),
 			weight: 3,
 			showCount: true,
 		},
@@ -466,7 +471,7 @@ function Compare() {
 			values: difficulty,
 			format: (v) => v.toFixed(2),
 			scale: outOfFive,
-			winners: pickWinners(difficulty, eligible, 'lower'),
+			...pickRanks(difficulty, eligible, 'lower'),
 			weight: 1.5,
 		},
 		{
@@ -476,7 +481,7 @@ function Compare() {
 			values: takeAgain,
 			format: (v) => `${v.toFixed(0)}%`,
 			scale: (v) => v / 100,
-			winners: pickWinners(takeAgain, eligible, 'higher', 0),
+			...pickRanks(takeAgain, eligible, 'higher', 0),
 			weight: 2,
 		},
 	];
