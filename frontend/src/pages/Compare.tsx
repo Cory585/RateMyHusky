@@ -43,7 +43,7 @@ interface MetricRow {
 	verdictLabel: string;
 	values: (number | null)[];
 	format: (value: number) => string;
-	scale: (value: number) => number; // 0..1 on a fixed scale, for the bar
+	scale: (value: number) => number; // 0..1 on a fixed scale for the bar; longer is better
 	winners: number[]; // slot indexes sharing the best value; empty for no best
 	runnersUp: number[]; // slot indexes sharing the second-best value; empty for none
 	weight: number;
@@ -471,7 +471,8 @@ function Compare() {
 			verdictLabel: 'difficulty',
 			values: difficulty,
 			format: (v) => v.toFixed(2),
-			scale: outOfFive,
+			// Inverted so a longer bar always means better: 1 (easiest) is full, 5 is empty
+			scale: (v) => (5 - v) / 4,
 			...pickRanks(difficulty, eligible, 'lower'),
 			weight: 1.5,
 		},
