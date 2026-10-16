@@ -376,6 +376,19 @@ export interface CourseHistory {
     summer2?: number | null;
   } | null;
   windowYears: number | null;
+  /** The pattern window's academic years, oldest first, keyed by the year they end (2026 is 2025–26), and
+   *  the window years each season ran. first: the course's first academic year. null until the scraper stores them. */
+  offeringYears: {
+    window: number[];
+    first: number;
+    fall: number[];
+    spring: number[];
+    summer1: number[];
+    summer2: number[];
+    summer: number[];
+  } | null;
+  /** The oldest term Banner has it in ("Fall 2025"). */
+  firstOffered: string | null;
   lastOffered: string | null;
   offeredNow: string[];
   creditHours: string | null;

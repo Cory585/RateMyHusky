@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import StarRating from '../components/StarRating';
 import NotFound from './NotFound';
@@ -421,27 +422,91 @@ function ProfCard({ name, imageUrl, focusX, focusY, rating, footerLeft, footerCe
 	);
 }
 
-type SeasonYears = NonNullable<CourseHistory['seasonYears']>;
-const SEASONS: [keyof SeasonYears, string][] = [
+type OfferingYears = NonNullable<CourseHistory['offeringYears']>;
+type SeasonKey = Exclude<keyof OfferingYears, 'window' | 'first'>;
+const TILES: [SeasonKey, string][] = [
 	['fall', 'Fall'], ['spring', 'Spring'], ['summer1', 'Summer 1'], ['summer2', 'Summer 2'], ['summer', 'Summer'],
 ];
 
+/* Banner keys an academic year by the year it ends: 2026 -> "2025–26". */
+const schoolYear = (year: number) => `${year - 1}–${String(year).slice(2)}`;
+
 function OfferingPanel({ history }: { history: CourseHistory }) {
-	const years = history.seasonYears;
-	const span = history.windowYears;
-	/* A season Banner never counted (summer1/summer2 before session labels) or that never ran is skipped. */
-	const seasons = years && span
-		? SEASONS.filter(([k]) => (years[k] ?? 0) > 0).map(([k, label]) => `${label} ${years[k]}/${span} yrs`)
-		: [];
-	return (
-		<section className="course-panel">
-			<div className="course-panel-header">
-				<h2>When it's offered</h2>
-			</div>
-			{history.pattern && <p className="course-offering-pattern">{history.pattern}</p>}
-			{seasons.length > 0 && <p className="course-offering-seasons">{seasons.join(' · ')}</p>}
+	const oy = history.offeringYears;
+	const successors = (
+		<>
 			{history.replacedBy && <SuccessorLine verb="Replaced by" link={history.replacedBy} />}
 			{history.replaces && <SuccessorLine verb="Replaced" link={history.replaces} />}
+		</>
+	);
+	/* A row from before the scraper stored the years: the pattern alone, as before. */
+	if (!oy || oy.window.length === 0) {
+		return (
+			<section className="course-panel">
+				<div className="course-panel-header">
+					<h2>When it's offered</h2>
+				</div>
+				{history.pattern && <p className="course-offering-pattern">{history.pattern}</p>}
+				{successors}
+			</section>
+		);
+	}
+
+	const years = oy.window;
+	const last = years[years.length - 1];
+	/* "N of M": M counts only the years since the course existed. */
+	const existed = years.filter((y) => y >= oy.first).length;
+	const tiles = TILES.filter(([k]) => k !== 'summer' || oy.summer.length > 0);
+
+	let body;
+	if (oy.first > last) {
+		body = <p className="course-offering-note">First offered {history.firstOffered}</p>;
+	} else if (TILES.every(([k]) => oy[k].length === 0)) {
+		body = <p className="course-offering-note">Not offered since {history.lastOffered}</p>;
+	} else {
+		body = (
+			<>
+				<div className="course-offering-tiles" style={{ '--tiles': tiles.length } as CSSProperties}>
+					{tiles.map(([k, label]) => {
+						const ran = oy[k].length;
+						return (
+							<div key={k} className={`course-offering-tile${ran === 0 ? ' course-offering-tile--off' : ''}`}>
+								<span className="course-offering-tile-label">{label}</span>
+								<span className="course-offering-bar">
+									{years.map((y) => {
+										const state = oy[k].includes(y) ? 'ran' : y < oy.first ? 'before' : 'empty';
+										const what = state === 'ran' ? 'ran' : state === 'before' ? 'before this course existed' : 'not offered';
+										return <span key={y} className={`course-offering-seg course-offering-seg--${state}`} title={`${schoolYear(y)}: ${what}`} />;
+									})}
+								</span>
+								<span className="course-offering-count">
+									{ran === 0 ? 'Not offered' : `${ran} of ${existed} ${existed === 1 ? 'year' : 'years'}`}
+								</span>
+							</div>
+						);
+					})}
+				</div>
+				<p className="course-offering-caption">
+					School years {schoolYear(years[0])} to {schoolYear(last)}
+					{years[0] < oy.first && ' · Striped: before this course existed'}
+				</p>
+				{!!history.instructorCount && history.firstOffered && (
+					<p className="course-offering-taught">
+						Taught by {history.instructorCount} {history.instructorCount === 1 ? 'instructor' : 'instructors'} since {history.firstOffered}
+					</p>
+				)}
+			</>
+		);
+	}
+
+	return (
+		<section className="course-panel">
+			<div className="course-panel-header course-offering-header">
+				<h2>When it's offered</h2>
+				{history.pattern && <span className="course-offering-pattern">{history.pattern}</span>}
+			</div>
+			{body}
+			{successors}
 		</section>
 	);
 }
