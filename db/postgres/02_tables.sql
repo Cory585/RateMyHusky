@@ -271,6 +271,8 @@ CREATE TABLE public.banner_course_offerings (
     offered_now TEXT NULL,
     summer1_years BIGINT NOT NULL DEFAULT 0,
     summer2_years BIGINT NOT NULL DEFAULT 0,
+    first_term_label TEXT NULL,
+    offering_years TEXT NULL,
     CONSTRAINT banner_course_offerings_pkey PRIMARY KEY (subject_course)
 );
 

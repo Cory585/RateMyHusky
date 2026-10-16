@@ -32,7 +32,7 @@ a change here is exercised by the integration tests.
 
 ## Schema changes since the migration
 
-The NUBanner teaching-history code added a table and three columns after the
+The NUBanner teaching-history code added a table and five columns after the
 production database was loaded. `02_tables.sql` already declares them (the
 columns last in their tables, where `ADD COLUMN` puts them). A database loaded
 before this needs the following, which the loaders no longer run for you. Run it
@@ -47,11 +47,13 @@ CREATE TABLE IF NOT EXISTS public.banner_roster_duplicates (
 ALTER TABLE public.banner_sections ADD COLUMN IF NOT EXISTS part_of_term TEXT;
 ALTER TABLE public.banner_course_offerings
     ADD COLUMN IF NOT EXISTS summer1_years BIGINT NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS summer2_years BIGINT NOT NULL DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS summer2_years BIGINT NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS first_term_label TEXT,
+    ADD COLUMN IF NOT EXISTS offering_years TEXT;
 ```
 
 Until they run, the course-history query in `backend/teaching_history.py` fails
-on `summer1_years`, and the Banner loader and matcher stop at start-up naming
+on the missing columns, and the Banner loader and matcher stop at start-up naming
 the missing table or column.
 
 ### Optional cleanup (destructive; take a backup first)
