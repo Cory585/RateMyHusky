@@ -590,12 +590,13 @@ function Compare() {
 		);
 	};
 
-	const anyLowSample = slots.some((s, i) => s.slug && isReady(s) && lowSample[i]);
+	const anyLowSample = lowSample.some(Boolean);
 
 	const renderMetricCell = (row: MetricRow, i: number) => {
 		const value = row.values[i];
-		const isBest = selectedCount >= 2 && row.winners.includes(i);
-		const isSecond = selectedCount >= 2 && row.runnersUp.includes(i);
+		// Wait for every profile, so Best and 2nd don't move as late ones arrive
+		const isBest = allReady && row.winners.includes(i);
+		const isSecond = allReady && row.runnersUp.includes(i);
 		const count = numRatings[i];
 		const withValues = row.values.filter((v) => v !== null).length;
 		const rankClass = isBest ? 'compare-cell-winner' : isSecond ? 'compare-cell-second' : '';
