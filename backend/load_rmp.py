@@ -20,10 +20,10 @@ from denylist import denied_hashes, is_denied
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
-DATABASE_URL = os.getenv("CRDB_DATABASE_URL")
+DATABASE_URL = os.getenv("ORACLE_DATABASE_URL")
 
 if not DATABASE_URL:
-    sys.exit("Missing CRDB_DATABASE_URL in backend/.env")
+    sys.exit("Missing ORACLE_DATABASE_URL in backend/.env")
 
 import psycopg2
 from psycopg2.extras import execute_values

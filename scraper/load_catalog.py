@@ -403,9 +403,9 @@ def main(argv=None):
         return 0
 
     load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend", ".env"))
-    dsn = os.environ.get("CRDB_DATABASE_URL")
+    dsn = os.environ.get("ORACLE_DATABASE_URL")
     if not dsn:
-        print("CRDB_DATABASE_URL is not set", file=sys.stderr)
+        print("ORACLE_DATABASE_URL is not set", file=sys.stderr)
         return 1
 
     conn = connect(dsn)

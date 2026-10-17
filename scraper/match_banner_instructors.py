@@ -905,9 +905,9 @@ def main(argv=None):
     if args.local_db:
         open_conn = lambda: sqlite3.connect(args.local_db)  # noqa: E731
     else:
-        dsn = os.environ.get("CRDB_DATABASE_URL")
+        dsn = os.environ.get("ORACLE_DATABASE_URL")
         if not dsn:
-            print("CRDB_DATABASE_URL is not set", file=sys.stderr)
+            print("ORACLE_DATABASE_URL is not set", file=sys.stderr)
             return 1
         open_conn = lambda: connect(dsn)  # noqa: E731
 

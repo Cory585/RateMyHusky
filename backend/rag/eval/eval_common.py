@@ -15,9 +15,9 @@ def connect(attempts=20):
     import psycopg2
     from dotenv import load_dotenv
     load_dotenv(os.path.join(BACKEND_DIR, ".env"))
-    url = os.getenv("CRDB_DATABASE_URL")
+    url = os.getenv("ORACLE_DATABASE_URL")
     if not url:
-        sys.exit("Need CRDB_DATABASE_URL in backend/.env")
+        sys.exit("Need ORACLE_DATABASE_URL in backend/.env")
     last = None
     for i in range(1, attempts + 1):
         try:

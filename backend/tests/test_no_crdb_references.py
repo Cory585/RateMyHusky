@@ -1,8 +1,8 @@
 """No live code may still talk CockroachDB.
 
-The env var keeps its historical name (CRDB_DATABASE_URL); \bCRDB\b does not
-match it. Everything else that names CockroachDB, or uses SQL or settings only
-CockroachDB accepts, fails this test. Extend SCOPES rather than allowlisting.
+The env var is ORACLE_DATABASE_URL; its old name, CRDB_DATABASE_URL, fails this
+test, as does anything else that names CockroachDB or uses SQL or settings only
+CockroachDB accepts. Extend SCOPES rather than allowlisting.
 """
 
 import pathlib
@@ -16,7 +16,7 @@ SCOPES = ["backend/*.py", "backend/**/*.py", "scraper/*.py", "scraper/**/*.py",
 SELF = "backend/tests/test_no_crdb_references.py"
 
 FORBIDDEN_I = re.compile(
-    r"cockroach|\bCRDB\b|NEW_CRDB|_to_crdb|unique_rowid|SET experimental_|"
+    r"cockroach|\bCRDB\b|CRDB_DATABASE_URL|NEW_CRDB|_to_crdb|unique_rowid|SET experimental_|"
     r"UPSERT INTO|SHOW CREATE|autocommit_before_ddl|sql_safe_updates|request units?|C-SPANN",
     re.IGNORECASE)
 FORBIDDEN = re.compile(r"\bRUs?\b")

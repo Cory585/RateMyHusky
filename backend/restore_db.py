@@ -21,7 +21,7 @@ Only dumps written by pg_dump (backup_db.py) are accepted; older backups used a
 different format and cannot be restored with this tool.
 
 Needs psql on PATH, at least as new as the pg_dump that wrote the dump.
-Reads CRDB_DATABASE_URL from backend/.env.
+Reads ORACLE_DATABASE_URL from backend/.env.
 """
 
 import argparse
@@ -315,9 +315,9 @@ def main():
 
     from dotenv import load_dotenv
     load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
-    db_url = os.getenv("CRDB_DATABASE_URL")
+    db_url = os.getenv("ORACLE_DATABASE_URL")
     if not db_url:
-        sys.exit("Missing CRDB_DATABASE_URL in backend/.env")
+        sys.exit("Missing ORACLE_DATABASE_URL in backend/.env")
 
     absent = sorted(tables - schema_tables(db_url))
     if absent and args.all:

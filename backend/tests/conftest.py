@@ -21,7 +21,7 @@ os.environ["JWT_SECRET"] = "test-secret"
 # does not override an existing var. A deliberately unusable value — port 1 —
 # so nothing in the unit suite can connect, and a real URL here could never let
 # a stray test reach prod. The PG integration tests set their own URL.
-os.environ["CRDB_DATABASE_URL"] = "postgresql://test:test@localhost:1/test"
+os.environ["ORACLE_DATABASE_URL"] = "postgresql://test:test@localhost:1/test"
 
 
 @pytest.fixture

@@ -24,8 +24,8 @@ CONNECTORS = [
     ("rag.eval.eval_common", lambda m: m.connect()),
     ("load_evidence", lambda m: m.connect()),
     ("load_reddit", lambda m: m.connect()),
-    ("load_catalog", lambda m: m.connect(os.environ["CRDB_DATABASE_URL"])),
-    ("load_banner", lambda m: m.connect(os.environ["CRDB_DATABASE_URL"])),
+    ("load_catalog", lambda m: m.connect(os.environ["ORACLE_DATABASE_URL"])),
+    ("load_banner", lambda m: m.connect(os.environ["ORACLE_DATABASE_URL"])),
 ]
 
 
@@ -39,10 +39,10 @@ def test_every_connect_helper_pins_utc_over_ssl(monkeypatch, module_name, call):
     assert "-c timezone=UTC" in calls[0].get("options", "")
 
 
-def test_database_url_reads_only_crdb_database_url(monkeypatch):
+def test_database_url_reads_only_oracle_database_url(monkeypatch):
     from pipeline import db
-    monkeypatch.setenv("CRDB_DATABASE_URL", "postgresql://only-this")
-    monkeypatch.setenv("NEW_" + "CRDB_DATABASE_URL", "postgresql://not-this")
+    monkeypatch.setenv("ORACLE_DATABASE_URL", "postgresql://only-this")
+    monkeypatch.setenv("CRDB_" + "DATABASE_URL", "postgresql://not-this")
     assert db.database_url() == "postgresql://only-this"
 
 

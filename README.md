@@ -131,8 +131,8 @@ pip install -r backend/requirements.txt
 Create `backend/.env`:
 
 ```env
-# The variable keeps its historical name; the value is a PostgreSQL URL.
-CRDB_DATABASE_URL=postgresql://appuser:<password>@<host>:5432/appdb?sslmode=require
+# The value is a PostgreSQL URL (the database runs on an Oracle Cloud VM).
+ORACLE_DATABASE_URL=postgresql://appuser:<password>@<host>:5432/appdb?sslmode=require
 JWT_SECRET=<generate-with-openssl-rand-hex-32>
 
 # Optional — Google OAuth login flow

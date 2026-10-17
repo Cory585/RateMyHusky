@@ -277,7 +277,7 @@ def test_psql_stopping_on_an_error_reports_the_rollback(tmp_path, monkeypatch, c
 
 def _run_main(monkeypatch, argv, in_schema):
     restored = {}
-    monkeypatch.setenv("CRDB_DATABASE_URL", "postgresql://u@db.example.com/appdb")
+    monkeypatch.setenv("ORACLE_DATABASE_URL", "postgresql://u@db.example.com/appdb")
     monkeypatch.setattr(restore_db.sys, "argv", ["restore_db.py", *argv])
     monkeypatch.setattr(restore_db, "schema_tables", lambda url: in_schema)
     monkeypatch.setattr(restore_db, "restore", lambda url, path, tables: restored.update(tables=tables))

@@ -114,7 +114,7 @@ jobs:
         if: ${{ !inputs.dry_run }}
         working-directory: backend
         env:
-          CRDB_DATABASE_URL: ${{ secrets.CRDB_DATABASE_URL }}
+          ORACLE_DATABASE_URL: ${{ secrets.ORACLE_DATABASE_URL }}
         run: |
           python load_rmp.py rmp_professors --replace
           python load_rmp.py rmp_reviews
@@ -131,7 +131,7 @@ jobs:
         if: ${{ !inputs.dry_run }}
         working-directory: backend
         env:
-          CRDB_DATABASE_URL: ${{ secrets.CRDB_DATABASE_URL }}
+          ORACLE_DATABASE_URL: ${{ secrets.ORACLE_DATABASE_URL }}
         run: |
           python prune_rmp_reviews.py \
             --csv Better_Scraper/output_data/rmp_reviews.csv
@@ -143,7 +143,7 @@ jobs:
         if: ${{ !inputs.dry_run }}
         working-directory: backend
         env:
-          CRDB_DATABASE_URL: ${{ secrets.CRDB_DATABASE_URL }}
+          ORACLE_DATABASE_URL: ${{ secrets.ORACLE_DATABASE_URL }}
         run: python -m pipeline.run
 
       # Post-write verification: the pre-scrape floors validate the input CSVs;
@@ -153,11 +153,11 @@ jobs:
         if: ${{ !inputs.dry_run }}
         working-directory: backend
         env:
-          CRDB_DATABASE_URL: ${{ secrets.CRDB_DATABASE_URL }}
+          ORACLE_DATABASE_URL: ${{ secrets.ORACLE_DATABASE_URL }}
         run: |
           python - <<'EOF'
           import os, sys, psycopg2
-          conn = psycopg2.connect(os.environ["CRDB_DATABASE_URL"], sslmode="require")
+          conn = psycopg2.connect(os.environ["ORACLE_DATABASE_URL"], sslmode="require")
           cur = conn.cursor()
           cur.execute("SELECT count(*) FROM professors_catalog")
           n = cur.fetchone()[0]

@@ -241,16 +241,16 @@ def _unhandled_error(e):
 # ──────────────────────────────────────────────
 #  Database connection pool
 # ──────────────────────────────────────────────
-CRDB_DATABASE_URL = os.getenv("CRDB_DATABASE_URL")
-if not CRDB_DATABASE_URL:
-    raise RuntimeError("CRDB_DATABASE_URL environment variable is required")
+ORACLE_DATABASE_URL = os.getenv("ORACLE_DATABASE_URL")
+if not ORACLE_DATABASE_URL:
+    raise RuntimeError("ORACLE_DATABASE_URL environment variable is required")
 
 _pool = None
 
 def _get_pool():
     global _pool
     if _pool is None:
-        _pool = ThreadedConnectionPool(5, 10, CRDB_DATABASE_URL, sslmode="require",
+        _pool = ThreadedConnectionPool(5, 10, ORACLE_DATABASE_URL, sslmode="require",
                                        connect_timeout=5,
                                        # UTC: the Groq budget, throttle and usage-alert
                                        # queries take "today" from the session, and the

@@ -54,9 +54,9 @@ def injection_flag(text: str) -> "str | None":
 
 def connect():
     """Open a UTC database session over SSL."""
-    url = os.getenv("CRDB_DATABASE_URL")
+    url = os.getenv("ORACLE_DATABASE_URL")
     if not url:
-        raise RuntimeError("CRDB_DATABASE_URL is required")
+        raise RuntimeError("ORACLE_DATABASE_URL is required")
     return psycopg2.connect(url, sslmode="require", options="-c timezone=UTC")
 
 

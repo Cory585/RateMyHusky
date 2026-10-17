@@ -6,7 +6,7 @@ WHY: chat_abuse/chat_throttle logic is hard to reason about from raw SQL one-off
 usage — without leaving the local machine. Never imported by server.py; not part
 of any deploy path.
 
-Reads CRDB_DATABASE_URL from backend/.env, using the same DNS-retry connect()
+Reads ORACLE_DATABASE_URL from backend/.env, using the same DNS-retry connect()
 as clear_ask_strikes.py.
 
 Run: python backend/rag/ask_admin.py -> http://127.0.0.1:5051
@@ -27,9 +27,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from rag.chat_abuse import STRIKE_STATUSES, _CAPS
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
-URL = os.getenv("CRDB_DATABASE_URL")
+URL = os.getenv("ORACLE_DATABASE_URL")
 if not URL:
-    sys.exit("Need CRDB_DATABASE_URL in backend/.env")
+    sys.exit("Need ORACLE_DATABASE_URL in backend/.env")
 
 ALL_STATUSES = (
     "ok", "ok_cached", "kill_switch", "rate_limited", "off_topic",

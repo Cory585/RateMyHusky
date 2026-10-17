@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 import psycopg2
 
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), "backend", ".env"))
-URL = os.getenv("CRDB_DATABASE_URL")
+URL = os.getenv("ORACLE_DATABASE_URL")
 
 _counter = itertools.count()
 

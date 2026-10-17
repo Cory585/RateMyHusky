@@ -6,7 +6,7 @@ rows back into that existing schema. Rows are INSERTs with explicit column
 lists (pg_dump --column-inserts), which scraper/match_professors.py parses, and
 pg_dump writes each identity column's setval so ids resume correctly.
 
-Needs the PostgreSQL 16 client tools (pg_dump) on PATH. Reads CRDB_DATABASE_URL
+Needs the PostgreSQL 16 client tools (pg_dump) on PATH. Reads ORACLE_DATABASE_URL
 from backend/.env.
 
 Run:  python backend/backup_db.py
@@ -93,9 +93,9 @@ def dump(url, path, pg_dump="pg_dump"):
 
 
 def main():
-    url = os.getenv("CRDB_DATABASE_URL")
+    url = os.getenv("ORACLE_DATABASE_URL")
     if not url:
-        sys.exit("Missing CRDB_DATABASE_URL in backend/.env")
+        sys.exit("Missing ORACLE_DATABASE_URL in backend/.env")
     path = dump(url, backup_path(), require_matching_pg_dump(server_major(url)))
     print(f"Backup complete: {path} ({os.path.getsize(path) / 1024 / 1024:.1f} MB)")
 

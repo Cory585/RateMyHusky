@@ -60,8 +60,8 @@ def pg(pg_url):
 
 @pytest.fixture
 def pg_env(pg_url, monkeypatch):
-    """Point modules that read CRDB_DATABASE_URL at call time at the test DB."""
-    monkeypatch.setenv("CRDB_DATABASE_URL", pg_url)
+    """Point modules that read ORACLE_DATABASE_URL at call time at the test DB."""
+    monkeypatch.setenv("ORACLE_DATABASE_URL", pg_url)
     return pg_url
 
 
@@ -69,7 +69,7 @@ def pg_env(pg_url, monkeypatch):
 def live_server(pg_url, monkeypatch):
     """The server module with its pool on the test DB and the TTL cache off."""
     import server
-    monkeypatch.setattr(server, "CRDB_DATABASE_URL", pg_url)
+    monkeypatch.setattr(server, "ORACLE_DATABASE_URL", pg_url)
     monkeypatch.setattr(server, "_pool", None)
     monkeypatch.setattr(server, "cache_get", lambda key: None)
     monkeypatch.setattr(server, "cache_set", lambda key, data: None)

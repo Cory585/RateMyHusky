@@ -11,9 +11,9 @@ load_dotenv()
 
 
 def database_url():
-    url = os.getenv("CRDB_DATABASE_URL")
+    url = os.getenv("ORACLE_DATABASE_URL")
     if not url:
-        raise RuntimeError("CRDB_DATABASE_URL is required")
+        raise RuntimeError("ORACLE_DATABASE_URL is required")
     return url
 
 

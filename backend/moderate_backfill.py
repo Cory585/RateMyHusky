@@ -22,9 +22,9 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from moderation import score_texts, ModerationUnavailable, BATCH_SIZE  # noqa: E402
 
-DATABASE_URL = os.getenv("CRDB_DATABASE_URL")
+DATABASE_URL = os.getenv("ORACLE_DATABASE_URL")
 if not DATABASE_URL:
-    sys.exit("Missing CRDB_DATABASE_URL in backend/.env")
+    sys.exit("Missing ORACLE_DATABASE_URL in backend/.env")
 
 import psycopg2  # noqa: E402
 import psycopg2.extras  # noqa: E402

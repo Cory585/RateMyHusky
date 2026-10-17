@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 # Nothing here reads or writes the repo through GITHUB_TOKEN; the
-# only credential used is the CRDB_DATABASE_URL secret.
+# only credential used is the ORACLE_DATABASE_URL secret.
 permissions:
   contents: read
 
@@ -51,7 +51,7 @@ jobs:
       - name: Refresh open terms
         id: refresh
         env:
-          CRDB_DATABASE_URL: ${{ secrets.CRDB_DATABASE_URL }}
+          ORACLE_DATABASE_URL: ${{ secrets.ORACLE_DATABASE_URL }}
         run: |
           cd scraper
           set +e
@@ -65,10 +65,10 @@ jobs:
       - name: Finalize newly closed terms
         if: ${{ !cancelled() && steps.selftest.outcome == 'success' && steps.refresh.outputs.exit_code != '75' }}
         env:
-          CRDB_DATABASE_URL: ${{ secrets.CRDB_DATABASE_URL }}
+          ORACLE_DATABASE_URL: ${{ secrets.ORACLE_DATABASE_URL }}
         run: cd scraper && python load_banner.py --backfill
       - name: Build teaching chip and course history
         if: ${{ !cancelled() && steps.selftest.outcome == 'success' }}
         env:
-          CRDB_DATABASE_URL: ${{ secrets.CRDB_DATABASE_URL }}
+          ORACLE_DATABASE_URL: ${{ secrets.ORACLE_DATABASE_URL }}
         run: cd scraper && python match_banner_instructors.py

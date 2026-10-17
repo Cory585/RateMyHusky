@@ -6,7 +6,7 @@ false-positives as 'strikes'. Accumulated strikes cap/ban an account on the dail
 question limit even when no real question ever went through. This script lets you
 see the strike rows per account and clear them for a specific account.
 
-Reads CRDB_DATABASE_URL from backend/.env and wraps connect() in a DNS-retry
+Reads ORACLE_DATABASE_URL from backend/.env and wraps connect() in a DNS-retry
 loop. Never prints the connection string.
 
 USAGE (from backend/):
@@ -24,9 +24,9 @@ from dotenv import load_dotenv
 import psycopg2
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
-URL = os.getenv("CRDB_DATABASE_URL")
+URL = os.getenv("ORACLE_DATABASE_URL")
 if not URL:
-    sys.exit("Need CRDB_DATABASE_URL in backend/.env")
+    sys.exit("Need ORACLE_DATABASE_URL in backend/.env")
 
 STRIKE_STATUSES = ("injection_blocked", "off_topic", "defamation_framing")
 
