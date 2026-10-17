@@ -2,9 +2,10 @@
 
 The scraper's own tests run the loader on sqlite; this runs the same write path
 with a psycopg2 cursor, and runs the course-history query that selects the
-summer1_years / summer2_years / part_of_term columns the schema must carry.
+offering_years / first_term_label columns the schema must carry.
 """
 
+import json
 import pathlib
 import sys
 
@@ -78,7 +79,7 @@ def test_add_columns_is_a_no_op_when_the_schema_already_has_them(pg):
                       "table_name = 'banner_sections' AND column_name = 'part_of_term'") == 1
 
 
-def test_course_history_reads_the_summer_session_columns(pg):
+def test_course_history_reads_the_offering_year_columns(pg):
     truncate(pg, *BANNER_TABLES)
     with pg.cursor() as cur:
         cur.execute("""
@@ -86,9 +87,11 @@ def test_course_history_reads_the_summer_session_columns(pg):
                 (subject_course, subject, course_title, first_term_code, last_term_code,
                  last_term_label, terms_offered, pattern, fall_years, spring_years,
                  summer_years, pattern_window_years, instructor_count,
-                 summer1_years, summer2_years)
+                 first_term_label, offering_years)
             VALUES ('ACCT1201', 'ACCT', 'Accounting', '202210', '202710', 'Fall 2026',
-                    8, 'Fall and Spring', 4, 4, 3, 5, 1, 2, 1)""")
+                    8, 'Fall and Spring', 4, 4, 3, 5, 1, 'Fall 2021', %s)""",
+                (json.dumps({"window": [2025, 2026], "Fall": [2025, 2026], "Spring": [2026],
+                             "Summer 1": [2025], "Summer 2": [], "Summer": [2025]}),))
         cur.execute("""
             INSERT INTO banner_course_instructors
                 (subject_course, instructor_key, instructor_name, professor_slug, match_method,
@@ -104,6 +107,8 @@ def test_course_history_reads_the_summer_session_columns(pg):
     query_one = lambda sql, params=None: next(iter(query(sql, params)), None)  # noqa: E731
     history = teaching_history.course_history("ACCT1201", query, query_one)
 
-    assert history["seasonYears"] == {"fall": 4, "spring": 4, "summer1": 2,
-                                      "summer2": 1, "summer": 3}
+    assert history["offeringYears"] == {"window": [2025, 2026], "first": 2022,
+                                        "fall": [2025, 2026], "spring": [2026],
+                                        "summer1": [2025], "summer2": [], "summer": [2025]}
+    assert history["firstOffered"] == "Fall 2021"
     assert [i["slug"] for i in history["instructors"]] == ["annie-witte"]
