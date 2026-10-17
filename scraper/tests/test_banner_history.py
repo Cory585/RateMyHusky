@@ -1,4 +1,5 @@
 """Course and instructor history built from stored Banner sections. Pure, no DB."""
+import json
 import os
 import re
 import sys
@@ -16,6 +17,7 @@ LABELS = {"202710": ("Fall 2026", "Fall"), "202630": ("Spring 2026", "Spring"),
           "202530": ("Spring 2025", "Spring"), "202510": ("Fall 2024", "Fall"),
           "202430": ("Spring 2024", "Spring"), "202410": ("Fall 2023", "Fall"),
           "202330": ("Spring 2023", "Spring"), "202310": ("Fall 2022", "Fall"),
+          "202230": ("Spring 2022", "Spring"),
           "202615": ("Fall 2025", "Fall"),
           "202325": ("Winter 2023", "Winter"), "202425": ("Winter 2024", "Winter"),
           "202525": ("Winter 2025", "Winter"), "202625": ("Winter 2026", "Winter")}
@@ -217,6 +219,70 @@ def test_offering_reports_pattern_and_window_counts():
 
 def test_offering_only_in_the_open_year_is_new():
     assert build_course_offerings([sec("202710", "1", course="CS4999")])[0]["pattern"] == "New"
+
+
+def test_offering_years_name_the_window_years_each_season_ran():
+    got = build_course_offerings(history())[0]
+    assert json.loads(got["offering_years"]) == {
+        "window": [2023, 2024, 2025, 2026],
+        "Fall": [2023, 2024, 2025, 2026], "Spring": [2023, 2024, 2025, 2026],
+        "Summer 1": [], "Summer 2": [], "Summer": []}
+
+
+def test_offering_first_term_label_is_the_oldest_label():
+    assert build_course_offerings(history())[0]["first_term_label"] == "Fall 2022"
+
+
+def young(course, terms):
+    """CS3500's full history sets the window; `course` starts later."""
+    return {o["subject_course"]: o for o in build_course_offerings(
+        history() + [sec(t, f"{course}-{t}", course=course) for t in terms])}[course]
+
+
+def test_a_course_two_years_old_is_judged_over_those_two_years():
+    """Fall and Spring every year since 2023-24: regular, not 2 of 4."""
+    got = young("CS2000", ("202510", "202530", "202610", "202630", "202710"))
+    assert got["pattern"] == "Fall and Spring"
+    assert (got["fall_years"], got["spring_years"]) == (2, 2)
+    assert got["pattern_window_years"] == 2
+
+
+def test_a_course_one_year_old_is_new_since_its_first_term():
+    got = young("CS2000", ("202610", "202630", "202710"))
+    assert got["pattern"] == "New since Fall 2025"
+    assert got["first_term_label"] == "Fall 2025"
+    assert json.loads(got["offering_years"])["Fall"] == [2026]
+
+
+def test_a_course_only_in_the_open_year_is_new_beside_a_full_window():
+    assert young("CS4999", ("202710",))["pattern"] == "New"
+
+
+def test_a_course_first_seen_in_the_oldest_stored_year_is_judged_over_the_full_window():
+    """Spring 2022 is outside the window; Spring 2026 alone is 1 of 4."""
+    got = young("CS1800", ("202230", "202630"))
+    assert got["pattern"] == "Irregular"
+    assert got["spring_years"] == 1
+    assert json.loads(got["offering_years"])["window"] == [2023, 2024, 2025, 2026]
+
+
+def test_a_course_back_on_the_schedule_after_the_window_is_not_new():
+    """Last run in 2021-22, open for Fall 2026: returning, not new."""
+    assert young("CS1500", ("202230", "202710"))["pattern"] == "Not offered recently"
+
+
+def test_a_one_year_window_never_makes_a_course_young():
+    """A fresh stage file holds one complete year; its courses aren't all new."""
+    got = build_course_offerings([sec("202610", "1"), sec("202630", "2")])[0]
+    assert got["pattern"] == "Fall and Spring"
+
+
+def test_a_course_retired_before_the_window_has_empty_offering_years():
+    got = young("CS1500", ("202230",))
+    assert got["pattern"] == "Not offered recently"
+    assert json.loads(got["offering_years"]) == {
+        "window": [2023, 2024, 2025, 2026],
+        "Fall": [], "Spring": [], "Summer 1": [], "Summer 2": [], "Summer": []}
 
 
 def test_offering_marks_what_is_on_the_current_schedule():

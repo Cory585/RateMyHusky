@@ -24,6 +24,9 @@ CREATE UNIQUE INDEX ev_dedupe ON public.evidence (source, source_ref, professor_
 -- professor_photos
 CREATE UNIQUE INDEX uq_professor_photos ON public.professor_photos (name, source_page);
 
+-- professor_tags
+CREATE INDEX professor_tags_tag ON public.professor_tags (tag ASC, review_count DESC);
+
 -- professor_teaching
 CREATE INDEX pt_slug ON public.professor_teaching (professor_slug);
 

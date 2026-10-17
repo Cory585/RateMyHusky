@@ -74,6 +74,14 @@ CREATE TABLE public.professor_photos (
     CONSTRAINT professor_photos_pkey PRIMARY KEY (id)
 );
 
+CREATE TABLE public.professor_tags (
+    name_key TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    review_count BIGINT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT professor_tags_pkey PRIMARY KEY (name_key, tag)
+);
+
 CREATE TABLE public.professor_teaching (
     professor_slug TEXT NOT NULL,
     name_key TEXT NOT NULL,
@@ -125,6 +133,22 @@ CREATE TABLE public.reddit_text (
     flagged BOOLEAN NULL DEFAULT false,
     flag_reason TEXT NULL,
     CONSTRAINT reddit_text_pkey PRIMARY KEY (source_id)
+);
+
+CREATE TABLE public.review_tags (
+    source TEXT NOT NULL,
+    source_id BIGINT NOT NULL,
+    tag TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT review_tags_pkey PRIMARY KEY (source, source_id, tag)
+);
+
+CREATE TABLE public.review_tags_processed (
+    source TEXT NOT NULL,
+    source_id BIGINT NOT NULL,
+    taxonomy_version BIGINT NOT NULL DEFAULT 1,
+    processed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT review_tags_processed_pkey PRIMARY KEY (source, source_id)
 );
 
 CREATE TABLE public.rmp_professors (

@@ -10,7 +10,7 @@ import argparse
 
 import moderation
 
-from . import course_codes, name_keys, read_models, roster, summaries
+from . import course_codes, name_keys, read_models, review_tags, roster, summaries
 from .blend import blend
 from .db import connect, fetch_all
 from .rmp_fields import rmp_id
@@ -96,6 +96,7 @@ def main(argv=None):
     roster.apply_roster(conn, new_links, new_professors)
     print(f"course codes changed: {course_codes.apply_codes(conn, pairs)}")
     print(f"name keys changed: {name_keys.apply_name_keys(conn, key_pairs)}")
+    review_tags.rebuild_if_present(conn)  # tags follow name_key remaps, pruned reviews, moderation
     read_models.write(conn, catalog, courses, rows, counts)
     print("replaced professors_catalog, course_catalog, source_summary; data_version bumped")
     return 0

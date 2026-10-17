@@ -367,15 +367,19 @@ export interface RecentInstructor {
 export interface CourseHistory {
   /** "Fall and Spring", "New", "Not offered recently"…; null for a retired code with only a successor link. */
   pattern: string | null;
-  /** Academic years each season ran, out of windowYears. summer1/summer2 arrive with session labels. */
-  seasonYears: {
-    fall: number | null;
-    spring: number | null;
-    summer: number | null;
-    summer1?: number | null;
-    summer2?: number | null;
+  /** The pattern window's academic years, oldest first, keyed by the year they end (2026 is 2025–26), and
+   *  the window years each season ran. first: the course's first academic year. null until the scraper stores them. */
+  offeringYears: {
+    window: number[];
+    first: number;
+    fall: number[];
+    spring: number[];
+    summer1: number[];
+    summer2: number[];
+    summer: number[];
   } | null;
-  windowYears: number | null;
+  /** The oldest term Banner has it in ("Fall 2025"). */
+  firstOffered: string | null;
   lastOffered: string | null;
   offeredNow: string[];
   creditHours: string | null;

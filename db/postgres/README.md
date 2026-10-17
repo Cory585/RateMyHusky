@@ -87,8 +87,8 @@ If the connection fails:
 
 ## Schema changes since the migration
 
-The NUBanner teaching-history code added a table and five columns after the
-production database was loaded. `02_tables.sql` already declares them (the
+The NUBanner teaching-history code added a table and five columns, and review
+tags added three tables, after the production database was loaded. `02_tables.sql` already declares them (the
 columns last in their tables, where `ADD COLUMN` puts them). A database loaded
 before this needs the following, which the loaders no longer run for you. Run it
 once at cutover:
@@ -105,11 +105,34 @@ ALTER TABLE public.banner_course_offerings
     ADD COLUMN IF NOT EXISTS summer2_years BIGINT NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS first_term_label TEXT,
     ADD COLUMN IF NOT EXISTS offering_years TEXT;
+CREATE TABLE IF NOT EXISTS public.review_tags (
+    source TEXT NOT NULL,
+    source_id BIGINT NOT NULL,
+    tag TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT review_tags_pkey PRIMARY KEY (source, source_id, tag)
+);
+CREATE TABLE IF NOT EXISTS public.review_tags_processed (
+    source TEXT NOT NULL,
+    source_id BIGINT NOT NULL,
+    taxonomy_version BIGINT NOT NULL DEFAULT 1,
+    processed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT review_tags_processed_pkey PRIMARY KEY (source, source_id)
+);
+CREATE TABLE IF NOT EXISTS public.professor_tags (
+    name_key TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    review_count BIGINT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT professor_tags_pkey PRIMARY KEY (name_key, tag)
+);
+CREATE INDEX IF NOT EXISTS professor_tags_tag ON public.professor_tags (tag ASC, review_count DESC);
 ```
 
 Until they run, the course-history query in `backend/teaching_history.py` fails
-on the missing columns, and the Banner loader and matcher stop at start-up naming
-the missing table or column.
+on the missing columns, the Banner loader and matcher stop at start-up naming
+the missing table or column, and the tags routes and `pipeline.review_tags` fail
+on the missing tag tables.
 
 ### Optional cleanup (destructive; take a backup first)
 

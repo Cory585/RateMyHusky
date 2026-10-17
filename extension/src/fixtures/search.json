@@ -1,0 +1,9 @@
+[
+  { "type": "professor", "name": "David Kaeli",       "dept": "Electrical and Computer Engineering", "rating": 4.12, "slug": "david-kaeli" },
+  { "type": "professor", "name": "Sarah Ostadabbas",  "dept": "Electrical and Computer Engineering", "rating": 4.45, "slug": "sarah-ostadabbas" },
+  { "type": "professor", "name": "Kristina Lynch",    "dept": "Mechanical and Industrial Engineering", "rating": null, "slug": "kristina-lynch" },
+  { "type": "professor", "name": "Olin Guha",         "dept": "Computer Science", "rating": 3.78, "slug": "olin-guha" },
+  { "type": "professor", "name": "Amal Rahman",       "dept": "Mathematics", "rating": 4.9, "slug": "amal-rahman" },
+  { "type": "course",    "code": "CS3500", "name": "Object-Oriented Design", "dept": "Computer Science" },
+  { "type": "course",    "code": "CS2500", "name": "Fundamentals of Computer Science 1", "dept": "Computer Science" }
+]

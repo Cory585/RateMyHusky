@@ -1,5 +1,10 @@
 .compare-page {
 	--compare-gutter: clamp(16px, 3.5vw, 50px);
+	/* One color per slot: chip avatars, table header dots and profile card dots */
+	--compare-tone-0: #4d7a5c;
+	--compare-tone-1: #9b5560;
+	--compare-tone-2: #56709b;
+	--compare-tone-3: #8d7442;
 	min-height: 100vh;
 	padding-top: 60px;
 	background: #f4f5f7;
@@ -400,13 +405,18 @@
 	overflow-x: auto;
 }
 
+/* --cols is the number of picked professors (4 when none are picked yet) */
 .compare-table {
-	min-width: 760px;
+	min-width: calc(160px + var(--cols, 4) * 140px);
+}
+
+.compare-table.has-selection .is-empty-col {
+	display: none;
 }
 
 .compare-row {
 	display: grid;
-	grid-template-columns: minmax(160px, 1fr) repeat(4, minmax(140px, 1fr));
+	grid-template-columns: minmax(160px, 1fr) repeat(var(--cols, 4), minmax(140px, 1fr));
 	border-top: 1px solid #eef0f2;
 	animation: compareFadeUp 0.4s ease both;
 }
@@ -467,6 +477,133 @@
 .compare-cell-winner {
 	background: #ecf8ef;
 	font-weight: 800;
+}
+
+.compare-cell-second {
+	background: #fdf3e6;
+	font-weight: 700;
+}
+
+.compare-row-hint {
+	display: block;
+	font-size: 0.7rem;
+	font-weight: 600;
+	text-transform: none;
+	letter-spacing: 0;
+	color: #8e8e8e;
+}
+
+.compare-col-name {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	min-width: 0;
+	max-width: 100%;
+}
+
+.compare-col-dot {
+	flex: none;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+}
+
+.compare-col-dot.tone-0 { background: var(--compare-tone-0); }
+.compare-col-dot.tone-1 { background: var(--compare-tone-1); }
+.compare-col-dot.tone-2 { background: var(--compare-tone-2); }
+.compare-col-dot.tone-3 { background: var(--compare-tone-3); }
+
+/* The same dot before each name on the desktop profile cards */
+.compare-profile-card h3 .compare-col-dot {
+	display: inline-block;
+	margin-right: 8px;
+	vertical-align: middle;
+}
+
+.compare-value {
+	font-variant-numeric: tabular-nums;
+}
+
+.compare-best {
+	margin-left: 6px;
+	font-size: 0.66rem;
+	font-weight: 800;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: #2f8a4e;
+	white-space: nowrap;
+}
+
+/* Rank labels: long form on desktop, short form on mobile */
+.compare-rank-short {
+	display: none;
+}
+
+.compare-second {
+	margin-left: 6px;
+	font-size: 0.66rem;
+	font-weight: 800;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: #b35a07;
+	white-space: nowrap;
+}
+
+/* Thin bar on a fixed scale, so a close lead looks close */
+.compare-bar {
+	display: block;
+	width: 100%;
+	max-width: 120px;
+	height: 5px;
+	margin-top: 2px;
+	border-radius: 3px;
+	background: #eceef1;
+	overflow: hidden;
+}
+
+.compare-bar i {
+	display: block;
+	height: 100%;
+	border-radius: 3px;
+	background: #b3b8c0;
+}
+
+.compare-cell-winner .compare-bar i {
+	background: #3f9a5e;
+}
+
+.compare-cell-second .compare-bar i {
+	background: #e08a2e;
+}
+
+.compare-cell-winner small,
+.compare-cell-second small {
+	font-weight: 600;
+}
+
+/* Too few ratings to rank: value and bar are muted on every row */
+.compare-cell.is-low-sample .compare-value {
+	color: #8e8e8e;
+}
+
+.compare-cell.is-low-sample .compare-bar i {
+	background: #d3d6db;
+}
+
+.compare-cell small.compare-low-sample {
+	align-self: flex-start;
+	padding: 1px 7px;
+	border-radius: 999px;
+	background: #f8edd6;
+	color: #8a5d0e;
+	font-weight: 700;
+}
+
+.compare-table-note {
+	padding: 12px 24px 14px;
+	border-top: 1px solid #eef0f2;
+	font-size: 0.78rem;
+	color: #868686;
 }
 
 .compare-lock-prompt {
@@ -670,6 +807,56 @@
 	background: rgba(93, 207, 128, 0.14);
 }
 
+.dark .compare-cell-second {
+	background: rgba(240, 150, 60, 0.13);
+}
+
+.dark .compare-second {
+	color: #f2a65a;
+}
+
+.dark .compare-cell-second .compare-bar i {
+	background: #e8954a;
+}
+
+.dark .compare-row-hint,
+.dark .compare-table-note {
+	color: #8f96a0;
+}
+
+.dark .compare-table-note {
+	border-top-color: #2c3035;
+}
+
+.dark .compare-best {
+	color: #7fd99a;
+}
+
+.dark .compare-bar {
+	background: #33373d;
+}
+
+.dark .compare-bar i {
+	background: #6b727c;
+}
+
+.dark .compare-cell-winner .compare-bar i {
+	background: #6fcf8e;
+}
+
+.dark .compare-cell.is-low-sample .compare-value {
+	color: #8f96a0;
+}
+
+.dark .compare-cell.is-low-sample .compare-bar i {
+	background: #4a4f57;
+}
+
+.dark .compare-cell small.compare-low-sample {
+	background: #3a2f1a;
+	color: #e9bd66;
+}
+
 /* ---- Responsive ---- */
 @media (max-width: 1000px) {
 	.compare-controls,
@@ -773,10 +960,10 @@
 		height: 14px;
 	}
 
-	.compare-chip-avatar.tone-0 { background: #d9eee0; color: #4d7a5c; }
-	.compare-chip-avatar.tone-1 { background: #f5dcdf; color: #9b5560; }
-	.compare-chip-avatar.tone-2 { background: #dbe5f6; color: #56709b; }
-	.compare-chip-avatar.tone-3 { background: #f3e8cf; color: #8d7442; }
+	.compare-chip-avatar.tone-0 { background: #d9eee0; color: var(--compare-tone-0); }
+	.compare-chip-avatar.tone-1 { background: #f5dcdf; color: var(--compare-tone-1); }
+	.compare-chip-avatar.tone-2 { background: #dbe5f6; color: var(--compare-tone-2); }
+	.compare-chip-avatar.tone-3 { background: #f3e8cf; color: var(--compare-tone-3); }
 
 	.compare-chip-remove {
 		border: none;
@@ -858,9 +1045,54 @@
 		animation: none;
 	}
 
-	.compare-row.is-desktop-only,
-	.compare-table.has-selection .is-empty-col {
+	.compare-row.is-desktop-only {
 		display: none;
+	}
+
+	.compare-row-hint {
+		font-size: 0.66rem;
+	}
+
+	.compare-col-name {
+		gap: 4px;
+	}
+
+	.compare-col-dot {
+		width: 6px;
+		height: 6px;
+	}
+
+	/* Narrow columns: short labels ("✓", "✓ Tie", "T-2nd"), plus the screen-reader text */
+	.compare-best,
+	.compare-second {
+		margin-left: 3px;
+	}
+
+	.compare-rank-long {
+		display: none;
+	}
+
+	.compare-rank-short {
+		display: inline;
+	}
+
+	.compare-second {
+		font-size: 0.6rem;
+		letter-spacing: 0;
+	}
+
+	.compare-bar {
+		max-width: 64px;
+	}
+
+	.compare-cell small.compare-low-sample {
+		align-self: center;
+		padding: 1px 5px;
+	}
+
+	.compare-table-note {
+		padding: 10px 14px 12px;
+		font-size: 0.72rem;
 	}
 
 	.compare-row-head {
@@ -930,6 +1162,21 @@
 		font-weight: 800;
 	}
 
+	/* Second best: orange pill, same shape as the winner's */
+	.compare-cell.compare-cell-second {
+		background: transparent;
+	}
+
+	.compare-cell-second > span:first-child {
+		display: block;
+		width: 100%;
+		padding: 7px 4px;
+		border-radius: 6px;
+		background: #fdf0df;
+		color: #b35a07;
+		font-weight: 700;
+	}
+
 	.dark .compare-chip {
 		background: #242628;
 		border-color: #2f343a;
@@ -965,6 +1212,15 @@
 	.dark .compare-cell-winner > span:first-child {
 		background: rgba(93, 207, 128, 0.16);
 		color: #7fd99a;
+	}
+
+	.dark .compare-cell.compare-cell-second {
+		background: transparent;
+	}
+
+	.dark .compare-cell-second > span:first-child {
+		background: rgba(240, 150, 60, 0.16);
+		color: #f2a65a;
 	}
 }
 

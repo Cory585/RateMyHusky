@@ -116,6 +116,18 @@ app.config["COMPRESS_MIMETYPES"] = ["application/json", "text/html"]
 app.config["COMPRESS_MIN_SIZE"] = 256
 Compress(app)
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+# Set per environment, never defaulted: the id derives from the public key in
+# extension/manifest.json, so anyone could copy that key into their own
+# unpacked extension and inherit whatever this trusts. Comma-separated, so the
+# dev id and the Web Store's can both run during the handover.
+EXTENSION_ORIGINS = [
+    o.strip() for o in os.getenv("EXTENSION_ORIGINS", "").split(",") if o.strip()
+]
+
+# Not EXTENSION_ORIGINS: a popup holding host_permissions for the site isn't
+# subject to CORS, and the extension sends credentials: 'omit'. It still needs
+# the ALLOWED_ORIGINS entry below, because Chrome does send an Origin header.
 CORS(app, supports_credentials=True, origins=[FRONTEND_URL])
 def get_real_ip():
     """Get the real client IP from X-Forwarded-For (set by Vercel/Railway proxy)."""
@@ -158,6 +170,7 @@ ALLOWED_ORIGINS = {
         FRONTEND_URL,
         "http://localhost:5173",
         "http://localhost:3000",
+        *EXTENSION_ORIGINS,
     ) if _origin_host(o)
 }
 
@@ -984,6 +997,50 @@ def professor_full(slug):
     resp.headers["Cache-Control"] = "private, max-age=3600" if _is_authed() else "public, max-age=3600"
     resp.headers["Vary"] = "Authorization"
     return history_cache_control(resp)
+
+
+from professor_full import _resolve_professor  # same lookup as /full, skips denied profs
+
+MIN_TAG_REVIEWS = 3  # need at least this many reviews before showing a tag
+
+
+@app.route("/api/professors/<slug>/tags")
+def professor_tags(slug):
+    cache_key = f"prof_tags:{slug}"
+    data = cache_get(cache_key)
+    if data is None:
+        prof = _resolve_professor(slug, query_one)
+        if not prof:
+            return jsonify({"error": "Professor not found"}), 404
+        rows = query(
+            "SELECT tag, review_count FROM professor_tags "
+            "WHERE name_key = %s AND review_count >= %s ORDER BY review_count DESC",
+            (prof["name_key"], MIN_TAG_REVIEWS),
+        )
+        data = [{"tag": r["tag"], "count": r["review_count"]} for r in rows]
+        cache_set(cache_key, data)
+    resp = jsonify(data)
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
+
+
+@app.route("/api/tags/popular")
+def popular_tags():
+    data = cache_get("tags_popular")
+    if data is None:
+        # join on professors_catalog so denied profs don't get counted
+        rows = query(
+            "SELECT pt.tag, COUNT(*) AS profs FROM professor_tags pt "
+            "JOIN professors_catalog pc ON pc.name_key = pt.name_key "
+            "WHERE pt.review_count >= %s GROUP BY pt.tag ORDER BY profs DESC LIMIT 20",
+            (MIN_TAG_REVIEWS,),
+        )
+        # count is number of profs with the tag
+        data = [{"tag": r["tag"], "count": int(r["profs"])} for r in rows]
+        cache_set("tags_popular", data)
+    resp = jsonify(data)
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
 
 
 @app.route("/api/departments")
