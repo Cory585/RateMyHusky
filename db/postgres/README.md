@@ -30,6 +30,61 @@ psql "$PG_URL" -f reset_sequences.sql
 `backend/tests/pg/` applies 00, 02 and 03 to a scratch database on every run, so
 a change here is exercised by the integration tests.
 
+## Browsing the database from VS Code
+
+Developers get their own login, sent privately along with the server address.
+Never put either in a file in this repo.
+
+| Login | Can do | Use it for |
+|---|---|---|
+| `reader` | `SELECT` only; every transaction is read-only and a query stops after 30 s | browsing data, writing and checking queries |
+| `writer` | everything `appuser` can, including `ALTER` and `DROP` | data fixes you have agreed with the team |
+
+Both are the production database. Start with `reader`, and connect as `writer`
+only for the change you need to make. Schema changes still go through the SQL
+files in this folder, not through edits made by hand in VS Code.
+
+1. Install the **PostgreSQL** extension from Microsoft (`ms-ossdata.vscode-pgsql`).
+2. Open the PostgreSQL view in the Activity Bar, hover over the **Connections**
+   header and click **+** (**Add New Connection**). You can also run
+   **PGSQL: Add New Connection** from the Command Palette.
+3. On the **Parameters** tab, fill in:
+   - **Server name**: the server address you were sent
+   - **Authentication Type**: Password
+   - **User name** and **Password**: your login. Tick **Save Password** if you like:
+     VS Code keeps it in your operating system's credential manager, not in a
+     settings file.
+   - **Database name**: `appdb`. Left blank, the extension connects to a default
+     database, and the server refuses every database except `appdb`.
+   - **Connection Name**: anything, for example `RateMyHusky (reader)`
+4. Click **Advanced** and set:
+   - **Scope**: **User**. Workspace scope writes the connection to
+     `.vscode/settings.json`, which is checked into this repo.
+   - **Port**: `5432`
+   - **SSL** section → **SSL mode**: **Require**. The server refuses connections
+     without SSL.
+5. Click **Test Connection**, then **Save & Connect**. Expand the connection in
+   the **Connections** tree to browse the tables in the `public` schema, and
+   right-click it to open a query editor.
+
+You can paste a connection string into the **Connection String** tab instead:
+`postgresql://<user>@<server>:5432/appdb?sslmode=require`. Leave the password out
+and type it when VS Code prompts you. Even then, check under **Advanced** that
+Scope is User and SSL mode is Require.
+
+The extension's Copilot integration can run SQL over an open connection. Use it
+over a `reader` connection, not `writer`.
+
+If the connection fails:
+
+- `no pg_hba.conf entry ... database "postgres"`: **Database name** is blank or
+  wrong. Set it to `appdb`.
+- `no pg_hba.conf entry ... no encryption`: SSL is off. Set **SSL mode** to **Require**.
+- `password authentication failed`: the user name or password is wrong. Ask for
+  your login to be checked or reset.
+- `canceling statement due to statement timeout` (as `reader`): the query took
+  longer than 30 s. Add a `LIMIT` or a narrower `WHERE`.
+
 ## Schema changes since the migration
 
 The NUBanner teaching-history code added a table and five columns after the
