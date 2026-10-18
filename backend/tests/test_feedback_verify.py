@@ -31,3 +31,77 @@ def test_professor_requests_require_an_email(monkeypatch):
         "/api/feedback", json={"feedbackType": "professor", "description": "remove my page"})
     assert resp.status_code == 400
     assert "Email is required" in resp.get_json()["error"]
+
+
+def _post(monkeypatch, **body):
+    import server
+    monkeypatch.delenv("TURNSTILE_SECRET_KEY", raising=False)
+    # Unset so a request that passes validation stops at "not configured" instead of emailing.
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+    monkeypatch.setattr(server.limiter, "enabled", False)
+    return server.app.test_client().post("/api/feedback", json=body)
+
+
+def test_unknown_types_are_rejected(monkeypatch):
+    resp = _post(monkeypatch, feedbackType="Buy cheap watches", description="hi")
+    assert resp.status_code == 400
+    assert "Unknown feedback type" in resp.get_json()["error"]
+
+
+def test_every_accepted_type_passes_validation(monkeypatch):
+    # Includes the merged "missing"/"feature" keys that cached bundles can still send.
+    for t in ("bug", "feature", "missing", "incorrectdata", "general"):
+        resp = _post(monkeypatch, feedbackType=t, description="hi")
+        assert resp.get_json()["error"] == "Email service not configured", t
+    for t in ("banappeal", "datadeletion", "professor"):
+        resp = _post(monkeypatch, feedbackType=t, description="hi", email="a@northeastern.edu",
+                     accountSub=_account_token())
+        assert resp.get_json()["error"] == "Email service not configured", t
+
+
+def _account_token():
+    import jwt
+    import server
+    return jwt.encode({"sub": "user-123"}, server.JWT_SECRET, algorithm="HS256")
+
+
+def test_data_deletion_requires_a_valid_account(monkeypatch):
+    for token in (None, "not-a-jwt"):
+        resp = _post(monkeypatch, feedbackType="datadeletion", description="hi",
+                     email="a@northeastern.edu", accountSub=token)
+        assert resp.status_code == 401
+        assert resp.get_json()["error"] == "Sign in required"
+
+
+def test_invalid_requests_are_rejected_before_captcha(monkeypatch):
+    import server
+    monkeypatch.setattr(server.limiter, "enabled", False)
+    monkeypatch.setenv("TURNSTILE_SECRET_KEY", "secret")
+    def no_siteverify(*a, **kw):
+        raise AssertionError("siteverify called for an invalid request")
+    monkeypatch.setattr(server.http_requests, "post", no_siteverify)
+    resp = server.app.test_client().post("/api/feedback", json={
+        "feedbackType": "bug", "description": "x" * (server.FEEDBACK_MAX_DESCRIPTION + 1),
+        "turnstileToken": "tok"})
+    assert resp.status_code == 400
+    assert "too long" in resp.get_json()["error"]
+
+
+def test_non_string_fields_are_rejected_not_crashed(monkeypatch):
+    resp = _post(monkeypatch, feedbackType=123, description="hi")
+    assert resp.status_code == 400
+    resp = _post(monkeypatch, feedbackType="bug", description="hi", email=None)
+    assert resp.get_json()["error"] == "Email service not configured"
+
+
+def test_overlong_description_is_rejected(monkeypatch):
+    import server
+    resp = _post(monkeypatch, feedbackType="bug", description="x" * (server.FEEDBACK_MAX_DESCRIPTION + 1))
+    assert resp.status_code == 400
+    assert "too long" in resp.get_json()["error"]
+
+
+def test_overlong_email_is_rejected(monkeypatch):
+    resp = _post(monkeypatch, feedbackType="bug", description="hi", email="a" * 250 + "@x.com")
+    assert resp.status_code == 400
+    assert "Invalid email" in resp.get_json()["error"]

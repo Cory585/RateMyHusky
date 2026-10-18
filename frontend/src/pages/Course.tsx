@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import StarRating from '../components/StarRating';
 import NotFound from './NotFound';
@@ -149,6 +150,12 @@ const Course = () => {
 						</h1>
 						<p className="course-dept">{course.department}</p>
 					</div>
+					{/* Up top, not in "When it's offered": next term is what a student registering looks for first. */}
+					{history && history.offeredNow.length > 0 && (
+						<div className="course-hero-offered">
+							{history.offeredNow.map(t => <span key={t} className="course-catalog-tag course-hero-offered-tag">Offered {t}</span>)}
+						</div>
+					)}
 				</header>
 
 				{course.catalog && (course.catalog.description || course.catalog.credits || course.catalog.prerequisites
@@ -197,7 +204,7 @@ const Course = () => {
 					<StatCard label="Professors" value={professors.length.toLocaleString()} />
 					{history?.lastOffered && <StatCard label="Last Taught" value={history.lastOffered} text />}
 					{history?.typicalClassSize != null && (
-						<StatCard label="Typical Class" value={`${history.typicalClassSize} students`} text />
+						<StatCard label="Typical Class Size" value={history.typicalClassSize.toLocaleString()} />
 					)}
 					{SHOW_SURVEY_STATS && (
 						<StatCard label="Avg Hrs / Week" value={summary.hoursPerWeek != null ? `${summary.hoursPerWeek.toFixed(1)}h` : '—'} />
@@ -415,30 +422,90 @@ function ProfCard({ name, imageUrl, focusX, focusY, rating, footerLeft, footerCe
 	);
 }
 
-type SeasonYears = NonNullable<CourseHistory['seasonYears']>;
-const SEASONS: [keyof SeasonYears, string][] = [
+type OfferingYears = NonNullable<CourseHistory['offeringYears']>;
+type SeasonKey = Exclude<keyof OfferingYears, 'window' | 'first'>;
+const TILES: [SeasonKey, string][] = [
 	['fall', 'Fall'], ['spring', 'Spring'], ['summer1', 'Summer 1'], ['summer2', 'Summer 2'], ['summer', 'Summer'],
 ];
 
+/* Banner keys an academic year by the year it ends: 2026 -> "2025–26". */
+const schoolYear = (year: number) => `${year - 1}–${String(year).slice(2)}`;
+
 function OfferingPanel({ history }: { history: CourseHistory }) {
-	const years = history.seasonYears;
-	const span = history.windowYears;
-	/* A season Banner never counted (summer1/summer2 before session labels) or that never ran is skipped. */
-	const seasons = years && span
-		? SEASONS.filter(([k]) => (years[k] ?? 0) > 0).map(([k, label]) => `${label} ${years[k]}/${span} yrs`)
-		: [];
+	const oy = history.offeringYears;
+	/* A row from before the scraper stored the years shows the pattern alone. */
+	let body = null;
+	let pattern = history.pattern;
+	if (oy && oy.window.length > 0) {
+		const years = oy.window;
+		const last = years[years.length - 1];
+		/* "N of M": M counts only the years since the course existed. */
+		const existed = years.filter((y) => y >= oy.first).length;
+		/* A full-summer-only course (Summer Full, CPS, Law) didn't skip the halves: hide them. */
+		const fullSummerOnly = oy.summer.length > 0 && oy.summer1.length === 0 && oy.summer2.length === 0;
+		const tiles = TILES.filter(([k]) => {
+			if (k === 'summer') return oy.summer.length > 0;
+			if (k === 'summer1' || k === 'summer2') return !fullSummerOnly;
+			return true;
+		});
+
+		if (oy.first > last) {
+			body = <p className="course-offering-note">First offered {history.firstOffered}</p>;
+		} else if (TILES.every(([k]) => oy[k].length === 0)) {
+			if (history.offeredNow.length > 0) {
+				/* Ran only before the window and is back on the schedule now: not "not offered".
+				   The note explains the gap, so the header's "Not offered recently" would contradict it. */
+				pattern = null;
+				body = <p className="course-offering-note">Back for {history.offeredNow.join(' and ')}, after no runs from {schoolYear(years[0])} to {schoolYear(last)}</p>;
+			} else {
+				body = <p className="course-offering-note">Not offered since {history.lastOffered}</p>;
+			}
+		} else {
+			body = (
+				<>
+					<div className="course-offering-tiles" style={{ '--tiles': tiles.length } as CSSProperties}>
+						{tiles.map(([k, label]) => {
+							const ran = oy[k].length;
+							const segs = years.map((y) => {
+								const state = oy[k].includes(y) ? 'ran' : y < oy.first ? 'before' : 'empty';
+								const what = state === 'ran' ? 'ran' : state === 'before' ? 'before this course existed' : 'not offered';
+								return { y, state, desc: `${schoolYear(y)}: ${what}` };
+							});
+							return (
+								<div key={k} className={`course-offering-tile${ran === 0 ? ' course-offering-tile--off' : ''}`}>
+									<span className="course-offering-tile-label">{label}</span>
+									{/* Color and hover titles alone don't reach touch or screen readers. */}
+									<span className="course-offering-bar" role="img" aria-label={`${label}: ${segs.map((s) => s.desc).join(', ')}`}>
+										{segs.map((s) => <span key={s.y} className={`course-offering-seg course-offering-seg--${s.state}`} title={s.desc} />)}
+									</span>
+									<span className="course-offering-count">
+										{ran === 0 ? 'Not offered' : `${ran} of ${existed} ${existed === 1 ? 'year' : 'years'}`}
+									</span>
+								</div>
+							);
+						})}
+					</div>
+					<p className="course-offering-caption">
+						School years {schoolYear(years[0])} to {schoolYear(last)}
+						{years[0] < oy.first && ' · Striped: before this course existed'}
+					</p>
+					{!!history.instructorCount && history.firstOffered && (
+						<p className="course-offering-taught">
+							Taught by {history.instructorCount} {history.instructorCount === 1 ? 'instructor' : 'instructors'} since {history.firstOffered}
+						</p>
+					)}
+				</>
+			);
+		}
+	}
+
 	return (
 		<section className="course-panel">
-			<div className="course-panel-header">
+			<div className="course-panel-header course-offering-header">
 				<h2>When it's offered</h2>
+				{pattern && <span className="course-offering-pattern">{pattern}</span>}
 			</div>
-			{history.pattern && <p className="course-offering-pattern">{history.pattern}</p>}
-			{seasons.length > 0 && <p className="course-offering-seasons">{seasons.join(' · ')}</p>}
-			{history.offeredNow.length > 0 && (
-				<div className="course-offering-badges">
-					{history.offeredNow.map(t => <span key={t} className="course-catalog-tag">Offered {t}</span>)}
-				</div>
-			)}
+			{body}
 			{history.replacedBy && <SuccessorLine verb="Replaced by" link={history.replacedBy} />}
 			{history.replaces && <SuccessorLine verb="Replaced" link={history.replaces} />}
 		</section>

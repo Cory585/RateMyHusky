@@ -8,7 +8,7 @@ const Privacy = () => {
         <div className="terms-shell">
           <header className="terms-header">
             <h1>Privacy Policy</h1>
-            <p className="terms-meta">Effective October 3, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective October 10, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -63,9 +63,9 @@ const Privacy = () => {
                   the RateMyHusky team via email and are not stored in a database. Submitted
                   information is used solely to improve the service. The form is protected by
                   a CAPTCHA challenge (see Third-Party Services). If you submit a
-                  "Data Deletion Request," an email address is required so we can respond, and
-                  (if you are signed in) your account identifier is included so we can locate
-                  the data held for your account and delete it. That account identifier is
+                  "Data Deletion Request," you must be signed in and an email address is
+                  required so we can respond; your account identifier is included so we can
+                  locate the data held for your account and delete it. That account identifier is
                   derived from your sign-in token at the time you submit and is not retained
                   beyond handling your request. A professor's request to correct or remove their
                   page also requires an email address, so we can confirm it with them.
@@ -123,8 +123,9 @@ const Privacy = () => {
                 <em>Your Rights &amp; Choices</em>.
               </p>
               <p>
-                Our database is a managed CockroachDB cluster hosted in the United States, the
-                API runs on Railway, and the site is served through Vercel. Each of these
+                Our database is a self-hosted PostgreSQL server on Oracle Cloud Infrastructure in
+                the United States (US East – Ashburn), the API runs on Railway, and the site is
+                served through Vercel. Each of these
                 providers processes data on our behalf under its own terms; see{' '}
                 <em>Third-Party Services</em>.
               </p>
@@ -197,7 +198,7 @@ const Privacy = () => {
                   </a>.
                 </li>
                 <li>
-                  <strong>Vercel, Railway &amp; Cockroach Labs</strong>: host the site, the API,
+                  <strong>Vercel, Railway &amp; Oracle Cloud Infrastructure</strong>: host the site, the API,
                   and the database respectively. As part of normal infrastructure operation they
                   may log request data such as IP addresses and user-agent strings. Subject to{' '}
                   <a
@@ -217,11 +218,11 @@ const Privacy = () => {
                   </a>
                   , and{' '}
                   <a
-                    href="https://www.cockroachlabs.com/privacy/"
+                    href="https://www.oracle.com/legal/privacy/"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    Cockroach Labs'
+                    Oracle's
                   </a>{' '}
                   privacy policies.
                 </li>
@@ -292,7 +293,7 @@ const Privacy = () => {
                   from Google and cannot be edited; we store it with your bookmarks, and a Data
                   Deletion Request removes it (see Right to deletion above).
                   If you believe professor or course data displayed on the site is inaccurate,
-                  you can report it through the feedback form under "Incorrect Data."
+                  you can report it through the feedback form under "Wrong or Missing Data."
                 </li>
                 <li>
                   <strong>Right to raise a concern:</strong> you may contact us at any time at{' '}

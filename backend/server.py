@@ -1,6 +1,6 @@
 """
 Backend API server for NEU Professor Ratings.
-No pandas/numpy — queries CockroachDB directly per request.
+No pandas/numpy — queries PostgreSQL directly per request.
 
 Install deps:  pip install flask flask-cors flask-limiter psycopg2-binary pyjwt requests python-dotenv gunicorn
 Run:           python server.py
@@ -116,6 +116,18 @@ app.config["COMPRESS_MIMETYPES"] = ["application/json", "text/html"]
 app.config["COMPRESS_MIN_SIZE"] = 256
 Compress(app)
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+# Set per environment, never defaulted: the id derives from the public key in
+# extension/manifest.json, so anyone could copy that key into their own
+# unpacked extension and inherit whatever this trusts. Comma-separated, so the
+# dev id and the Web Store's can both run during the handover.
+EXTENSION_ORIGINS = [
+    o.strip() for o in os.getenv("EXTENSION_ORIGINS", "").split(",") if o.strip()
+]
+
+# Not EXTENSION_ORIGINS: a popup holding host_permissions for the site isn't
+# subject to CORS, and the extension sends credentials: 'omit'. It still needs
+# the ALLOWED_ORIGINS entry below, because Chrome does send an Origin header.
 CORS(app, supports_credentials=True, origins=[FRONTEND_URL])
 def get_real_ip():
     """Get the real client IP from X-Forwarded-For (set by Vercel/Railway proxy)."""
@@ -158,6 +170,7 @@ ALLOWED_ORIGINS = {
         FRONTEND_URL,
         "http://localhost:5173",
         "http://localhost:3000",
+        *EXTENSION_ORIGINS,
     ) if _origin_host(o)
 }
 
@@ -241,18 +254,21 @@ def _unhandled_error(e):
 # ──────────────────────────────────────────────
 #  Database connection pool
 # ──────────────────────────────────────────────
-CRDB_DATABASE_URL = os.getenv("CRDB_DATABASE_URL")
-if not CRDB_DATABASE_URL:
-    raise RuntimeError("CRDB_DATABASE_URL environment variable is required")
+ORACLE_DATABASE_URL = os.getenv("ORACLE_DATABASE_URL")
+if not ORACLE_DATABASE_URL:
+    raise RuntimeError("ORACLE_DATABASE_URL environment variable is required")
 
 _pool = None
 
 def _get_pool():
     global _pool
     if _pool is None:
-        _pool = ThreadedConnectionPool(5, 10, CRDB_DATABASE_URL, sslmode="require",
+        _pool = ThreadedConnectionPool(5, 10, ORACLE_DATABASE_URL, sslmode="require",
                                        connect_timeout=5,
-                                       options="-c statement_timeout=5000",
+                                       # UTC: the Groq budget, throttle and usage-alert
+                                       # queries take "today" from the session, and the
+                                       # Python side counts days in UTC.
+                                       options="-c statement_timeout=5000 -c timezone=UTC",
                                        keepalives=1, keepalives_idle=30,
                                        keepalives_interval=10, keepalives_count=3)
     return _pool
@@ -280,6 +296,27 @@ _EMAIL_REQUIRED_FEEDBACK_TYPES = _ACCOUNT_FEEDBACK_TYPES | {"professor"}
 # Privacy Policy promise professors we confirm these at their Northeastern
 # address before acting, so the support email says up front whether that is possible.
 _PAGE_CHANGE_FEEDBACK_TYPES = {"missing", "incorrectdata", "professor"}
+
+# Every type the endpoint accepts, with its email subject label. "missing" and
+# "feature" were merged into "incorrectdata" and "general" on the form but stay
+# accepted for cached bundles; "banappeal" is hidden while Ask is off. Drop the two
+# old keys once no tab can still be running a pre-merge bundle (a couple of weeks
+# after the merge ships).
+_FEEDBACK_TYPE_LABELS = {
+    "bug": "Bug Report",
+    "incorrectdata": "Wrong or Missing Data",
+    "missing": "Missing Data",
+    "general": "Idea or General Feedback",
+    "feature": "Feature Request",
+    "professor": "Professor Request",
+    "datadeletion": "Data Deletion Request",
+    "banappeal": "Ask Ban Appeal",
+}
+# These limits and the email pattern in submit_feedback are copied in
+# frontend/src/components/FeedbackTab.tsx and frontend/public/maintenance.html
+# (maxlength attributes and the submit handler's regex). Change all three together.
+FEEDBACK_MAX_DESCRIPTION = 5000
+FEEDBACK_MAX_EMAIL = 254   # RFC 5321's limit on a full address
 
 
 def _is_northeastern_address(email):
@@ -512,7 +549,7 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 # ──────────────────────────────────────────────
 def _professor_search(q, limit=5):
     """Search professors with tiered relevance ranking."""
-    # Normalize first: name_key is stored lowercase/ASCII, and CockroachDB LIKE is
+    # Normalize first: name_key is stored lowercase/ASCII, and LIKE is
     # case-sensitive. Callers like the chat/Ask path pass a raw gate hint ("Wu Chieh"),
     # so without this the LIKE filter (and the lowercase ALIAS_MAP) never match.
     q = normalize_name(q)
@@ -685,17 +722,14 @@ FALLBACK_PRIOR = 4.2   # only for an empty or brand-new catalog
 # So a short board is a feature. Do not backfill it to reach `limit`.
 BOARD_MIN_REVIEWS = 30
 
-# CockroachDB has no implicit int/float coercion, so total_reviews (INT) needs an
-# explicit cast against avg_rating (FLOAT) or the query fails with
-# "unsupported binary operator: <int> * <float>".
+# total_reviews (BIGINT) is cast to float so the shrinkage arithmetic is
+# floating-point throughout instead of leaning on implicit int/float coercion.
 # float(m), not "{m}.0" — the latter renders "0.9.0" and is a syntax error if
 # SHRINKAGE_M is ever tuned to a non-integer.
 # The prior arrives as a bound parameter rather than a subquery, so the sort does
 # not carry a full-table aggregate and the value can be measured under its own
-# filter.
-# The prior is cast explicitly: CockroachDB infers placeholder types from
-# context, and a bare %s inside an ORDER BY arithmetic expression is the kind of
-# position where it gives up with "could not determine data type of placeholder".
+# filter. It is cast explicitly (%s::float) so its type never depends on how the
+# driver renders the bound value.
 RANKING_SCORE_SQL = """
     ((total_reviews::float * avg_rating + {m} * %s::float)
      / (total_reviews::float + {m}))
@@ -963,6 +997,50 @@ def professor_full(slug):
     resp.headers["Cache-Control"] = "private, max-age=3600" if _is_authed() else "public, max-age=3600"
     resp.headers["Vary"] = "Authorization"
     return history_cache_control(resp)
+
+
+from professor_full import _resolve_professor  # same lookup as /full, skips denied profs
+
+MIN_TAG_REVIEWS = 3  # need at least this many reviews before showing a tag
+
+
+@app.route("/api/professors/<slug>/tags")
+def professor_tags(slug):
+    cache_key = f"prof_tags:{slug}"
+    data = cache_get(cache_key)
+    if data is None:
+        prof = _resolve_professor(slug, query_one)
+        if not prof:
+            return jsonify({"error": "Professor not found"}), 404
+        rows = query(
+            "SELECT tag, review_count FROM professor_tags "
+            "WHERE name_key = %s AND review_count >= %s ORDER BY review_count DESC",
+            (prof["name_key"], MIN_TAG_REVIEWS),
+        )
+        data = [{"tag": r["tag"], "count": r["review_count"]} for r in rows]
+        cache_set(cache_key, data)
+    resp = jsonify(data)
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
+
+
+@app.route("/api/tags/popular")
+def popular_tags():
+    data = cache_get("tags_popular")
+    if data is None:
+        # join on professors_catalog so denied profs don't get counted
+        rows = query(
+            "SELECT pt.tag, COUNT(*) AS profs FROM professor_tags pt "
+            "JOIN professors_catalog pc ON pc.name_key = pt.name_key "
+            "WHERE pt.review_count >= %s GROUP BY pt.tag ORDER BY profs DESC LIMIT 20",
+            (MIN_TAG_REVIEWS,),
+        )
+        # count is number of profs with the tag
+        data = [{"tag": r["tag"], "count": int(r["profs"])} for r in rows]
+        cache_set("tags_popular", data)
+    resp = jsonify(data)
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
 
 
 @app.route("/api/departments")
@@ -1615,11 +1693,49 @@ def submit_feedback():
     global _feedback_count, _feedback_date
 
     data = request.get_json(silent=True) or {}
-    feedback_type = data.get("feedbackType", "").strip()
-    description = data.get("description", "").strip()
-    reply_email = data.get("email", "").strip()
-    turnstile_token = data.get("turnstileToken", "").strip()
-    account_token = (data.get("accountSub") or "").strip()
+    # Non-string values (123, null) count as missing instead of crashing .strip().
+    def field(name):
+        value = data.get(name)
+        return value.strip() if isinstance(value, str) else ""
+
+    feedback_type = field("feedbackType")
+    description = field("description")
+    reply_email = field("email")
+    turnstile_token = field("turnstileToken")
+    account_token = field("accountSub")
+
+    # Validate before Turnstile: a bad request shouldn't cost a siteverify call
+    # or use up the user's one-time CAPTCHA token.
+    if not feedback_type or not description:
+        return jsonify({"error": "feedbackType and description are required"}), 400
+
+    if feedback_type not in _FEEDBACK_TYPE_LABELS:
+        return jsonify({"error": "Unknown feedback type"}), 400
+
+    if len(description) > FEEDBACK_MAX_DESCRIPTION:
+        return jsonify({"error": f"Description is too long (max {FEEDBACK_MAX_DESCRIPTION} characters)"}), 400
+
+    # Ask ban appeals, data-deletion and professor requests are useless without a reply
+    # address — require it (other types stay optional).
+    if feedback_type in _EMAIL_REQUIRED_FEEDBACK_TYPES and not reply_email:
+        return jsonify({"error": "Email is required for this request"}), 400
+
+    if reply_email and (len(reply_email) > FEEDBACK_MAX_EMAIL
+                        or not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', reply_email)):
+        return jsonify({"error": "Invalid email address"}), 400
+
+    # Resolve the account from its JWT (verified server-side, never trust a client-supplied id)
+    # so we can locate/clear its ask_log rows by session_token (appeal review or data erasure).
+    appeal_account = None
+    if feedback_type in _ACCOUNT_FEEDBACK_TYPES and account_token:
+        try:
+            appeal_account = pyjwt.decode(account_token, JWT_SECRET, algorithms=["HS256"]).get("sub")
+        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+            appeal_account = None
+
+    # Support can't erase data that isn't tied to an account, so don't send it on.
+    if feedback_type == "datadeletion" and appeal_account is None:
+        return jsonify({"error": "Sign in required"}), 401
 
     # Verify Cloudflare Turnstile CAPTCHA
     turnstile_secret = os.getenv("TURNSTILE_SECRET_KEY")
@@ -1637,26 +1753,6 @@ def submit_feedback():
         except Exception:
             return jsonify({"error": "CAPTCHA verification failed"}), 500
 
-    if not feedback_type or not description:
-        return jsonify({"error": "feedbackType and description are required"}), 400
-
-    # Ask ban appeals, data-deletion and professor requests are useless without a reply
-    # address — require it (other types stay optional).
-    if feedback_type in _EMAIL_REQUIRED_FEEDBACK_TYPES and not reply_email:
-        return jsonify({"error": "Email is required for this request"}), 400
-
-    if reply_email and not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', reply_email):
-        return jsonify({"error": "Invalid email address"}), 400
-
-    # Resolve the account from its JWT (verified server-side, never trust a client-supplied id)
-    # so we can locate/clear its ask_log rows by session_token (appeal review or data erasure).
-    appeal_account = None
-    if feedback_type in _ACCOUNT_FEEDBACK_TYPES and account_token:
-        try:
-            appeal_account = pyjwt.decode(account_token, JWT_SECRET, algorithms=["HS256"]).get("sub")
-        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
-            appeal_account = None
-
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     with _feedback_lock:
         if _feedback_date != today:
@@ -1671,17 +1767,7 @@ def submit_feedback():
         print("[feedback] RESEND_API_KEY not configured")
         return jsonify({"error": "Email service not configured"}), 500
 
-    type_labels = {
-        "bug": "Bug Report",
-        "feature": "Feature Request",
-        "missing": "Missing Data",
-        "incorrectdata": "Incorrect Data",
-        "banappeal": "Ask Ban Appeal",
-        "datadeletion": "Data Deletion Request",
-        "professor": "Professor Request",
-        "general": "General Feedback",
-    }
-    type_label = type_labels.get(feedback_type, feedback_type)
+    type_label = _FEEDBACK_TYPE_LABELS[feedback_type]
     submitted_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     lines = [

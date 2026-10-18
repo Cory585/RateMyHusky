@@ -427,3 +427,20 @@
 .dark .feedback-fab:hover {
   background: #9e2535;
 }
+/* ---------- inline notice (e.g. data deletion while signed out) ---------- */
+.feedback-note {
+  width: 100%;
+  background: #fff6e5;
+  color: #8a5a00;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin: 0 0 10px;
+  text-align: left;
+}
+
+.dark .feedback-note {
+  background: #3a2f1a;
+  color: #e8b85c;
+}

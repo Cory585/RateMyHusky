@@ -1,7 +1,6 @@
 # Baseline: known historical findings, amnestied 2026-07-29.
 # 15 x expired university course-portal session cookies in old scraper/main.py commits.
 # 1 x dummy TEST_SECRET in backend/tests/test_bookmarks_api.py (false positive).
-# 1 x Chrome extension manifest "key" in extension/manifest.json: the extension's
 #     public key, which pins its ID (false positive; the private .pem is not committed).
 # Anything NOT listed here still fails CI.
 0b186f8ea5613de81d392aa4a5fef6f92d9d78b2:backend/tests/test_bookmarks_api.py:generic-api-key:15
@@ -20,4 +19,3 @@ a5a12d457dffef72c1286cb7a7bb6fcbc0cc777c:scraper/main.py:jwt:20
 a5a12d457dffef72c1286cb7a7bb6fcbc0cc777c:scraper/main.py:jwt:21
 a5a12d457dffef72c1286cb7a7bb6fcbc0cc777c:scraper/main.py:generic-api-key:19
 a5a12d457dffef72c1286cb7a7bb6fcbc0cc777c:scraper/main.py:generic-api-key:24
-faf1ed2588f872e38ccc665dc59eaf80b397b54f:extension/manifest.json:generic-api-key:6
