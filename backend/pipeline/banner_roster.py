@@ -21,6 +21,8 @@ from teaching_history import display_name
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "scraper"))
+from banner_api import NON_TEACHING_SCHEDULE_TYPES  # noqa: E402
+from banner_history import MAX_COURSES_PER_TERM  # noqa: E402
 from match_banner_instructors import BANNER_ALIASES, subject_of  # noqa: E402
 
 from .db import chunk_insert
@@ -39,6 +41,38 @@ _SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
 # BIO, ENG) taught by day-college faculty, so counting it would move Science
 # professors into Professional Studies.
 TRACK_COLLEGES = {"Law Semester": "Law", "CPS Quarter": "Professional Studies"}
+
+# Sections taught per (instructor_key, professor_slug, track), counted the way
+# the Banner history counts teaching: Banner's own rows, no supervision or co-op
+# rows, no cancelled sections (closed term, 0 enrolled), and no term where the
+# name was listed twice or sat on more than MAX_COURSES_PER_TERM courses (a
+# coordinator, not a teacher). The slug comes from the matcher's per-course
+# verdict, so a namesake's courses the matcher refused to link stay uncounted;
+# it is NULL for Banner-only professors, who are linked at apply time.
+TRACK_SECTIONS_SQL = """
+    WITH taught AS (
+        SELECT i.term_code, i.instructor_key, s.subject_course, t.track
+        FROM banner_section_instructors i
+        JOIN banner_sections s ON s.term_code = i.term_code AND s.crn = i.crn
+        JOIN banner_terms t ON t.term_code = i.term_code
+        WHERE i.source = 'banner'
+          AND lower(coalesce(s.schedule_type, '')) NOT IN ({non_teaching})
+          AND NOT (coalesce(t.scraped_closed, false) AND coalesce(s.enrollment = 0, false))
+          AND NOT EXISTS (SELECT 1 FROM banner_roster_duplicates d
+                          WHERE d.term_code = i.term_code AND d.instructor_key = i.instructor_key)
+    ), coordinators AS (
+        SELECT term_code, instructor_key FROM taught GROUP BY 1, 2
+        HAVING count(DISTINCT subject_course) > {max_courses}
+    )
+    SELECT t.instructor_key, b.professor_slug, t.track, count(*) AS sections
+    FROM taught t
+    JOIN banner_course_instructors b
+      ON b.instructor_key = t.instructor_key AND b.subject_course = t.subject_course
+    WHERE NOT EXISTS (SELECT 1 FROM coordinators c
+                      WHERE c.term_code = t.term_code AND c.instructor_key = t.instructor_key)
+    GROUP BY 1, 2, 3
+""".format(non_teaching=", ".join(f"'{s}'" for s in sorted(NON_TEACHING_SCHEDULE_TYPES)),
+           max_courses=int(MAX_COURSES_PER_TERM))
 
 
 def _first_last(key):
@@ -63,13 +97,15 @@ def subject_departments(instructor_rows, department_by_slug):
     return {subject: min(counts, key=lambda d: (-counts[d], d)) for subject, counts in votes.items()}
 
 
-def track_colleges(track_rows, slug_by_key):
+def track_colleges(track_rows, new_slug_by_key):
     """slug -> college, for professors who taught more than half their sections
-    in one TRACK_COLLEGES track. track_rows hold (instructor_key, track, sections);
-    a professor reached by several instructor keys has their sections summed."""
+    in one TRACK_COLLEGES track. track_rows are TRACK_SECTIONS_SQL rows; an
+    unlinked row counts only for a Banner-only professor created this run
+    (new_slug_by_key), whose rows are all unlinked by construction. A professor
+    reached by several instructor keys has their sections summed."""
     sections = defaultdict(Counter)
     for row in track_rows:
-        slug = slug_by_key.get(row["instructor_key"])
+        slug = row["professor_slug"] or new_slug_by_key.get(row["instructor_key"])
         if slug:
             sections[slug][row["track"]] += row["sections"]
     colleges = {}

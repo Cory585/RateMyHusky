@@ -52,13 +52,9 @@ def main(argv=None):
     _print("banner roster", banner_counts)
     professors = professors + new_banner
     # New Banner professors are linked in the database only at apply time, so
-    # their keys are added here from the rows just resolved.
-    slug_by_key = {r["instructor_key"]: r["professor_slug"] for r in bci if r["professor_slug"]}
-    slug_by_key.update({p["name_key"]: p["slug"] for p in new_banner})
-    track_rows = fetch_all(conn, "SELECT si.instructor_key, t.track, count(*) AS sections "
-                                 "FROM banner_section_instructors si JOIN banner_terms t USING (term_code) "
-                                 "GROUP BY 1, 2")
-    colleges = banner_roster.track_colleges(track_rows, slug_by_key)
+    # their keys come from the rows just resolved.
+    track_rows = fetch_all(conn, banner_roster.TRACK_SECTIONS_SQL)
+    colleges = banner_roster.track_colleges(track_rows, {p["name_key"]: p["slug"] for p in new_banner})
     print(f"colleges from term track: {dict(sorted(Counter(colleges.values()).items()))}")
     # Alias-aware, so a page created before its professor's denial request still drops.
     professors, links = read_models.drop_denied(professors, links, banner_roster.is_denied_banner_key)

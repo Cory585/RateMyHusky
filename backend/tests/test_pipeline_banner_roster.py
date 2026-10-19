@@ -136,36 +136,54 @@ def test_banner_key_denied_through_alias_map(monkeypatch):
     assert br.is_denied_banner_key("virgiliu pavlu") and seen == ["virgiliu pavlu"]
 
 
-def track(key, track_name, sections):
-    return {"instructor_key": key, "track": track_name, "sections": sections}
+def track(key, track_name, sections, slug=None):
+    return {"instructor_key": key, "professor_slug": slug, "track": track_name, "sections": sections}
 
 
 def test_majority_law_or_cps_quarter_track_names_the_college():
-    slugs = {"ada park": "ada-park", "john smith": "john-smith"}
-    colleges = br.track_colleges([track("ada park", "Law Semester", 6), track("ada park", "Semester", 2),
-                                  track("john smith", "CPS Quarter", 3)], slugs)
+    colleges = br.track_colleges([track("ada park", "Law Semester", 6, "ada-park"),
+                                  track("ada park", "Semester", 2, "ada-park"),
+                                  track("john smith", "CPS Quarter", 3, "john-smith")], {})
     assert colleges == {"ada-park": "Law", "john-smith": "Professional Studies"}
 
 
 def test_day_college_majority_or_a_tie_keeps_the_department_college():
-    slugs = {"ada park": "ada-park", "john smith": "john-smith"}
-    colleges = br.track_colleges([track("ada park", "CPS Quarter", 2), track("ada park", "Semester", 3),
-                                  track("john smith", "Law Semester", 2), track("john smith", "Semester", 2)],
-                                 slugs)
+    colleges = br.track_colleges([track("ada park", "CPS Quarter", 2, "ada-park"),
+                                  track("ada park", "Semester", 3, "ada-park"),
+                                  track("john smith", "Law Semester", 2, "john-smith"),
+                                  track("john smith", "Semester", 2, "john-smith")], {})
     assert colleges == {}
 
 
 def test_cps_semester_does_not_count_toward_professional_studies():
     # Day-college subjects taught to CPS undergraduates by day-college faculty.
-    assert br.track_colleges([track("ada park", "CPS Semester", 9)], {"ada park": "ada-park"}) == {}
+    assert br.track_colleges([track("ada park", "CPS Semester", 9, "ada-park")], {}) == {}
 
 
 def test_sections_are_summed_across_a_professors_instructor_keys():
-    slugs = {"ada park": "ada-park", "ada m park": "ada-park"}
-    colleges = br.track_colleges([track("ada park", "Law Semester", 2), track("ada park", "Semester", 3),
-                                  track("ada m park", "Law Semester", 2)], slugs)
+    colleges = br.track_colleges([track("ada park", "Law Semester", 2, "ada-park"),
+                                  track("ada park", "Semester", 3, "ada-park"),
+                                  track("ada m park", "Law Semester", 2, "ada-park")], {})
     assert colleges == {"ada-park": "Law"}
 
 
-def test_unlinked_instructors_are_ignored():
+def test_a_namesakes_unlinked_courses_do_not_count():
+    # The matcher linked john smith's CS courses but refused his LAW ones as
+    # another person's; those rows arrive with no slug and must not move him.
+    colleges = br.track_colleges([track("john smith", "Semester", 2, "john-smith"),
+                                  track("john smith", "Law Semester", 10)], {})
+    assert colleges == {}
+
+
+def test_unlinked_rows_count_for_a_banner_professor_created_this_run():
+    assert br.track_colleges([track("lucia nunez", "CPS Quarter", 4)],
+                             {"lucia nunez": "lucia-nunez"}) == {"lucia-nunez": "Professional Studies"}
     assert br.track_colleges([track("nobody", "Law Semester", 5)], {}) == {}
+
+
+def test_track_sql_applies_the_banner_history_filters():
+    sql = br.TRACK_SECTIONS_SQL
+    assert "i.source = 'banner'" in sql
+    assert all(f"'{t}'" in sql for t in br.NON_TEACHING_SCHEDULE_TYPES)
+    assert f"> {br.MAX_COURSES_PER_TERM}" in sql
+    assert "banner_roster_duplicates" in sql and "scraped_closed" in sql

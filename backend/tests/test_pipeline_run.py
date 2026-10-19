@@ -29,8 +29,8 @@ TABLES = {
     ],
     # The aggregate run.py reads; keyed by its first table like every query here.
     "banner_section_instructors": [
-        {"instructor_key": "olin guha", "track": "Law Semester", "sections": 3},
-        {"instructor_key": "lucia nunez", "track": "CPS Quarter", "sections": 1},
+        {"instructor_key": "olin guha", "professor_slug": "olin-guha", "track": "Law Semester", "sections": 3},
+        {"instructor_key": "lucia nunez", "professor_slug": None, "track": "CPS Quarter", "sections": 1},
     ],
 }
 
@@ -78,5 +78,5 @@ def test_term_track_sets_catalog_college_for_linked_and_new_banner_professors(wr
     monkeypatch.setattr(run.read_models, "verify", lambda *a: [])
     assert run.main([]) == 0
     catalog = {r["slug"]: r["college"] for r in writes[-1][1]}
-    assert catalog["olin-guha"] == "Law"                       # linked through banner_course_instructors
+    assert catalog["olin-guha"] == "Law"                       # linked by the matcher
     assert catalog["lucia-nunez"] == "Professional Studies"    # created this run, linked by name_key
