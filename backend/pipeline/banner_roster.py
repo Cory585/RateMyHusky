@@ -115,6 +115,6 @@ def apply_banner_professors(conn, rows):
     # banner-refresh, whose matcher recomputes these columns.
     cur.execute("UPDATE banner_course_instructors bci SET professor_slug = p.slug, "
                 "name_key = p.name_key, match_method = 'name_key' FROM professors p "
-                "WHERE p.slug = ANY(%s) AND p.name_key = bci.instructor_key "
+                "WHERE p.slug = ANY(%s) AND p.origin = 'banner' AND p.name_key = bci.instructor_key "
                 "AND bci.match_method = 'no_match'", ([r["slug"] for r in rows],))
     conn.commit()
