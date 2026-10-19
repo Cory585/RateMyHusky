@@ -67,6 +67,16 @@ export interface RmpData {
   reviews: ProfessorReview[];
 }
 
+export interface SurveyData {
+  /** False without survey ratings; every number below is null then. */
+  available: boolean;
+  rating: number | null;
+  numRatings: number;
+  hoursPerWeek: number | null;
+  ratingDistribution: RatingDistribution;
+  gradeDistribution: Record<string, number>;
+}
+
 export interface ProfessorCourse {
   code: string;
   /** The catalog name, else Banner's title. null when neither has one. */
@@ -100,7 +110,7 @@ export interface ProfessorPage {
   version: 2;
   identity: ProfessorIdentity;
   summary: ProfessorSummary;
-  sources: { rmp: RmpData };
+  sources: { rmp: RmpData; survey: SurveyData };
   courses: ProfessorCourse[];
   redditMentions: RedditMention[];
   awards: TeachingAward[];

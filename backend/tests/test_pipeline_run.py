@@ -27,7 +27,32 @@ TABLES = {
          "professor_slug": "olin-guha", "match_method": "name_key", "terms_taught": 3,
          "last_term_code": "202630"},
     ],
+    "survey_ratings": [{"professor_slug": "olin-guha", "course_code": "CS2500", "rating": 5,
+                        "hours": "3-4", "grade": None, "comment": ""}],
+    "survey_pending_courses": [],
 }
+
+
+@pytest.fixture
+def captured(monkeypatch):
+    sqls, written = [], {}
+
+    def fetch(conn, sql):
+        sqls.append(sql)
+        return [dict(r) for r in TABLES[sql.split(" FROM ")[1].split()[0]]]
+
+    monkeypatch.setattr(run, "connect", lambda: object())
+    monkeypatch.setattr(run, "fetch_all", fetch)
+    monkeypatch.setattr(run.roster, "apply_roster", lambda *a: None)
+    monkeypatch.setattr(run.banner_roster, "apply_banner_professors", lambda *a: None)
+    monkeypatch.setattr(run.course_codes, "apply_codes", lambda *a: 0)
+    monkeypatch.setattr(run.name_keys, "apply_name_keys", lambda *a: 0)
+    monkeypatch.setattr(run.review_tags, "rebuild_if_present", lambda *a: None)
+    monkeypatch.setattr(run.read_models, "verify", lambda *a: [])
+    monkeypatch.setattr(run.read_models, "write",
+                        lambda conn, catalog, courses, summary_rows, counts: written.update(
+                            summary_rows=summary_rows))
+    return sqls, written
 
 
 @pytest.fixture
@@ -67,3 +92,18 @@ def test_writes_happen_after_verify_in_order(writes, monkeypatch):
     assert writes[1][1][0]["department"] == "CS"
     assert writes[2][1] == [(10, "CS2500")]
     assert writes[3][1] == [(10, "olin guha")]
+
+
+def test_survey_rows_reach_the_read_models(captured):
+    _, written = captured
+    assert run.main([]) == 0
+    by = {(r["professor_slug"], r["course_code"], r["source"]): r for r in written["summary_rows"]}
+    assert ("olin-guha", "", "survey") in by
+    assert by[("olin-guha", "", "blend")]["num_ratings"] == 2      # 1 RMP + 1 survey
+
+
+def test_only_accepted_ratings_with_a_professor_are_read(captured):
+    sqls, _ = captured
+    run.main(["--dry-run"])
+    [sql] = [s for s in sqls if "FROM survey_ratings" in s]
+    assert "status = 'accepted' AND professor_slug IS NOT NULL" in sql

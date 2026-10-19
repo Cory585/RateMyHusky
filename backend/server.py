@@ -38,6 +38,11 @@ from course_page import build_course
 from professor_full import build_payload
 import bookmarks
 import moderation
+import notify
+import ip_networks
+import rating_identity
+import rating_checks
+import ratings
 import usage_alert
 
 load_dotenv()
@@ -130,7 +135,14 @@ EXTENSION_ORIGINS = [
 # the ALLOWED_ORIGINS entry below, because Chrome does send an Origin header.
 CORS(app, supports_credentials=True, origins=[FRONTEND_URL])
 def get_real_ip():
-    """Get the real client IP from X-Forwarded-For (set by Vercel/Railway proxy)."""
+    """Client IP: X-RMH-Client-IP from the keyed proxy, else last X-Forwarded-For."""
+    # Only the Vercel middleware can send the key, so only then is the client
+    # IP header it sets trustworthy. Checked here, not assumed from
+    # require_proxy_key: the limiter's hook runs before that one.
+    if PROXY_SECRET and request.headers.get("X-Proxy-Key") == PROXY_SECRET:
+        client_ip = request.headers.get("X-RMH-Client-IP", "").strip()
+        if client_ip:
+            return client_ip
     xff = request.headers.get("X-Forwarded-For", "")
     if xff:
         # Last entry is the IP appended by our trusted proxy (Vercel/Railway);
@@ -1814,6 +1826,218 @@ def submit_feedback():
         return jsonify({"error": "Failed to send email"}), 500
 
     return jsonify({"ok": True})
+
+
+# ──────────────────────────────────────────────
+#  Student ratings (no login): /api/rate
+# ──────────────────────────────────────────────
+
+RATING_SECRET = os.getenv("RATING_SECRET")
+# Loaded at import so gunicorn --preload reads the data files once.
+_networks = ip_networks.load_index(os.getenv("IP_DATA_DIR", "/tmp/ipdata"))
+_rating_moderation_client = None
+_last_ip_purge = 0.0
+_IP_PURGE_INTERVAL = 3600
+_MIN_RATING_SECRET = 32
+
+
+def _rating_enabled():
+    """A RATING_SECRET shorter than 32 characters counts as unset."""
+    return bool(RATING_SECRET) and len(RATING_SECRET) >= _MIN_RATING_SECRET
+
+
+def _turnstile_passes(token):
+    try:
+        resp = http_requests.post(
+            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+            data={"secret": os.getenv("TURNSTILE_SECRET_KEY"), "response": token, "remoteip": get_real_ip()},
+            timeout=5,
+        )
+        return bool(resp.ok and resp.json().get("success"))
+    except Exception:
+        return False
+
+
+def _rating_moderation_score(texts):
+    """moderation.score_texts through a client that gives up after 5 s, so a slow API holds the rating."""
+    global _rating_moderation_client
+    if _rating_moderation_client is None:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise moderation.ModerationUnavailable("OPENAI_API_KEY is not set")
+        from openai import OpenAI
+        _rating_moderation_client = OpenAI(api_key=api_key, timeout=5, max_retries=0)
+    return moderation.score_texts(texts, client=_rating_moderation_client)
+
+
+def _rating_limit_key():
+    token = request.cookies.get(rating_identity.DEVICE_COOKIE, "")
+    if not rating_identity.valid_device_token(token):
+        body = request.get_json(silent=True)
+        token = body.get("deviceToken") if isinstance(body, dict) else None
+    if _rating_enabled() and rating_identity.valid_device_token(token):
+        return rating_identity.keyed_hash(RATING_SECRET, "device", token) + "|" + get_real_ip()
+    return get_real_ip()
+
+
+def _network_type():
+    """The client's network type, looked up once per request."""
+    if "network_type" not in g:
+        g.network_type = _networks.network_type(get_real_ip())
+    return g.network_type
+
+
+def _shared_network():
+    """Campus and Private Relay addresses are shared by many students, so the IP-only limit skips them."""
+    return _network_type() in ("campus", "relay")
+
+
+def _rating_unavailable():
+    return jsonify({"error": "Ratings are not available right now"}), 503
+
+
+def _rating_response(body, status, token=None):
+    resp = make_response(jsonify(body), status)
+    resp.headers["Cache-Control"] = "no-store"
+    if token:
+        resp.set_cookie(rating_identity.DEVICE_COOKIE, token, max_age=rating_identity.DEVICE_MAX_AGE,
+                        httponly=True, secure=True, samesite="Lax", path="/api")
+    return resp
+
+
+def _device_token(mirror):
+    """(token, minted_now): the cookie, else a valid localStorage mirror, else a new one."""
+    for candidate in (request.cookies.get(rating_identity.DEVICE_COOKIE), mirror):
+        if rating_identity.valid_device_token(candidate):
+            return candidate, False
+    return rating_identity.new_device_token(), True
+
+
+@app.route("/api/rate/start")
+def rate_start():
+    if not _rating_enabled():
+        return _rating_unavailable()
+    now = datetime.now(timezone.utc)
+    # The localStorage mirror comes in a header, not the query string, so it stays out of access logs.
+    token, minted = _device_token(request.headers.get("X-Rmh-Device"))
+    device_hash = rating_identity.keyed_hash(RATING_SECRET, "device", token)
+    opened = rating_identity.sign_opened(RATING_SECRET, int(now.timestamp()), device_hash, minted)
+    counter = ratings.huskies_this_term(query_one, now)
+    return _rating_response({"opened": opened, "deviceToken": token, "counter": counter}, 200, token)
+
+
+@app.route("/api/rate/professors/<slug>")
+def rate_professor(slug):
+    if not _rating_enabled():
+        return _rating_unavailable()
+    if not ratings.professor_exists(slug, query_one):
+        return _rating_response({"error": "Professor not found"}, 404)
+    token = request.cookies.get(rating_identity.DEVICE_COOKIE)
+    device_hash = (rating_identity.keyed_hash(RATING_SECRET, "device", token)
+                   if rating_identity.valid_device_token(token) else None)
+    return _rating_response(ratings.professor_context(slug, device_hash, query), 200)
+
+
+@app.route("/api/rate", methods=["POST"])
+@limiter.limit("20 per hour", key_func=_rating_limit_key)
+@limiter.limit("300 per hour", exempt_when=_shared_network)
+def rate_submit():
+    global _last_ip_purge
+    # 1. Secret
+    if not _rating_enabled():
+        return _rating_unavailable()
+    body = request.get_json(silent=True)
+    now = datetime.now(timezone.utc)
+
+    # 2. Honeypot: look accepted, verify and store nothing
+    if isinstance(body, dict) and body.get("website"):
+        return _rating_response({"ok": True, "counter": ratings.huskies_this_term(query_one, now)}, 200)
+
+    # 3. Validation
+    clean, err = rating_checks.validate_submission(body, now.year)
+    if err:
+        return _rating_response({"error": err}, 400)
+
+    # 4. Turnstile
+    if os.getenv("TURNSTILE_SECRET_KEY"):
+        token = body.get("turnstileToken")
+        if not token:
+            return _rating_response({"error": "CAPTCHA verification required"}, 400)
+        if not _turnstile_passes(token):
+            return _rating_response({"error": "CAPTCHA verification failed"}, 403)
+
+    # 5. Existence
+    if clean["professor_slug"] and not ratings.professor_exists(clean["professor_slug"], query_one):
+        return _rating_response({"error": "Unknown professor"}, 400)
+    new_course = None
+    if not ratings.course_exists(clean["course_code"], query_one):
+        if not clean["new_course_name"]:
+            return _rating_response({"error": "Unknown course code: give the course name"}, 400)
+        new_course = clean["new_course_name"]
+
+    # 6. Device, hashes, network, fill time
+    device, minted_now = _device_token(body.get("deviceToken"))
+    device_hash = rating_identity.keyed_hash(RATING_SECRET, "device", device)
+    ip = get_real_ip()
+    ip_hash = rating_identity.keyed_hash(RATING_SECRET, "ip", ip)
+    prefix = rating_identity.ip_prefix(ip)
+    prefix_hash = rating_identity.keyed_hash(RATING_SECRET, "net", prefix) if prefix else None
+    network_type = _network_type()
+    fill_seconds, opened_minted = rating_identity.read_opened(
+        RATING_SECRET, body.get("opened"), device_hash, int(now.timestamp()))
+
+    # A well-formed token the client picked is no returning device unless it already has a rating.
+    new_device = minted_now or opened_minted or not ratings.device_seen(device_hash, query_one)
+
+    # 7. Moderation: a blocked comment stops here, before anything is written
+    moderation_action = rating_checks.moderate(clean["comment"], score=_rating_moderation_score)
+    if moderation_action == "block":
+        return _rating_response({"error": "comment_blocked"}, 422, device)
+
+    # 8. Pending professor / course; the team emails wait until the rating is saved
+    pending_professor_id = pending_course_id = None
+    emails = []
+    if clean["new_professor"]:
+        name, dept = clean["new_professor"]["name"], clean["new_professor"]["department"]
+        pending_professor_id, created = ratings.pending_professor(name, dept, query_one, _write)
+        if created:
+            emails.append((f"[RateMyHusky] New professor to review: {name}",
+                           f"Name: {name}\nDepartment: {dept or '-'}\n\nReview with: python review_ratings.py list"))
+    if new_course:
+        pending_course_id, created = ratings.pending_course(clean["course_code"], new_course, query_one, _write)
+        if created:
+            emails.append((f"[RateMyHusky] New course to review: {clean['course_code']}",
+                           f"Code: {clean['course_code']}\nName: {new_course}\n\nReview with: python review_ratings.py list"))
+
+    # 9. Replace-or-insert, holds and bursts
+    key = ratings.rating_key(clean, pending_professor_id, pending_course_id)
+    existing = ratings.existing_rating(device_hash, key, query_one)
+    chash = rating_checks.comment_hash(clean["comment"])
+    duplicate = ratings.duplicate_comment(chash, existing["id"] if existing else None, query_one)
+    bursts = ratings.burst_reasons(key, ip_hash, prefix_hash, network_type, query_one, now)
+    status, reasons = rating_checks.assess(fill_seconds, network_type, bursts, duplicate, moderation_action)
+    row = {
+        **key,
+        "term_label": clean["term_label"], "rating": clean["rating"], "hours": clean["hours"],
+        "grade": clean["grade"], "comment": clean["comment"] or None, "comment_hash": chash,
+        "status": status, "hold_reasons": ",".join(reasons) or None,
+        "device_hash": device_hash, "new_device": new_device,
+        "ip_hash": ip_hash, "ip_prefix_hash": prefix_hash, "network_type": network_type,
+        "fill_seconds": fill_seconds, "collection": "turnstile+device",
+    }
+    ratings.save_rating(row, existing, _write)
+    if bursts:
+        ratings.hold_burst(bursts, key, ip_hash, prefix_hash, _write, now)
+    for subject, text in emails:
+        notify.send_team_email(subject, text)
+
+    # 10. Clear old IP hashes, at most hourly per process
+    if time.time() - _last_ip_purge >= _IP_PURGE_INTERVAL:
+        _last_ip_purge = time.time()
+        ratings.purge_ip_hashes(_write, now)
+
+    # 11. Same body whether accepted or held
+    return _rating_response({"ok": True, "counter": ratings.huskies_this_term(query_one, now)}, 200, device)
 
 
 from render import render_bp

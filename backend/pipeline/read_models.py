@@ -55,8 +55,8 @@ def catalog_rows(professors, links, pages, summary_rows, is_denied=is_denied_key
     blend, rmp = _index(summary_rows, "blend"), _index(summary_rows, "rmp")
     rows = []
     for p in professors:
-        # An RMP professor needs a link; a Banner-only one is listed without.
-        if (p.get("origin") != "banner" and p["slug"] not in best_url) or is_denied(p["name_key"]):
+        # An RMP professor needs a link; a Banner or survey one is listed without.
+        if (p.get("origin", "rmp") == "rmp" and p["slug"] not in best_url) or is_denied(p["name_key"]):
             continue
         b = blend.get((p["slug"], ""), {})
         r = rmp.get((p["slug"], ""), {})

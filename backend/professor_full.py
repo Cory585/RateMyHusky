@@ -42,6 +42,26 @@ def build_identity(prof):
     }
 
 
+def build_survey_section(row):
+    """The `sources.survey` block from the professor's `survey` source_summary row.
+
+    Always the same keys. Without survey ratings it is `available: False` with
+    every number null, like `rmp.build_section`.
+    """
+    row = row or {}
+    num_ratings = int(row.get("num_ratings") or 0)
+    rating = rmp.stat(row.get("rating"), 2)
+    available = num_ratings > 0 and rating is not None
+    return {
+        "available": available,
+        "rating": rating if available else None,
+        "numRatings": num_ratings,
+        "hoursPerWeek": rmp.stat(row.get("hours_per_week"), 1) if available else None,
+        "ratingDistribution": rmp.distribution(row.get("rating_distribution")),
+        "gradeDistribution": dict(row.get("grade_distribution") or {}),
+    }
+
+
 def build_summary(own_rows, reddit_mentions):
     """`own_rows`: {source: professor-level source_summary row}."""
     b = own_rows.get("blend") or {}
@@ -126,7 +146,8 @@ def build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions,
         "version": 2,
         "identity": build_identity(prof),
         "summary": build_summary(own, mentions),
-        "sources": {"rmp": rmp.build_section(own.get("rmp"), prof.get("professor_url"), reviews)},
+        "sources": {"rmp": rmp.build_section(own.get("rmp"), prof.get("professor_url"), reviews),
+                    "survey": build_survey_section(own.get("survey"))},
         "courses": build_courses([r for r in summaries if r["course_code"] and r["source"] == "blend"],
                                  history),
         "lastTaught": history[0]["lastTerm"] if history else None,
