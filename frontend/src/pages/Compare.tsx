@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type React from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { fetchProfessorFull, fetchProfessorsCatalog, fetchSearchSuggestions } from '../api/api';
-import type { CatalogProfessor, ProfessorPage, ProfessorSuggestion } from '../api/api';
+import { fetchProfessorFull, fetchSearchSuggestions } from '../api/api';
+import type { ProfessorPage, ProfessorSuggestion } from '../api/api';
 import StarRating from '../components/StarRating';
 import Footer from '../components/Footer';
 import { photoThumb, thumbOnError } from '../utils/photoThumb';
@@ -16,11 +16,7 @@ const SLOT_LABELS = ['A', 'B', 'C', 'D'] as const;
 const MAX_SLOTS = SLOT_KEYS.length;
 const MIN_OPEN_SLOTS = 2; // A and B always show a search box
 
-const CATALOG_LIMIT = 10000;
 const MIN_RATINGS = 10; // below this a professor is flagged and can't be marked best
-
-// Module-level cache so catalog survives component unmounts
-let cachedCatalog: CatalogProfessor[] | null = null;
 
 interface ProfileEntry {
 	status: 'loading' | 'ready' | 'error';
@@ -31,7 +27,6 @@ interface SlotData {
 	index: number;
 	label: string;
 	slug: string;
-	catalogProf: CatalogProfessor | null;
 	profile: ProfessorPage | null;
 	loading: boolean;
 	failed: boolean;
@@ -53,8 +48,6 @@ interface MetricRow {
 }
 
 /* ---- Helpers ---- */
-const normalizeName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
-
 const parseMaybeNumber = (value: number | null | undefined) => {
 	if (typeof value !== 'number' || Number.isNaN(value)) return null;
 	return value;
@@ -107,17 +100,11 @@ const joinNames = (names: string[]) => {
 };
 
 /* ---- One search box (replaces the duplicated left/right search code) ---- */
-interface ResolvedSuggestion {
-	prof: ProfessorSuggestion;
-	slug: string;
-}
-
 interface SlotSearchProps {
 	label: string;
 	slug: string;
 	selectedName: string | null;
 	excludeSlugs: string[];
-	resolveSlug: (suggestion: ProfessorSuggestion) => string | null;
 	onSelect: (slug: string) => void;
 	onClear: () => void;
 	clearLabel: string | null;
@@ -129,14 +116,13 @@ function SlotSearch({
 	slug,
 	selectedName,
 	excludeSlugs,
-	resolveSlug,
 	onSelect,
 	onClear,
 	clearLabel,
 	autoFocus,
 }: SlotSearchProps) {
 	const [query, setQuery] = useState('');
-	const [suggestions, setSuggestions] = useState<ResolvedSuggestion[]>([]);
+	const [suggestions, setSuggestions] = useState<ProfessorSuggestion[]>([]);
 	const [open, setOpen] = useState(false);
 	const [activeIndex, setActiveIndex] = useState(-1);
 
@@ -177,10 +163,10 @@ function SlotSearch({
 			try {
 				const results = await fetchSearchSuggestions(trimmed, 'Professor');
 				if (gen !== fetchGenRef.current) return;
+				// A result without a slug can't be loaded, so it is dropped rather than guessed at
 				const professorResults = results
 					.filter((result): result is ProfessorSuggestion => result.type === 'professor')
-					.map((prof) => ({ prof, slug: resolveSlug(prof) }))
-					.filter((entry): entry is ResolvedSuggestion => entry.slug !== null && !excluded.has(entry.slug))
+					.filter((prof) => prof.slug && !excluded.has(prof.slug))
 					.slice(0, 3);
 
 				setSuggestions(professorResults);
@@ -194,7 +180,7 @@ function SlotSearch({
 		}, 200);
 
 		return () => clearTimeout(timer);
-	}, [query, slug, selectedName, excludeKey, resolveSlug]);
+	}, [query, slug, selectedName, excludeKey]);
 
 	useEffect(() => {
 		const handleOutsideClick = (event: MouseEvent) => {
@@ -206,11 +192,11 @@ function SlotSearch({
 		return () => document.removeEventListener('mousedown', handleOutsideClick);
 	}, []);
 
-	const select = ({ prof, slug: profSlug }: ResolvedSuggestion) => {
+	const select = (prof: ProfessorSuggestion) => {
 		setQuery(prof.name);
 		setOpen(false);
 		setActiveIndex(-1);
-		onSelect(profSlug);
+		onSelect(prof.slug);
 	};
 
 	return (
@@ -252,22 +238,19 @@ function SlotSearch({
 			/>
 			{open && (
 				<div className="compare-suggestion-list">
-					{suggestions.map((entry, index) => {
-						const { prof, slug: profSlug } = entry;
-						return (
-							<button
-								key={profSlug}
-								className={`compare-suggestion ${slug === profSlug || activeIndex === index ? 'active' : ''}`}
-								onClick={() => select(entry)}
-								type="button"
-							>
-								<span className="compare-suggestion-main">{prof.name}</span>
-								<span className="compare-suggestion-meta">
-									{prof.dept ? `${prof.dept} • ` : ''}{prof.rating !== null ? prof.rating.toFixed(2) : '—'}
-								</span>
-							</button>
-						);
-					})}
+					{suggestions.map((prof, index) => (
+						<button
+							key={prof.slug}
+							className={`compare-suggestion ${slug === prof.slug || activeIndex === index ? 'active' : ''}`}
+							onClick={() => select(prof)}
+							type="button"
+						>
+							<span className="compare-suggestion-main">{prof.name}</span>
+							<span className="compare-suggestion-meta">
+								{prof.dept ? `${prof.dept} • ` : ''}{prof.rating !== null ? prof.rating.toFixed(2) : '—'}
+							</span>
+						</button>
+					))}
 				</div>
 			)}
 		</div>
@@ -278,8 +261,6 @@ function SlotSearch({
 function Compare() {
 	const [searchParams, setSearchParams] = useSearchParams();
 
-	const [catalog, setCatalog] = useState<CatalogProfessor[]>(cachedCatalog ?? []);
-	const [catalogError, setCatalogError] = useState<string | null>(null);
 	const [entries, setEntries] = useState<Record<string, ProfileEntry>>({});
 	const [openCount, setOpenCount] = useState(MIN_OPEN_SLOTS);
 	const [focusSlot, setFocusSlot] = useState<number | null>(null);
@@ -305,31 +286,6 @@ function Compare() {
 	useEffect(() => {
 		setOpenCount((count) => Math.max(count, lastFilledIndex + 1));
 	}, [lastFilledIndex]);
-
-	useEffect(() => {
-		if (cachedCatalog) return;
-		let cancelled = false;
-
-		fetchProfessorsCatalog({ sort: 'alpha', limit: CATALOG_LIMIT, page: 1 })
-			.then((result) => {
-				if (cancelled) return;
-				cachedCatalog = result.professors;
-				setCatalog(result.professors);
-			})
-			.catch(() => {
-				if (!cancelled) setCatalogError('Could not load professor list. Please refresh and try again.');
-			});
-
-		return () => {
-			cancelled = true;
-		};
-	}, []);
-
-	const catalogBySlug = useMemo(() => {
-		const map = new Map<string, CatalogProfessor>();
-		catalog.forEach((prof) => map.set(prof.slug, prof));
-		return map;
-	}, [catalog]);
 
 	// Load a profile for every selected slug
 	useEffect(() => {
@@ -358,31 +314,6 @@ function Compare() {
 		};
 	}, [slugKey]);
 
-	/* Returns the professor's canonical slug, or null if we can't be sure who it is.
-	   The search API should always send a slug. If one is missing, only accept a
-	   catalog match that is unique by name (narrowed by department if needed);
-	   never guess, because the wrong professor would be compared silently. */
-	const resolveSlug = useCallback(
-		(suggestion: ProfessorSuggestion): string | null => {
-			if (suggestion.slug) return suggestion.slug;
-
-			const target = normalizeName(suggestion.name);
-			let matches = catalog.filter((prof) => normalizeName(prof.name) === target);
-			if (matches.length > 1 && suggestion.dept) {
-				matches = matches.filter((prof) => prof.department === suggestion.dept);
-			}
-			if (matches.length === 1) return matches[0].slug;
-
-			console.error(
-				`[Compare] Search result "${suggestion.name}" has no slug and ${
-					matches.length === 0 ? 'no' : 'several'
-				} catalog matches. Hiding it so the wrong professor can't be compared.`,
-			);
-			return null;
-		},
-		[catalog],
-	);
-
 	const updateSlot = (index: number, slug: string) => {
 		if (slug && slugs.some((existing, i) => i !== index && existing === slug)) return;
 
@@ -407,18 +338,16 @@ function Compare() {
 
 	/* ---- Per-slot data ---- */
 	const slots: SlotData[] = slugs.map((slug, index) => {
-		const catalogProf = slug ? catalogBySlug.get(slug) ?? null : null;
 		const entry = slug ? entries[slug] : undefined;
 		const profile = entry?.profile ?? null;
 		return {
 			index,
 			label: SLOT_LABELS[index],
 			slug,
-			catalogProf,
 			profile,
 			loading: Boolean(slug) && (!entry || entry.status === 'loading'),
 			failed: entry?.status === 'error',
-			name: catalogProf?.name ?? profile?.identity.name ?? '',
+			name: profile?.identity.name ?? '',
 		};
 	});
 
@@ -434,26 +363,17 @@ function Compare() {
 	const firstName = (slot: SlotData) => slot.name.trim().split(/\s+/)[0] || `Prof. ${slot.label}`;
 
 	/* Professor data shape (api.ts v2): summary = blended numbers across sources.
-	   RMP is the only live source, so the Overall Rating row is the RMP rating. Catalog values are the fallback. */
-	const rating = slots.map((s) => (isReady(s) ? s.profile?.summary.rating ?? s.catalogProf?.avgRating ?? null : null));
+	   RMP is the only live source, so the Overall Rating row is the RMP rating. */
+	const rating = slots.map((s) => (isReady(s) ? s.profile?.summary.rating ?? null : null));
 	const difficulty = slots.map((s) => (isReady(s) ? s.profile?.summary.difficulty ?? null : null));
-	const takeAgain = slots.map((s) =>
-		isReady(s) ? s.profile?.summary.wouldTakeAgainPct ?? s.catalogProf?.wouldTakeAgainPct ?? null : null,
-	);
-	const numRatings = slots.map((s) =>
-		isReady(s) ? s.profile?.summary.numRatings ?? s.catalogProf?.totalReviews ?? null : null,
-	);
+	const takeAgain = slots.map((s) => (isReady(s) ? s.profile?.summary.wouldTakeAgainPct ?? null : null));
+	const numRatings = slots.map((s) => (isReady(s) ? s.profile?.summary.numRatings ?? null : null));
 	// Too few ratings to trust: still shown, but flagged and never marked best
 	const lowSample = numRatings.map((n) => n !== null && n < MIN_RATINGS);
 	const eligible = slots.map((s, i) => isReady(s) && !lowSample[i]);
 
 	const departments = slots.map((s) => {
 		if (!isReady(s)) return '—';
-		if (s.catalogProf) {
-			const { department, college } = s.catalogProf;
-			if (!department) return college || '—';
-			return `${department} (${college})`;
-		}
 		const identity = s.profile?.identity;
 		if (!identity) return '—';
 		if (!identity.department) return identity.college || '—';
@@ -546,18 +466,18 @@ function Compare() {
 
 	const renderProfileCard = (slot: SlotData) => {
 		if (slot.loading) return <p className="compare-status">Loading profile...</p>;
-		if (slot.failed && !slot.catalogProf) {
+		if (slot.failed) {
 			return <p className="compare-status compare-status-error">Could not load this professor profile.</p>;
 		}
-		if (!slot.slug || (!slot.catalogProf && !slot.profile)) {
+		if (!slot.slug || !slot.profile) {
 			return <p className="compare-status">Pick a professor for slot {slot.label}.</p>;
 		}
 
-		const { catalogProf, profile } = slot;
-		const dept = catalogProf?.department ?? profile?.identity.department ?? '';
-		const imgUrl = profile?.identity.imageUrl ?? catalogProf?.imageUrl ?? null;
-		const rating = profile?.summary.rating ?? catalogProf?.avgRating ?? null;
-		const profSlug = catalogProf?.slug ?? slot.slug;
+		const { identity, summary } = slot.profile;
+		const dept = identity.department;
+		const imgUrl = identity.imageUrl;
+		const rating = summary.rating;
+		const profSlug = identity.slug;
 
 		const fallbackIcon = (
 			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -691,12 +611,12 @@ function Compare() {
 						{slots
 							.filter((slot) => slot.slug)
 							.map((slot) => {
-								const imgUrl = slot.profile?.identity.imageUrl ?? slot.catalogProf?.imageUrl ?? null;
+								const imgUrl = slot.profile?.identity.imageUrl ?? null;
 								return (
 									<div className="compare-chip" key={slot.label}>
 										<Link
 											className="compare-chip-main"
-											to={`/professors/${slot.catalogProf?.slug ?? slot.slug}`}
+											to={`/professors/${slot.profile?.identity.slug ?? slot.slug}`}
 											state={{ fromPage: { label: 'Compare', url: `/compare?${searchParams.toString()}` } }}
 										>
 											<span className={`compare-chip-avatar tone-${slot.index}`}>
@@ -757,9 +677,8 @@ function Compare() {
 								key={slot.label}
 								label={`Professor ${slot.label}`}
 								slug={slot.slug}
-								selectedName={slot.catalogProf?.name ?? null}
+								selectedName={slot.profile?.identity.name ?? null}
 								excludeSlugs={slugs.filter((s, i) => s && i !== slot.index)}
-								resolveSlug={resolveSlug}
 								onSelect={(slug) => updateSlot(slot.index, slug)}
 								onClear={() => (canClose ? closeSlot(slot.index) : updateSlot(slot.index, ''))}
 								clearLabel={slot.slug ? 'Clear' : canClose ? 'Remove' : null}
@@ -768,8 +687,6 @@ function Compare() {
 						);
 					})}
 				</section>
-
-				{catalogError && <p className="compare-status compare-status-error compare-status-page">{catalogError}</p>}
 
 				<section className="compare-panels" aria-live="polite">
 					{slots.map((slot) =>
