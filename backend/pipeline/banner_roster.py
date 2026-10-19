@@ -40,35 +40,52 @@ _SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
 # CPS Semester is left out on purpose: it carries day-college subjects (CHM,
 # BIO, ENG) taught by day-college faculty, so counting it would move Science
 # professors into Professional Studies.
+#
+# Both tracks are ending. Law and CPS Semester terms stop after Summer 2025, when
+# Law moved onto the university Semester calendar, so a LAW-subject section
+# counts as Law Semester whatever its term. CPS Quarter stops after Summer 2026
+# (the registrar moves graduate CPS to Semester from Fall 2026), and CPS has no
+# subject of its own to stand in, so Professional Studies is decided by the
+# quarters taught up to then.
 TRACK_COLLEGES = {"Law Semester": "Law", "CPS Quarter": "Professional Studies"}
 
-# Sections taught per (instructor_key, professor_slug, track), counted the way
+# Sections taught per professor and track, counted the way
 # the Banner history counts teaching: Banner's own rows, no supervision or co-op
 # rows, no cancelled sections (closed term, 0 enrolled), and no term where the
 # name was listed twice or sat on more than MAX_COURSES_PER_TERM courses (a
-# coordinator, not a teacher). The slug comes from the matcher's per-course
-# verdict, so a namesake's courses the matcher refused to link stay uncounted;
-# it is NULL for Banner-only professors, who are linked at apply time.
+# coordinator, not a teacher). Cancelled sections still count toward that course
+# limit, as they do in banner_history.roster_artifacts. The slug comes from the
+# matcher's per-course verdict, so a namesake's courses the matcher refused to
+# link stay uncounted. A section joins through any spelling the matcher merged
+# into the row (instructor_keys), and is counted once per professor however many
+# spellings listed it, as build_course_instructors dedupes sections. A linked
+# row's instructor_key is NULL; an unlinked row (a Banner-only professor, linked
+# at apply time) keeps its key and a NULL slug.
 TRACK_SECTIONS_SQL = """
     WITH taught AS (
-        SELECT i.term_code, i.instructor_key, s.subject_course, t.track
+        SELECT i.term_code, i.crn, i.instructor_key, s.subject_course,
+               CASE WHEN s.subject = 'LAW' THEN 'Law Semester' ELSE t.track END AS track,
+               coalesce(t.scraped_closed, false) AND coalesce(s.enrollment = 0, false) AS cancelled
         FROM banner_section_instructors i
         JOIN banner_sections s ON s.term_code = i.term_code AND s.crn = i.crn
         JOIN banner_terms t ON t.term_code = i.term_code
         WHERE i.source = 'banner'
           AND lower(coalesce(s.schedule_type, '')) NOT IN ({non_teaching})
-          AND NOT (coalesce(t.scraped_closed, false) AND coalesce(s.enrollment = 0, false))
           AND NOT EXISTS (SELECT 1 FROM banner_roster_duplicates d
                           WHERE d.term_code = i.term_code AND d.instructor_key = i.instructor_key)
     ), coordinators AS (
         SELECT term_code, instructor_key FROM taught GROUP BY 1, 2
         HAVING count(DISTINCT subject_course) > {max_courses}
     )
-    SELECT t.instructor_key, b.professor_slug, t.track, count(*) AS sections
+    SELECT CASE WHEN b.professor_slug IS NULL THEN b.instructor_key END AS instructor_key,
+           b.professor_slug, t.track, count(DISTINCT (t.term_code, t.crn)) AS sections
     FROM taught t
+    -- instructor_keys is NULL until the matcher's first run that writes it.
     JOIN banner_course_instructors b
-      ON b.instructor_key = t.instructor_key AND b.subject_course = t.subject_course
-    WHERE NOT EXISTS (SELECT 1 FROM coordinators c
+      ON b.subject_course = t.subject_course
+     AND t.instructor_key = ANY(string_to_array(coalesce(b.instructor_keys, b.instructor_key), '|'))
+    WHERE NOT t.cancelled
+      AND NOT EXISTS (SELECT 1 FROM coordinators c
                       WHERE c.term_code = t.term_code AND c.instructor_key = t.instructor_key)
     GROUP BY 1, 2, 3
 """.format(non_teaching=", ".join(f"'{s}'" for s in sorted(NON_TEACHING_SCHEDULE_TYPES)),
@@ -97,24 +114,77 @@ def subject_departments(instructor_rows, department_by_slug):
     return {subject: min(counts, key=lambda d: (-counts[d], d)) for subject, counts in votes.items()}
 
 
-def track_colleges(track_rows, new_slug_by_key):
-    """slug -> college, for professors who taught more than half their sections
-    in one TRACK_COLLEGES track. track_rows are TRACK_SECTIONS_SQL rows; an
-    unlinked row counts only for a Banner-only professor created this run
-    (new_slug_by_key), whose rows are all unlinked by construction. A professor
-    reached by several instructor keys has their sections summed."""
+def _track_sections(track_rows, new_slug_by_key):
+    """slug -> Counter(track -> sections). An unlinked row counts only for a
+    Banner-only professor created this run (new_slug_by_key), whose rows are all
+    unlinked by construction. Rows that resolve to the same slug are summed."""
     sections = defaultdict(Counter)
     for row in track_rows:
         slug = row["professor_slug"] or new_slug_by_key.get(row["instructor_key"])
         if slug:
             sections[slug][row["track"]] += row["sections"]
+    return sections
+
+
+def track_colleges(track_rows, new_slug_by_key):
+    """slug -> college, for professors who taught more than half their sections
+    in one TRACK_COLLEGES track. track_rows are TRACK_SECTIONS_SQL rows."""
     colleges = {}
-    for slug, by_track in sections.items():
+    for slug, by_track in _track_sections(track_rows, new_slug_by_key).items():
         total = sum(by_track.values())
         for track, college in TRACK_COLLEGES.items():
             if by_track[track] * 2 > total:
                 colleges[slug] = college
     return colleges
+
+
+def subject_colleges(instructor_rows, professors):
+    """subject -> college, voted as subject_departments does but without the
+    professors labelled with a TRACK_COLLEGES college: their labels are the
+    ones in question, and CRIM or MGT taught by mislabelled Law professors
+    would otherwise vote themselves back into Law."""
+    voters = {p["slug"]: p["department"] for p in professors
+              if p.get("origin") != "banner" and p.get("college") not in TRACK_COLLEGES.values()}
+    return {s: get_college(d) for s, d in subject_departments(instructor_rows, voters).items()}
+
+
+def track_exits(track_rows, new_slug_by_key, professors, instructor_rows, colleges_by_subject):
+    """slug -> college, for professors labelled Law who taught Banner sections
+    but none in a Law Semester term or LAW course: a label the term track
+    contradicts outright. A professor with any Law section keeps the label (Law
+    faculty who also teach a day-college course), and so does one with no Banner
+    record. The new college is the one most of their sections' subjects belong
+    to (colleges_by_subject); a professor whose subjects point to Law,
+    Professional Studies, Other or nowhere keeps the label rather than getting
+    a guess.
+
+    Professional Studies labels are not checked. Most of the ones with no CPS
+    Quarter section are Counseling & Educational Psych, Bouve's Applied
+    Psychology (CAEP), and CAEP's other teachers are labelled Psychology, so the
+    subject vote would send them to CSSH; and with CPS Quarter ending, an absent
+    quarter will soon say nothing about a CPS professor."""
+    track_of = {"Law": "Law Semester"}
+    sections = _track_sections(track_rows, new_slug_by_key)
+    subjects = defaultdict(Counter)
+    for row in instructor_rows:
+        if row["professor_slug"]:
+            subjects[row["professor_slug"]][subject_of(row["subject_course"])] += row["sections"]
+    exits = {}
+    for p in professors:
+        track = track_of.get(p.get("college"))
+        by_track = sections.get(p["slug"])
+        if not track or not by_track or by_track[track]:
+            continue
+        votes = Counter()
+        for subject, n in subjects[p["slug"]].items():
+            if colleges_by_subject.get(subject):
+                votes[colleges_by_subject[subject]] += n
+        if not votes:
+            continue
+        college = min(votes, key=lambda c: (-votes[c], c))
+        if college not in TRACK_COLLEGES.values() and college != "Other":
+            exits[p["slug"]] = college
+    return exits
 
 
 def resolve_banner_professors(instructor_rows, professors, departments, is_denied=is_denied_banner_key):

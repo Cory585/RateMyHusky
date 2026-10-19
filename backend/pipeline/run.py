@@ -44,7 +44,8 @@ def main(argv=None):
     _print("roster", counts)
     links, professors = links + new_links, professors + new_professors
     bci = fetch_all(conn, "SELECT subject_course, instructor_key, instructor_name, professor_slug, "
-                          "match_method, terms_taught, last_term_code FROM banner_course_instructors")
+                          "match_method, terms_taught, sections, last_term_code "
+                          "FROM banner_course_instructors")
     # Banner-only professors' departments are earlier guesses, so they don't vote.
     departments = banner_roster.subject_departments(
         bci, {p["slug"]: p["department"] for p in professors if p.get("origin") != "banner"})
@@ -54,8 +55,14 @@ def main(argv=None):
     # New Banner professors are linked in the database only at apply time, so
     # their keys come from the rows just resolved.
     track_rows = fetch_all(conn, banner_roster.TRACK_SECTIONS_SQL)
-    colleges = banner_roster.track_colleges(track_rows, {p["name_key"]: p["slug"] for p in new_banner})
+    new_slug_by_key = {p["name_key"]: p["slug"] for p in new_banner}
+    colleges = banner_roster.track_colleges(track_rows, new_slug_by_key)
     print(f"colleges from term track: {dict(sorted(Counter(colleges.values()).items()))}")
+    exits = banner_roster.track_exits(track_rows, new_slug_by_key, professors, bci,
+                                      banner_roster.subject_colleges(bci, professors))
+    exits = {slug: c for slug, c in exits.items() if slug not in colleges}
+    print(f"out of Law by term track: {dict(sorted(Counter(exits.values()).items()))}")
+    colleges = {**exits, **colleges}
     # Alias-aware, so a page created before its professor's denial request still drops.
     professors, links = read_models.drop_denied(professors, links, banner_roster.is_denied_banner_key)
 

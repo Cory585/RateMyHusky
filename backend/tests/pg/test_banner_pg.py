@@ -13,6 +13,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3] / "scraper"))
 
 import load_banner  # noqa: E402
 import teaching_history  # noqa: E402
+from banner_history import MAX_COURSES_PER_TERM  # noqa: E402
+from pipeline import banner_roster  # noqa: E402
 from tests.pg.pgutil import query_fn, rows, scalar, truncate  # noqa: E402
 
 BANNER_TABLES = ("banner_terms", "banner_sections", "banner_section_instructors",
@@ -112,3 +114,95 @@ def test_course_history_reads_the_offering_year_columns(pg):
                                         "summer1": [2025], "summer2": [], "summer": [2025]}
     assert history["firstOffered"] == "Fall 2021"
     assert [i["slug"] for i in history["instructors"]] == ["annie-witte"]
+
+
+def _term(cur, code, track):
+    cur.execute("INSERT INTO banner_terms (term_code, term_label, season, season_group, year, "
+                "view_only, scraped_closed, section_count, attributed_sections, instructor_count, "
+                "instructors_source, track) VALUES (%s, %s, 'Fall', 'Fall', 2025, true, true, "
+                "0, 0, 0, 'banner', %s)", (code, f"Fall 2025 {track}", track))
+
+
+def _taught(cur, term, crn, course, *keys, enrollment=20):
+    cur.execute("INSERT INTO banner_sections (term_code, crn, subject, subject_course, "
+                "schedule_type, enrollment) VALUES (%s, %s, %s, %s, 'Lecture', %s)",
+                (term, crn, course[:-4], course, enrollment))
+    for key in keys:
+        cur.execute("INSERT INTO banner_section_instructors (term_code, crn, instructor_key, "
+                    "instructor_name) VALUES (%s, %s, %s, %s)", (term, crn, key, key.title()))
+
+
+def _course_instructor(cur, course, key, slug, keys):
+    cur.execute("INSERT INTO banner_course_instructors (subject_course, instructor_key, "
+                "professor_slug, match_method, terms_taught, sections, first_term_code, "
+                "last_term_code, last_term_label, instructor_keys) VALUES "
+                "(%s, %s, %s, 'alias', 1, 1, '202610', '202610', 'Fall 2025', %s)",
+                (course, key, slug, keys))
+
+
+def test_track_sections_reach_the_row_an_older_spelling_was_merged_into(pg):
+    # The reviewer's case: 8 Law sections as "williams tom", 1 as "williams thomas"
+    # (the spelling the row kept), 3 Semester sections elsewhere. Joined on the kept
+    # key alone, Semester won 3 to 1 and the professor stayed out of Law.
+    truncate(pg, *BANNER_TABLES)
+    with pg.cursor() as cur:
+        _term(cur, "202614", "Law Semester")
+        _term(cur, "202610", "Semester")
+        for crn in range(8):
+            _taught(cur, "202614", str(crn), "LAW7000", "williams tom")
+        # Listed under both spellings: still one section.
+        _taught(cur, "202614", "8", "LAW7000", "williams thomas", "williams tom")
+        for crn in range(3):
+            _taught(cur, "202610", str(crn), "CRIM3000", "williams thomas")
+        _course_instructor(cur, "LAW7000", "williams thomas", "thomas-williams",
+                           "williams thomas|williams tom")
+        _course_instructor(cur, "CRIM3000", "williams thomas", "thomas-williams",
+                           "williams thomas")
+    pg.commit()
+
+    got = rows(pg, banner_roster.TRACK_SECTIONS_SQL)
+    assert sorted((r["instructor_key"], r["professor_slug"], r["track"], r["sections"])
+                  for r in got) == [(None, "thomas-williams", "Law Semester", 9),
+                                    (None, "thomas-williams", "Semester", 3)]
+    assert banner_roster.track_colleges(got, {}) == {"thomas-williams": "Law"}
+
+
+def test_track_sections_fall_back_to_the_key_before_instructor_keys_is_written(pg):
+    truncate(pg, *BANNER_TABLES)
+    with pg.cursor() as cur:
+        _term(cur, "202614", "Law Semester")
+        _taught(cur, "202614", "1", "LAW7000", "lucia nunez")
+        _course_instructor(cur, "LAW7000", "lucia nunez", None, None)
+    pg.commit()
+    assert [(r["instructor_key"], r["professor_slug"], r["sections"]) for r in rows(
+        pg, banner_roster.TRACK_SECTIONS_SQL)] == [("lucia nunez", None, 1)]
+
+
+def test_a_cancelled_section_still_makes_a_coordinator(pg):
+    # banner_history.roster_artifacts counts courses before cancelled sections go,
+    # so a term with one too many courses, one of them cancelled, is not teaching.
+    truncate(pg, *BANNER_TABLES)
+    with pg.cursor() as cur:
+        _term(cur, "202614", "Law Semester")
+        for n in range(MAX_COURSES_PER_TERM + 1):
+            course = f"LAW{7000 + n}"
+            _taught(cur, "202614", str(n), course, "jo coord", enrollment=0 if n == 0 else 20)
+            _course_instructor(cur, course, "jo coord", "jo-coord", "jo coord")
+    pg.commit()
+    assert rows(pg, banner_roster.TRACK_SECTIONS_SQL) == []
+
+
+def test_a_law_course_in_a_semester_term_counts_as_law(pg):
+    # From Fall 2025 Law courses run in the university's Semester terms.
+    truncate(pg, *BANNER_TABLES)
+    with pg.cursor() as cur:
+        _term(cur, "202610", "Semester")
+        _taught(cur, "202610", "1", "LAW7000", "ada park")
+        _taught(cur, "202610", "2", "LAW7001", "ada park")
+        _taught(cur, "202610", "3", "CRIM3000", "ada park")
+        for course in ("LAW7000", "LAW7001", "CRIM3000"):
+            _course_instructor(cur, course, "ada park", "ada-park", "ada park")
+    pg.commit()
+    got = rows(pg, banner_roster.TRACK_SECTIONS_SQL)
+    assert sorted((r["track"], r["sections"]) for r in got) == [("Law Semester", 2), ("Semester", 1)]
+    assert banner_roster.track_colleges(got, {}) == {"ada-park": "Law"}

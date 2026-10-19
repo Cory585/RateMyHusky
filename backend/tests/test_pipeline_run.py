@@ -22,10 +22,10 @@ TABLES = {
                      "comment": "good", "visible": True}],
     "banner_course_instructors": [
         {"subject_course": "CS3100", "instructor_key": "lucia nunez", "instructor_name": "Nunez, Lucia",
-         "professor_slug": None, "match_method": "no_match", "terms_taught": 2, "last_term_code": "202630"},
+         "professor_slug": None, "match_method": "no_match", "terms_taught": 2, "sections": 2, "last_term_code": "202630"},
         {"subject_course": "CS2500", "instructor_key": "olin guha", "instructor_name": "Guha, Olin",
          "professor_slug": "olin-guha", "match_method": "name_key", "terms_taught": 3,
-         "last_term_code": "202630"},
+         "sections": 3, "last_term_code": "202630"},
     ],
     # The aggregate run.py reads; keyed by its first table like every query here.
     "banner_section_instructors": [

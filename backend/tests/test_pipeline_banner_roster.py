@@ -187,3 +187,88 @@ def test_track_sql_applies_the_banner_history_filters():
     assert all(f"'{t}'" in sql for t in br.NON_TEACHING_SCHEDULE_TYPES)
     assert f"> {br.MAX_COURSES_PER_TERM}" in sql
     assert "banner_roster_duplicates" in sql and "scraped_closed" in sql
+
+
+def test_cancelled_sections_count_toward_the_coordinator_limit():
+    # banner_history.roster_artifacts counts courses before dropping cancelled
+    # sections, so the filter must come after the coordinators CTE, not in taught.
+    sql = br.TRACK_SECTIONS_SQL
+    taught = sql[:sql.index("coordinators AS")]
+    assert "NOT t.cancelled" not in taught and "NOT (" not in taught
+    assert sql.index("NOT t.cancelled") > sql.index("coordinators AS")
+
+
+def test_track_sql_joins_every_merged_spelling_and_counts_each_section_once():
+    sql = br.TRACK_SECTIONS_SQL
+    # The reviewer's case: sections under an older spelling ("williams tom") must
+    # reach the row the matcher kept under the newest one ("williams thomas").
+    assert "string_to_array(coalesce(b.instructor_keys, b.instructor_key), '|')" in sql
+    assert "count(DISTINCT (t.term_code, t.crn))" in sql
+
+
+def test_track_sql_counts_law_courses_as_law_semester_in_any_term():
+    # Law moved onto the Semester calendar in Fall 2025.
+    assert "CASE WHEN s.subject = 'LAW' THEN 'Law Semester' ELSE t.track END AS track" \
+        in br.TRACK_SECTIONS_SQL
+
+
+def prof(slug, college, department="Law", origin="rmp"):
+    return {"slug": slug, "college": college, "department": department, "origin": origin}
+
+
+def bci_row(slug, course, sections):
+    return {"professor_slug": slug, "subject_course": course, "sections": sections}
+
+
+def test_a_law_label_with_no_law_sections_moves_to_its_subjects_college():
+    exits = br.track_exits([track(None, "Semester", 6, "ada-park")], {},
+                           [prof("ada-park", "Law")],
+                           [bci_row("ada-park", "CRIM2100", 4), bci_row("ada-park", "BLAW3100", 2)],
+                           {"CRIM": "CSSH", "BLAW": "Business"})
+    assert exits == {"ada-park": "CSSH"}
+
+
+def test_any_section_in_the_labels_track_keeps_it():
+    # Law faculty who also teach a day-college course: a judgment the data can't make.
+    exits = br.track_exits([track(None, "Semester", 6, "ada-park"),
+                            track(None, "Law Semester", 1, "ada-park")], {},
+                           [prof("ada-park", "Law")], [bci_row("ada-park", "CRIM2100", 7)],
+                           {"CRIM": "CSSH"})
+    assert exits == {}
+
+
+def test_no_banner_record_keeps_the_label():
+    assert br.track_exits([], {}, [prof("ada-park", "Law")], [], {"CRIM": "CSSH"}) == {}
+
+
+def test_professional_studies_labels_are_not_exited():
+    # Applied Psychology faculty labelled Professional Studies would vote into CSSH.
+    exits = br.track_exits([track(None, "Semester", 5, "john-smith")], {},
+                           [prof("john-smith", "Professional Studies", "Counseling & Educational Psych")],
+                           [bci_row("john-smith", "CAEP6200", 5)], {"CAEP": "CSSH"})
+    assert exits == {}
+
+
+def test_subjects_pointing_back_or_nowhere_keep_the_label():
+    rows = [track(None, "Semester", 3, s) for s in ("a", "b", "c")]
+    exits = br.track_exits(rows, {}, [prof("a", "Law"), prof("b", "Law"), prof("c", "Law")],
+                           [bci_row("a", "LAWS6100", 3), bci_row("b", "INTL1000", 3),
+                            bci_row("c", "XYZ1000", 3)],
+                           {"LAWS": "Law", "INTL": "Other"})
+    assert exits == {}
+
+
+def test_other_colleges_are_never_exited():
+    exits = br.track_exits([track(None, "Law Semester", 0, "ada-park"),
+                            track(None, "Semester", 4, "ada-park")], {},
+                           [prof("ada-park", "Khoury", "Computer Science")],
+                           [bci_row("ada-park", "CRIM2100", 4)], {"CRIM": "CSSH"})
+    assert exits == {}
+
+
+def test_track_labelled_professors_do_not_vote_on_a_subjects_college(monkeypatch):
+    # Mislabelled Law professors teaching BLAW must not make BLAW a Law subject.
+    monkeypatch.setattr(br, "get_college", {"Law": "Law", "Business Law": "Business"}.get)
+    rows = [{"professor_slug": s, "subject_course": "BLAW3100"} for s in ("l1", "l2", "b1")]
+    profs = [prof("l1", "Law"), prof("l2", "Law"), prof("b1", "Business", "Business Law")]
+    assert br.subject_colleges(rows, profs) == {"BLAW": "Business"}

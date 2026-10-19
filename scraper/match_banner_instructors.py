@@ -217,6 +217,7 @@ CREATE TABLE IF NOT EXISTS banner_course_instructors (
     was_primary      BOOLEAN,
     campuses         TEXT,              -- "|"-joined
     methods          TEXT,              -- "|"-joined
+    instructor_keys  TEXT,              -- "|"-joined: every spelling merged into the row
     PRIMARY KEY (subject_course, instructor_key)
 );
 CREATE INDEX IF NOT EXISTS bci_slug ON banner_course_instructors (professor_slug);
@@ -267,6 +268,7 @@ HISTORY_ADDED_COLUMNS = (
     ("banner_course_offerings", "summer2_years", "BIGINT NOT NULL DEFAULT 0"),
     ("banner_course_offerings", "first_term_label", "TEXT"),
     ("banner_course_offerings", "offering_years", "TEXT"),
+    ("banner_course_instructors", "instructor_keys", "TEXT"),
 )
 
 
@@ -299,7 +301,7 @@ COURSE_INSTRUCTOR_COLUMNS = (
     "subject_course", "instructor_key", "instructor_name", "professor_slug",
     "name_key", "match_method", "terms_taught", "sections", "first_term_code",
     "last_term_code", "last_term_label", "recent_terms", "avg_enrollment",
-    "was_primary", "campuses", "methods")
+    "was_primary", "campuses", "methods", "instructor_keys")
 OFFERING_COLUMNS = (
     "subject_course", "subject", "course_title", "first_term_code",
     "last_term_code", "last_term_label", "terms_offered", "pattern",
