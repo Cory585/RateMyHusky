@@ -373,16 +373,19 @@ type ProfCardProps = {
 };
 
 function ProfCard({ name, imageUrl, focusX, focusY, rating, footerLeft, footerCenter, footerRight, rank, to, fromPage }: ProfCardProps) {
+	// The URL whose copy and original both failed; held by URL so a reused card retries a new photo
+	const [deadPhoto, setDeadPhoto] = useState<string | null>(null);
 	const content = (
 		<>
 			<div className="course-top-prof-photo">
-				{imageUrl ? (
+				{imageUrl && deadPhoto !== imageUrl ? (
 					<img
+						key={imageUrl}
 						className="course-top-prof-img"
 						src={photoThumb(imageUrl)}
 						alt={name}
 						style={{ objectPosition: `${focusX}% ${focusY}%` }}
-						onError={thumbOnError(imageUrl)}
+						onError={thumbOnError(imageUrl, () => setDeadPhoto(imageUrl))}
 					/>
 				) : (
 					<div className="course-top-prof-avatar" aria-hidden="true">

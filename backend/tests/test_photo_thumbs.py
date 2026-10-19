@@ -44,6 +44,15 @@ def test_flattens_transparency():
     assert out.mode == "RGB"
 
 
+def test_color_keyed_transparency_becomes_white():
+    # An RGB PNG with a transparent color key used to lose its alpha and come out black
+    img = Image.new("RGB", (400, 400), (0, 0, 0))
+    buf = io.BytesIO()
+    img.save(buf, "PNG", transparency=(0, 0, 0))
+    out = Image.open(io.BytesIO(photo_thumbs.make_thumbnail(buf.getvalue())))
+    assert min(out.getpixel((200, 200))) > 240
+
+
 class _Resp:
     def __init__(self, content, status_code=200):
         self.content, self.status_code = content, status_code

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type React from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { fetchProfessorFull, fetchSearchSuggestions } from '../api/api';
@@ -94,7 +94,7 @@ const pickRanks = (
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 
-// "jane-doe-2" -> "Jane Doe": a stand-in name when a profile can't be loaded
+// "jane-doe-2" -> "Jane Doe": a stand-in name for a shared-link slot before (or without) its profile
 const nameFromSlug = (slug: string) =>
 	slug
 		.replace(/-\d+$/, '')
@@ -325,6 +325,15 @@ function Compare() {
 		};
 	}, [slugKey]);
 
+	// Refetch one profile after it failed. A result for a slug that was removed meanwhile is dropped.
+	const retryProfile = async (slug: string) => {
+		setEntries((prev) => ({ ...prev, [slug]: { status: 'loading', profile: null } }));
+		const res = await fetchProfessorFull(slug);
+		setEntries((prev) =>
+			prev[slug] ? { ...prev, [slug]: res.ok ? { status: 'ready', profile: res.data } : { status: 'error', profile: null } } : prev
+		);
+	};
+
 	const updateSlot = (index: number, slug: string) => {
 		if (slug && slugs.some((existing, i) => i !== index && existing === slug)) return;
 
@@ -358,7 +367,9 @@ function Compare() {
 			profile,
 			loading: Boolean(slug) && (!entry || entry.status === 'loading'),
 			failed: entry?.status === 'error',
-			name: profile?.identity.name ?? pickedNames[slug] ?? (entry?.status === 'error' ? nameFromSlug(slug) : ''),
+			// Picked name first, so the name (and the search box synced to it) stays put when the profile arrives.
+			// A slot from a shared link has no picked name, so it shows one built from the slug until then.
+			name: pickedNames[slug] ?? profile?.identity.name ?? (slug ? nameFromSlug(slug) : ''),
 		};
 	});
 
@@ -478,7 +489,14 @@ function Compare() {
 	const renderProfileCard = (slot: SlotData) => {
 		if (slot.loading) return <p className="compare-status">Loading profile...</p>;
 		if (slot.failed) {
-			return <p className="compare-status compare-status-error">Could not load {displayName(slot)}'s profile.</p>;
+			return (
+				<div className="compare-status">
+					<p className="compare-status-error">Could not load {displayName(slot)}'s profile.</p>
+					<button type="button" className="compare-retry" onClick={() => retryProfile(slot.slug)}>
+						Try again
+					</button>
+				</div>
+			);
 		}
 		if (!slot.slug || !slot.profile) {
 			return <p className="compare-status">Pick a professor for slot {slot.label}.</p>;
@@ -501,7 +519,8 @@ function Compare() {
 			<>
 				<div className="compare-avatar-wrap">
 					{imgUrl ? (
-						<>
+						// Keyed so a slot switching professors gets a fresh <img>, not the last one's error state
+						<Fragment key={imgUrl}>
 							<img
 								src={photoThumb(imgUrl)}
 								alt={slot.name}
@@ -515,7 +534,7 @@ function Compare() {
 							<div className="compare-avatar-fallback" style={{ display: 'none' }}>
 								{fallbackIcon}
 							</div>
-						</>
+						</Fragment>
 					) : (
 						<div className="compare-avatar-fallback">{fallbackIcon}</div>
 					)}
@@ -632,7 +651,7 @@ function Compare() {
 										>
 											<span className={`compare-chip-avatar tone-${slot.index}`}>
 												{imgUrl ? (
-													<img src={photoThumb(imgUrl)} alt="" onError={thumbOnError(imgUrl, (img) => (img.style.display = 'none'))} />
+													<img key={imgUrl} src={photoThumb(imgUrl)} alt="" onError={thumbOnError(imgUrl, (img) => (img.style.display = 'none'))} />
 												) : (
 													<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
 														<circle cx="12" cy="9" r="4" />

@@ -736,6 +736,7 @@ const Professor = () => {
           >
             {identity.imageUrl ? (
               <img
+                key={identity.imageUrl}
                 src={photoThumb(identity.imageUrl)}
                 alt={identity.name}
                 className="prof-avatar-img"
@@ -748,6 +749,7 @@ const Professor = () => {
               />
             ) : null}
             <span
+              key={identity.imageUrl ?? ''}
               className="prof-avatar-initials"
               style={identity.imageUrl ? { display: 'none' } : undefined}
             >

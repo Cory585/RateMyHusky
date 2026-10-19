@@ -16,7 +16,11 @@ Photo updates are manual; no workflow runs them, and the weekly refresh adds
 new professors with no photo (pipeline/roster.py). The full sequence:
   1. photo_scrape.py                 -> professor_photos.csv
   2. compute_focus.py                -> adds focus_x / focus_y
-  3. load image_url / focus_x / focus_y into the professors table
+  3. set image_url / focus_x / focus_y on the matching professors rows. No script
+     does this: pipeline/seed.py copied them from professors_catalog once, and
+     load_rmp.py loads the CSV into the separate professor_photos table, which the
+     site never reads. Names there are not unique, so update by slug, by hand:
+       UPDATE professors SET image_url = %s, focus_x = %s, focus_y = %s WHERE slug = %s;
   4. backend/photo_thumbs.py         -> small WebP copies in frontend/public/photos/
                                         (--refresh if photos changed at the same URL)
   5. commit frontend/public/photos/ and deploy

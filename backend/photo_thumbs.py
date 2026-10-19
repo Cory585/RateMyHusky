@@ -26,6 +26,7 @@ import argparse
 import io
 import os
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 SHORT_SIDE = 320
@@ -58,7 +59,7 @@ def make_thumbnail(raw):
     from PIL import Image, ImageOps
 
     img = ImageOps.exif_transpose(Image.open(io.BytesIO(raw)))
-    if img.mode in ("RGBA", "LA", "P"):
+    if img.mode in ("RGBA", "LA", "P", "PA") or "transparency" in img.info:
         img = img.convert("RGBA")
         flat = Image.new("RGB", img.size, (255, 255, 255))
         flat.paste(img, mask=img.getchannel("A"))
@@ -149,12 +150,19 @@ def main():
             if args.refresh or not os.path.exists(os.path.join(OUT_DIR, name))]
     print(f"{len(urls)} photos, {len(urls) - len(todo)} already have thumbnails, fetching {len(todo)}")
 
-    session = requests.Session()
-    session.headers["User-Agent"] = "Mozilla/5.0 (compatible; RateMyHusky photo thumbnails)"
+    # One Session per worker thread: requests doesn't promise a shared one is thread-safe
+    local = threading.local()
+
+    def worker_session():
+        if not hasattr(local, "session"):
+            local.session = requests.Session()
+            local.session.headers["User-Agent"] = "Mozilla/5.0 (compatible; RateMyHusky photo thumbnails)"
+        return local.session
+
     counts = {"new": 0, "updated": 0, "unchanged": 0, "failed": 0}
     failed = []
     with ThreadPoolExecutor(args.workers) as pool:
-        for i, (url, outcome, err) in enumerate(pool.map(lambda t: fetch_one(session, *t), todo), 1):
+        for i, (url, outcome, err) in enumerate(pool.map(lambda t: fetch_one(worker_session(), *t), todo), 1):
             counts[outcome] += 1
             if err:
                 failed.append((url, err))
