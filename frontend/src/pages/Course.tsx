@@ -8,6 +8,7 @@ import { fetchCourseData } from '../api/api';
 import type { CourseDetail, CourseHistory, HistoryCourseLink } from '../api/api';
 import Footer from '../components/Footer';
 import { getInitials, stripPrefix } from '../utils/nameUtils';
+import { photoThumb, thumbOnError } from '../utils/photoThumb';
 import Breadcrumbs from '../components/Breadcrumbs';
 import Seo from '../components/Seo';
 import BookmarkButton from '../components/BookmarkButton';
@@ -378,9 +379,10 @@ function ProfCard({ name, imageUrl, focusX, focusY, rating, footerLeft, footerCe
 				{imageUrl ? (
 					<img
 						className="course-top-prof-img"
-						src={imageUrl}
+						src={photoThumb(imageUrl)}
 						alt={name}
 						style={{ objectPosition: `${focusX}% ${focusY}%` }}
+						onError={thumbOnError(imageUrl)}
 					/>
 				) : (
 					<div className="course-top-prof-avatar" aria-hidden="true">

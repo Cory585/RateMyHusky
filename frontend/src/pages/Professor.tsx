@@ -13,6 +13,7 @@ import type { ProfessorPage, ProfessorCourse, RatingDistribution, RedditMention,
 import { SHOW_SURVEY_STATS } from '../config';
 import { termSortKey } from '../utils/termUtils';
 import { isPinned, pinnedFirst } from '../utils/askPinMatch';
+import { photoThumb, thumbOnError } from '../utils/photoThumb';
 import BookmarkButton from '../components/BookmarkButton';
 import neuIcon from '../assets/neu-circle-icon.png';
 import './Professor.css';
@@ -735,16 +736,15 @@ const Professor = () => {
           >
             {identity.imageUrl ? (
               <img
-                src={identity.imageUrl}
+                src={photoThumb(identity.imageUrl)}
                 alt={identity.name}
                 className="prof-avatar-img"
                 style={{ objectPosition: `${identity.focusX ?? 50}% ${identity.focusY ?? 30}%` }}
-                onError={(e) => {
-                  const target = e.currentTarget;
+                onError={thumbOnError(identity.imageUrl, (target) => {
                   target.style.display = 'none';
                   const initials = target.parentElement?.querySelector('.prof-avatar-initials') as HTMLElement;
                   if (initials) initials.style.display = 'flex';
-                }}
+                })}
               />
             ) : null}
             <span

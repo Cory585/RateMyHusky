@@ -24,6 +24,15 @@
           "value": "camera=(), microphone=(), geolocation=(), browsing-topics=(self)"
         }
       ]
+    },
+    {
+      "source": "/photos/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=604800"
+        }
+      ]
     }
   ],
   "rewrites": [

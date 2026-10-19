@@ -5,6 +5,7 @@ import { fetchProfessorFull, fetchProfessorsCatalog, fetchSearchSuggestions } fr
 import type { CatalogProfessor, ProfessorPage, ProfessorSuggestion } from '../api/api';
 import StarRating from '../components/StarRating';
 import Footer from '../components/Footer';
+import { photoThumb, thumbOnError } from '../utils/photoThumb';
 
 import './Compare.css';
 
@@ -571,14 +572,14 @@ function Compare() {
 					{imgUrl ? (
 						<>
 							<img
-								src={imgUrl}
+								src={photoThumb(imgUrl)}
 								alt={slot.name}
 								className="compare-avatar-img"
-								onError={(e) => {
-									e.currentTarget.style.display = 'none';
-									const fb = e.currentTarget.parentElement?.querySelector('.compare-avatar-fallback') as HTMLElement;
+								onError={thumbOnError(imgUrl, (img) => {
+									img.style.display = 'none';
+									const fb = img.parentElement?.querySelector('.compare-avatar-fallback') as HTMLElement;
 									if (fb) fb.style.display = 'flex';
-								}}
+								})}
 							/>
 							<div className="compare-avatar-fallback" style={{ display: 'none' }}>
 								{fallbackIcon}
@@ -700,7 +701,7 @@ function Compare() {
 										>
 											<span className={`compare-chip-avatar tone-${slot.index}`}>
 												{imgUrl ? (
-													<img src={imgUrl} alt="" onError={(e) => (e.currentTarget.style.display = 'none')} />
+													<img src={photoThumb(imgUrl)} alt="" onError={thumbOnError(imgUrl, (img) => (img.style.display = 'none'))} />
 												) : (
 													<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
 														<circle cx="12" cy="9" r="4" />
