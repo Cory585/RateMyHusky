@@ -10,12 +10,15 @@ frontend/public/photos/<thumb_name(url)>. The frontend computes the same name
 (frontend/src/utils/photoThumb.ts) and falls back to the original URL when a
 file is missing, so a photo added since the last run still shows.
 
-Existing files are skipped, so a rerun only fetches new photos. Run it after
-photos change, then commit frontend/public/photos/.
+Existing files are skipped, so a rerun only fetches new photos. A photo
+replaced at the same URL keeps its old thumbnail until a --refresh run, which
+downloads everything again and rewrites only the files whose image changed.
+Run it after photos change, then commit frontend/public/photos/.
 
 Reads ORACLE_DATABASE_URL from backend/.env.
 
 Run:  python backend/photo_thumbs.py            # fetch what's missing
+      python backend/photo_thumbs.py --refresh  # also re-check existing ones
       python backend/photo_thumbs.py --prune    # also delete files no professor uses
 """
 
@@ -89,41 +92,70 @@ def photo_urls():
 
 
 def fetch_one(session, url, path):
-    """Returns (url, error or None)."""
+    """Returns (url, outcome, error or None); outcome is "new", "updated",
+    "unchanged" or "failed". Never raises: one bad photo must not stop the run."""
     try:
         resp = session.get(url, timeout=20)
         if resp.status_code != 200 or not resp.content:
-            return url, f"HTTP {resp.status_code}"
+            return url, "failed", f"HTTP {resp.status_code}"
         thumb = make_thumbnail(resp.content)
-    except Exception as e:  # one bad photo must not stop the run
-        return url, f"{type(e).__name__}: {e}"
+    except Exception as e:
+        return url, "failed", f"{type(e).__name__}: {e}"
+
+    existed = os.path.exists(path)
     tmp = path + ".tmp"
-    with open(tmp, "wb") as f:
-        f.write(thumb)
-    os.replace(tmp, path)
-    return url, None
+    try:
+        if existed:
+            with open(path, "rb") as f:
+                if f.read() == thumb:   # same photo: leave the file alone, so git sees no change
+                    return url, "unchanged", None
+        with open(tmp, "wb") as f:
+            f.write(thumb)
+        os.replace(tmp, path)
+    except OSError as e:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return url, "failed", f"write {type(e).__name__}: {e}"
+    return url, "updated" if existed else "new", None
+
+
+def remove_partial_writes(out_dir):
+    """Delete .tmp files a killed run left behind, so they can't be committed."""
+    leftovers = [f for f in os.listdir(out_dir) if f.endswith(".tmp")]
+    for f in leftovers:
+        os.remove(os.path.join(out_dir, f))
+    return len(leftovers)
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0].strip())
     ap.add_argument("--prune", action="store_true", help="delete thumbnails no professor uses any more")
+    ap.add_argument("--refresh", action="store_true",
+                    help="re-download photos that already have thumbnails and rewrite any that changed")
     ap.add_argument("--workers", type=int, default=8)
     args = ap.parse_args()
 
     import requests
 
     os.makedirs(OUT_DIR, exist_ok=True)
+    leftovers = remove_partial_writes(OUT_DIR)
+    if leftovers:
+        print(f"removed {leftovers} partial .tmp files from an earlier run")
     urls = photo_urls()
     wanted = {thumb_name(u): u for u in urls}
     todo = [(u, os.path.join(OUT_DIR, name)) for name, u in wanted.items()
-            if not os.path.exists(os.path.join(OUT_DIR, name))]
+            if args.refresh or not os.path.exists(os.path.join(OUT_DIR, name))]
     print(f"{len(urls)} photos, {len(urls) - len(todo)} already have thumbnails, fetching {len(todo)}")
 
     session = requests.Session()
     session.headers["User-Agent"] = "Mozilla/5.0 (compatible; RateMyHusky photo thumbnails)"
+    counts = {"new": 0, "updated": 0, "unchanged": 0, "failed": 0}
     failed = []
     with ThreadPoolExecutor(args.workers) as pool:
-        for i, (url, err) in enumerate(pool.map(lambda t: fetch_one(session, *t), todo), 1):
+        for i, (url, outcome, err) in enumerate(pool.map(lambda t: fetch_one(session, *t), todo), 1):
+            counts[outcome] += 1
             if err:
                 failed.append((url, err))
             if i % 100 == 0:
@@ -136,8 +168,8 @@ def main():
         print(f"pruned {len(stale)} unused thumbnails")
 
     total = sum(os.path.getsize(os.path.join(OUT_DIR, f)) for f in os.listdir(OUT_DIR) if f.endswith(".webp"))
-    print(f"done: {len(todo) - len(failed)} written, {len(failed)} failed (these keep the original URL); "
-          f"folder is {total / 1e6:.1f} MB")
+    print(f"done: {counts['new']} new, {counts['updated']} updated, {counts['unchanged']} unchanged, "
+          f"{counts['failed']} failed (these keep the original URL); folder is {total / 1e6:.1f} MB")
     for url, err in failed:
         print(f"  FAILED {err}  {url}")
 
