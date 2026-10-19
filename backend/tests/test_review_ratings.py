@@ -130,6 +130,27 @@ def test_approve_course_moves_ratings_onto_the_pending_code():
     assert params == ("CS9999", "c1")
 
 
+def test_merge_course_accepts_a_banner_only_code():
+    course = {"id": "c1", "code": "CS1880", "name": "Discrete", "status": "pending"}
+    cur = FakeCursor({"FOR UPDATE": [course], "banner_course_offerings": [{"x": 1}]})
+    rr.merge_course(cur, "c1", "CS1800")
+    assert cur.statements("UPDATE survey_ratings")[0][1] == ("CS1800", "c1")
+    cur = FakeCursor({"FOR UPDATE": [course]})
+    with pytest.raises(rr.ReviewError):
+        rr.merge_course(cur, "c1", "ZZ0000")
+    assert not cur.statements("DELETE") and not cur.statements("UPDATE")
+
+
+def test_list_matches_last_names_on_the_folded_key_and_escapes_wildcards():
+    def like_param(name_key):
+        cur = FakeCursor({"FROM survey_pending_professors": [
+            {"id": "p1", "name": "Ana Muñoz", "name_key": name_key, "department": None, "n": 1}]})
+        rr.list_pending(cur)
+        return next(p for s, p in cur.calls if "name_key LIKE" in s)[0]
+    assert like_param("ana munoz") == "% munoz"
+    assert like_param("ana mu%n_z") == "% mu\%n\_z"
+
+
 def test_approve_rating_only_touches_held_rows():
     cur = FakeCursor({"UPDATE survey_ratings": [{"id": "abcd1234"}]})
     rr.approve_rating(cur, "abcd1234")
@@ -168,7 +189,8 @@ def test_list_strips_control_characters(capsys):
             "comment": "hi" + evil, "created_at": "2026-10-01"}
     cur = FakeCursor({"FROM survey_ratings": [held],
                       "FROM survey_pending_professors": [{"id": "p1", "name": "Eve" + evil,
-                                                          "department": evil, "n": 1}],
+                                                          "name_key": "eve x", "department": evil,
+                                                          "n": 1}],
                       "FROM survey_pending_courses": [{"id": "c1", "code": evil, "name": evil,
                                                        "n": 1, "in_catalog": False}]})
     rr.list_pending(cur)

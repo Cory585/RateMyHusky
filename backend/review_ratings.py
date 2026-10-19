@@ -160,8 +160,11 @@ def approve_course(cur, entry_id):
 
 def merge_course(cur, entry_id, code):
     load_pending(cur, COURSE, entry_id)
-    cur.execute("SELECT 1 FROM course_catalog WHERE code = %s", (code,))
-    if cur.fetchone() is None:
+    def query_one(sql, params):
+        cur.execute(sql, params)
+        return cur.fetchone()
+    # The same codes the rating form accepts, including Banner-only ones.
+    if not ratings.course_exists(code, query_one):
         raise ReviewError(f"No course with code {code}")
     moved = move_ratings(cur, COURSE, entry_id, code)
     resolve(cur, COURSE, entry_id, "merged", code)
@@ -202,14 +205,16 @@ def list_pending(cur):
               f"{comment!r}  {str(r['created_at'])[:10]}")
 
     cur.execute(
-        "SELECT p.id, p.name, p.department, count(r.id) AS n FROM survey_pending_professors p "
+        "SELECT p.id, p.name, p.name_key, p.department, count(r.id) AS n FROM survey_pending_professors p "
         "LEFT JOIN survey_ratings r ON r.pending_professor_id = p.id "
         "WHERE p.status = 'pending' GROUP BY p.id ORDER BY p.created_at")
     profs = cur.fetchall()
     print(f"Pending professors ({len(profs)}):")
     for p in profs:
+        # name_key is accent-folded like professors.name_key; escape LIKE's wildcards.
+        last = re.sub(r"([\\%_])", r"\\\1", p["name_key"].split()[-1])
         cur.execute("SELECT slug FROM professors WHERE name_key LIKE %s ORDER BY slug LIMIT 3",
-                    ("% " + p["name"].split()[-1].lower(),))
+                    ("% " + last,))
         similar = ", ".join(r["slug"] for r in cur.fetchall()) or "none"
         print(f"  {p['id']}  {clean(p['name'])}  {clean(p['department'])}  {p['n']} rating(s)  "
               f"same last name: {similar}")

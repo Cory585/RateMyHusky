@@ -47,7 +47,11 @@ def rate(monkeypatch):
             return {"x": 1} if params[0] == "CS2500" else None
         if "count(*) AS cnt FROM survey_ratings WHERE created_at" in sql:
             return {"cnt": 3}
-        return None  # banner offerings, pending lookups, existing rating, duplicates, bursts
+        if "AND status = 'pending'" in sql:  # the first insert wins, like the partial unique index
+            table = sql.split("FROM ")[1].split()[0]
+            ids = [p[0] for s, p in state["writes"] if f"INSERT INTO {table}" in s]
+            return {"id": ids[0]} if ids else None
+        return None  # banner offerings, approved courses, existing rating, duplicates, bursts
 
     def fake_write(sql, params=None):
         state["writes"].append((sql, params))
@@ -107,9 +111,12 @@ def test_start_sets_a_device_cookie_and_signs_opened(rate):
 
 def test_start_adopts_the_localstorage_mirror_when_the_cookie_is_gone(rate):
     server, client, state, ri = rate
-    resp = client.get(f"/api/rate/start?device={DEVICE}")
+    resp = client.get("/api/rate/start", headers={"X-Rmh-Device": DEVICE})
     assert resp.get_json()["deviceToken"] == DEVICE
     assert f"rmh_device={DEVICE}" in resp.headers["Set-Cookie"]
+    # The query string ends up in access logs, so it's never read.
+    client.delete_cookie("rmh_device", path="/api")
+    assert client.get(f"/api/rate/start?device={DEVICE}").get_json()["deviceToken"] != DEVICE
 
 
 def test_submit_without_secret_is_503(rate, monkeypatch):
@@ -177,6 +184,20 @@ def test_new_professor_creates_one_pending_entry_and_one_email(rate):
     (subject, text), = state["emails"]
     assert subject == "[RateMyHusky] New professor to review: New Person"
     assert "Math" in text and "python review_ratings.py list" in text
+    # A second student naming the same professor shares the row and sends no email.
+    post(client, ri, {"professor": {"name": "new  PERSON"}}, device="b" * 32)
+    assert len(state["emails"]) == 1
+    pending_id = rating_writes(state)[0][1][1 + server.ratings._INSERT_COLUMNS.index("pending_professor_id")]
+    assert rating_writes(state)[1][1][1 + server.ratings._INSERT_COLUMNS.index("pending_professor_id")] == pending_id
+
+
+def test_team_email_is_sent_after_the_rating_is_saved(rate, monkeypatch):
+    server, client, state, ri = rate
+    saved_at_send = []
+    monkeypatch.setattr(server.notify, "send_team_email",
+                        lambda subject, text, post=None: saved_at_send.append(len(rating_writes(state))))
+    post(client, ri, {"course": {"code": "ZZ9999", "name": "Brand New Course"}})
+    assert saved_at_send == [1]
 
 
 def test_new_course_needs_a_name_and_known_code_ignores_it(rate):
@@ -211,13 +232,19 @@ def test_no_raw_ip_is_written(rate, monkeypatch):
 
 def test_shared_network_is_exempt_from_the_ip_limit(rate):
     server, client, state, ri = rate
-    with server.app.test_request_context("/api/rate"):
-        state["network"] = "campus"
-        assert server._shared_network() is True
-        state["network"] = "relay"
-        assert server._shared_network() is True
-        state["network"] = "other"
-        assert server._shared_network() is False
+    for network, shared in (("campus", True), ("relay", True), ("other", False)):
+        state["network"] = network
+        with server.app.test_request_context("/api/rate"):
+            assert server._shared_network() is shared
+
+
+def test_network_type_is_looked_up_once_per_submit(rate, monkeypatch):
+    server, client, state, ri = rate
+    lookups = []
+    monkeypatch.setattr(server, "_networks",
+                        SimpleNamespace(network_type=lambda ip: lookups.append(ip) or "other"))
+    assert post(client, ri).status_code == 200
+    assert len(lookups) == 1
 
 
 def test_professor_context_uses_cookie_device_and_404s_unknown(rate):

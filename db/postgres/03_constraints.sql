@@ -110,11 +110,15 @@ ALTER TABLE public.survey_ratings ADD CONSTRAINT check_survey_course
 
 -- survey_pending_professors
 CREATE INDEX survey_pending_professors_key ON public.survey_pending_professors (name_key);
+CREATE UNIQUE INDEX survey_pending_professors_one_pending ON public.survey_pending_professors (name_key)
+    WHERE status = 'pending';
 ALTER TABLE public.survey_pending_professors ADD CONSTRAINT check_survey_pending_professor_status
     CHECK (status IN ('pending', 'approved', 'merged', 'rejected'));
 
 -- survey_pending_courses
 CREATE INDEX survey_pending_courses_code ON public.survey_pending_courses (code);
+CREATE UNIQUE INDEX survey_pending_courses_one_pending ON public.survey_pending_courses (code)
+    WHERE status = 'pending';
 ALTER TABLE public.survey_pending_courses ADD CONSTRAINT check_survey_pending_course_status
     CHECK (status IN ('pending', 'approved', 'merged', 'rejected'));
 

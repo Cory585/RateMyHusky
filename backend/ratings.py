@@ -6,12 +6,11 @@ these to the real helpers and owns all HTTP concerns. Every `now` is a
 timezone-aware UTC datetime.
 """
 
-import re
-import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import rmp
+from prof_aliases import rmp_link_key
 
 # The burst thresholds count prior ratings in the window: the route counts before it saves.
 PAIR_BURST = 5  # prior new-device ratings for one professor + course in an hour
@@ -36,12 +35,6 @@ _NO_NETWORK_BURST = ("campus", "relay")
 _BURST_REASONS = ("burst_pair", "burst_ip", "burst_prefix")
 
 
-def _normalize_name(name):
-    s = str(name).strip().lower()
-    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
-    return re.sub(r"\s+", " ", s).strip()
-
-
 def term_start(now):
     """The latest Jan 1 / May 1 / Sep 1 00:00 UTC at or before `now`."""
     month = max(m for m in TERM_START_MONTHS if m <= now.month)
@@ -61,36 +54,38 @@ def professor_exists(slug, query_one):
 
 
 def course_exists(code, query_one):
-    if query_one("SELECT 1 FROM course_catalog WHERE code = %s", (code,)) is not None:
-        return True
-    return query_one("SELECT 1 FROM banner_course_offerings WHERE subject_course = %s",
-                     (code,)) is not None
+    """In the catalog, in Banner, or approved since the last pipeline run rebuilt the catalog."""
+    for sql in ("SELECT 1 FROM course_catalog WHERE code = %s",
+                "SELECT 1 FROM banner_course_offerings WHERE subject_course = %s",
+                "SELECT 1 FROM survey_pending_courses WHERE code = %s AND status = 'approved'"):
+        if query_one(sql, (code,)) is not None:
+            return True
+    return False
 
 
+# The insert is a no-op when a pending row already exists: a partial unique index
+# allows one pending row per name_key / code, so two racing submits share one row.
 def pending_professor(name, department, query_one, write):
-    """(id, created): reuse a pending row with the same normalized name, else insert."""
-    name_key = _normalize_name(name)
+    """(id, created): reuse a pending row with the same name_key as professors use, else insert."""
+    name_key = rmp_link_key(name)[0]
+    new_id = str(uuid.uuid4())
+    write("INSERT INTO survey_pending_professors (id, name, name_key, department) "
+          "VALUES (%s, %s, %s, %s) ON CONFLICT (name_key) WHERE status = 'pending' DO NOTHING",
+          (new_id, name, name_key, department))
     row = query_one(
         "SELECT id FROM survey_pending_professors WHERE name_key = %s AND status = 'pending'",
         (name_key,))
-    if row:
-        return str(row["id"]), False
-    new_id = str(uuid.uuid4())
-    write("INSERT INTO survey_pending_professors (id, name, name_key, department) "
-          "VALUES (%s, %s, %s, %s)", (new_id, name, name_key, department))
-    return new_id, True
+    return str(row["id"]), str(row["id"]) == new_id
 
 
 def pending_course(code, name, query_one, write):
     """(id, created): reuse a pending row with the same code, else insert."""
+    new_id = str(uuid.uuid4())
+    write("INSERT INTO survey_pending_courses (id, code, name) VALUES (%s, %s, %s) "
+          "ON CONFLICT (code) WHERE status = 'pending' DO NOTHING", (new_id, code, name))
     row = query_one(
         "SELECT id FROM survey_pending_courses WHERE code = %s AND status = 'pending'", (code,))
-    if row:
-        return str(row["id"]), False
-    new_id = str(uuid.uuid4())
-    write("INSERT INTO survey_pending_courses (id, code, name) VALUES (%s, %s, %s)",
-          (new_id, code, name))
-    return new_id, True
+    return str(row["id"]), str(row["id"]) == new_id
 
 
 def rating_key(clean, pending_professor_id, pending_course_id):
@@ -109,7 +104,7 @@ def _key_params(key):
 
 def existing_rating(device_hash, key, query_one):
     return query_one(
-        f"SELECT id, status FROM survey_ratings WHERE device_hash = %s AND {_KEY_MATCH}",
+        f"SELECT id, status, hold_reasons FROM survey_ratings WHERE device_hash = %s AND {_KEY_MATCH}",
         (device_hash, *_key_params(key)))
 
 
@@ -156,10 +151,15 @@ def burst_reasons(key, ip_hash, prefix_hash, network_type, query_one, now):
 
 
 def hold_burst(reasons, key, ip_hash, prefix_hash, write, now):
-    """Hold the accepted rows from the last hour that match each tripped trigger."""
+    """Hold the accepted rows from the last hour that match each tripped trigger.
+
+    burst_pair holds only new-device rows, the ones burst_reasons counts. A row a
+    reviewer approved keeps its hold_reasons, so `hold_reasons IS NULL` leaves
+    approvals alone.
+    """
     hour_ago = now - timedelta(hours=1)
     where = {
-        "burst_pair": (_KEY_MATCH, _key_params(key)),
+        "burst_pair": (f"new_device = true AND {_KEY_MATCH}", _key_params(key)),
         "burst_ip": ("ip_hash = %s", (ip_hash,)),
         "burst_prefix": ("ip_prefix_hash = %s", (prefix_hash,)),
     }
@@ -168,19 +168,19 @@ def hold_burst(reasons, key, ip_hash, prefix_hash, write, now):
             continue
         condition, params = where[reason]
         write(
-            "UPDATE survey_ratings SET status = 'held', hold_reasons = "
-            "CASE WHEN hold_reasons IS NULL OR hold_reasons = '' THEN %s "
-            "ELSE hold_reasons || ',' || %s END "
-            f"WHERE status = 'accepted' AND created_at >= %s AND {condition}",
-            (reason, reason, hour_ago, *params))
+            "UPDATE survey_ratings SET status = 'held', hold_reasons = %s "
+            "WHERE status = 'accepted' AND hold_reasons IS NULL AND created_at >= %s "
+            f"AND {condition}",
+            (reason, hour_ago, *params))
 
 
 # The conflict target (device_hash + the four key columns) is never updated;
-# status and hold_reasons have their own held-stays-held rules below.
+# status and hold_reasons have their own held-stays-held rules below. new_device
+# keeps its first value, so an edit can't take a row out of the burst_pair count.
 _INSERT_COLUMNS = tuple(c for c in RATING_COLUMNS if c != "id")
 _SET_COLUMNS = tuple(
     c for c in _INSERT_COLUMNS
-    if c not in ("status", "hold_reasons", "device_hash", *_KEY_COLUMNS))
+    if c not in ("status", "hold_reasons", "device_hash", "new_device", *_KEY_COLUMNS))
 _UPSERT_SQL = (
     f"INSERT INTO survey_ratings (id, {', '.join(_INSERT_COLUMNS)}) "
     f"VALUES (%s, {', '.join(['%s'] * len(_INSERT_COLUMNS))}) "
@@ -198,8 +198,13 @@ def save_rating(row, existing, write):
     """Insert or replace this device's rating in one statement; return its id.
 
     The unique index on (device, key) is the conflict target, so two racing
-    submits still leave one row, and a held row stays held.
+    submits still leave one row, and a held row stays held. Resubmitting a held
+    row adds the new hold reasons to the old ones.
     """
+    if existing and existing["status"] == "held" and existing["hold_reasons"] and row["hold_reasons"]:
+        old = existing["hold_reasons"].split(",")
+        row = {**row, "hold_reasons": ",".join(
+            old + [r for r in row["hold_reasons"].split(",") if r not in old])}
     new_id = str(uuid.uuid4())
     write(_UPSERT_SQL, (new_id, *(row[c] for c in _INSERT_COLUMNS)))
     return existing["id"] if existing else new_id

@@ -55,25 +55,48 @@ def test_counter_hidden_below_25():
     assert f.calls[0][1] == (ratings.term_start(NOW),)
 
 
+class PendingFake(Fake):
+    """The pending row is whichever insert landed first, like the partial unique index."""
+
+    def query_one(self, sql, params=()):
+        self.calls.append((sql, params))
+        return {"id": self.writes[0][1][0]} if self.writes else None
+
+
 def test_pending_professor_reuses_a_pending_row_with_the_same_name_key():
-    f = Fake(one={"survey_pending_professors": {"id": "p1"}})
+    f = PendingFake()
+    f.writes.append(("INSERT", ("p1",)))
     assert ratings.pending_professor("  Jane   DOE ", "CS", f.query_one, f.write) == ("p1", False)
     assert f.calls[0][1] == ("jane doe",)
-    assert f.writes == []
-    f = Fake()
+    sql, params = f.writes[1]
+    assert "ON CONFLICT (name_key) WHERE status = 'pending' DO NOTHING" in sql
+    assert params[1:] == ("  Jane   DOE ", "jane doe", "CS")
+    f = PendingFake()
     new_id, created = ratings.pending_professor("  Jane   DOE ", "CS", f.query_one, f.write)
-    assert created is True
-    assert len(f.writes) == 1 and "INSERT" in f.writes[0][0]
-    assert f.writes[0][1] == (new_id, "  Jane   DOE ", "jane doe", "CS")
+    assert created is True and f.writes[0][1][0] == new_id
+
+
+def test_pending_professor_key_matches_professors_name_key():
+    f = PendingFake()
+    ratings.pending_professor("Ana Muñoz", None, f.query_one, f.write)
+    assert f.writes[0][1][2] == "ana munoz"
 
 
 def test_pending_course_reuses_a_pending_row_with_the_same_code():
-    f = Fake(one={"survey_pending_courses": {"id": "c1"}})
+    f = PendingFake()
+    f.writes.append(("INSERT", ("c1",)))
     assert ratings.pending_course("CS9999", "New", f.query_one, f.write) == ("c1", False)
-    assert f.writes == []
-    f = Fake()
+    assert "ON CONFLICT (code) WHERE status = 'pending' DO NOTHING" in f.writes[1][0]
+    f = PendingFake()
     new_id, created = ratings.pending_course("CS9999", "New", f.query_one, f.write)
     assert created is True and f.writes[0][1] == (new_id, "CS9999", "New")
+
+
+def test_course_exists_counts_codes_approved_since_the_last_pipeline_run():
+    f = Fake(one={"status = 'approved'": {"x": 1}})
+    assert ratings.course_exists("ZZ9999", f.query_one) is True
+    assert len(f.calls) == 3
+    assert ratings.course_exists("ZZ9999", Fake().query_one) is False
 
 
 def test_rating_key_nulls_the_resolved_side_of_a_pending_pair():
@@ -85,8 +108,8 @@ def test_rating_key_nulls_the_resolved_side_of_a_pending_pair():
 
 
 def test_existing_rating_matches_all_four_key_columns_null_safely():
-    f = Fake(one={"survey_ratings": {"id": "r1", "status": "held"}})
-    assert ratings.existing_rating("d1", KEY, f.query_one) == {"id": "r1", "status": "held"}
+    f = Fake(one={"survey_ratings": {"id": "r1", "status": "held", "hold_reasons": "too_fast"}})
+    assert ratings.existing_rating("d1", KEY, f.query_one)["hold_reasons"] == "too_fast"
     sql, params = f.calls[0]
     assert sql.count("IS NOT DISTINCT FROM") == 4
     assert params == ("d1", "jane-doe", None, "CS2500", None)
@@ -111,16 +134,32 @@ def test_duplicate_comment():
 def test_save_is_one_upsert_that_keeps_holds():
     row = {c: None for c in ratings.RATING_COLUMNS if c != "id"}
     f = Fake()
-    assert ratings.save_rating(row, {"id": "r1", "status": "held"}, f.write) == "r1"
+    assert ratings.save_rating(row, {"id": "r1", "status": "held", "hold_reasons": "x"}, f.write) == "r1"
     assert len(f.writes) == 1
     sql, params = f.writes[0]
     assert ("ON CONFLICT (device_hash, professor_slug, pending_professor_id, course_code, "
             "pending_course_id) DO UPDATE") in sql
     assert "WHEN survey_ratings.status = 'held' THEN 'held'" in sql
     assert "updated_at = now()" in sql
+    assert "new_device = EXCLUDED" not in sql  # an edit keeps the row's first new_device
     assert sql.count("%s") == len(params) == len(ratings.RATING_COLUMNS)
     f = Fake()
     assert ratings.save_rating(row, None, f.write) == f.writes[0][1][0]
+
+
+def test_resubmitting_a_held_row_keeps_its_old_hold_reasons():
+    col = 1 + ratings._INSERT_COLUMNS.index("hold_reasons")
+    row = {c: None for c in ratings.RATING_COLUMNS if c != "id"}
+
+    def saved(existing, reasons):
+        f = Fake()
+        ratings.save_rating({**row, "hold_reasons": reasons}, existing, f.write)
+        return f.writes[0][1][col]
+    held = {"id": "r1", "status": "held", "hold_reasons": "burst_ip,duplicate_comment"}
+    assert saved(held, "too_fast,duplicate_comment") == "burst_ip,duplicate_comment,too_fast"
+    assert saved(held, None) is None  # the upsert keeps the old reasons itself
+    assert saved({**held, "status": "accepted"}, "too_fast") == "too_fast"
+    assert saved(None, "too_fast") == "too_fast"
 
 
 def test_burst_ip_skipped_on_campus_and_relay():
@@ -145,8 +184,11 @@ def test_hold_burst_holds_recent_accepted_rows_per_tripped_trigger():
     assert len(f.writes) == 2
     for sql, params in f.writes:
         assert "status = 'held'" in sql and "status = 'accepted'" in sql
-        assert params[2] == NOW - timedelta(hours=1)
-    assert f.writes[0][1][0] == "burst_pair" and f.writes[1][1][3] == "ip"
+        assert "hold_reasons IS NULL" in sql  # leaves reviewer-approved rows alone
+        assert params[1] == NOW - timedelta(hours=1)
+    assert f.writes[0][1][0] == "burst_pair" and f.writes[1][1][2] == "ip"
+    # burst_pair counts only new-device rows, so it holds only those.
+    assert "new_device = true" in f.writes[0][0] and "new_device" not in f.writes[1][0]
 
 
 def test_professor_context_shapes_summaries_and_rated_courses():

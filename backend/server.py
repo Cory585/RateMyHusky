@@ -1880,9 +1880,16 @@ def _rating_limit_key():
     return get_real_ip()
 
 
+def _network_type():
+    """The client's network type, looked up once per request."""
+    if "network_type" not in g:
+        g.network_type = _networks.network_type(get_real_ip())
+    return g.network_type
+
+
 def _shared_network():
     """Campus and Private Relay addresses are shared by many students, so the IP-only limit skips them."""
-    return _networks.network_type(get_real_ip()) in ("campus", "relay")
+    return _network_type() in ("campus", "relay")
 
 
 def _rating_unavailable():
@@ -1911,7 +1918,8 @@ def rate_start():
     if not _rating_enabled():
         return _rating_unavailable()
     now = datetime.now(timezone.utc)
-    token, minted = _device_token(request.args.get("device"))
+    # The localStorage mirror comes in a header, not the query string, so it stays out of access logs.
+    token, minted = _device_token(request.headers.get("X-Rmh-Device"))
     device_hash = rating_identity.keyed_hash(RATING_SECRET, "device", token)
     opened = rating_identity.sign_opened(RATING_SECRET, int(now.timestamp()), device_hash, minted)
     counter = ratings.huskies_this_term(query_one, now)
@@ -1974,7 +1982,7 @@ def rate_submit():
     ip_hash = rating_identity.keyed_hash(RATING_SECRET, "ip", ip)
     prefix = rating_identity.ip_prefix(ip)
     prefix_hash = rating_identity.keyed_hash(RATING_SECRET, "net", prefix) if prefix else None
-    network_type = _networks.network_type(ip)
+    network_type = _network_type()
     fill_seconds, opened_minted = rating_identity.read_opened(
         RATING_SECRET, body.get("opened"), device_hash, int(now.timestamp()))
 
@@ -1986,21 +1994,20 @@ def rate_submit():
     if moderation_action == "block":
         return _rating_response({"error": "comment_blocked"}, 422, device)
 
-    # 8. Pending professor / course, with a team email for each new one
+    # 8. Pending professor / course; the team emails wait until the rating is saved
     pending_professor_id = pending_course_id = None
+    emails = []
     if clean["new_professor"]:
         name, dept = clean["new_professor"]["name"], clean["new_professor"]["department"]
         pending_professor_id, created = ratings.pending_professor(name, dept, query_one, _write)
         if created:
-            notify.send_team_email(
-                f"[RateMyHusky] New professor to review: {name}",
-                f"Name: {name}\nDepartment: {dept or '-'}\n\nReview with: python review_ratings.py list")
+            emails.append((f"[RateMyHusky] New professor to review: {name}",
+                           f"Name: {name}\nDepartment: {dept or '-'}\n\nReview with: python review_ratings.py list"))
     if new_course:
         pending_course_id, created = ratings.pending_course(clean["course_code"], new_course, query_one, _write)
         if created:
-            notify.send_team_email(
-                f"[RateMyHusky] New course to review: {clean['course_code']}",
-                f"Code: {clean['course_code']}\nName: {new_course}\n\nReview with: python review_ratings.py list")
+            emails.append((f"[RateMyHusky] New course to review: {clean['course_code']}",
+                           f"Code: {clean['course_code']}\nName: {new_course}\n\nReview with: python review_ratings.py list"))
 
     # 9. Replace-or-insert, holds and bursts
     key = ratings.rating_key(clean, pending_professor_id, pending_course_id)
@@ -2021,6 +2028,8 @@ def rate_submit():
     ratings.save_rating(row, existing, _write)
     if bursts:
         ratings.hold_burst(bursts, key, ip_hash, prefix_hash, _write, now)
+    for subject, text in emails:
+        notify.send_team_email(subject, text)
 
     # 10. Clear old IP hashes, at most hourly per process
     if time.time() - _last_ip_purge >= _IP_PURGE_INTERVAL:

@@ -6,6 +6,7 @@ import hashlib
 import re
 
 import moderation
+from pipeline.names import name_to_slug, normalize_name
 from teaching_history import label_code
 
 HOURS = ("0-2", "3-4", "5-7", "8-10", "10+")
@@ -51,6 +52,10 @@ def _validate_professor(prof):
     name = " ".join(name.split())
     if not 3 <= len(name) <= 80 or len(name.split()) < 2:
         return None, None, "Professor name must be 3-80 characters and at least two words"
+    # The name_key and slug keep only ASCII letters and digits, so "李 明" would
+    # key to "" and share one pending row with every other such name.
+    if len(name_to_slug(normalize_name(name)).split("-")) < 2:
+        return None, None, "Professor name must be at least two words in Latin letters"
     dept = prof.get("department")
     if dept in (None, ""):
         dept = None

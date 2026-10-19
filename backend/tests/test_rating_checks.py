@@ -112,6 +112,15 @@ def test_validate_cleans():
     assert clean["comment"] == "ok"
 
 
+def test_new_professor_name_needs_two_latin_words():
+    # These would key to "" or one word and share a pending row with other names.
+    for name in ("李 明", "李 Ming", "-- --"):
+        clean, err = rc.validate_submission(_body(professor={"name": name}), 2026)
+        assert clean is None and "Latin letters" in err
+    for name in ("Ana Muñoz", "Mary-Kate Olsen", "J. Smith"):
+        assert rc.validate_submission(_body(professor={"name": name}), 2026)[1] is None
+
+
 def test_validate_new_professor_and_course():
     clean, err = rc.validate_submission(
         _body(professor={"name": " Jane  Doe ", "department": ""}, course={"code": "cs2500", "name": "Fundies"},

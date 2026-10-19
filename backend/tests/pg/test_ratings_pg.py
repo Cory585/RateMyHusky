@@ -5,7 +5,7 @@ import uuid
 import psycopg2
 import pytest
 
-from tests.pg.pgutil import scalar, truncate
+from tests.pg.pgutil import rows, scalar, truncate
 
 
 @pytest.fixture(autouse=True)
@@ -69,3 +69,73 @@ def test_upsert_keeps_a_held_row_held(pg):
     assert scalar(pg, "SELECT count(*) FROM survey_ratings") == 1
     assert scalar(pg, "SELECT status FROM survey_ratings") == "held"
     assert scalar(pg, "SELECT rating FROM survey_ratings") == 5
+
+
+def pg_write(pg):
+    def write(sql, params):
+        with pg.cursor() as cur:
+            cur.execute(sql, params)
+        pg.commit()
+    return write
+
+
+def pg_query_one(pg):
+    def query_one(sql, params):
+        found = rows(pg, sql, params)
+        return found[0] if found else None
+    return query_one
+
+
+def test_pending_rows_are_one_per_key_against_the_real_index(pg):
+    import ratings
+
+    truncate(pg, "survey_pending_professors", "survey_pending_courses")
+    write, query_one = pg_write(pg), pg_query_one(pg)
+    first = ratings.pending_professor("Jane Doe", None, query_one, write)
+    assert first[1] is True
+    assert ratings.pending_professor("jane  DOE", None, query_one, write) == (first[0], False)
+    first = ratings.pending_course("ZZ9999", "New", query_one, write)
+    assert ratings.pending_course("ZZ9999", "Other", query_one, write) == (first[0], False)
+    assert scalar(pg, "SELECT count(*) FROM survey_pending_professors") == 1
+    assert scalar(pg, "SELECT count(*) FROM survey_pending_courses") == 1
+    # A resolved row no longer blocks a new pending one for the same code.
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_pending_courses SET status = 'approved'")
+    pg.commit()
+    assert ratings.pending_course("ZZ9999", "New", query_one, write)[1] is True
+
+
+def test_upsert_keeps_new_device_and_merges_hold_reasons(pg):
+    import ratings
+
+    insert(pg, "d1", "jane-doe", None, "CS2500", None, status="held")
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET hold_reasons = 'burst_ip,duplicate_comment'")
+    pg.commit()
+    row = {c: None for c in ratings.RATING_COLUMNS if c != "id"}
+    row.update(professor_slug="jane-doe", course_code="CS2500", rating=5, hours="3-4",
+               status="held", hold_reasons="too_fast", device_hash="d1", new_device=False,
+               network_type="unknown", collection="turnstile+device")
+    key = ratings.rating_key(row, None, None)
+    existing = ratings.existing_rating("d1", key, pg_query_one(pg))
+    ratings.save_rating(row, existing, pg_write(pg))
+    (saved,) = rows(pg, "SELECT new_device, hold_reasons FROM survey_ratings")
+    assert saved == {"new_device": True, "hold_reasons": "burst_ip,duplicate_comment,too_fast"}
+
+
+def test_hold_burst_skips_returning_devices_and_approved_rows(pg):
+    import ratings
+    from datetime import datetime, timezone
+
+    insert(pg, "d1", "jane-doe", None, "CS2500", None)  # new device
+    insert(pg, "d2", "jane-doe", None, "CS2500", None)  # returning device
+    insert(pg, "d3", "jane-doe", None, "CS2500", None)  # approved by a reviewer
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET new_device = false WHERE device_hash = 'd2'")
+        cur.execute("UPDATE survey_ratings SET hold_reasons = 'burst_pair' WHERE device_hash = 'd3'")
+    pg.commit()
+    key = {"professor_slug": "jane-doe", "pending_professor_id": None,
+           "course_code": "CS2500", "pending_course_id": None}
+    ratings.hold_burst(["burst_pair"], key, None, None, pg_write(pg), datetime.now(timezone.utc))
+    held = rows(pg, "SELECT device_hash FROM survey_ratings WHERE status = 'held'")
+    assert [r["device_hash"] for r in held] == ["d1"]

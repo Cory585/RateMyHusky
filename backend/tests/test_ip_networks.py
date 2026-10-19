@@ -65,10 +65,18 @@ def test_load_index_reads_relay_csv(tmp_path):
 
 
 class _Resp:
-    content = b"data"
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
 
     def raise_for_status(self):
         pass
+
+    def iter_content(self, size):
+        yield b"da"
+        yield b"ta"
 
 
 def test_fetch_without_token_skips_ipinfo(tmp_path, monkeypatch, capsys):
@@ -81,6 +89,28 @@ def test_fetch_without_token_skips_ipinfo(tmp_path, monkeypatch, capsys):
     assert all("ipinfo.io" not in u for u in urls) and len(urls) == 1
     assert (tmp_path / "relay.csv").read_bytes() == b"data"
     assert "skipped: IPINFO_TOKEN not set" in capsys.readouterr().out
+
+
+def test_fetch_keeps_a_file_fetched_in_the_last_day(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("IPINFO_TOKEN", raising=False)
+    monkeypatch.setenv("IP_DATA_DIR", str(tmp_path))
+    (tmp_path / "relay.csv").write_bytes(b"old")
+    monkeypatch.setattr(fetch_ip_data.http_requests, "get",
+                        lambda url, **kw: (_ for _ in ()).throw(AssertionError("fetched")))
+    assert fetch_ip_data.main() == 0
+    assert (tmp_path / "relay.csv").read_bytes() == b"old"
+    assert "relay.csv kept" in capsys.readouterr().out
+
+
+def test_fetch_gives_up_after_the_deadline(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("IPINFO_TOKEN", raising=False)
+    monkeypatch.setenv("IP_DATA_DIR", str(tmp_path))
+    clock = iter([0, 0, fetch_ip_data.DEADLINE + 1])
+    monkeypatch.setattr(fetch_ip_data.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(fetch_ip_data.http_requests, "get", lambda url, **kw: _Resp())
+    assert fetch_ip_data.main() == 0
+    assert not (tmp_path / "relay.csv").exists()
+    assert "relay.csv failed: not done after" in capsys.readouterr().out
 
 
 def test_fetch_failure_exits_zero_and_hides_token(tmp_path, monkeypatch, capsys):

@@ -214,11 +214,27 @@ ALTER TABLE public.survey_ratings ADD CONSTRAINT check_survey_professor
 ALTER TABLE public.survey_ratings ADD CONSTRAINT check_survey_course
     CHECK (course_code IS NOT NULL OR pending_course_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS survey_pending_professors_key ON public.survey_pending_professors (name_key);
+CREATE UNIQUE INDEX IF NOT EXISTS survey_pending_professors_one_pending ON public.survey_pending_professors (name_key)
+    WHERE status = 'pending';
 ALTER TABLE public.survey_pending_professors ADD CONSTRAINT check_survey_pending_professor_status
     CHECK (status IN ('pending', 'approved', 'merged', 'rejected'));
 CREATE INDEX IF NOT EXISTS survey_pending_courses_code ON public.survey_pending_courses (code);
+CREATE UNIQUE INDEX IF NOT EXISTS survey_pending_courses_one_pending ON public.survey_pending_courses (code)
+    WHERE status = 'pending';
 ALTER TABLE public.survey_pending_courses ADD CONSTRAINT check_survey_pending_course_status
     CHECK (status IN ('pending', 'approved', 'merged', 'rejected'));
+```
+
+If the three tables already exist, run just the two partial unique indexes
+before deploying. They allow one pending row per name key and per course code,
+and the rating route's `ON CONFLICT` needs them, so without them every rating
+for a new professor or course fails. Both are rerunnable:
+
+```sql
+CREATE UNIQUE INDEX IF NOT EXISTS survey_pending_professors_one_pending ON public.survey_pending_professors (name_key)
+    WHERE status = 'pending';
+CREATE UNIQUE INDEX IF NOT EXISTS survey_pending_courses_one_pending ON public.survey_pending_courses (code)
+    WHERE status = 'pending';
 ```
 
 ### Optional cleanup (destructive; take a backup first)
