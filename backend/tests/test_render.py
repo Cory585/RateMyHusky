@@ -1097,6 +1097,7 @@ def test_professor_html_with_no_department_drops_it_without_null_or_double_space
     verdict = re.search(r"Francis Georges is a professor[^<]*", html).group(0)
     alt = re.search(r'<meta property="og:image:alt" content="(.*?)"', html).group(1)
     assert alt == "Francis Georges, professor at Northeastern University"
+    assert '"knowsAbout"' not in html                       # no empty JSON-LD field
     for text in (title, desc, verdict, alt):
         assert "null" not in text.lower() and "None" not in text
         assert "  " not in text

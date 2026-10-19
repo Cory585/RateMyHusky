@@ -324,7 +324,7 @@ def professor_html(profile: dict, reviews: list, canonical: str) -> str:
             "name": "Northeastern University",
             "sameAs": "https://www.northeastern.edu",
         },
-        "knowsAbout": dept,
+        **({"knowsAbout": dept} if dept else {}),
         "url": canonical,
     }
     if profile.get("imageUrl"):

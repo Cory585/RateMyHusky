@@ -63,10 +63,15 @@ def test_course_codes_and_name_keys_apply_through_temp_tables(pg):
 
 
 def test_apply_banner_professors_writes_origin_and_skips_taken_slugs(pg):
-    truncate(pg, "professors")
+    truncate(pg, "professors", "banner_course_instructors")
     with pg.cursor() as cur:
         cur.execute("INSERT INTO professors (slug, name, name_key) "
                     "VALUES ('lucia-nunez', 'Lucia Nunez', 'lucia nunez')")
+        for key in ("wei wang", "lucia nunez"):
+            cur.execute("INSERT INTO banner_course_instructors (subject_course, instructor_key, "
+                        "match_method, terms_taught, sections, first_term_code, last_term_code, "
+                        "last_term_label) VALUES ('CS2500', %s, 'no_match', 1, 1, '202610', "
+                        "'202610', 'Fall 2025')", (key,))
     pg.commit()
 
     def banner(slug, name):
@@ -81,3 +86,9 @@ def test_apply_banner_professors_writes_origin_and_skips_taken_slugs(pg):
         (r["slug"], r["origin"])
         for r in rows(pg, "SELECT slug, origin FROM professors ORDER BY slug")
     ] == [("lucia-nunez", "rmp"), ("wei-wang", "banner")]
+    # Only the inserted professor's rows are linked; the taken slug's are left to the matcher.
+    assert [
+        (r["instructor_key"], r["professor_slug"], r["name_key"], r["match_method"])
+        for r in rows(pg, "SELECT instructor_key, professor_slug, name_key, match_method "
+                          "FROM banner_course_instructors ORDER BY instructor_key")
+    ] == [("lucia nunez", None, None, "no_match"), ("wei wang", "wei-wang", "wei wang", "name_key")]

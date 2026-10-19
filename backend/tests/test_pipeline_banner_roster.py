@@ -108,3 +108,28 @@ def test_fully_matched_key_is_matched_not_mixed():
     rows, counts = br.resolve_banner_professors(
         [bci("wei wang", "CHEM1211", "Wang, Wei", method="ambiguous")], PROFS, DEPTS, never)
     assert rows == [] and counts["matched"] == 1 and counts["mixed"] == 0
+
+
+def test_generational_suffix_matching_an_existing_professor_is_a_possible_duplicate():
+    profs = PROFS + [{"slug": "martin-schwarz-jr", "name": "Martin Schwarz, Jr.",
+                      "name_key": "martin schwarz, jr."}]
+    rows, counts = br.resolve_banner_professors(
+        [bci("richard melloni jr", "PSYC1101", "Melloni Jr, Richard"),
+         bci("martin schwarz jr", "MATH1341", "Schwarz Jr, Martin")],
+        profs + [{"slug": "richard-melloni", "name": "Richard Melloni", "name_key": "richard melloni"}],
+        DEPTS, never)
+    assert rows == [] and counts["possible_duplicate"] == 2
+
+
+def test_banner_key_aliased_to_a_denied_professor_is_denied(monkeypatch):
+    monkeypatch.setattr(br, "BANNER_ALIASES", {"wan yee yvonne leung": "yvonne leung"})
+    monkeypatch.setattr(br, "is_denied", lambda name: False)
+    monkeypatch.setattr(br, "is_denied_key", lambda key: key == "yvonne leung")
+    assert br.is_denied_banner_key("wan yee yvonne leung")
+    assert not br.is_denied_banner_key("lucia nunez")
+
+
+def test_banner_key_denied_through_alias_map(monkeypatch):
+    seen = []
+    monkeypatch.setattr(br, "is_denied", lambda name: seen.append(name) or True)
+    assert br.is_denied_banner_key("virgiliu pavlu") and seen == ["virgiliu pavlu"]

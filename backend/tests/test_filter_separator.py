@@ -87,3 +87,14 @@ def test_search_keeps_a_zero_review_professor_whose_name_starts_with_the_query(m
 
     monkeypatch.setattr(server, "query", fake_query)
     assert server._professor_search("lee", limit=5)[0]["slug"] == "banner"
+
+
+def test_rated_only_search_filters_before_the_cut(monkeypatch):
+    """The catalog page keeps only rated rows, so it must drop unrated ones in SQL
+    or they fill the 100-row cut and push rated matches out."""
+    seen = []
+    monkeypatch.setattr(server, "query", lambda sql, params=None: seen.append(sql) or [])
+    server._professor_search("lee", limit=200, rated_only=True)
+    server._professor_search("lee", limit=5)
+    assert "avg_rating IS NOT NULL" in seen[0].split("ORDER BY")[0]
+    assert "avg_rating IS NOT NULL" not in seen[1]

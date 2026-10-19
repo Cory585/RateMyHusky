@@ -6,15 +6,22 @@ roster_duplicate) means the matcher found a candidate or flagged a conflict,
 and a new page could duplicate a real professor. A key with a no_match row and
 another verdict is counted as mixed; one with no no_match row is already matched.
 A key whose first and last words equal another known key's (an added or missing
-middle name) is a possible duplicate, whichever side has the middle name. A new professor's name_key is
+middle name, or a Jr/Sr/II/III/IV suffix) is a possible duplicate, whichever side
+has the extra word. A new professor's name_key is
 Banner's instructor_key verbatim. Existing slugs and names are never changed.
 """
 
+import os
 import re
+import sys
 from collections import Counter, defaultdict
 
-from denylist import is_denied_key
+from denylist import is_denied, is_denied_key
 from teaching_history import display_name
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), "scraper"))
+from match_banner_instructors import BANNER_ALIASES, subject_of  # noqa: E402
 
 from .db import chunk_insert
 from .names import get_college, name_to_slug
@@ -22,15 +29,19 @@ from .roster import unique_slug
 from .seed import PROFESSOR_FIELDS
 
 BANNER_FIELDS = PROFESSOR_FIELDS + ("origin",)
+_SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
 
 
 def _first_last(key):
-    parts = key.split()
+    parts = [w for w in re.sub(r"[.,]", "", key).split() if w not in _SUFFIXES]
     return f"{parts[0]} {parts[-1]}" if len(parts) >= 2 else None
 
 
-def _subject(subject_course):
-    return re.match(r"[A-Za-z]*", subject_course or "").group().upper()
+def is_denied_banner_key(key):
+    """Denied under the Banner spelling or either alias map's target. A denied
+    professor is not in the catalog, so the matcher reports an aliased spelling
+    of them as no_match rather than resolving it."""
+    return is_denied(key) or is_denied_key(BANNER_ALIASES.get(key))
 
 
 def subject_departments(instructor_rows, department_by_slug):
@@ -39,11 +50,11 @@ def subject_departments(instructor_rows, department_by_slug):
     for row in instructor_rows:
         department = department_by_slug.get(row["professor_slug"]) if row["professor_slug"] else None
         if department:
-            votes[_subject(row["subject_course"])][department] += 1
+            votes[subject_of(row["subject_course"])][department] += 1
     return {subject: min(counts, key=lambda d: (-counts[d], d)) for subject, counts in votes.items()}
 
 
-def resolve_banner_professors(instructor_rows, professors, departments, is_denied=is_denied_key):
+def resolve_banner_professors(instructor_rows, professors, departments, is_denied=is_denied_banner_key):
     """(new professor rows, counts). Pure; inputs are not modified."""
     by_key = defaultdict(list)
     for row in instructor_rows:
@@ -77,7 +88,7 @@ def resolve_banner_professors(instructor_rows, professors, departments, is_denie
             continue
         terms = Counter()
         for r in rows:
-            terms[_subject(r["subject_course"])] += r["terms_taught"]
+            terms[subject_of(r["subject_course"])] += r["terms_taught"]
         subject = min(terms, key=lambda s: (-terms[s], s))
         department = departments.get(subject)
         newest = max(rows, key=lambda r: (r["last_term_code"] or "", r["instructor_name"] or ""))
@@ -100,4 +111,10 @@ def apply_banner_professors(conn, rows):
     chunk_insert(cur, f"INSERT INTO professors ({', '.join(BANNER_FIELDS)}) VALUES %s "
                       "ON CONFLICT (slug) DO NOTHING",
                  [tuple(r[f] for f in BANNER_FIELDS) for r in rows])
+    # Link their Banner rows now, so a new page lists its courses before the next
+    # banner-refresh, whose matcher recomputes these columns.
+    cur.execute("UPDATE banner_course_instructors bci SET professor_slug = p.slug, "
+                "name_key = p.name_key, match_method = 'name_key' FROM professors p "
+                "WHERE p.slug = ANY(%s) AND p.name_key = bci.instructor_key "
+                "AND bci.match_method = 'no_match'", ([r["slug"] for r in rows],))
     conn.commit()

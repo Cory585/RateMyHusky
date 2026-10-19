@@ -600,7 +600,7 @@ const Professor = () => {
         name: 'Northeastern University',
         sameAs: 'https://www.northeastern.edu',
       },
-      knowsAbout: identity.department,
+      ...(identity.department ? { knowsAbout: identity.department } : {}),
       url: profCanonical,
       ...(identity.imageUrl ? { image: identity.imageUrl } : {}),
       ...(rmp.professorUrl ? { sameAs: [rmp.professorUrl] } : {}),
@@ -759,7 +759,7 @@ const Professor = () => {
               {identity.name}
               <BookmarkButton itemType="professor" itemKey={slug!} size="md" className="prof-hero-bookmark" />
             </h1>
-            <p className="prof-dept">{identity.department}</p>
+            {identity.department && <p className="prof-dept">{identity.department}</p>}
             {awards.length > 0 && (
               <ul className="prof-awards" aria-label="Teaching awards">
                 {groupAwards(awards).map(({ label, award: a, years }) => (
