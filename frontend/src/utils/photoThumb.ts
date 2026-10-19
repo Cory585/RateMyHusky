@@ -25,15 +25,17 @@ export function photoThumb(url: string): string {
 
 /* onError for an <img src={photoThumb(url)}>. A photo added since the thumbnails were
    last made has no file yet, so the first error retries the original URL; if that
-   fails too, `fallback` runs (e.g. hide the img and show initials). */
+   fails too, `fallback` runs (e.g. hide the img and show initials). The flag holds
+   the URL it was set for, because React can reuse the same <img> for another
+   professor, whose thumbnail still deserves its own retry. */
 export function thumbOnError(original: string, fallback?: (img: HTMLImageElement) => void) {
   return (e: SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
-    if (img.dataset.thumbFailed) {
+    if (img.dataset.thumbFailed === original) {
       fallback?.(img);
       return;
     }
-    img.dataset.thumbFailed = '1';
+    img.dataset.thumbFailed = original;
     img.src = original;
   };
 }

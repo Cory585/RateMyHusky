@@ -94,6 +94,15 @@ const pickRanks = (
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 
+// "jane-doe-2" -> "Jane Doe": a stand-in name when a profile can't be loaded
+const nameFromSlug = (slug: string) =>
+	slug
+		.replace(/-\d+$/, '')
+		.split('-')
+		.filter(Boolean)
+		.map((part) => part[0].toUpperCase() + part.slice(1))
+		.join(' ');
+
 const joinNames = (names: string[]) => {
 	if (names.length <= 2) return names.join(' and ');
 	return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
@@ -105,7 +114,7 @@ interface SlotSearchProps {
 	slug: string;
 	selectedName: string | null;
 	excludeSlugs: string[];
-	onSelect: (slug: string) => void;
+	onSelect: (prof: ProfessorSuggestion) => void;
 	onClear: () => void;
 	clearLabel: string | null;
 	autoFocus: boolean;
@@ -196,7 +205,7 @@ function SlotSearch({
 		setQuery(prof.name);
 		setOpen(false);
 		setActiveIndex(-1);
-		onSelect(prof.slug);
+		onSelect(prof);
 	};
 
 	return (
@@ -262,6 +271,8 @@ function Compare() {
 	const [searchParams, setSearchParams] = useSearchParams();
 
 	const [entries, setEntries] = useState<Record<string, ProfileEntry>>({});
+	// Names picked from search, so a slot has a name before its profile arrives
+	const [pickedNames, setPickedNames] = useState<Record<string, string>>({});
 	const [openCount, setOpenCount] = useState(MIN_OPEN_SLOTS);
 	const [focusSlot, setFocusSlot] = useState<number | null>(null);
 
@@ -347,7 +358,7 @@ function Compare() {
 			profile,
 			loading: Boolean(slug) && (!entry || entry.status === 'loading'),
 			failed: entry?.status === 'error',
-			name: profile?.identity.name ?? '',
+			name: profile?.identity.name ?? pickedNames[slug] ?? (entry?.status === 'error' ? nameFromSlug(slug) : ''),
 		};
 	});
 
@@ -467,7 +478,7 @@ function Compare() {
 	const renderProfileCard = (slot: SlotData) => {
 		if (slot.loading) return <p className="compare-status">Loading profile...</p>;
 		if (slot.failed) {
-			return <p className="compare-status compare-status-error">Could not load this professor profile.</p>;
+			return <p className="compare-status compare-status-error">Could not load {displayName(slot)}'s profile.</p>;
 		}
 		if (!slot.slug || !slot.profile) {
 			return <p className="compare-status">Pick a professor for slot {slot.label}.</p>;
@@ -677,9 +688,12 @@ function Compare() {
 								key={slot.label}
 								label={`Professor ${slot.label}`}
 								slug={slot.slug}
-								selectedName={slot.profile?.identity.name ?? null}
+								selectedName={slot.name || null}
 								excludeSlugs={slugs.filter((s, i) => s && i !== slot.index)}
-								onSelect={(slug) => updateSlot(slot.index, slug)}
+								onSelect={(prof) => {
+									setPickedNames((prev) => ({ ...prev, [prof.slug]: prof.name }));
+									updateSlot(slot.index, prof.slug);
+								}}
 								onClear={() => (canClose ? closeSlot(slot.index) : updateSlot(slot.index, ''))}
 								clearLabel={slot.slug ? 'Clear' : canClose ? 'Remove' : null}
 								autoFocus={focusSlot === slot.index}
