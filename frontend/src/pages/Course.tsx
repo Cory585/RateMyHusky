@@ -8,6 +8,7 @@ import { fetchCourseData } from '../api/api';
 import type { CourseDetail, CourseHistory, HistoryCourseLink } from '../api/api';
 import Footer from '../components/Footer';
 import { getInitials, stripPrefix } from '../utils/nameUtils';
+import { photoThumb, thumbOnError } from '../utils/photoThumb';
 import Breadcrumbs from '../components/Breadcrumbs';
 import Seo from '../components/Seo';
 import BookmarkButton from '../components/BookmarkButton';
@@ -372,15 +373,19 @@ type ProfCardProps = {
 };
 
 function ProfCard({ name, imageUrl, focusX, focusY, rating, footerLeft, footerCenter, footerRight, rank, to, fromPage }: ProfCardProps) {
+	// The URL whose copy and original both failed; held by URL so a reused card retries a new photo
+	const [deadPhoto, setDeadPhoto] = useState<string | null>(null);
 	const content = (
 		<>
 			<div className="course-top-prof-photo">
-				{imageUrl ? (
+				{imageUrl && deadPhoto !== imageUrl ? (
 					<img
+						key={imageUrl}
 						className="course-top-prof-img"
-						src={imageUrl}
+						src={photoThumb(imageUrl)}
 						alt={name}
 						style={{ objectPosition: `${focusX}% ${focusY}%` }}
+						onError={thumbOnError(imageUrl, () => setDeadPhoto(imageUrl))}
 					/>
 				) : (
 					<div className="course-top-prof-avatar" aria-hidden="true">

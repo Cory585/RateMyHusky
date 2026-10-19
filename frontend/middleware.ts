@@ -15,10 +15,11 @@
 import maintenance from './maintenance.config.json';
 
 // Skip the maintenance page itself, the assets it needs, crawler/AdSense
-// files, and Vercel internals (analytics beacons, etc.).
+// files, Vercel internals (analytics beacons, etc.), and professor photo
+// thumbnails (a catalog page loads dozens; each would be a middleware call).
 export const config = {
   matcher:
-    '/((?!maintenance\\.html|logo\\.jpg|neu-husky-icon\\.png|robots\\.txt|ads\\.txt|sitemap\\.xml|llms\\.txt|2c426a030622417e4b03f2011ae5959e\\.txt|_vercel).*)',
+    '/((?!maintenance\\.html|logo\\.jpg|neu-husky-icon\\.png|robots\\.txt|ads\\.txt|sitemap\\.xml|llms\\.txt|2c426a030622417e4b03f2011ae5959e\\.txt|_vercel|photos/).*)',
 };
 
 // Bypass token: "<name>.<expiry-epoch-seconds>.<hex hmac-sha256 of "name.expiry">"
