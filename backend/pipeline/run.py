@@ -11,7 +11,7 @@ from collections import Counter
 
 import moderation
 
-from . import banner_roster, course_codes, name_keys, read_models, review_tags, roster, summaries
+from . import banner_roster, course_codes, name_keys, names, read_models, review_tags, roster, summaries
 from .blend import blend
 from .db import connect, fetch_all
 from .rmp_fields import rmp_id
@@ -62,7 +62,12 @@ def main(argv=None):
                                       banner_roster.subject_colleges(bci, professors))
     exits = {slug: c for slug, c in exits.items() if slug not in colleges}
     print(f"out of Law by term track: {dict(sorted(Counter(exits.values()).items()))}")
-    colleges = {**exits, **colleges}
+    # A corrected department label applies to existing professors too; the term
+    # track still wins over it.
+    relabelled = {p["slug"]: names.get_college(p["department"]) for p in professors
+                  if p["department"] in names.RECOLLEGED_DEPARTMENTS}
+    print(f"colleges from corrected department labels: {dict(sorted(Counter(relabelled.values()).items()))}")
+    colleges = {**relabelled, **exits, **colleges}
     # Alias-aware, so a page created before its professor's denial request still drops.
     professors, links = read_models.drop_denied(professors, links, banner_roster.is_denied_banner_key)
 

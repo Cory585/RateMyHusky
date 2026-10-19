@@ -80,3 +80,13 @@ def test_term_track_sets_catalog_college_for_linked_and_new_banner_professors(wr
     catalog = {r["slug"]: r["college"] for r in writes[-1][1]}
     assert catalog["olin-guha"] == "Law"                       # linked by the matcher
     assert catalog["lucia-nunez"] == "Professional Studies"    # created this run, linked by name_key
+
+
+def test_a_corrected_department_label_moves_an_existing_professor(writes, monkeypatch):
+    monkeypatch.setattr(run.read_models, "verify", lambda *a: [])
+    olin = TABLES["professors"][0]
+    monkeypatch.setitem(TABLES, "professors", [
+        {**olin, "department": "Counseling & Educational Psych", "college": "Professional Studies"}])
+    monkeypatch.setitem(TABLES, "banner_section_instructors", [])
+    assert run.main([]) == 0
+    assert {r["slug"]: r["college"] for r in writes[-1][1]}["olin-guha"] == "Health Sciences"

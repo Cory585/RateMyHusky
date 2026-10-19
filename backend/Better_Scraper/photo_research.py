@@ -153,8 +153,8 @@ SUPPLEMENTAL_COLLEGE_MAP = {
     # Khoury
     "Information Assurance": "Khoury",
     "Computer  Informational Tech.": "Khoury",
-    # Professional Studies
-    "Counseling  Educational Psych": "Professional Studies",
+    # Health Sciences (Bouve's Applied Psychology)
+    "Counseling  Educational Psych": "Health Sciences",
 }
 
 
