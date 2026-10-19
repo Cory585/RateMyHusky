@@ -31,6 +31,15 @@ from .seed import PROFESSOR_FIELDS
 BANNER_FIELDS = PROFESSOR_FIELDS + ("origin",)
 _SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
 
+# Law and CPS run their own term calendars, so the track of the terms someone
+# teaches in names their college where an RMP department label cannot: "Law"
+# on RMP takes in instructors who never taught a Law term, and CPS faculty are
+# labelled by subject (Leadership, Regulatory Affairs) and land in other colleges.
+# CPS Semester is left out on purpose: it carries day-college subjects (CHM,
+# BIO, ENG) taught by day-college faculty, so counting it would move Science
+# professors into Professional Studies.
+TRACK_COLLEGES = {"Law Semester": "Law", "CPS Quarter": "Professional Studies"}
+
 
 def _first_last(key):
     parts = [w for w in re.sub(r"[.,]", "", key).split() if w not in _SUFFIXES]
@@ -52,6 +61,24 @@ def subject_departments(instructor_rows, department_by_slug):
         if department:
             votes[subject_of(row["subject_course"])][department] += 1
     return {subject: min(counts, key=lambda d: (-counts[d], d)) for subject, counts in votes.items()}
+
+
+def track_colleges(track_rows, slug_by_key):
+    """slug -> college, for professors who taught more than half their sections
+    in one TRACK_COLLEGES track. track_rows hold (instructor_key, track, sections);
+    a professor reached by several instructor keys has their sections summed."""
+    sections = defaultdict(Counter)
+    for row in track_rows:
+        slug = slug_by_key.get(row["instructor_key"])
+        if slug:
+            sections[slug][row["track"]] += row["sections"]
+    colleges = {}
+    for slug, by_track in sections.items():
+        total = sum(by_track.values())
+        for track, college in TRACK_COLLEGES.items():
+            if by_track[track] * 2 > total:
+                colleges[slug] = college
+    return colleges
 
 
 def resolve_banner_professors(instructor_rows, professors, departments, is_denied=is_denied_banner_key):

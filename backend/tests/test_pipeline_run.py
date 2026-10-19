@@ -27,6 +27,11 @@ TABLES = {
          "professor_slug": "olin-guha", "match_method": "name_key", "terms_taught": 3,
          "last_term_code": "202630"},
     ],
+    # The aggregate run.py reads; keyed by its first table like every query here.
+    "banner_section_instructors": [
+        {"instructor_key": "olin guha", "track": "Law Semester", "sections": 3},
+        {"instructor_key": "lucia nunez", "track": "CPS Quarter", "sections": 1},
+    ],
 }
 
 
@@ -42,7 +47,7 @@ def writes(monkeypatch):
     monkeypatch.setattr(run.course_codes, "apply_codes", lambda conn, p: calls.append(("codes", p)) or 0)
     monkeypatch.setattr(run.name_keys, "apply_name_keys", lambda conn, p: calls.append(("name_keys", p)) or 0)
     monkeypatch.setattr(run.review_tags, "rebuild_if_present", lambda conn: calls.append(("tags",)))
-    monkeypatch.setattr(run.read_models, "write", lambda conn, *a: calls.append(("read_models",)))
+    monkeypatch.setattr(run.read_models, "write", lambda conn, *a: calls.append(("read_models", a[0])))
     return calls
 
 
@@ -67,3 +72,11 @@ def test_writes_happen_after_verify_in_order(writes, monkeypatch):
     assert writes[1][1][0]["department"] == "CS"
     assert writes[2][1] == [(10, "CS2500")]
     assert writes[3][1] == [(10, "olin guha")]
+
+
+def test_term_track_sets_catalog_college_for_linked_and_new_banner_professors(writes, monkeypatch):
+    monkeypatch.setattr(run.read_models, "verify", lambda *a: [])
+    assert run.main([]) == 0
+    catalog = {r["slug"]: r["college"] for r in writes[-1][1]}
+    assert catalog["olin-guha"] == "Law"                       # linked through banner_course_instructors
+    assert catalog["lucia-nunez"] == "Professional Studies"    # created this run, linked by name_key

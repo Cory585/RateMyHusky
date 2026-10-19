@@ -134,3 +134,38 @@ def test_banner_key_denied_through_alias_map(monkeypatch):
     seen = []
     monkeypatch.setattr(br, "is_denied", lambda name: seen.append(name) or True)
     assert br.is_denied_banner_key("virgiliu pavlu") and seen == ["virgiliu pavlu"]
+
+
+def track(key, track_name, sections):
+    return {"instructor_key": key, "track": track_name, "sections": sections}
+
+
+def test_majority_law_or_cps_quarter_track_names_the_college():
+    slugs = {"ada park": "ada-park", "john smith": "john-smith"}
+    colleges = br.track_colleges([track("ada park", "Law Semester", 6), track("ada park", "Semester", 2),
+                                  track("john smith", "CPS Quarter", 3)], slugs)
+    assert colleges == {"ada-park": "Law", "john-smith": "Professional Studies"}
+
+
+def test_day_college_majority_or_a_tie_keeps_the_department_college():
+    slugs = {"ada park": "ada-park", "john smith": "john-smith"}
+    colleges = br.track_colleges([track("ada park", "CPS Quarter", 2), track("ada park", "Semester", 3),
+                                  track("john smith", "Law Semester", 2), track("john smith", "Semester", 2)],
+                                 slugs)
+    assert colleges == {}
+
+
+def test_cps_semester_does_not_count_toward_professional_studies():
+    # Day-college subjects taught to CPS undergraduates by day-college faculty.
+    assert br.track_colleges([track("ada park", "CPS Semester", 9)], {"ada park": "ada-park"}) == {}
+
+
+def test_sections_are_summed_across_a_professors_instructor_keys():
+    slugs = {"ada park": "ada-park", "ada m park": "ada-park"}
+    colleges = br.track_colleges([track("ada park", "Law Semester", 2), track("ada park", "Semester", 3),
+                                  track("ada m park", "Law Semester", 2)], slugs)
+    assert colleges == {"ada-park": "Law"}
+
+
+def test_unlinked_instructors_are_ignored():
+    assert br.track_colleges([track("nobody", "Law Semester", 5)], {}) == {}
