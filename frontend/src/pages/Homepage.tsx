@@ -605,8 +605,10 @@ const Homepage = () => {
               </div>
             ))
           ) : profs.length === 0 ? (
+            // 30 is BOARD_MIN_REVIEWS in server.py. The college has professors,
+            // just none rated often enough to rank (Law, as of 2026-10).
             <div className="goat-row" style={{ justifyContent: 'center', opacity: 0.6 }}>
-              No professors found for this college.
+              No {selectedCollege} professor has 30+ ratings yet.
             </div>
           ) : (
             profs.map((p, i) => (
