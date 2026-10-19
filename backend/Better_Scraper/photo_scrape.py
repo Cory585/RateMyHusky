@@ -12,6 +12,16 @@ Three-phase approach:
 Reads professor names from rmp_professors.csv.
 Outputs: professor_photos.csv (name, image_url, source_page)
 
+Photo updates are manual; no workflow runs them, and the weekly refresh adds
+new professors with no photo (pipeline/roster.py). The full sequence:
+  1. photo_scrape.py                 -> professor_photos.csv
+  2. compute_focus.py                -> adds focus_x / focus_y
+  3. load image_url / focus_x / focus_y into the professors table
+  4. backend/photo_thumbs.py         -> small WebP copies in frontend/public/photos/
+                                        (--refresh if photos changed at the same URL)
+  5. commit frontend/public/photos/ and deploy
+Skipping step 4 only means the new photos load at full size.
+
 Usage:
     python photo_scrape.py
     python photo_scrape.py --workers 10
