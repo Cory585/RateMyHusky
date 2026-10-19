@@ -65,6 +65,12 @@ async function proxyToBackend(request: Request, url: URL): Promise<Response> {
   headers.delete('content-length');
   const proxyKey = process.env.PROXY_SECRET;
   if (proxyKey) headers.set('x-proxy-key', proxyKey);
+  // Railway appends the Vercel edge's own address to X-Forwarded-For, so the
+  // last entry is Vercel, not the student. Vercel overwrites x-real-ip, so
+  // pass it on as the one client IP the backend trusts; drop any client copy.
+  headers.delete('x-rmh-client-ip');
+  const clientIp = request.headers.get('x-real-ip');
+  if (clientIp) headers.set('x-rmh-client-ip', clientIp);
 
   const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
   return fetch(target, {

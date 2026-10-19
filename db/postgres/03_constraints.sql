@@ -93,6 +93,31 @@ CREATE INDEX source_summary_course ON public.source_summary (course_code, profes
 ALTER TABLE public.source_summary ADD CONSTRAINT check_professor_slug_course_code
     CHECK ((professor_slug <> '') OR (course_code <> ''));
 
+-- survey_ratings
+CREATE INDEX survey_ratings_pair    ON public.survey_ratings (professor_slug, course_code);
+CREATE INDEX survey_ratings_created ON public.survey_ratings (created_at);
+CREATE INDEX survey_ratings_ip      ON public.survey_ratings (ip_hash);
+CREATE INDEX survey_ratings_prefix  ON public.survey_ratings (ip_prefix_hash);
+CREATE INDEX survey_ratings_comment ON public.survey_ratings (comment_hash);
+CREATE UNIQUE INDEX survey_ratings_one_per_device ON public.survey_ratings
+    (device_hash, professor_slug, pending_professor_id, course_code, pending_course_id) NULLS NOT DISTINCT;
+ALTER TABLE public.survey_ratings ADD CONSTRAINT check_survey_rating CHECK (rating BETWEEN 1 AND 5);
+ALTER TABLE public.survey_ratings ADD CONSTRAINT check_survey_status CHECK (status IN ('accepted', 'held'));
+ALTER TABLE public.survey_ratings ADD CONSTRAINT check_survey_professor
+    CHECK (professor_slug IS NOT NULL OR pending_professor_id IS NOT NULL);
+ALTER TABLE public.survey_ratings ADD CONSTRAINT check_survey_course
+    CHECK (course_code IS NOT NULL OR pending_course_id IS NOT NULL);
+
+-- survey_pending_professors
+CREATE INDEX survey_pending_professors_key ON public.survey_pending_professors (name_key);
+ALTER TABLE public.survey_pending_professors ADD CONSTRAINT check_survey_pending_professor_status
+    CHECK (status IN ('pending', 'approved', 'merged', 'rejected'));
+
+-- survey_pending_courses
+CREATE INDEX survey_pending_courses_code ON public.survey_pending_courses (code);
+ALTER TABLE public.survey_pending_courses ADD CONSTRAINT check_survey_pending_course_status
+    CHECK (status IN ('pending', 'approved', 'merged', 'rejected'));
+
 -- Foreign keys
 ALTER TABLE public.evidence_embeddings
     ADD CONSTRAINT evidence_embeddings_evidence_id_fkey

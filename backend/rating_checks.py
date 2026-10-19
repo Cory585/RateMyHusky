@@ -1,0 +1,168 @@
+"""Pure decision functions for the no-login rating form: validate the body,
+hash the comment for duplicate detection, moderate it, and decide whether the
+rating is accepted, held or rejected."""
+
+import hashlib
+import re
+
+import moderation
+from teaching_history import label_code
+
+HOURS = ("0-2", "3-4", "5-7", "8-10", "10+")
+GRADES = ("A", "A-", "B+", "B", "B-", "C+", "C", "C- or below")
+MIN_FILL_SECONDS = 8
+MAX_FILL_SECONDS = 7200
+MAX_COMMENT = 2000
+MIN_DUPLICATE_CHARS = 20
+COURSE_CODE_RE = re.compile(r"^[A-Z]{2,5}\d{4}[A-Z]?$", re.ASCII)
+# label_code alone would also accept "Summer Full", which is never a valid label.
+TERM_RE = re.compile(r"^(Fall|Spring|Summer 1|Summer 2|Summer|Winter) (\d{4})$", re.ASCII)
+
+
+def _text(value):
+    """The stripped string, or None when value isn't a string."""
+    return value.strip() if isinstance(value, str) else None
+
+
+def _unsafe(value):
+    """True for a string PostgreSQL can't store: a NUL byte or a lone surrogate."""
+    if not isinstance(value, str):
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return True
+    return "\x00" in value
+
+
+def _validate_professor(prof):
+    if not isinstance(prof, dict):
+        return None, None, "professor must be an object"
+    slug, name = prof.get("slug"), prof.get("name")
+    if (slug in (None, "")) == (name in (None, "")):
+        return None, None, "Give either a professor slug or a new professor name"
+    if slug not in (None, ""):
+        if _text(slug):
+            return slug.strip(), None, None
+        return None, None, "Invalid professor"
+    name = _text(name)
+    if name is None:
+        return None, None, "Invalid professor name"
+    name = " ".join(name.split())
+    if not 3 <= len(name) <= 80 or len(name.split()) < 2:
+        return None, None, "Professor name must be 3-80 characters and at least two words"
+    dept = prof.get("department")
+    if dept in (None, ""):
+        dept = None
+    elif _text(dept) is None or len(dept.strip()) > 100:
+        return None, None, "Department must be at most 100 characters"
+    else:
+        dept = dept.strip() or None
+    return None, {"name": name, "department": dept}, None
+
+
+def validate_submission(body, this_year):
+    """(clean, None) for a valid body, else (None, error message). Never raises."""
+    if not isinstance(body, dict):
+        return None, "Body must be a JSON object"
+    texts = [body.get(k) for k in ("term", "hours", "grade", "comment")]
+    for part in (body.get("professor"), body.get("course")):
+        if isinstance(part, dict):
+            texts += [part.get(k) for k in ("slug", "name", "department", "code")]
+    if any(_unsafe(t) for t in texts):
+        return None, "Text contains characters that can't be stored"
+    slug, new_prof, err = _validate_professor(body.get("professor"))
+    if err:
+        return None, err
+
+    course = body.get("course")
+    if not isinstance(course, dict):
+        return None, "course must be an object"
+    code = course.get("code")
+    code = re.sub(r"\s+", "", code).upper() if isinstance(code, str) else ""
+    if not COURSE_CODE_RE.fullmatch(code):
+        return None, "Invalid course code"
+    course_name = course.get("name")
+    if course_name in (None, ""):
+        course_name = None
+    elif _text(course_name) is None or not 3 <= len(course_name.strip()) <= 120:
+        return None, "Course name must be 3-120 characters"
+    else:
+        course_name = course_name.strip()
+
+    term = body.get("term")
+    if term is not None:
+        m = TERM_RE.fullmatch(term) if isinstance(term, str) else None
+        if not m or label_code(term) is None or not this_year - 6 <= int(m.group(2)) <= this_year + 1:
+            return None, "Invalid term"
+
+    rating = body.get("rating")
+    if type(rating) is not int or not 1 <= rating <= 5:
+        return None, "Rating must be a whole number from 1 to 5"
+    hours = body.get("hours")
+    if not isinstance(hours, str) or hours not in HOURS:
+        return None, "Invalid hours"
+    grade = body.get("grade")
+    if grade is not None and (not isinstance(grade, str) or grade not in GRADES):
+        return None, "Invalid grade"
+
+    comment = body.get("comment")
+    if comment is None:
+        comment = ""
+    elif not isinstance(comment, str):
+        return None, "Comment must be text"
+    comment = comment.strip()
+    if len(comment) > MAX_COMMENT:
+        return None, f"Comment must be at most {MAX_COMMENT} characters"
+
+    return {
+        "professor_slug": slug, "new_professor": new_prof,
+        "course_code": code, "new_course_name": course_name,
+        "term_label": term, "rating": rating, "hours": hours, "grade": grade, "comment": comment,
+    }, None
+
+
+def normalize_comment(text):
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text.lower()).split())
+
+
+def comment_hash(text):
+    """SHA-256 of the normalized comment, or None when it's too short to compare."""
+    norm = normalize_comment(text)
+    if len(norm) < MIN_DUPLICATE_CHARS:
+        return None
+    return hashlib.sha256(norm.encode()).hexdigest()
+
+
+def moderate(comment, score=moderation.score_texts):
+    """None for an empty comment, else "allow" | "review" | "block", or
+    "unavailable" when the scorer fails for any reason."""
+    if not comment.strip():
+        return None
+    try:
+        return score([comment])[0].action
+    except Exception:
+        return "unavailable"
+
+
+def assess(fill_seconds, network_type, bursts, duplicate_comment, moderation_action):
+    """("rejected", [...]) | ("held", reasons) | ("accepted", [])."""
+    if moderation_action == "block":
+        return "rejected", ["moderation_block"]
+    reasons = []
+    if fill_seconds is None:
+        reasons.append("no_timer")
+    elif fill_seconds < MIN_FILL_SECONDS:
+        reasons.append("too_fast")
+    elif fill_seconds > MAX_FILL_SECONDS:
+        reasons.append("stale")
+    if network_type == "datacenter":
+        reasons.append("datacenter")
+    reasons.extend(bursts)
+    if duplicate_comment:
+        reasons.append("duplicate_comment")
+    if moderation_action == "review":
+        reasons.append("moderation_review")
+    elif moderation_action == "unavailable":
+        reasons.append("moderation_unavailable")
+    return ("held", reasons) if reasons else ("accepted", [])
