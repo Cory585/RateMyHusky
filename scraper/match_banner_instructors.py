@@ -151,6 +151,12 @@ BANNER_ALIASES = {
     # source record, not a field-width cap (16- and 17-char first names exist).
     # ALIAS_MAP already points "sriram rajagopalan" at the same truncated key.
     "sriramasundararajan rajagopalan": "sriramasundarar rajagopalan",
+    # A generational suffix only one side carries. Same subject and department
+    # on both sides (checked 2026-10-19); before these, each got a Banner-only
+    # page of its own.
+    "martin schwarz jr": "martin schwarz, jr.",   # MATH / Mathematics
+    "richard melloni jr": "richard melloni",      # PSYC / Psychology
+    "william lovely iii": "william lovely",       # INTB / Business Administration
 }
 
 
@@ -330,13 +336,19 @@ def catalog_departments(cur):
     return out
 
 
+def banner_origin_slugs(cur):
+    """Slugs of professors created from Banner alone, not from an RMP page."""
+    cur.execute("SELECT slug FROM professors WHERE origin = 'banner'")
+    return {slug for (slug,) in cur.fetchall()}
+
+
 def subject_of(subject_course):
     """"CHEM1211" -> "CHEM"."""
     m = _SUBJECT_RE.match(subject_course or "")
     return m.group(0).upper() if m else None
 
 
-def department_subjects(instructor_rows, index, departments):
+def department_subjects(instructor_rows, index, departments, skip=frozenset()):
     """{department: {subject: {slugs}}} from exact, unambiguous name matches.
 
     What a department teaches, learned from Banner itself: every professor whose
@@ -344,6 +356,10 @@ def department_subjects(instructor_rows, index, departments):
     they teach to their catalog department. RMP departments ("Business",
     "Engineering") don't map one-to-one onto Banner subjects, so this is learned
     rather than hand-written.
+
+    `skip` is the Banner-only professors (professors.origin = 'banner'). Their
+    department was guessed from this same evidence (pipeline.banner_roster), so
+    counting them would let a guess vouch for itself.
     """
     out = {}
     for r in instructor_rows:
@@ -355,7 +371,7 @@ def department_subjects(instructor_rows, index, departments):
             continue
         slug = hits[0][0]
         dept = departments.get(slug)
-        if dept:
+        if dept and slug not in skip:
             out.setdefault(dept, {}).setdefault(subject, set()).add(slug)
     return out
 
@@ -941,14 +957,16 @@ def main(argv=None):
     local_catalog = bool(args.local_db) and cur.execute(
         "SELECT 1 FROM sqlite_master WHERE name = 'professors_catalog'").fetchone()
     if args.local_db and not local_catalog:
-        index, departments = {}, {}
+        index, departments, banner_only = {}, {}, set()
         print("local staging file: no professors_catalog, so every instructor is "
               "unmatched — history is built, profile links are not")
     else:
         index = catalog_index(cur)
         departments = catalog_departments(cur)
+        # A staging file's copied catalog has no professors table to read origin from.
+        banner_only = set() if args.local_db else banner_origin_slugs(cur)
     identity = Identity(index, departments,
-                        department_subjects(instructors, index, departments),
+                        department_subjects(instructors, index, departments, banner_only),
                         read_roster_duplicates(cur), subjects_by_term(instructors))
     # The last run's matches, the baseline for the gate. Read before anything
     # is written, so it is always the previous run's count, never this one's.

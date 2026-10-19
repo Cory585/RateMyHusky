@@ -301,6 +301,23 @@ def test_unrated_professor_is_all_null():
     assert data["courses"] == []
 
 
+def test_banner_only_professor_payload():
+    banner_only = {**CATALOG, "slug": "ada-newhire", "name": "Ada Newhire", "name_key": "ada newhire",
+                   "avg_rating": None, "rmp_rating": None, "num_ratings": 0, "total_reviews": 0,
+                   "would_take_again_pct": None, "difficulty": None, "professor_url": None,
+                   "total_comments": 0}
+    history = [{"code": "CS3100", "name": "Program Design and Implementation 2", "termsTaught": 1,
+                "lastTerm": "Spring 2026", "recentTerms": ["Spring 2026"],
+                "avgClassSize": 100, "hasPage": False}]
+    data, _ = _with_history(history, slug="ada-newhire", db=FakeDB(catalog=banner_only, reviews=[], summaries=[]), mentions=[])
+    assert data["sources"]["rmp"]["available"] is False
+    assert data["sources"]["rmp"]["professorUrl"] is None
+    assert data["summary"]["rating"] is None
+    assert data["summary"]["numRatings"] == 0
+    assert [c["code"] for c in data["courses"]] == ["CS3100"]
+    assert data["lastTaught"] == "Spring 2026"
+
+
 def test_zero_ratings_are_null_not_zero():
     zeros = [{**r, "rating": 0.0, "difficulty": 0.0} for r in SUMMARY_ROWS]
     data, _, _ = _build(db=FakeDB(summaries=zeros))

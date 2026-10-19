@@ -335,6 +335,7 @@ CREATE TABLE public.professors (
     focus_y DOUBLE PRECISION NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    origin TEXT NOT NULL DEFAULT 'rmp',
     CONSTRAINT professors_pkey PRIMARY KEY (slug)
 );
 

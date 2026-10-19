@@ -547,8 +547,9 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 # ──────────────────────────────────────────────
 #  Search helper
 # ──────────────────────────────────────────────
-def _professor_search(q, limit=5):
-    """Search professors with tiered relevance ranking."""
+def _professor_search(q, limit=5, rated_only=False):
+    """Search professors with tiered relevance ranking. rated_only applies the
+    caller's avg_rating filter before the 100-row cut, not after it."""
     # Normalize first: name_key is stored lowercase/ASCII, and LIKE is
     # case-sensitive. Callers like the chat/Ask path pass a raw gate hint ("Wu Chieh"),
     # so without this the LIKE filter (and the lowercase ALIAS_MAP) never match.
@@ -580,12 +581,14 @@ def _professor_search(q, limit=5):
             conditions.append("name_key LIKE %s")
             params.append(f"%{word}%")
 
+    if rated_only:
+        conditions.append("avg_rating IS NOT NULL")
     where = " AND ".join(conditions)
     rows = query(
         f"SELECT slug, name, name_key, department, avg_rating, total_reviews "
         f"FROM professors_catalog WHERE {where} "
-        f"ORDER BY total_reviews DESC LIMIT 100",
-        params
+        f"ORDER BY (name_key LIKE %s OR name_key LIKE %s) DESC, total_reviews DESC LIMIT 100",
+        params + [f"{q_resolved}%", f"% {q_resolved}%"]
     )
 
     # Rank in Python for proper tiered relevance (use resolved query)
@@ -1086,7 +1089,8 @@ def department_slug(name):
 
 def _department_hub_map():
     """slug -> {name, professorCount, avgRating} for every department with
-    >=1 rated professor (same inclusion rule as professors_catalog), built
+    >=1 rated professor (avg_rating set, so unrated Banner-only professors
+    in professors_catalog are not counted), built
     from a single grouped query. Cached like the other catalog lookups.
     Collisions (two department names slugging to the same value) keep the
     first-seen entry and drop the rest."""
@@ -1203,7 +1207,7 @@ def professors_catalog():
     # If there's a search query, get matching name_keys first
     matched_name_keys = None
     if q and len(q) >= 2:
-        matches = _professor_search(q, limit=200)
+        matches = _professor_search(q, limit=200, rated_only=True)
         matched_name_keys = [m["name_key"] for m in matches]
         if not matched_name_keys:
             return jsonify({"professors": [], "total": 0, "page": 1, "totalPages": 1})

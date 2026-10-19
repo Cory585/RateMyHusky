@@ -166,9 +166,12 @@ def test_banner_aliases_are_normalized_like_instructor_keys():
     with a capital or a stray double space can never be hit.
     """
     from banner_api import normalize_instructor_key
+    from prof_aliases import _normalize_name
     for k, v in BANNER_ALIASES.items():
         assert k == normalize_instructor_key(k), f"key not normalized: {k!r}"
-        assert v == normalize_instructor_key(v), f"value not normalized: {v!r}"
+        # A value is a catalog name_key, normalized without the comma flip
+        # ("martin schwarz, jr." is one).
+        assert v == _normalize_name(v), f"value not normalized: {v!r}"
 
 
 def test_banner_aliases_never_map_a_name_to_itself():
@@ -876,6 +879,14 @@ def test_department_subjects_learn_only_from_unambiguous_exact_names():
             hist("202610", "MATH1000", "nobody")]
     assert department_subjects(rows, index, {"wei-wang": "Business", "john-smith": "Science"}) == {
         "Business": {"FINA": {"wei-wang"}}}
+
+
+def test_department_subjects_skip_banner_only_professors():
+    """A Banner-only professor's department is a guess from these same votes."""
+    index = {"wei wang": [("wei-wang", "wei wang")], "ada park": [("ada-park", "ada park")]}
+    rows = [hist("202610", "FINA2201", "wei wang"), hist("202610", "CHEM1211", "ada park")]
+    assert department_subjects(rows, index, {"wei-wang": "Business", "ada-park": "Business"},
+                               skip={"ada-park"}) == {"Business": {"FINA": {"wei-wang"}}}
 
 
 def test_the_chip_keeps_only_courses_that_belong_to_the_professor():

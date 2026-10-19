@@ -10,7 +10,7 @@ import argparse
 
 import moderation
 
-from . import course_codes, name_keys, read_models, review_tags, roster, summaries
+from . import banner_roster, course_codes, name_keys, read_models, review_tags, roster, summaries
 from .blend import blend
 from .db import connect, fetch_all
 from .rmp_fields import rmp_id
@@ -34,7 +34,7 @@ def main(argv=None):
         print("rmp_links is empty: run python -m pipeline.seed --apply first")
         return 1
     professors = fetch_all(conn, "SELECT slug, name, name_key, department, college, image_url, "
-                                 "focus_x, focus_y FROM professors")
+                                 "focus_x, focus_y, origin FROM professors")
 
     catalog_courses = fetch_all(conn, "SELECT code, name, department, subject, search_text, is_placeholder "
                                       "FROM catalog_courses")
@@ -42,7 +42,16 @@ def main(argv=None):
     new_links, new_professors, counts = roster.resolve_roster(pages, links, professors)
     _print("roster", counts)
     links, professors = links + new_links, professors + new_professors
-    professors, links = read_models.drop_denied(professors, links)
+    bci = fetch_all(conn, "SELECT subject_course, instructor_key, instructor_name, professor_slug, "
+                          "match_method, terms_taught, last_term_code FROM banner_course_instructors")
+    # Banner-only professors' departments are earlier guesses, so they don't vote.
+    departments = banner_roster.subject_departments(
+        bci, {p["slug"]: p["department"] for p in professors if p.get("origin") != "banner"})
+    new_banner, banner_counts = banner_roster.resolve_banner_professors(bci, professors, departments)
+    _print("banner roster", banner_counts)
+    professors = professors + new_banner
+    # Alias-aware, so a page created before its professor's denial request still drops.
+    professors, links = read_models.drop_denied(professors, links, banner_roster.is_denied_banner_key)
 
     valid = {c["code"] for c in catalog_courses}
     print(f"moderation filter: {'on' if moderation.enforcing() else 'off'}")
@@ -94,6 +103,7 @@ def main(argv=None):
         return 0
     # Every write waits for verify, so a failed run leaves no rows behind.
     roster.apply_roster(conn, new_links, new_professors)
+    banner_roster.apply_banner_professors(conn, new_banner)
     print(f"course codes changed: {course_codes.apply_codes(conn, pairs)}")
     print(f"name keys changed: {name_keys.apply_name_keys(conn, key_pairs)}")
     review_tags.rebuild_if_present(conn)  # tags follow name_key remaps, pruned reviews, moderation
