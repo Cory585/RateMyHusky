@@ -206,3 +206,29 @@ def test_a_law_course_in_a_semester_term_counts_as_law(pg):
     got = rows(pg, banner_roster.TRACK_SECTIONS_SQL)
     assert sorted((r["track"], r["sections"]) for r in got) == [("Law Semester", 2), ("Semester", 1)]
     assert banner_roster.track_colleges(got, {}) == {"ada-park": "Law"}
+
+
+def test_a_cps_subject_in_a_semester_term_counts_as_cps_quarter(pg):
+    # Graduate CPS moves to Semester terms from Fall 2026 with renumbered courses
+    # (PJM6100), so a subject mostly taught in CPS Quarter terms stands in.
+    truncate(pg, *BANNER_TABLES)
+    with pg.cursor() as cur:
+        _term(cur, "202655", "CPS Quarter")
+        _term(cur, "202630", "Semester")
+        _term(cur, "202710", "Semester")
+        _taught(cur, "202655", "1", "PJM5900", "old hand")
+        _taught(cur, "202655", "2", "PJM5901", "old hand")
+        _taught(cur, "202630", "3", "PJM5902", "old hand")   # PJM: 2 of 3 in CPS Quarter
+        _taught(cur, "202630", "4", "CHEM1211", "old hand")  # CHEM: never in CPS Quarter
+        _taught(cur, "202710", "5", "PJM6100", "new hire")
+        _taught(cur, "202710", "6", "CHEM1212", "chemist")
+        for course, key in (("PJM5900", "old hand"), ("PJM5901", "old hand"), ("PJM5902", "old hand"),
+                            ("CHEM1211", "old hand"), ("PJM6100", "new hire"), ("CHEM1212", "chemist")):
+            _course_instructor(cur, course, key, key.replace(" ", "-"), key)
+    pg.commit()
+    got = rows(pg, banner_roster.TRACK_SECTIONS_SQL)
+    assert sorted((r["professor_slug"], r["track"], r["sections"]) for r in got) == [
+        ("chemist", "Semester", 1), ("new-hire", "CPS Quarter", 1),
+        ("old-hand", "CPS Quarter", 3), ("old-hand", "Semester", 1)]
+    assert banner_roster.track_colleges(got, {}) == {
+        "new-hire": "Professional Studies", "old-hand": "Professional Studies"}

@@ -28,7 +28,7 @@ TABLES = {
          "sections": 3, "last_term_code": "202630"},
     ],
     # The aggregate run.py reads; keyed by its first table like every query here.
-    "banner_section_instructors": [
+    "banner_sections": [
         {"instructor_key": "olin guha", "professor_slug": "olin-guha", "track": "Law Semester", "sections": 3},
         {"instructor_key": "lucia nunez", "professor_slug": None, "track": "CPS Quarter", "sections": 1},
     ],

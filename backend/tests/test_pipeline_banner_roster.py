@@ -208,8 +208,7 @@ def test_track_sql_joins_every_merged_spelling_and_counts_each_section_once():
 
 def test_track_sql_counts_law_courses_as_law_semester_in_any_term():
     # Law moved onto the Semester calendar in Fall 2025.
-    assert "CASE WHEN s.subject = 'LAW' THEN 'Law Semester' ELSE t.track END AS track" \
-        in br.TRACK_SECTIONS_SQL
+    assert "CASE WHEN s.subject = 'LAW' THEN 'Law Semester'" in br.TRACK_SECTIONS_SQL
 
 
 def prof(slug, college, department="Law", origin="rmp"):
@@ -287,3 +286,10 @@ def test_track_labelled_professors_do_not_vote_on_a_subjects_college(monkeypatch
     rows = [{"professor_slug": s, "subject_course": "BLAW3100"} for s in ("l1", "l2", "b1")]
     profs = [prof("l1", "Law"), prof("l2", "Law"), prof("b1", "Business", "Business Law")]
     assert br.subject_colleges(rows, profs) == {"BLAW": "Business"}
+
+
+def test_track_sql_counts_cps_subjects_as_cps_quarter_in_any_term():
+    # CPS Quarter ends after Summer 2026; its subjects stand in for it.
+    sql = br.TRACK_SECTIONS_SQL
+    assert "WHEN s.subject IN (SELECT subject FROM cps_subjects) THEN 'CPS Quarter'" in sql
+    assert "(SELECT max(term_code) FROM banner_terms WHERE track = 'CPS Quarter')" in sql

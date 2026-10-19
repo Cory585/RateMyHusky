@@ -44,12 +44,16 @@ _SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
 # sections and 14 CHEM. Counting it would move such professors into
 # Professional Studies.
 #
-# Both tracks are ending. Law and CPS Semester terms stop after Summer 2025, when
-# Law moved onto the university Semester calendar, so a LAW-subject section
-# counts as Law Semester whatever its term. CPS Quarter stops after Summer 2026
-# (the registrar moves graduate CPS to Semester from Fall 2026), and CPS has no
-# subject of its own to stand in, so Professional Studies is decided by the
-# quarters taught up to then.
+# Both tracks are ending, so each has a subject stand-in that holds in any term.
+# Law and CPS Semester terms stop after Summer 2025, when Law moved onto the
+# university Semester calendar: a LAW section counts as Law Semester. CPS Quarter
+# stops after Summer 2026 (the registrar moves graduate CPS to Semester from
+# Fall 2026), and CPS courses were renumbered then (PJM6100, ALY6710), so the
+# stand-in is the subject: one with more than half its sections in CPS Quarter
+# terms, up to the last of them, is a CPS subject (ALY, PJM, RGA, LDR), and its
+# sections count as CPS Quarter. Measured on the 2026-10-01 stage file, 31
+# subjects clear that bar, most above 90%. It moves 119 instructors into
+# Professional Studies (19 of them first teaching in Fall 2026) and none out.
 TRACK_COLLEGES = {"Law Semester": "Law", "CPS Quarter": "Professional Studies"}
 
 # Subjects the catalog names "<subject> - CPS" or "- CPS Specialty"
@@ -75,9 +79,16 @@ CPS_SUBJECTS = frozenset("""
 # row's instructor_key is NULL; an unlinked row (a Banner-only professor, linked
 # at apply time) keeps its key and a NULL slug.
 TRACK_SECTIONS_SQL = """
-    WITH taught AS (
+    WITH cps_subjects AS (
+        SELECT s.subject FROM banner_sections s JOIN banner_terms t ON t.term_code = s.term_code
+        WHERE s.subject IS NOT NULL
+          AND t.term_code <= (SELECT max(term_code) FROM banner_terms WHERE track = 'CPS Quarter')
+        GROUP BY 1 HAVING 2 * count(*) FILTER (WHERE t.track = 'CPS Quarter') > count(*)
+    ), taught AS (
         SELECT i.term_code, i.crn, i.instructor_key, s.subject_course,
-               CASE WHEN s.subject = 'LAW' THEN 'Law Semester' ELSE t.track END AS track,
+               CASE WHEN s.subject = 'LAW' THEN 'Law Semester'
+                    WHEN s.subject IN (SELECT subject FROM cps_subjects) THEN 'CPS Quarter'
+                    ELSE t.track END AS track,
                coalesce(t.scraped_closed, false) AND coalesce(s.enrollment = 0, false) AS cancelled
         FROM banner_section_instructors i
         JOIN banner_sections s ON s.term_code = i.term_code AND s.crn = i.crn
