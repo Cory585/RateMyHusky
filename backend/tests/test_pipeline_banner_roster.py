@@ -126,6 +126,7 @@ def test_banner_key_aliased_to_a_denied_professor_is_denied(monkeypatch):
     monkeypatch.setattr(br, "is_denied", lambda name: False)
     monkeypatch.setattr(br, "is_denied_key", lambda key: key == "yvonne leung")
     assert br.is_denied_banner_key("wan yee yvonne leung")
+    assert br.is_denied_banner_key("yvonne leung")              # the key itself, unresolved
     assert not br.is_denied_banner_key("lucia nunez")
 
 

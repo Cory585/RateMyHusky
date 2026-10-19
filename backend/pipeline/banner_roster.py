@@ -38,10 +38,10 @@ def _first_last(key):
 
 
 def is_denied_banner_key(key):
-    """Denied under the Banner spelling or either alias map's target. A denied
+    """Denied as the key itself, or under either alias map's target. A denied
     professor is not in the catalog, so the matcher reports an aliased spelling
     of them as no_match rather than resolving it."""
-    return is_denied(key) or is_denied_key(BANNER_ALIASES.get(key))
+    return is_denied_key(key) or is_denied(key) or is_denied_key(BANNER_ALIASES.get(key))
 
 
 def subject_departments(instructor_rows, department_by_slug):
