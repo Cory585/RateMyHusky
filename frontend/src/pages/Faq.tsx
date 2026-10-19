@@ -42,7 +42,8 @@ const Faq = () => {
 
               <h3>Where do the ratings and reviews come from?</h3>
               <p>
-                Ratings and written reviews come from RateMyProfessors. The Reddit tab on a
+                Ratings and written reviews come from RateMyProfessors, and ratings also come
+                from students through our own rating form. The Reddit tab on a
                 professor's page shows public posts and comments from Northeastern subreddits
                 that mention that professor, with a link back to each original. We refresh the
                 data every week.
@@ -57,9 +58,13 @@ const Faq = () => {
 
               <h3>Can I write a review here?</h3>
               <p>
-                Not on RateMyHusky itself. Reviews are collected from RateMyProfessors, so the
-                best way to add yours is to post it there. It will show up here after the next
-                weekly refresh.
+                Yes. Use the <Link to="/rate">rating form</Link> to rate a professor and course you
+                took: you answer a few questions, add an optional comment, and no sign-in is
+                needed. Once accepted, your rating shows up here after the next weekly refresh; a rating
+                that is held, or that names a new professor or course, needs our review first.
+                Comments aren't
+                shown on the site yet. You can still post a review on RateMyProfessors too, and
+                it will show up here after the refresh.
               </p>
 
               <h3>How are the GOATED Professors ranked?</h3>
