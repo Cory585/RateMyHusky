@@ -205,7 +205,10 @@ const Homepage = () => {
     return restored && COLLEGES.includes(restored) ? restored : COLLEGES[0];
   });
   const [profs, setProfs] = useState<Professor[]>([]);
-  const [profsLoading, setProfsLoading] = useState(false);
+  // Starts true so the board shows a skeleton, not the empty message, before
+  // the section scrolls into view and the first fetch starts.
+  const [profsLoading, setProfsLoading] = useState(true);
+  const [profsError, setProfsError] = useState(false);
   const [goatVisible, setGoatVisible] = useState(false);
   const goatSectionRef = useRef<HTMLElement>(null);
   const [shuffleVisible, setShuffleVisible] = useState(false);
@@ -332,6 +335,8 @@ const Homepage = () => {
     const cached = goatCache.get(selectedCollege);
     if (cached) {
       setProfs(cached);
+      setProfsError(false);
+      setProfsLoading(false);
       setOpenTooltip(null);
       return;
     }
@@ -340,6 +345,7 @@ const Homepage = () => {
 
     async function loadProfs() {
       setProfsLoading(true);
+      setProfsError(false);
       setOpenTooltip(null);
       try {
         const data = await fetchGoatProfessors(selectedCollege);
@@ -349,6 +355,11 @@ const Homepage = () => {
         }
       } catch (err) {
         console.error('Failed to load professors:', err);
+        // Clear the previous college's board so it can't show under this tab.
+        if (!cancelled) {
+          setProfs([]);
+          setProfsError(true);
+        }
       } finally {
         if (!cancelled) setProfsLoading(false);
       }
@@ -604,9 +615,13 @@ const Homepage = () => {
                 <span className="goat-col-reviews"><span className="skeleton-bone skeleton-reviews" /></span>
               </div>
             ))
+          ) : profsError ? (
+            <div className="goat-row" style={{ justifyContent: 'center', opacity: 0.6 }}>
+              Couldn't load this board. Try again later.
+            </div>
           ) : profs.length === 0 ? (
-            // 30 is BOARD_MIN_REVIEWS in server.py. The college has professors,
-            // just none rated often enough to rank (Law, as of 2026-10).
+            // 30 is BOARD_MIN_REVIEWS in server.py: the college has professors,
+            // just none rated often enough to rank.
             <div className="goat-row" style={{ justifyContent: 'center', opacity: 0.6 }}>
               No {selectedCollege} professor has 30+ ratings yet.
             </div>

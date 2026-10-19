@@ -276,3 +276,12 @@ def test_board_row_has_exactly_these_keys(monkeypatch):
 def test_board_is_one_statement(monkeypatch):
     _, seen = _run_leaderboard(monkeypatch, [ROW])
     assert len(seen) == 1   # the prior goes through query_one, so GOAT is two statements in all
+
+
+def test_an_empty_board_is_served_from_cache(monkeypatch):
+    # Law has no professor over the floor; a cached [] must not re-run the queries.
+    monkeypatch.setattr(server, "cache_get", lambda key: [])
+    monkeypatch.setattr(server, "query", lambda *a: pytest.fail("cached board re-queried"))
+    monkeypatch.setattr(server, "query_one", lambda *a: pytest.fail("cached board re-queried"))
+    with server.app.test_request_context("/api/goat-professors?college=Law"):
+        assert server.goat_professors().get_json() == []

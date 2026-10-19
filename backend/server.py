@@ -774,7 +774,8 @@ def goat_professors():
     # from the cache after deploy, which looks exactly like the fix not working.
     cache_key = f"goat:v5:{college}:{limit}:{min_reviews}"
     cached = cache_get(cache_key)
-    if cached:
+    # `is not None`: an empty board (Law) is a real answer and must cache too.
+    if cached is not None:
         return jsonify(cached)
 
     prior = ranking_prior(query_one)
