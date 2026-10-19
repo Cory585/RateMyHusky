@@ -620,10 +620,10 @@ const Homepage = () => {
               Couldn't load this board. Try again later.
             </div>
           ) : profs.length === 0 ? (
-            // 30 is BOARD_MIN_REVIEWS in server.py: the college has professors,
-            // just none rated often enough to rank.
+            // No number: the floor is BOARD_MIN_REVIEWS in server.py, and an empty
+            // board can also mean the college has no professors at all.
             <div className="goat-row" style={{ justifyContent: 'center', opacity: 0.6 }}>
-              No {selectedCollege} professor has 30+ ratings yet.
+              No {selectedCollege} professors have enough ratings to rank yet.
             </div>
           ) : (
             profs.map((p, i) => (

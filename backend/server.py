@@ -14,6 +14,7 @@ from psycopg2.extras import RealDictCursor
 from functools import lru_cache
 from dotenv import load_dotenv
 from prof_aliases import ALIAS_MAP
+from pipeline.names import COLLEGE_MAP
 from flask import Flask, g, jsonify, request, redirect, make_response
 from flask_cors import CORS
 from flask_compress import Compress
@@ -724,6 +725,7 @@ FALLBACK_PRIOR = 4.2   # only for an empty or brand-new catalog
 #
 # So a short board is a feature. Do not backfill it to reach `limit`.
 BOARD_MIN_REVIEWS = 30
+BOARD_COLLEGES = frozenset(COLLEGE_MAP.values())
 
 # total_reviews (BIGINT) is cast to float so the shrinkage arithmetic is
 # floating-point throughout instead of leaning on implicit int/float coercion.
@@ -772,6 +774,10 @@ def goat_professors():
     # per-college review floor collapsed to a single BOARD_MIN_REVIEWS and the
     # sort gained a name tiebreak. An unbumped key serves the previous version
     # from the cache after deploy, which looks exactly like the fix not working.
+    # Unknown colleges are answered before the cache: every value would
+    # otherwise store its own [] and push real boards out of the LRU.
+    if college not in BOARD_COLLEGES:
+        return jsonify([])
     cache_key = f"goat:v5:{college}:{limit}:{min_reviews}"
     cached = cache_get(cache_key)
     # `is not None`: an empty board (Law) is a real answer and must cache too.

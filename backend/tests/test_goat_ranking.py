@@ -285,3 +285,12 @@ def test_an_empty_board_is_served_from_cache(monkeypatch):
     monkeypatch.setattr(server, "query_one", lambda *a: pytest.fail("cached board re-queried"))
     with server.app.test_request_context("/api/goat-professors?college=Law"):
         assert server.goat_professors().get_json() == []
+
+
+def test_an_unknown_college_is_not_queried_or_cached(monkeypatch):
+    monkeypatch.setattr(server, "cache_get", lambda key: pytest.fail("unknown college read the cache"))
+    monkeypatch.setattr(server, "cache_set", lambda *a: pytest.fail("unknown college cached"))
+    monkeypatch.setattr(server, "query", lambda *a: pytest.fail("unknown college queried"))
+    monkeypatch.setattr(server, "query_one", lambda *a: pytest.fail("unknown college queried"))
+    with server.app.test_request_context("/api/goat-professors?college=xyz"):
+        assert server.goat_professors().get_json() == []
