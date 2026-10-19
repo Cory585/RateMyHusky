@@ -28,8 +28,10 @@ def test_catalog_row_columns_and_sources():
     assert (row["name"], row["image_url"]) == ("Olin Guha", "https://img/o.jpg")   # frozen identity
 
 
-def test_professor_without_a_link_is_not_in_the_catalog():
-    assert catalog_rows([PROF], [], [], SUMMARIES, is_denied=lambda k: False) == []
+def test_professor_without_a_link_is_in_the_catalog_with_no_url():
+    [row] = catalog_rows([PROF], [], [], [], is_denied=lambda k: False)
+    assert row["professor_url"] is None
+    assert (row["num_ratings"], row["total_reviews"], row["avg_rating"]) == (0, 0, None)
 
 
 def test_read_models_drop_denied():
@@ -54,18 +56,32 @@ def test_keep_summaries_drops_rows_for_professors_outside_the_catalog():
 
 
 def test_verify_floors():
-    catalog = [{"slug": f"p{i}", "department": "CS", "total_comments": 1} for i in range(3000)]
+    catalog = [{"slug": f"p{i}", "department": "CS", "total_comments": 1, "professor_url": "u", "num_ratings": 0}
+               for i in range(3000)]
     courses = [{"code": f"C{i}"} for i in range(5000)]
     assert verify(catalog, courses) == []
     assert verify(catalog[:10], courses)                             # too few professors
     assert verify(catalog, courses[:10])                             # too few courses
 
 
+def test_verify_fails_when_no_professor_is_linked_or_rated():
+    catalog = [{"slug": f"p{i}", "department": "CS", "total_comments": 0, "professor_url": None, "num_ratings": 0}
+               for i in range(5000)]
+    assert verify(catalog, [{"code": f"C{i}"} for i in range(5000)])
+
+
 def test_stats():
-    catalog = [{"slug": "a", "department": "CS", "total_comments": 3},
-               {"slug": "b", "department": "Law", "total_comments": 2}]
+    catalog = [{"slug": "a", "department": "CS", "total_comments": 3, "professor_url": "u", "num_ratings": 0},
+               {"slug": "b", "department": "Law", "total_comments": 2, "professor_url": None, "num_ratings": 4}]
     assert stats(catalog, [{"code": "X"}], []) == {"professors": 2, "courses": 1,
                                                    "comments": 5, "departments": 2}
+
+
+def test_stats_ignore_unrated_unlinked_professors():
+    catalog = [{"slug": "a", "department": "CS", "total_comments": 0, "professor_url": "u", "num_ratings": 0},
+               {"slug": "b", "department": "Biology", "total_comments": 0, "professor_url": None, "num_ratings": 0}]
+    counts = stats(catalog, [], [])
+    assert (counts["professors"], counts["departments"]) == (1, 1)
 
 
 def test_drop_denied_removes_the_professor_and_their_links_only():

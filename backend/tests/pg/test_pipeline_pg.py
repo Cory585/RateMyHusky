@@ -4,7 +4,7 @@ import copy
 
 import pytest
 
-from pipeline import course_codes, name_keys, read_models
+from pipeline import banner_roster, course_codes, name_keys, read_models
 from tests.pg.pgutil import rows, scalar, schema_snapshot, truncate
 from tests.pg.seed import CATALOG, COUNTS, COURSES, SUMMARIES
 
@@ -60,3 +60,24 @@ def test_course_codes_and_name_keys_apply_through_temp_tables(pg):
     got = {r["id"]: (r["course_code"], r["name_key"]) for r in rows(
         pg, "SELECT id, course_code, name_key FROM rmp_reviews")}
     assert got == {10: ("CS2500", "alice smith"), 11: (None, "alice smith")}
+
+
+def test_apply_banner_professors_writes_origin_and_skips_taken_slugs(pg):
+    truncate(pg, "professors")
+    with pg.cursor() as cur:
+        cur.execute("INSERT INTO professors (slug, name, name_key) "
+                    "VALUES ('lucia-nunez', 'Lucia Nunez', 'lucia nunez')")
+    pg.commit()
+
+    def banner(slug, name):
+        return {"slug": slug, "name": name, "name_key": name.lower(), "department": None,
+                "college": "Other", "image_url": None, "focus_x": None, "focus_y": None,
+                "origin": "banner"}
+
+    banner_roster.apply_banner_professors(
+        pg, [banner("lucia-nunez", "Lucia Nunez"), banner("wei-wang", "Wei Wang")])
+
+    assert [
+        (r["slug"], r["origin"])
+        for r in rows(pg, "SELECT slug, origin FROM professors ORDER BY slug")
+    ] == [("lucia-nunez", "rmp"), ("wei-wang", "banner")]

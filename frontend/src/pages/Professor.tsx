@@ -574,6 +574,7 @@ const Professor = () => {
   const identity = profile.identity;
   const summary = profile.summary;
   const rmp = profile.sources.rmp;
+  const noRatings = summary.numRatings === 0;
   // `?? []`: a payload cached before awards shipped has no key.
   const awards = profile.awards ?? [];
 
@@ -583,7 +584,7 @@ const Professor = () => {
     ? `${identity.name} professor reviews and ratings: ${rmp.rating.toFixed(2)}/5 from ${rmp.numRatings} RMP ratings at Northeastern` +
       (rmp.wouldTakeAgainPct != null ? ` (${rmp.wouldTakeAgainPct}% would take again)` : '') +
       `. RateMyProfessor + Reddit.`
-    : `${identity.name}, Northeastern ${identity.department} professor: no Rate My Professors ratings yet. RateMyProfessor + Reddit.`;
+    : `${identity.name}, Northeastern${identity.department ? ` ${identity.department}` : ''} professor: no Rate My Professors ratings yet. RateMyProfessor + Reddit.`;
 
   const profCanonical = `https://ratemyhusky.com/professors/${slug}`;
   const profJsonLd = {
@@ -701,7 +702,7 @@ const Professor = () => {
   return (
     <div className="prof-page">
       <Seo
-        title={`${identity.name} Reviews & Ratings — Northeastern ${identity.department}`}
+        title={`${identity.name} Reviews & Ratings — Northeastern${identity.department ? ` ${identity.department}` : ''}`}
         description={seoDescription}
         canonical={profCanonical}
         image={identity.imageUrl}
@@ -783,6 +784,11 @@ const Professor = () => {
       </header>
 
       <section className="prof-stats">
+        {noRatings ? (
+          <div className="prof-stat-card">
+            <span className="prof-stat-value prof-stat-value-text">No ratings yet</span>
+          </div>
+        ) : (<>
         <div className="prof-stat-card prof-stat-clickable">
           <span className="prof-stat-value">{stats.rating !== null ? <AnimatedNumber value={stats.rating} /> : '—'}</span>
           <span className="prof-stat-label" style={{ display: 'block', textAlign: 'center', position: 'relative' }}>
@@ -830,6 +836,7 @@ const Professor = () => {
           <span className="prof-stat-label">Total Ratings</span>
           <span className="prof-stat-hint">View distribution ↓</span>
         </div>
+        </>)}
         {profile.lastTaught && (
           <div className="prof-stat-card">
             <span className="prof-stat-value prof-stat-value-text">{profile.lastTaught}</span>
@@ -859,7 +866,9 @@ const Professor = () => {
         )}
       </div>
 
+      {(!noRatings || gradeDistribution.length > 0) && (
       <section className="prof-section prof-charts-row" ref={chartsRef}>
+        {!noRatings && (
         <div className="prof-chart-card">
           <h3 className="prof-chart-title">Rating Distribution</h3>
           <div className="prof-distribution">
@@ -868,6 +877,7 @@ const Professor = () => {
             ))}
           </div>
         </div>
+        )}
         {gradeDistribution.length > 0 && (
           <div className="prof-chart-card" ref={gradesRef}>
             <h3 className="prof-chart-title">Grade Distribution</h3>
@@ -885,6 +895,7 @@ const Professor = () => {
           </div>
         )}
       </section>
+      )}
 
       {isImageModalOpen && identity.imageUrl && (
         <div className="prof-image-modal-overlay" onClick={() => setIsImageModalOpen(false)}>
@@ -977,7 +988,7 @@ const Professor = () => {
             )}
             <div className="prof-reviews-list">
               {sortedReviews.length === 0 ? (
-                <p className="prof-no-reviews">No reviews match current filters.</p>
+                <p className="prof-no-reviews">{reviews.length === 0 ? 'No reviews yet.' : 'No reviews match current filters.'}</p>
               ) : (
                 sortedReviews.slice(0, visibleReviews).map((r, i) => (
                   <div key={i} className={`prof-review-card ${isPinned(r.comment || '', pinSnippets.rmp) ? 'is-ask-pinned' : ''}`} style={{ borderLeftColor: r.quality >= 4 ? '#27ae60' : r.quality >= 3 ? '#f39c12' : '#e74c3c' }}>

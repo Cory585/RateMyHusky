@@ -448,9 +448,14 @@ function Compare() {
 
 	const departments = slots.map((s) => {
 		if (!isReady(s)) return '—';
-		if (s.catalogProf) return `${s.catalogProf.department} (${s.catalogProf.college})`;
+		if (s.catalogProf) {
+			const { department, college } = s.catalogProf;
+			if (!department) return college || '—';
+			return `${department} (${college})`;
+		}
 		const identity = s.profile?.identity;
 		if (!identity) return '—';
+		if (!identity.department) return identity.college || '—';
 		return identity.college ? `${identity.department} (${identity.college})` : identity.department;
 	});
 

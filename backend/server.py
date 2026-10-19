@@ -584,8 +584,8 @@ def _professor_search(q, limit=5):
     rows = query(
         f"SELECT slug, name, name_key, department, avg_rating, total_reviews "
         f"FROM professors_catalog WHERE {where} "
-        f"ORDER BY total_reviews DESC LIMIT 100",
-        params
+        f"ORDER BY (name_key LIKE %s OR name_key LIKE %s) DESC, total_reviews DESC LIMIT 100",
+        params + [f"{q_resolved}%", f"% {q_resolved}%"]
     )
 
     # Rank in Python for proper tiered relevance (use resolved query)
@@ -1086,7 +1086,8 @@ def department_slug(name):
 
 def _department_hub_map():
     """slug -> {name, professorCount, avgRating} for every department with
-    >=1 rated professor (same inclusion rule as professors_catalog), built
+    >=1 rated professor (avg_rating set, so unrated Banner-only professors
+    in professors_catalog are not counted), built
     from a single grouped query. Cached like the other catalog lookups.
     Collisions (two department names slugging to the same value) keep the
     first-seen entry and drop the rest."""
