@@ -130,7 +130,7 @@ CREATE INDEX IF NOT EXISTS professor_tags_tag ON public.professor_tags (tag ASC,
 ALTER TABLE public.professors ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'rmp';
 ```
 
-Banner-only professors record which source first created each professor in `professors.origin` (`'rmp'` or `'banner'`). It is never updated, so a Banner-created professor that later gains an RMP link keeps `'banner'`. Run the ALTER before deploying: without the column the new `pipeline.run` fails at the Banner insert, after `apply_roster` has already committed.
+Banner-only professors record which source first created each professor in `professors.origin` (`'rmp'`, `'banner'`, or `'survey'`, created by `review_ratings.py approve-professor`). It is never updated, so a Banner-created professor that later gains an RMP link keeps `'banner'`. Run the ALTER before deploying: without the column the new `pipeline.run` fails at the Banner insert, after `apply_roster` has already committed.
 
 Until they run, the course-history query in `backend/teaching_history.py` fails
 on the missing columns, the Banner loader and matcher stop at start-up naming
