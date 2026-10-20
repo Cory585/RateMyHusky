@@ -49,7 +49,6 @@ def captured(monkeypatch):
     monkeypatch.setattr(run, "connect", lambda: object())
     monkeypatch.setattr(run, "fetch_all", fetch)
     monkeypatch.setattr(run.roster, "apply_roster", lambda *a: None)
-    monkeypatch.setattr(run.roster, "apply_colleges", lambda *a: 0)
     monkeypatch.setattr(run.banner_roster, "apply_banner_professors", lambda *a: None)
     monkeypatch.setattr(run.course_codes, "apply_codes", lambda *a: 0)
     monkeypatch.setattr(run.name_keys, "apply_name_keys", lambda *a: 0)
@@ -68,7 +67,6 @@ def writes(monkeypatch):
     monkeypatch.setattr(run, "fetch_all",
                         lambda conn, sql: [dict(r) for r in TABLES[sql.split(" FROM ")[1].split()[0]]])
     monkeypatch.setattr(run.roster, "apply_roster", lambda conn, l, p: calls.append(("roster", l, p)))
-    monkeypatch.setattr(run.roster, "apply_colleges", lambda conn, p: calls.append(("colleges", p)) or 0)
     monkeypatch.setattr(run.banner_roster, "apply_banner_professors",
                         lambda conn, rows: calls.append(("banner", rows)))
     monkeypatch.setattr(run.course_codes, "apply_codes", lambda conn, p: calls.append(("codes", p)) or 0)
@@ -92,14 +90,13 @@ def test_a_dry_run_writes_nothing(writes, monkeypatch):
 def test_writes_happen_after_verify_in_order(writes, monkeypatch):
     monkeypatch.setattr(run.read_models, "verify", lambda *a: [])
     assert run.main([]) == 0
-    assert [c[0] for c in writes] == ["roster", "colleges", "banner", "codes", "name_keys", "tags", "read_models"]
+    assert [c[0] for c in writes] == ["roster", "banner", "codes", "name_keys", "tags", "read_models"]
     _, new_links, new_professors = writes[0]
     assert [l["rmp_id"] for l in new_links] == [2] and [p["name"] for p in new_professors] == ["Ada Lovelace"]
-    assert writes[1][1] == []                     # every stored college matches COLLEGE_MAP
-    assert [p["slug"] for p in writes[2][1]] == ["lucia-nunez"]
-    assert writes[2][1][0]["department"] == "CS"
-    assert writes[3][1] == [(10, "CS2500")]
-    assert writes[4][1] == [(10, "olin guha")]
+    assert [p["slug"] for p in writes[1][1]] == ["lucia-nunez"]
+    assert writes[1][1][0]["department"] == "CS"
+    assert writes[2][1] == [(10, "CS2500")]
+    assert writes[3][1] == [(10, "olin guha")]
 
 
 def test_term_track_sets_catalog_college_for_linked_and_new_banner_professors(writes, monkeypatch):
@@ -119,17 +116,15 @@ def _caep(monkeypatch, track):
         {"instructor_key": "olin guha", "professor_slug": "olin-guha", "track": track, "sections": 3}])
 
 
-def test_a_corrected_department_label_is_saved_and_shown(writes, monkeypatch):
+def test_a_corrected_department_label_is_shown(writes, monkeypatch):
     _caep(monkeypatch, "Semester")
     assert run.main([]) == 0
-    assert ("colleges", [("olin-guha", "Health Sciences")]) in writes
     assert {r["slug"]: r["college"] for r in writes[-1][1]}["olin-guha"] == "Health Sciences"
 
 
 def test_the_term_track_wins_over_a_corrected_department_label(writes, monkeypatch):
     _caep(monkeypatch, "CPS Quarter")
     assert run.main([]) == 0
-    assert ("colleges", [("olin-guha", "Health Sciences")]) in writes
     assert {r["slug"]: r["college"] for r in writes[-1][1]}["olin-guha"] == "Professional Studies"
 
 

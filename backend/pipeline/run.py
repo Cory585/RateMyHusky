@@ -130,7 +130,6 @@ def main(argv=None):
         return 0
     # Every write waits for verify, so a failed run leaves no rows behind.
     roster.apply_roster(conn, new_links, new_professors)
-    print(f"colleges corrected: {roster.apply_colleges(conn, recolleged)}")
     banner_roster.apply_banner_professors(conn, new_banner)
     print(f"course codes changed: {course_codes.apply_codes(conn, pairs)}")
     print(f"name keys changed: {name_keys.apply_name_keys(conn, key_pairs)}")
