@@ -39,7 +39,7 @@ def main(argv=None):
     # Before anything reads college: the subject vote and the Law exits skip
     # professors by it.
     recolleged = roster.recollege(professors)
-    print(f"colleges to correct from COLLEGE_MAP: {dict(sorted(Counter(c for _, c in recolleged).items()))}")
+    print(f"colleges from COLLEGE_MAP over the stored label: {dict(sorted(Counter(c for _, c in recolleged).items()))}")
     corrected = dict(recolleged)
     professors = [{**p, "college": corrected.get(p["slug"], p["college"])} for p in professors]
 

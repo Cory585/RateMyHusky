@@ -117,7 +117,7 @@ def _caep(monkeypatch, track):
     olin = TABLES["professors"][0]
     monkeypatch.setitem(TABLES, "professors", [
         {**olin, "department": "Counseling & Educational Psych", "college": "Professional Studies"}])
-    monkeypatch.setitem(TABLES, "banner_section_instructors", [
+    monkeypatch.setitem(TABLES, "track_sections", [
         {"instructor_key": "olin guha", "professor_slug": "olin-guha", "track": track, "sections": 3}])
 
 
@@ -125,6 +125,27 @@ def test_a_corrected_department_label_is_shown(writes, monkeypatch):
     _caep(monkeypatch, "Semester")
     assert run.main([]) == 0
     assert {r["slug"]: r["college"] for r in writes[-1][1]}["olin-guha"] == "Health Sciences"
+
+
+def test_the_subject_vote_and_the_law_exits_read_the_corrected_label(writes, monkeypatch):
+    # They skip professors by college, so the correction has to come first.
+    _caep(monkeypatch, "Semester")
+    seen = {}
+    real_subjects, real_exits = run.banner_roster.subject_colleges, run.banner_roster.track_exits
+
+    def subjects(rows, profs, *a):
+        seen["subject_colleges"] = {p["slug"]: p["college"] for p in profs}
+        return real_subjects(rows, profs, *a)
+
+    def exits(track_rows, new, profs, *a):
+        seen["track_exits"] = {p["slug"]: p["college"] for p in profs}
+        return real_exits(track_rows, new, profs, *a)
+
+    monkeypatch.setattr(run.banner_roster, "subject_colleges", subjects)
+    monkeypatch.setattr(run.banner_roster, "track_exits", exits)
+    assert run.main([]) == 0
+    assert seen["subject_colleges"]["olin-guha"] == "Health Sciences"
+    assert seen["track_exits"]["olin-guha"] == "Health Sciences"
 
 
 def test_the_term_track_wins_over_a_corrected_department_label(writes, monkeypatch):
