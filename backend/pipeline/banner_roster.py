@@ -95,7 +95,9 @@ _TAUGHT_CTES = """
           AND NOT EXISTS (SELECT 1 FROM banner_roster_duplicates d
                           WHERE d.term_code = i.term_code AND d.instructor_key = i.instructor_key)
     ), cps_subjects AS (
-        -- Voted on the same teaching sections counted below.
+        -- Voted on the same teaching sections counted below. The undergraduate
+        -- CPS subjects (CHM, BIO, ENG) ran on the CPS Semester calendar, not
+        -- CPS Quarter, so they cannot clear the bar.
         SELECT subject FROM listed
         WHERE NOT cancelled AND subject IS NOT NULL
           AND term_code <= (SELECT max(term_code) FROM banner_terms WHERE track = 'CPS Quarter')
@@ -112,15 +114,19 @@ _TAUGHT_CTES = """
     )""".format(non_teaching=", ".join(f"'{s}'" for s in sorted(NON_TEACHING_SCHEDULE_TYPES)),
                 cps_catalog=", ".join(f"'{s}'" for s in sorted(CPS_SUBJECTS)))
 
-# The subjects voted CPS, for run.py to print: the vote follows live data.
-CPS_VOTE_SQL = _TAUGHT_CTES + " SELECT subject FROM cps_subjects ORDER BY 1"
-
+# The voted subjects come back as extra rows (cps_subject set, the rest NULL),
+# so the vote, which follows live data, can be logged without a second scan;
+# split_cps_vote separates them.
 TRACK_SECTIONS_SQL = _TAUGHT_CTES + """, coordinators AS (
         SELECT term_code, instructor_key FROM taught GROUP BY 1, 2
         HAVING count(DISTINCT subject_course) > {max_courses}
     )
-    SELECT CASE WHEN b.professor_slug IS NULL THEN b.instructor_key END AS instructor_key,
-           b.professor_slug, t.track, count(DISTINCT (t.term_code, t.crn)) AS sections
+    SELECT NULL AS instructor_key, NULL AS professor_slug, NULL AS track, NULL::bigint AS sections,
+           subject AS cps_subject
+    FROM cps_subjects
+    UNION ALL
+    SELECT CASE WHEN b.professor_slug IS NULL THEN b.instructor_key END,
+           b.professor_slug, t.track, count(DISTINCT (t.term_code, t.crn)), NULL
     FROM taught t
     -- instructor_keys is NULL until the matcher's first run that writes it.
     JOIN banner_course_instructors b
@@ -131,6 +137,12 @@ TRACK_SECTIONS_SQL = _TAUGHT_CTES + """, coordinators AS (
                       WHERE c.term_code = t.term_code AND c.instructor_key = t.instructor_key)
     GROUP BY 1, 2, 3
 """.format(max_courses=int(MAX_COURSES_PER_TERM))
+
+
+def split_cps_vote(rows):
+    """(track rows, subjects voted CPS) from TRACK_SECTIONS_SQL rows."""
+    return ([r for r in rows if r["cps_subject"] is None],
+            frozenset(r["cps_subject"] for r in rows if r["cps_subject"] is not None))
 
 
 def _first_last(key):
@@ -169,7 +181,7 @@ def _track_sections(track_rows, new_slug_by_key):
 
 def track_colleges(track_rows, new_slug_by_key):
     """slug -> college, for professors who taught more than half their sections
-    in one TRACK_COLLEGES track. track_rows are TRACK_SECTIONS_SQL rows."""
+    in one TRACK_COLLEGES track. track_rows are split_cps_vote's track rows."""
     colleges = {}
     for slug, by_track in _track_sections(track_rows, new_slug_by_key).items():
         total = sum(by_track.values())
@@ -179,18 +191,20 @@ def track_colleges(track_rows, new_slug_by_key):
     return colleges
 
 
-def subject_colleges(instructor_rows, professors):
-    """subject -> college. A CPS_SUBJECTS subject is Professional Studies: its
+def subject_colleges(instructor_rows, professors, cps_subjects=CPS_SUBJECTS):
+    """subject -> college. A CPS subject is Professional Studies: its
     teachers are CPS adjuncts labelled by subject, so a vote would file MGT
     under Business. Any other subject is voted as subject_departments does, but
     without the professors labelled with a TRACK_COLLEGES college: their labels
     are the ones in question, and CRIM taught by mislabelled Law professors
-    would otherwise vote itself back into Law."""
+    would otherwise vote itself back into Law. run.py passes CPS_SUBJECTS plus
+    the subjects TRACK_SECTIONS_SQL voted, so this and the track agree on what
+    a CPS subject is."""
     voters = {p["slug"]: p["department"] for p in professors
               if p.get("origin") != "banner" and p.get("college") not in TRACK_COLLEGES.values()}
     colleges = {s: get_college(d) for s, d in subject_departments(instructor_rows, voters).items()}
     for row in instructor_rows:
-        if subject_of(row["subject_course"]) in CPS_SUBJECTS:
+        if subject_of(row["subject_course"]) in cps_subjects:
             colleges[subject_of(row["subject_course"])] = "Professional Studies"
     return colleges
 

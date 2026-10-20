@@ -55,17 +55,17 @@ def main(argv=None):
     new_banner, banner_counts = banner_roster.resolve_banner_professors(bci, professors, departments)
     _print("banner roster", banner_counts)
     professors = professors + new_banner
-    cps_voted = {r["subject"] for r in fetch_all(conn, banner_roster.CPS_VOTE_SQL)}
+    track_rows, cps_voted = banner_roster.split_cps_vote(fetch_all(conn, banner_roster.TRACK_SECTIONS_SQL))
     print(f"CPS Quarter subjects by vote: {len(cps_voted)}; "
           f"not in the catalog's CPS list: {' '.join(sorted(cps_voted - banner_roster.CPS_SUBJECTS)) or 'none'}")
     # New Banner professors are linked in the database only at apply time, so
     # their keys come from the rows just resolved.
-    track_rows = fetch_all(conn, banner_roster.TRACK_SECTIONS_SQL)
     new_slug_by_key = {p["name_key"]: p["slug"] for p in new_banner}
     colleges = banner_roster.track_colleges(track_rows, new_slug_by_key)
     print(f"colleges from term track: {dict(sorted(Counter(colleges.values()).items()))}")
     exits = banner_roster.track_exits(track_rows, new_slug_by_key, professors, bci,
-                                      banner_roster.subject_colleges(bci, professors))
+                                      banner_roster.subject_colleges(bci, professors,
+                                                                     banner_roster.CPS_SUBJECTS | cps_voted))
     exits = {slug: c for slug, c in exits.items() if slug not in colleges}
     print(f"out of Law by term track: {dict(sorted(Counter(exits.values()).items()))}")
     colleges = {**exits, **colleges}

@@ -310,7 +310,23 @@ def test_track_sql_counts_cps_subjects_as_cps_quarter_in_any_term():
 
 
 def test_the_cps_vote_counts_the_same_teaching_sections():
-    vote = br.CPS_VOTE_SQL
-    assert vote.startswith(br._TAUGHT_CTES) and br.TRACK_SECTIONS_SQL.startswith(br._TAUGHT_CTES)
-    cps = vote[vote.index("cps_subjects AS"):]
+    sql = br.TRACK_SECTIONS_SQL
+    cps = sql[sql.index("cps_subjects AS"):sql.index("taught AS")]
     assert "FROM listed" in cps and "NOT cancelled" in cps and "count(DISTINCT (term_code, crn))" in cps
+
+
+def test_the_vote_rows_are_split_from_the_track_rows():
+    rows = [{"instructor_key": None, "professor_slug": None, "track": None, "sections": None,
+             "cps_subject": "PJM"},
+            {"instructor_key": None, "professor_slug": "a", "track": "CPS Quarter", "sections": 2,
+             "cps_subject": None}]
+    assert br.split_cps_vote(rows) == ([rows[1]], frozenset({"PJM"}))
+
+
+def test_voted_cps_subjects_are_professional_studies_in_the_subject_vote(monkeypatch):
+    # ESL left the catalog but the track counts it as CPS; the exits must agree.
+    monkeypatch.setattr(br, "get_college", {"English": "CSSH"}.get)
+    rows = [{"professor_slug": "e1", "subject_course": "ESL5100"}]
+    profs = [prof("e1", "CSSH", "English")]
+    assert br.subject_colleges(rows, profs) == {"ESL": "CSSH"}
+    assert br.subject_colleges(rows, profs, br.CPS_SUBJECTS | {"ESL"}) == {"ESL": "Professional Studies"}

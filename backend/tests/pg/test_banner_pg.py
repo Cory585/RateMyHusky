@@ -160,7 +160,7 @@ def test_track_sections_reach_the_row_an_older_spelling_was_merged_into(pg):
                            "williams thomas")
     pg.commit()
 
-    got = rows(pg, banner_roster.TRACK_SECTIONS_SQL)
+    got = banner_roster.split_cps_vote(rows(pg, banner_roster.TRACK_SECTIONS_SQL))[0]
     assert sorted((r["instructor_key"], r["professor_slug"], r["track"], r["sections"])
                   for r in got) == [(None, "thomas-williams", "Law Semester", 9),
                                     (None, "thomas-williams", "Semester", 3)]
@@ -174,8 +174,8 @@ def test_track_sections_fall_back_to_the_key_before_instructor_keys_is_written(p
         _taught(cur, "202614", "1", "LAW7000", "lucia nunez")
         _course_instructor(cur, "LAW7000", "lucia nunez", None, None)
     pg.commit()
-    assert [(r["instructor_key"], r["professor_slug"], r["sections"]) for r in rows(
-        pg, banner_roster.TRACK_SECTIONS_SQL)] == [("lucia nunez", None, 1)]
+    got = banner_roster.split_cps_vote(rows(pg, banner_roster.TRACK_SECTIONS_SQL))[0]
+    assert [(r["instructor_key"], r["professor_slug"], r["sections"]) for r in got] == [("lucia nunez", None, 1)]
 
 
 def test_a_cancelled_section_still_makes_a_coordinator(pg):
@@ -189,7 +189,7 @@ def test_a_cancelled_section_still_makes_a_coordinator(pg):
             _taught(cur, "202614", str(n), course, "jo coord", enrollment=0 if n == 0 else 20)
             _course_instructor(cur, course, "jo coord", "jo-coord", "jo coord")
     pg.commit()
-    assert rows(pg, banner_roster.TRACK_SECTIONS_SQL) == []
+    assert banner_roster.split_cps_vote(rows(pg, banner_roster.TRACK_SECTIONS_SQL))[0] == []
 
 
 def test_a_law_course_in_a_semester_term_counts_as_law(pg):
@@ -203,7 +203,7 @@ def test_a_law_course_in_a_semester_term_counts_as_law(pg):
         for course in ("LAW7000", "LAW7001", "CRIM3000"):
             _course_instructor(cur, course, "ada park", "ada-park", "ada park")
     pg.commit()
-    got = rows(pg, banner_roster.TRACK_SECTIONS_SQL)
+    got = banner_roster.split_cps_vote(rows(pg, banner_roster.TRACK_SECTIONS_SQL))[0]
     assert sorted((r["track"], r["sections"]) for r in got) == [("Law Semester", 2), ("Semester", 1)]
     assert banner_roster.track_colleges(got, {}) == {"ada-park": "Law"}
 
@@ -226,12 +226,13 @@ def test_a_cps_subject_in_a_semester_term_counts_as_cps_quarter(pg):
                             ("CHEM1211", "old hand"), ("PJM6100", "new hire"), ("CHEM1212", "chemist")):
             _course_instructor(cur, course, key, key.replace(" ", "-"), key)
     pg.commit()
-    got = rows(pg, banner_roster.TRACK_SECTIONS_SQL)
+    got = banner_roster.split_cps_vote(rows(pg, banner_roster.TRACK_SECTIONS_SQL))[0]
     assert sorted((r["professor_slug"], r["track"], r["sections"]) for r in got) == [
         ("chemist", "Semester", 1), ("new-hire", "CPS Quarter", 1),
         ("old-hand", "CPS Quarter", 3), ("old-hand", "Semester", 1)]
     assert banner_roster.track_colleges(got, {}) == {
         "new-hire": "Professional Studies", "old-hand": "Professional Studies"}
+    assert banner_roster.split_cps_vote(rows(pg, banner_roster.TRACK_SECTIONS_SQL))[1] == {"PJM"}
 
 
 def test_the_cps_vote_skips_sections_that_are_not_teaching(pg):
@@ -250,8 +251,8 @@ def test_the_cps_vote_skips_sections_that_are_not_teaching(pg):
         for course in ("XYZ5003", "XYZ5004"):
             _course_instructor(cur, course, "day prof", "day-prof", "day prof")
     pg.commit()
-    assert rows(pg, banner_roster.CPS_VOTE_SQL) == []
-    got = rows(pg, banner_roster.TRACK_SECTIONS_SQL)
+    got, voted = banner_roster.split_cps_vote(rows(pg, banner_roster.TRACK_SECTIONS_SQL))
+    assert voted == frozenset()
     assert [(r["professor_slug"], r["track"], r["sections"]) for r in got] == [("day-prof", "Semester", 2)]
 
 
@@ -267,6 +268,24 @@ def test_a_graduate_catalog_cps_section_counts_as_cps_quarter(pg):
         _course_instructor(cur, "AAI6600", "ai teacher", "ai-teacher", "ai teacher")
         _course_instructor(cur, "CHM1211", "chemist", "chemist", "chemist")
     pg.commit()
-    got = rows(pg, banner_roster.TRACK_SECTIONS_SQL)
+    got = banner_roster.split_cps_vote(rows(pg, banner_roster.TRACK_SECTIONS_SQL))[0]
     assert sorted((r["professor_slug"], r["track"]) for r in got) == [
         ("ai-teacher", "CPS Quarter"), ("chemist", "Semester")]
+
+
+def test_an_undergraduate_cps_subject_on_the_cps_semester_calendar_is_not_voted(pg):
+    # CHM ran on CPS Semester, not CPS Quarter: the vote must not relabel it and
+    # pull day-college chemists (the Toher case) into Professional Studies.
+    truncate(pg, *BANNER_TABLES)
+    with pg.cursor() as cur:
+        _term(cur, "202655", "CPS Quarter")
+        _term(cur, "202535", "CPS Semester")
+        _taught(cur, "202535", "1", "CHM1211", "chemist")
+        _taught(cur, "202535", "2", "CHM1212", "chemist")
+        _taught(cur, "202655", "3", "CHM1213", "chemist")
+        for course in ("CHM1211", "CHM1212", "CHM1213"):
+            _course_instructor(cur, course, "chemist", "chemist", "chemist")
+    pg.commit()
+    got, voted = banner_roster.split_cps_vote(rows(pg, banner_roster.TRACK_SECTIONS_SQL))
+    assert voted == frozenset()
+    assert sorted((r["track"], r["sections"]) for r in got) == [("CPS Quarter", 1), ("CPS Semester", 2)]

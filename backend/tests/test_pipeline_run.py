@@ -28,10 +28,12 @@ TABLES = {
          "sections": 3, "last_term_code": "202630"},
     ],
     # banner_roster's queries open with CTEs, so _rows matches them by object.
-    "cps_subjects": [{"subject": "PJM"}],
     "track_sections": [
-        {"instructor_key": "olin guha", "professor_slug": "olin-guha", "track": "Law Semester", "sections": 3},
-        {"instructor_key": "lucia nunez", "professor_slug": None, "track": "CPS Quarter", "sections": 1},
+        {"instructor_key": None, "professor_slug": None, "track": None, "sections": None, "cps_subject": "PJM"},
+        {"instructor_key": "olin guha", "professor_slug": "olin-guha", "track": "Law Semester", "sections": 3,
+         "cps_subject": None},
+        {"instructor_key": "lucia nunez", "professor_slug": None, "track": "CPS Quarter", "sections": 1,
+         "cps_subject": None},
     ],
     "survey_ratings": [{"professor_slug": "olin-guha", "course_code": "CS2500", "rating": 5,
                         "hours": "3-4", "grade": None, "comment": ""}],
@@ -40,7 +42,7 @@ TABLES = {
 
 
 def _rows(sql):
-    by_sql = {run.banner_roster.TRACK_SECTIONS_SQL: "track_sections", run.banner_roster.CPS_VOTE_SQL: "cps_subjects"}
+    by_sql = {run.banner_roster.TRACK_SECTIONS_SQL: "track_sections"}
     return [dict(r) for r in TABLES[by_sql.get(sql) or sql.split(" FROM ")[1].split()[0]]]
 
 
