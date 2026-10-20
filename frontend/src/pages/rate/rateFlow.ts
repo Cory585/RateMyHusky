@@ -201,7 +201,8 @@ export function withMyRating(s: RatePairSummary | undefined, a: Answers): RatePa
 }
 
 export function buildSubmission(a: Answers, start: RateStart, turnstileToken: string, honeypot: string): RateSubmission {
-  if (!a.professor || !a.course || a.rating === undefined || a.hours === undefined) {
+  // undefined is unanswered; null is "Not sure" or "Prefer not to say".
+  if (!a.professor || !a.course || a.term === undefined || a.rating === undefined || a.hours === undefined || a.grade === undefined) {
     throw new Error('Incomplete rating');
   }
   return {

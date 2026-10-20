@@ -7,7 +7,6 @@ import { StepFoot } from './ChoiceGroup';
 const NEW_PROFESSOR_NOTE = 'New professors show up after a quick check by our team. Your rating is saved either way.';
 
 interface WhoStepProps {
-  counter: number | null;
   onPick: (p: RateProfessor) => void;
   onAddNew: (typedName: string) => void;
 }

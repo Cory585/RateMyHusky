@@ -531,8 +531,11 @@ export async function startRating(deviceMirror: string | null): Promise<RateStar
   return res.json();
 }
 
-export async function fetchRateContext(slug: string): Promise<RateProfessorContext | null> {
-  const res = await fetch(`${API_BASE}/api/rate/professors/${encodeURIComponent(slug)}`);
+/* The device cookie doesn't reach a cross-site API, so the token also goes in the header. */
+export async function fetchRateContext(slug: string, deviceToken: string): Promise<RateProfessorContext | null> {
+  const res = await fetch(`${API_BASE}/api/rate/professors/${encodeURIComponent(slug)}`, {
+    headers: { "X-Rmh-Device": deviceToken },
+  });
   if (maintenanceGuard(res)) throw new Error("Site is under maintenance");
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`API ${res.status}`);

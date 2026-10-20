@@ -143,6 +143,11 @@ function selftest(): number {
     sub.opened === 'tok' && sub.deviceToken === 'dev' && sub.website === 'hp' && sub.turnstileToken === 'ts');
   const sub2 = buildSubmission({ ...a, comment: 'x' }, start, 't', '');
   check('buildSubmission existing professor and course', same(sub2.professor, { slug: 'alex-rivera' }) && same(sub2.course, { code: 'CS2500' }));
+  const throws = (x: Answers) => { try { buildSubmission(x, start, 't', ''); return false; } catch { return true; } };
+  const noTerm: Answers = { ...a, term: undefined };
+  const noGradeYet: Answers = { ...a, grade: undefined };
+  check('buildSubmission throws on an unanswered term', throws(noTerm) && firstStep(noTerm) === 'term');
+  check('buildSubmission throws on an unanswered grade', throws(noGradeYet) && firstStep(noGradeYet) === 'grade');
 
   console.log(fails.length ? `${fails.length} FAIL(s): ` + fails.join(', ') : 'ALL PASS');
   return fails.length ? 1 : 0;

@@ -1932,7 +1932,10 @@ def rate_professor(slug):
         return _rating_unavailable()
     if not ratings.professor_exists(slug, query_one):
         return _rating_response({"error": "Professor not found"}, 404)
+    # The cookie doesn't reach a cross-site API, so the localStorage mirror comes in a header too.
     token = request.cookies.get(rating_identity.DEVICE_COOKIE)
+    if not rating_identity.valid_device_token(token):
+        token = request.headers.get("X-Rmh-Device")
     device_hash = (rating_identity.keyed_hash(RATING_SECRET, "device", token)
                    if rating_identity.valid_device_token(token) else None)
     return _rating_response(ratings.professor_context(slug, device_hash, query), 200)

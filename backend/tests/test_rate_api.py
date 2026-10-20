@@ -256,6 +256,16 @@ def test_professor_context_uses_cookie_device_and_404s_unknown(rate):
     assert "Set-Cookie" not in resp.headers
 
 
+def test_professor_context_reads_the_mirror_header_without_a_cookie(rate, monkeypatch):
+    server, client, state, ri = rate
+    device_hash = ri.keyed_hash(SECRET, "device", DEVICE)
+    monkeypatch.setattr(server, "query", lambda sql, params=None: (
+        [{"course_code": "CS2500"}] if "FROM survey_ratings" in sql and params[0] == device_hash else []))
+    assert client.get("/api/rate/professors/alice-smith").get_json()["ratedCourses"] == []
+    resp = client.get("/api/rate/professors/alice-smith", headers={"X-Rmh-Device": DEVICE})
+    assert resp.get_json()["ratedCourses"] == ["CS2500"]
+
+
 def test_new_device_follows_the_opened_token_and_cookie_is_set(rate):
     server, client, state, ri = rate
     state["seen"] = True  # the device has rated before

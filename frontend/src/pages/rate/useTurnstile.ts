@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 
 const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY;
+// Without a site key there's no widget to wait for; the backend skips the check when it has no secret either.
+const NO_WIDGET_TOKEN = 'no-turnstile';
 
 export function useTurnstile(): { containerRef: RefObject<HTMLDivElement | null>; token: string; failed: boolean; reset: () => void } {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -10,14 +12,18 @@ export function useTurnstile(): { containerRef: RefObject<HTMLDivElement | null>
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    if (!TURNSTILE_SITE_KEY) return;
     // Wait for the Turnstile script to load, as FeedbackTab does.
     const interval = setInterval(() => {
-      if (!window.turnstile || !containerRef.current || !TURNSTILE_SITE_KEY) return;
+      if (!window.turnstile || !containerRef.current) return;
       clearInterval(interval);
       const id = window.turnstile.render(containerRef.current, {
         sitekey: TURNSTILE_SITE_KEY,
         appearance: 'interaction-only',
-        callback: (t: string) => setToken(t),
+        callback: (t: string) => {
+          setToken(t);
+          setFailed(false); // an automatic retry recovered from an earlier error
+        },
         'error-callback': () => setFailed(true),
         'expired-callback': () => {
           setToken('');
@@ -43,5 +49,5 @@ export function useTurnstile(): { containerRef: RefObject<HTMLDivElement | null>
     if (widgetIdRef.current !== null) window.turnstile?.reset(widgetIdRef.current);
   }, []);
 
-  return { containerRef, token, failed, reset };
+  return { containerRef, token: TURNSTILE_SITE_KEY ? token : NO_WIDGET_TOKEN, failed, reset };
 }

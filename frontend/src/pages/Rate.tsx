@@ -39,9 +39,11 @@ function writeMirror(token: string) {
 }
 
 const FAILURE_MESSAGES: Record<number, string> = {
+  400: "Something in this rating didn't go through. Check your answers and try again.",
   403: "We couldn't check you're human. Try again.",
   422: "This comment can't be posted. Edit it or skip it.",
   429: 'Too many ratings from this device for now. Try again later.',
+  503: 'Ratings are paused right now. Try again later.',
 };
 const TOKEN_WAIT_MS = 15000;
 const NETWORK_MESSAGE = "Couldn't send. Check your connection and try again.";
@@ -68,12 +70,14 @@ export default function Rate() {
   const [typedName, setTypedName] = useState('');
   const [counter, setCounter] = useState<number | null>(null);
   const [submitError, setSubmitError] = useState('');
-  const [pending, setPending] = useState<{ skip: boolean; honeypot: string } | null>(null);
+  // until: when the wait gives up, fixed at submit so a re-run of the timer effect can't extend it.
+  const [pending, setPending] = useState<{ skip: boolean; honeypot: string; until: number } | null>(null);
   const [sending, setSending] = useState(false);
   const [contextReload, setContextReload] = useState(0);
   // The pair's numbers as they were before this rating, which the thanks screen adds it to.
   const [thanksBase, setThanksBase] = useState<RatePairSummary | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const visitRef = useRef(0);
   const { containerRef, token, failed, reset } = useTurnstile();
   const isDesktop = useMediaQuery('(min-width: 1024px)');
 
@@ -82,16 +86,23 @@ export default function Rate() {
   const courses = slug === null ? [] : loaded?.slug === slug ? loaded.list : null;
   const coursesLoading = courses === null;
 
-  // Start the visit, then resolve any ?professor / ?course prefill.
-  useEffect(() => {
-    let cancelled = false;
+  // Only the latest visit's start lands, so a slow earlier one can't overwrite it.
+  const beginVisit = () => {
+    const visit = ++visitRef.current;
+    setStartFailed(false);
     startRating(readMirror())
       .then((s) => {
-        if (cancelled) return;
+        if (visitRef.current !== visit) return;
         writeMirror(s.deviceToken);
         setStart(s);
       })
-      .catch(() => { if (!cancelled) setStartFailed(true); });
+      .catch(() => { if (visitRef.current === visit) setStartFailed(true); });
+  };
+
+  // Start the visit, then resolve any ?professor / ?course prefill.
+  useEffect(() => {
+    let cancelled = false;
+    beginVisit();
 
     (async () => {
       const profSlug = params.get('professor');
@@ -123,11 +134,11 @@ export default function Rate() {
     return () => { cancelled = true; };
   }, [slug]);
 
-  // The context call reads the cookie that startRating sets, so it waits for start.
+  // The context call needs the device token from startRating, so it waits for start.
   useEffect(() => {
     if (!start || !slug) return;
     let cancelled = false;
-    fetchRateContext(slug)
+    fetchRateContext(slug, start.deviceToken)
       .then((c) => { if (!cancelled) setContext(c); })
       .catch(() => { /* no "You rated this" tags */ });
     return () => { cancelled = true; };
@@ -169,16 +180,10 @@ export default function Rate() {
     setSubmitError('');
     if (token && start) send(skip, honeypot, token);
     else {
-      setPending({ skip, honeypot });
-      if (!start) {
-        setStartFailed(false);
-        startRating(readMirror())
-          .then((s) => {
-            writeMirror(s.deviceToken);
-            setStart(s);
-          })
-          .catch(() => setStartFailed(true));
-      }
+      // An earlier challenge error would end this wait at once, so run a fresh challenge.
+      if (failed) reset();
+      setPending({ skip, honeypot, until: Date.now() + TOKEN_WAIT_MS });
+      if (!start) beginVisit();
     }
   };
 
@@ -198,30 +203,24 @@ export default function Rate() {
       setSubmitError(start ? FAILURE_MESSAGES[403] : NETWORK_MESSAGE);
       reset();
     };
-    if (failed) {
+    if (failed || startFailed) {
       giveUp();
       return;
     }
-    const timer = setTimeout(giveUp, TOKEN_WAIT_MS);
+    const timer = setTimeout(giveUp, pending.until - Date.now());
     return () => clearTimeout(timer);
-  }, [pending, failed, reset, start]);
+  }, [pending, failed, startFailed, reset, start]);
 
   const rateAnother = () => {
     setAnswers({ comment: '' });
     setStep('who');
     setStart(null);
-    setStartFailed(false);
     setContext(null);
     setCounter(null);
     setSubmitError('');
     setTypedName('');
     setContextReload((n) => n + 1);
-    startRating(readMirror())
-      .then((s) => {
-        writeMirror(s.deviceToken);
-        setStart(s);
-      })
-      .catch(() => setStartFailed(true));
+    beginVisit();
   };
 
   useEffect(() => {
@@ -249,7 +248,6 @@ export default function Rate() {
         return (
           <>
             <WhoStep
-              counter={start?.counter ?? null}
               onPick={(p) => pickProfessor(p, 'who')}
               onAddNew={(name) => { setTypedName(name); setStep('newProfessor'); }}
             />
