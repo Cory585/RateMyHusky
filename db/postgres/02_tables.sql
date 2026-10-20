@@ -271,6 +271,7 @@ CREATE TABLE public.banner_course_instructors (
     was_primary BOOLEAN NULL,
     campuses TEXT NULL,
     methods TEXT NULL,
+    instructor_keys TEXT NULL,
     CONSTRAINT banner_course_instructors_pkey PRIMARY KEY (subject_course, instructor_key)
 );
 

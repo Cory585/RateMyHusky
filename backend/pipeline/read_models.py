@@ -47,7 +47,11 @@ def drop_denied(professors, links, is_denied=is_denied_key):
     return kept, [l for l in links if l["slug"] in slugs]
 
 
-def catalog_rows(professors, links, pages, summary_rows, is_denied=is_denied_key):
+def catalog_rows(professors, links, pages, summary_rows, is_denied=is_denied_key, colleges=None):
+    """colleges overrides professors.college per slug. professors.college is set
+    once from a department label and never rewritten, so a better source is
+    applied here, where the catalog is rebuilt every run."""
+    colleges = colleges or {}
     ratings_by_page = {p["rmp_id"]: p["num_ratings"] or 0 for p in pages}
     best_url = {}
     for l in sorted(links, key=lambda l: (-ratings_by_page.get(l["rmp_id"], 0), l["rmp_id"])):
@@ -62,7 +66,7 @@ def catalog_rows(professors, links, pages, summary_rows, is_denied=is_denied_key
         r = rmp.get((p["slug"], ""), {})
         rows.append({
             "slug": p["slug"], "name": p["name"], "name_key": p["name_key"],
-            "department": p["department"], "college": p["college"],
+            "department": p["department"], "college": colleges.get(p["slug"], p["college"]),
             "avg_rating": b.get("rating"), "rmp_rating": r.get("rating"),
             "num_ratings": r.get("num_ratings", 0), "total_reviews": b.get("num_ratings", 0),
             "would_take_again_pct": b.get("would_take_again_pct"), "difficulty": b.get("difficulty"),

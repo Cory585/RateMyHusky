@@ -126,3 +126,12 @@ def test_placeholder_courses_are_kept_only_when_rated():
                {"code": "CS9999", "name": "Unrated", "department": "CS", "subject": "CS",
                 "search_text": "y", "is_placeholder": True}]
     assert [r["code"] for r in course_rows(catalog, SUMMARIES)] == ["CS3500"]
+
+
+def test_college_override_replaces_the_stored_college():
+    [row] = catalog_rows([PROF], LINKS, PAGES, SUMMARIES, is_denied=lambda k: False,
+                         colleges={"olin-guha": "Law"})
+    assert row["college"] == "Law"
+    [row] = catalog_rows([PROF], LINKS, PAGES, SUMMARIES, is_denied=lambda k: False,
+                         colleges={"someone-else": "Law"})
+    assert row["college"] == "Khoury"

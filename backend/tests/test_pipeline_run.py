@@ -22,15 +22,25 @@ TABLES = {
                      "comment": "good", "visible": True}],
     "banner_course_instructors": [
         {"subject_course": "CS3100", "instructor_key": "lucia nunez", "instructor_name": "Nunez, Lucia",
-         "professor_slug": None, "match_method": "no_match", "terms_taught": 2, "last_term_code": "202630"},
+         "professor_slug": None, "match_method": "no_match", "terms_taught": 2, "sections": 2, "last_term_code": "202630"},
         {"subject_course": "CS2500", "instructor_key": "olin guha", "instructor_name": "Guha, Olin",
          "professor_slug": "olin-guha", "match_method": "name_key", "terms_taught": 3,
-         "last_term_code": "202630"},
+         "sections": 3, "last_term_code": "202630"},
+    ],
+    # TRACK_SECTIONS_SQL opens with a CTE, so _rows matches it by object.
+    "track_sections": [
+        {"instructor_key": "olin guha", "professor_slug": "olin-guha", "track": "Law Semester", "sections": 3},
+        {"instructor_key": "lucia nunez", "professor_slug": None, "track": "CPS Quarter", "sections": 1},
     ],
     "survey_ratings": [{"professor_slug": "olin-guha", "course_code": "CS2500", "rating": 5,
                         "hours": "3-4", "grade": None, "comment": ""}],
     "survey_pending_courses": [],
 }
+
+
+def _rows(sql):
+    key = "track_sections" if sql is run.banner_roster.TRACK_SECTIONS_SQL else sql.split(" FROM ")[1].split()[0]
+    return [dict(r) for r in TABLES[key]]
 
 
 @pytest.fixture
@@ -39,7 +49,7 @@ def captured(monkeypatch):
 
     def fetch(conn, sql):
         sqls.append(sql)
-        return [dict(r) for r in TABLES[sql.split(" FROM ")[1].split()[0]]]
+        return _rows(sql)
 
     monkeypatch.setattr(run, "connect", lambda: object())
     monkeypatch.setattr(run, "fetch_all", fetch)
@@ -60,14 +70,14 @@ def writes(monkeypatch):
     calls = []
     monkeypatch.setattr(run, "connect", lambda: object())
     monkeypatch.setattr(run, "fetch_all",
-                        lambda conn, sql: [dict(r) for r in TABLES[sql.split(" FROM ")[1].split()[0]]])
+                        lambda conn, sql: _rows(sql))
     monkeypatch.setattr(run.roster, "apply_roster", lambda conn, l, p: calls.append(("roster", l, p)))
     monkeypatch.setattr(run.banner_roster, "apply_banner_professors",
                         lambda conn, rows: calls.append(("banner", rows)))
     monkeypatch.setattr(run.course_codes, "apply_codes", lambda conn, p: calls.append(("codes", p)) or 0)
     monkeypatch.setattr(run.name_keys, "apply_name_keys", lambda conn, p: calls.append(("name_keys", p)) or 0)
     monkeypatch.setattr(run.review_tags, "rebuild_if_present", lambda conn: calls.append(("tags",)))
-    monkeypatch.setattr(run.read_models, "write", lambda conn, *a: calls.append(("read_models",)))
+    monkeypatch.setattr(run.read_models, "write", lambda conn, *a: calls.append(("read_models", a[0])))
     return calls
 
 
@@ -92,6 +102,14 @@ def test_writes_happen_after_verify_in_order(writes, monkeypatch):
     assert writes[1][1][0]["department"] == "CS"
     assert writes[2][1] == [(10, "CS2500")]
     assert writes[3][1] == [(10, "olin guha")]
+
+
+def test_term_track_sets_catalog_college_for_linked_and_new_banner_professors(writes, monkeypatch):
+    monkeypatch.setattr(run.read_models, "verify", lambda *a: [])
+    assert run.main([]) == 0
+    catalog = {r["slug"]: r["college"] for r in writes[-1][1]}
+    assert catalog["olin-guha"] == "Law"                       # linked by the matcher
+    assert catalog["lucia-nunez"] == "Professional Studies"    # created this run, linked by name_key
 
 
 def test_survey_rows_reach_the_read_models(captured):

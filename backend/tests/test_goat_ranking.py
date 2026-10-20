@@ -276,3 +276,34 @@ def test_board_row_has_exactly_these_keys(monkeypatch):
 def test_board_is_one_statement(monkeypatch):
     _, seen = _run_leaderboard(monkeypatch, [ROW])
     assert len(seen) == 1   # the prior goes through query_one, so GOAT is two statements in all
+
+
+def test_an_empty_board_is_served_from_cache(monkeypatch):
+    # Law has no professor over the floor; a cached [] must not re-run the queries.
+    monkeypatch.setattr(server, "cache_get", lambda key: [])
+    monkeypatch.setattr(server, "query", lambda *a: pytest.fail("cached board re-queried"))
+    monkeypatch.setattr(server, "query_one", lambda *a: pytest.fail("cached board re-queried"))
+    with server.app.test_request_context("/api/goat-professors?college=Law"):
+        assert server.goat_professors().get_json() == []
+
+
+def test_an_unknown_college_is_not_queried_or_cached(monkeypatch):
+    monkeypatch.setattr(server, "cache_get", lambda key: pytest.fail("unknown college read the cache"))
+    monkeypatch.setattr(server, "cache_set", lambda *a: pytest.fail("unknown college cached"))
+    monkeypatch.setattr(server, "query", lambda *a: pytest.fail("unknown college queried"))
+    monkeypatch.setattr(server, "query_one", lambda *a: pytest.fail("unknown college queried"))
+    with server.app.test_request_context("/api/goat-professors?college=xyz"):
+        assert server.goat_professors().get_json() == []
+
+
+@pytest.mark.parametrize("args, limit", [("limit=-5", 1), ("limit=500", 50), ("limit=x", 10)])
+def test_the_limit_is_clamped_and_the_floor_is_not_a_parameter(monkeypatch, args, limit):
+    # Free values would each store a cache entry, and LIMIT -5 is a Postgres error.
+    seen = []
+    monkeypatch.setattr(server, "query", lambda sql, params: seen.append(params) or [])
+    monkeypatch.setattr(server, "query_one", lambda sql, params: {"prior": C})
+    monkeypatch.setattr(server, "cache_get", lambda key: seen.append(key) and None)
+    monkeypatch.setattr(server, "cache_set", lambda key, val: None)
+    with server.app.test_request_context(f"/api/goat-professors?college=Khoury&{args}&min_reviews=1"):
+        server.goat_professors()
+    assert seen == [f"goat:v5:Khoury:{limit}", ("Khoury", server.BOARD_MIN_REVIEWS, C, limit)]

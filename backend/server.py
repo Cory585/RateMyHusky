@@ -14,6 +14,7 @@ from psycopg2.extras import RealDictCursor
 from functools import lru_cache
 from dotenv import load_dotenv
 from prof_aliases import ALIAS_MAP
+from pipeline.names import COLLEGE_MAP
 from flask import Flask, g, jsonify, request, redirect, make_response
 from flask_cors import CORS
 from flask_compress import Compress
@@ -736,6 +737,7 @@ FALLBACK_PRIOR = 4.2   # only for an empty or brand-new catalog
 #
 # So a short board is a feature. Do not backfill it to reach `limit`.
 BOARD_MIN_REVIEWS = 30
+BOARD_COLLEGES = frozenset(COLLEGE_MAP.values())
 
 # total_reviews (BIGINT) is cast to float so the shrinkage arithmetic is
 # floating-point throughout instead of leaning on implicit int/float coercion.
@@ -776,17 +778,24 @@ def shrunk_score(avg_rating, total_reviews, prior_mean, m=SHRINKAGE_M):
 @app.route("/api/goat-professors")
 def goat_professors():
     college = request.args.get("college", "Khoury")
-    limit = min(int(request.args.get("limit", "10")), 50)
-    min_reviews = int(request.args.get("min_reviews", str(BOARD_MIN_REVIEWS)))
+    # Clamped, and the floor is not a parameter: every distinct value would
+    # store its own cache entry, and a negative LIMIT is a Postgres error.
+    limit = max(1, min(request.args.get("limit", 10, type=int), 50))
 
     # v5: the ordering has changed three times — to the shrunk score, again when
     # the prior stopped being the whole-catalog average, and again when the
     # per-college review floor collapsed to a single BOARD_MIN_REVIEWS and the
     # sort gained a name tiebreak. An unbumped key serves the previous version
     # from the cache after deploy, which looks exactly like the fix not working.
-    cache_key = f"goat:v5:{college}:{limit}:{min_reviews}"
+    # Unknown colleges are answered before the cache: every value would
+    # otherwise store its own [] and push real boards out of the LRU. With
+    # limit clamped, a college holds at most 50 entries.
+    if college not in BOARD_COLLEGES:
+        return jsonify([])
+    cache_key = f"goat:v5:{college}:{limit}"
     cached = cache_get(cache_key)
-    if cached:
+    # `is not None`: an empty board (Law) is a real answer and must cache too.
+    if cached is not None:
         return jsonify(cached)
 
     prior = ranking_prior(query_one)
@@ -807,7 +816,7 @@ def goat_professors():
         WHERE college = %s AND total_reviews >= %s
         ORDER BY {RANKING_SCORE_SQL} DESC NULLS LAST, total_reviews DESC, name
         LIMIT %s
-    """, (college, min_reviews, prior, limit))
+    """, (college, BOARD_MIN_REVIEWS, prior, limit))
 
     result = []
     for row in rows:

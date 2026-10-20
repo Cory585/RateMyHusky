@@ -88,7 +88,8 @@ If the connection fails:
 ## Schema changes since the migration
 
 The NUBanner teaching-history code added a table and five columns, and review
-tags added three tables, after the production database was loaded. `02_tables.sql` already declares them (the
+tags added three tables, after the production database was loaded; the term-track
+colleges added `banner_course_instructors.instructor_keys`. `02_tables.sql` already declares them (the
 columns last in their tables, where `ADD COLUMN` puts them). A database loaded
 before this needs the following, which the loaders no longer run for you. Run it
 once at cutover:
@@ -105,6 +106,7 @@ ALTER TABLE public.banner_course_offerings
     ADD COLUMN IF NOT EXISTS summer2_years BIGINT NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS first_term_label TEXT,
     ADD COLUMN IF NOT EXISTS offering_years TEXT;
+ALTER TABLE public.banner_course_instructors ADD COLUMN IF NOT EXISTS instructor_keys TEXT;
 CREATE TABLE IF NOT EXISTS public.review_tags (
     source TEXT NOT NULL,
     source_id BIGINT NOT NULL,

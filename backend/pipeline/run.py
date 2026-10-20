@@ -7,6 +7,7 @@ stdout carries counts only.
 """
 
 import argparse
+from collections import Counter
 
 import moderation
 
@@ -46,13 +47,25 @@ def main(argv=None):
     _print("roster", counts)
     links, professors = links + new_links, professors + new_professors
     bci = fetch_all(conn, "SELECT subject_course, instructor_key, instructor_name, professor_slug, "
-                          "match_method, terms_taught, last_term_code FROM banner_course_instructors")
+                          "match_method, terms_taught, sections, last_term_code "
+                          "FROM banner_course_instructors")
     # Banner-only professors' departments are earlier guesses, so they don't vote.
     departments = banner_roster.subject_departments(
         bci, {p["slug"]: p["department"] for p in professors if p.get("origin") != "banner"})
     new_banner, banner_counts = banner_roster.resolve_banner_professors(bci, professors, departments)
     _print("banner roster", banner_counts)
     professors = professors + new_banner
+    # New Banner professors are linked in the database only at apply time, so
+    # their keys come from the rows just resolved.
+    track_rows = fetch_all(conn, banner_roster.TRACK_SECTIONS_SQL)
+    new_slug_by_key = {p["name_key"]: p["slug"] for p in new_banner}
+    colleges = banner_roster.track_colleges(track_rows, new_slug_by_key)
+    print(f"colleges from term track: {dict(sorted(Counter(colleges.values()).items()))}")
+    exits = banner_roster.track_exits(track_rows, new_slug_by_key, professors, bci,
+                                      banner_roster.subject_colleges(bci, professors))
+    exits = {slug: c for slug, c in exits.items() if slug not in colleges}
+    print(f"out of Law by term track: {dict(sorted(Counter(exits.values()).items()))}")
+    colleges = {**exits, **colleges}
     # Alias-aware, so a page created before its professor's denial request still drops.
     professors, links = read_models.drop_denied(professors, links, banner_roster.is_denied_banner_key)
 
@@ -93,7 +106,7 @@ def main(argv=None):
     rows += survey_summary
     rows += blend(rows)
 
-    catalog = read_models.catalog_rows(professors, links, linked_pages, rows)
+    catalog = read_models.catalog_rows(professors, links, linked_pages, rows, colleges=colleges)
     rows = read_models.keep_summaries(rows, {r["slug"] for r in catalog})
     courses = read_models.course_rows(catalog_courses, rows)
     counts = read_models.stats(catalog, courses, rows)
