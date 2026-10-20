@@ -238,6 +238,17 @@ def test_any_section_in_the_labels_track_keeps_it():
     assert exits == {}
 
 
+def test_a_banner_only_professor_created_this_run_is_exited():
+    # Unlinked until apply time: both their sections and their subjects come
+    # through new_slug_by_key.
+    exits = br.track_exits([track("park ada", "Semester", 4)], {"park ada": "ada-park"},
+                           [prof("ada-park", "Law", origin="banner")],
+                           [{"professor_slug": None, "instructor_key": "park ada",
+                             "subject_course": "CRIM2100", "sections": 4}],
+                           {"CRIM": "CSSH"})
+    assert exits == {"ada-park": "CSSH"}
+
+
 def test_no_banner_record_keeps_the_label():
     assert br.track_exits([], {}, [prof("ada-park", "Law")], [], {"CRIM": "CSSH"}) == {}
 
