@@ -675,7 +675,7 @@ def colleges():
 
 # ── Leaderboard ranking ──────────────────────────────────────────────
 # Ranking by raw avg_rating lets a 5.00 built on 3 reviews outrank a 4.9 built on
-# 500. 276 professors sit at exactly 5.00 and 95% of them have under 15 reviews,
+# 500. 551 professors sit at exactly 5.00 and 97% of them have under 15 reviews,
 # which is why the Law and Professional Studies boards (which used to carry a
 # review floor of 5 rather than 100) filled up with them.
 #
@@ -720,20 +720,18 @@ FALLBACK_PRIOR = 4.2   # only for an empty or brand-new catalog
 # Professional Studies to 5. Both halves of that were wrong in opposite
 # directions, and shrinkage is what makes a single number workable:
 #
-#   - 100 was doing almost no work. Reaching Khoury's rank-10 score needs ~57
-#     reviews even at a perfect 5.00, so the shrunk score already excludes
-#     nearly everyone the floor was excluding. Re-measured after the
-#     total_reviews rebuild, going 100 -> 30 changes one row across every
-#     100-floor board: Business rank 10, Peggy O'Kelly -> Laura Huang. (Before
-#     the rebuild it changed nothing at all, so expect this to keep drifting
-#     with the corpus — the argument is that the floor is near-redundant, not
-#     that it is exactly redundant.)
-#   - 5 was the actual bug. Law survives it on population (232 eligible), but
-#     Professional Studies had 15, so a "top 10" showed two thirds of the
-#     department including professors with 7 ratings, scoring within 0.04 of each
-#     other and of the prior — an ordering that reflects the prior, not the
-#     professors. At 30 that board is 5 professors long, which is the honest
-#     answer: the department does not have ten well-measured ones.
+#   - 100 is too strict for total_reviews as it now stands: RMP ratings and
+#     survey ratings only, since TRACE responses left it (2026-10-04). At 100,
+#     6 of the boards that fill at 30 lose rows, and Engineering's is empty.
+#     Nor does shrinkage do the floor's job: Khoury's rank-10 score needs ~17
+#     reviews at a perfect 5.00, so it is the floor of 30, not the shrunk score,
+#     that keeps a thinly rated 5.00 off the board.
+#   - 5 was the actual bug. Law had 7 eligible at that floor and Professional
+#     Studies 5, so a "top 10" was every rated professor in the college, on 5
+#     to 16 ratings each and scoring within 0.25 of the prior — an ordering
+#     that reflects the prior, not the professors. At 30 the Professional Studies
+#     board has 0 professors, and Law's is empty too, which is the honest answer:
+#     neither college has well-measured ones yet.
 #
 # So a short board is a feature. Do not backfill it to reach `limit`.
 BOARD_MIN_REVIEWS = 30
@@ -802,7 +800,7 @@ def goat_professors():
     # `name` breaks ties last. Without it, professors equal on both score and
     # review count come back in whatever order the scan produces, so the board
     # could reshuffle between requests. Measured on the current corpus:
-    # 64 such groups across the catalog, covering 137 professors, and none
+    # 3 such groups across the catalog, covering 6 professors, and none
     # reaching a top 10. So this closes the door rather than fixing a visible bug.
     #
     # Which colleges hold them is not worth stating: an earlier version of this

@@ -174,21 +174,27 @@ CLAIMS = [
      ("rel", 0.15)),
 
     ("Law professors eligible at a floor of 5", SERVER_PY,
-     r"Law survives it on population \((\d+) eligible\)",
+     r"Law had (\d+) eligible at that floor",
      lambda c: c.val("SELECT count(*) FROM professors_catalog WHERE college = 'Law' "
                      "AND avg_rating IS NOT NULL AND total_reviews >= 5"),
      ("rel", 0.10)),
 
     ("Professional Studies eligible at a floor of 5", SERVER_PY,
-     r"Professional Studies had (\d+),",
+     r"and Professional\s*\n#\s*Studies (\d+), so",
      lambda c: c.val("SELECT count(*) FROM professors_catalog "
                      "WHERE college = 'Professional Studies' "
                      "AND avg_rating IS NOT NULL AND total_reviews >= 5"),
      ("abs", 3)),
 
     ("length of the Professional Studies board", SERVER_PY,
-     r"At 30 that board is (\d+) professors long",
+     r"At 30 the Professional Studies\s*\n#\s*board has (\d+) professors",
      lambda c: len(c.board("Professional Studies")),
+     ("abs", 1)),
+
+    ("boards a floor of 100 would shorten", SERVER_PY,
+     r"At 100,\s*\n#\s*(\d+) of the boards that fill at 30 lose rows",
+     lambda c: sum(1 for x in c.colleges
+                   if len(c.board(x, floor=100)) < len(c.board(x)) and c.board(x)),
      ("abs", 1)),
 
     ("score/review-count tie groups", SERVER_PY,
@@ -203,12 +209,12 @@ CLAIMS = [
 
     ("fewest rating inversions on a board", HOMEPAGE_TSX,
      r"moves backwards between adjacent rows, (\d+)-\d+ times per board",
-     lambda c: min(c.rating_inversions(x) for x in c.colleges),
+     lambda c: min(c.rating_inversions(x) for x in c.colleges if len(c.board(x)) > 1),
      ("abs", 1)),
 
     ("most rating inversions on a board", HOMEPAGE_TSX,
      r"moves backwards between adjacent rows, \d+-(\d+) times per board",
-     lambda c: max(c.rating_inversions(x) for x in c.colleges),
+     lambda c: max(c.rating_inversions(x) for x in c.colleges if len(c.board(x)) > 1),
      ("abs", 1)),
 
     ("professors at exactly 5.00 (goat test docstring)", GOAT_TEST,
@@ -302,27 +308,6 @@ def test_claim_still_matches_the_corpus(label, path, pattern, measure, tol, corp
         f"  tolerance: +/-{slack:g}\n"
         f"Rewrite the comment with the measured value. If precompute.py has just "
         f"run, expect several of these together.")
-
-
-# Law and Professional Studies are excluded from the floor comparison because
-# they never carried the 100 floor -- they were the two colleges the old code
-# dropped to 5. Comparing them to a hypothetical 100 would test a floor that was
-# never in force and always "fail".
-NEVER_ON_THE_100_FLOOR = {"Law", "Professional Studies"}
-
-
-def test_business_is_the_only_board_the_review_floor_changes(corpus):
-    """server.py names Business rank 10 as the one row a 100 -> 30 floor moves."""
-    moved = {}
-    for college in set(corpus.colleges) - NEVER_ON_THE_100_FLOOR:
-        strict = [r["name"] for r in corpus.board(college, floor=100)]
-        actual = [r["name"] for r in corpus.board(college, floor=30)]
-        if strict != actual:
-            moved[college] = (strict, actual)
-    assert set(moved) <= {"Business"}, (
-        f"the review floor now changes boards server.py does not mention: "
-        f"{sorted(set(moved) - {'Business'})}. The '100 was doing almost no work' "
-        f"argument needs re-measuring.")
 
 
 def test_no_tie_group_reaches_a_board_top_ten(corpus):
