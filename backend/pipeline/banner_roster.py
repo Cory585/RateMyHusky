@@ -52,8 +52,12 @@ _SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
 # stand-in is the subject: one with more than half its sections in CPS Quarter
 # terms, up to the last of them, is a CPS subject (ALY, PJM, RGA, LDR), and its
 # sections count as CPS Quarter. Measured on the 2026-10-01 stage file, 31
-# subjects clear that bar, most above 90%. It moves 119 instructors into
-# Professional Studies (19 of them first teaching in Fall 2026) and none out.
+# subjects clear that bar, most above 90%. 24 are in CPS_SUBJECTS; the other 7
+# (CJS, EAI, ESL, HLS, PTH, RFA, RPT) are no longer in the catalog and none runs
+# in Fall 2026. CPS_SUBJECTS is not used here because it also holds the
+# undergraduate CPS subjects (CHM, BIO) left out with CPS Semester above. A
+# production dry run on 2026-10-19 puts 94 more professors in Professional
+# Studies (971 to 1,065) and moves none out.
 TRACK_COLLEGES = {"Law Semester": "Law", "CPS Quarter": "Professional Studies"}
 
 # Subjects the catalog names "<subject> - CPS" or "- CPS Specialty"
