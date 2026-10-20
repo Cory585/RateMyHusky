@@ -24,11 +24,20 @@
           "value": "camera=(), microphone=(), geolocation=(), browsing-topics=(self)"
         }
       ]
+    },
+    {
+      "source": "/photos/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=86400, stale-while-revalidate=604800"
+        }
+      ]
     }
   ],
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/((?!photos/).*)",
       "destination": "/index.html"
     }
   ]

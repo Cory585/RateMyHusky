@@ -12,3 +12,4 @@ onnxruntime
 tokenizers
 huggingface_hub
 numpy
+maxminddb
