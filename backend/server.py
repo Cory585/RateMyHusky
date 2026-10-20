@@ -721,7 +721,7 @@ FALLBACK_PRIOR = 4.2   # only for an empty or brand-new catalog
 # directions, and shrinkage is what makes a single number workable:
 #
 #   - 100 is too strict for total_reviews as it now stands: RMP ratings and
-#     survey ratings only, since TRACE responses left it (2026-10-04). At 100,
+#     survey ratings only, since course evaluations left it (2026-10-04). At 100,
 #     6 of the boards that fill at 30 lose rows, and Engineering's is empty.
 #     Nor does shrinkage do the floor's job: Khoury's rank-10 score needs ~17
 #     reviews at a perfect 5.00, so it is the floor of 30, not the shrunk score,
