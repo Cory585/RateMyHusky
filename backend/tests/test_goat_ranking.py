@@ -294,3 +294,16 @@ def test_an_unknown_college_is_not_queried_or_cached(monkeypatch):
     monkeypatch.setattr(server, "query_one", lambda *a: pytest.fail("unknown college queried"))
     with server.app.test_request_context("/api/goat-professors?college=xyz"):
         assert server.goat_professors().get_json() == []
+
+
+@pytest.mark.parametrize("args, limit", [("limit=-5", 1), ("limit=500", 50), ("limit=x", 10)])
+def test_the_limit_is_clamped_and_the_floor_is_not_a_parameter(monkeypatch, args, limit):
+    # Free values would each store a cache entry, and LIMIT -5 is a Postgres error.
+    seen = []
+    monkeypatch.setattr(server, "query", lambda sql, params: seen.append(params) or [])
+    monkeypatch.setattr(server, "query_one", lambda sql, params: {"prior": C})
+    monkeypatch.setattr(server, "cache_get", lambda key: seen.append(key) and None)
+    monkeypatch.setattr(server, "cache_set", lambda key, val: None)
+    with server.app.test_request_context(f"/api/goat-professors?college=Khoury&{args}&min_reviews=1"):
+        server.goat_professors()
+    assert seen == [f"goat:v5:Khoury:{limit}", ("Khoury", server.BOARD_MIN_REVIEWS, C, limit)]
