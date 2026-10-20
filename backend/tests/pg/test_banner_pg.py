@@ -206,3 +206,21 @@ def test_a_law_course_in_a_semester_term_counts_as_law(pg):
     got = rows(pg, banner_roster.TRACK_SECTIONS_SQL)
     assert sorted((r["track"], r["sections"]) for r in got) == [("Law Semester", 2), ("Semester", 1)]
     assert banner_roster.track_colleges(got, {}) == {"ada-park": "Law"}
+
+
+def test_a_semester_after_the_last_quarter_does_not_tip_a_cps_professor_out(pg):
+    # Graduate CPS moved to Semester from Fall 2026 (202710). Counted in the
+    # majority, those sections would take a CPS adjunct out of Professional Studies.
+    truncate(pg, *BANNER_TABLES)
+    with pg.cursor() as cur:
+        _term(cur, "202655", "CPS Quarter")
+        _term(cur, "202710", "Semester")
+        _taught(cur, "202655", "1", "PJM5900", "adjunct")
+        _taught(cur, "202710", "2", "PJM6000", "adjunct")
+        _taught(cur, "202710", "3", "PJM6100", "adjunct")
+        for course in ("PJM5900", "PJM6000", "PJM6100"):
+            _course_instructor(cur, course, "adjunct", "adjunct", "adjunct")
+    pg.commit()
+    got = rows(pg, banner_roster.TRACK_SECTIONS_SQL)
+    assert sorted((r["track"], r["sections"]) for r in got) == [("After CPS Quarter", 2), ("CPS Quarter", 1)]
+    assert banner_roster.track_colleges(got, {}) == {"adjunct": "Professional Studies"}

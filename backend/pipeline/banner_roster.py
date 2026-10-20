@@ -49,8 +49,11 @@ _SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
 # counts as Law Semester whatever its term. CPS Quarter stops after Summer 2026
 # (the registrar moves graduate CPS to Semester from Fall 2026), and CPS has no
 # subject of its own to stand in, so Professional Studies is decided by the
-# quarters taught up to then.
+# quarters taught up to then: a later section is AFTER_CPS_QUARTER and stays out
+# of that majority. Counted in it, the Semester sections of a CPS adjunct still
+# teaching would pile up each term and tip them out of Professional Studies.
 TRACK_COLLEGES = {"Law Semester": "Law", "CPS Quarter": "Professional Studies"}
+AFTER_CPS_QUARTER = "After CPS Quarter"
 
 # Subjects the catalog names "<subject> - CPS" or "- CPS Specialty"
 # (catalog.northeastern.edu/course-descriptions/, read 2026-10-19). A CPS
@@ -77,7 +80,10 @@ CPS_SUBJECTS = frozenset("""
 TRACK_SECTIONS_SQL = """
     WITH taught AS (
         SELECT i.term_code, i.crn, i.instructor_key, s.subject_course,
-               CASE WHEN s.subject = 'LAW' THEN 'Law Semester' ELSE t.track END AS track,
+               CASE WHEN s.subject = 'LAW' THEN 'Law Semester'
+                    WHEN i.term_code > (SELECT max(term_code) FROM banner_terms
+                                        WHERE track = 'CPS Quarter') THEN '{after_cps_quarter}'
+                    ELSE t.track END AS track,
                coalesce(t.scraped_closed, false) AND coalesce(s.enrollment = 0, false) AS cancelled
         FROM banner_section_instructors i
         JOIN banner_sections s ON s.term_code = i.term_code AND s.crn = i.crn
@@ -102,7 +108,7 @@ TRACK_SECTIONS_SQL = """
                       WHERE c.term_code = t.term_code AND c.instructor_key = t.instructor_key)
     GROUP BY 1, 2, 3
 """.format(non_teaching=", ".join(f"'{s}'" for s in sorted(NON_TEACHING_SCHEDULE_TYPES)),
-           max_courses=int(MAX_COURSES_PER_TERM))
+           max_courses=int(MAX_COURSES_PER_TERM), after_cps_quarter=AFTER_CPS_QUARTER)
 
 
 def _first_last(key):
@@ -141,12 +147,15 @@ def _track_sections(track_rows, new_slug_by_key):
 
 def track_colleges(track_rows, new_slug_by_key):
     """slug -> college, for professors who taught more than half their sections
-    in one TRACK_COLLEGES track. track_rows are TRACK_SECTIONS_SQL rows."""
+    in one TRACK_COLLEGES track. track_rows are TRACK_SECTIONS_SQL rows. The
+    CPS Quarter majority leaves out AFTER_CPS_QUARTER sections; Law's counts
+    every section."""
     colleges = {}
     for slug, by_track in _track_sections(track_rows, new_slug_by_key).items():
         total = sum(by_track.values())
         for track, college in TRACK_COLLEGES.items():
-            if by_track[track] * 2 > total:
+            base = total - (by_track[AFTER_CPS_QUARTER] if track == "CPS Quarter" else 0)
+            if by_track[track] * 2 > base:
                 colleges[slug] = college
     return colleges
 

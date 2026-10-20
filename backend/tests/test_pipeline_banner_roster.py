@@ -207,9 +207,23 @@ def test_track_sql_joins_every_merged_spelling_and_counts_each_section_once():
 
 
 def test_track_sql_counts_law_courses_as_law_semester_in_any_term():
-    # Law moved onto the Semester calendar in Fall 2025.
-    assert "CASE WHEN s.subject = 'LAW' THEN 'Law Semester' ELSE t.track END AS track" \
-        in br.TRACK_SECTIONS_SQL
+    # Law moved onto the Semester calendar in Fall 2025; sections after the last
+    # CPS Quarter term are set apart, LAW ones excepted.
+    sql = " ".join(br.TRACK_SECTIONS_SQL.split())
+    assert ("CASE WHEN s.subject = 'LAW' THEN 'Law Semester' "
+            "WHEN i.term_code > (SELECT max(term_code) FROM banner_terms WHERE track = 'CPS Quarter') "
+            "THEN 'After CPS Quarter' ELSE t.track END AS track") in sql
+
+
+def test_sections_after_the_last_quarter_do_not_tip_a_cps_professor_out():
+    # The reviewer's case: 6 quarter sections, then 2 Semester sections a term.
+    rows = [track(None, "CPS Quarter", 6, "adj"), track(None, "After CPS Quarter", 8, "adj")]
+    assert br.track_colleges(rows, {}) == {"adj": "Professional Studies"}
+
+
+def test_sections_after_the_last_quarter_still_count_against_law():
+    rows = [track(None, "Law Semester", 3, "ada"), track(None, "After CPS Quarter", 4, "ada")]
+    assert br.track_colleges(rows, {}) == {}
 
 
 def prof(slug, college, department="Law", origin="rmp"):
