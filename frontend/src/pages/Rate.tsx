@@ -8,6 +8,7 @@ import { CourseStep, OtherCourseStep } from './rate/CourseStep';
 import { TermStep, OtherTermStep } from './rate/TermStep';
 import { CommentStep } from './rate/CommentStep';
 import { ThanksStep } from './rate/ThanksStep';
+import { Celebration } from './rate/Celebration';
 import { useMediaQuery } from './rate/useMediaQuery';
 import { ChoiceGroup, StepFoot } from './rate/ChoiceGroup';
 import { SidePanel } from './rate/SidePanel';
@@ -363,7 +364,7 @@ export default function Rate() {
           />
         );
       case 'thanks':
-        return <ThanksStep answers={answers} counter={counter} onRateAnother={rateAnother} />;
+        return <ThanksStep answers={answers} counter={counter} onRateAnother={rateAnother} popperSlot={<Celebration />} />;
       default:
         return null;
     }

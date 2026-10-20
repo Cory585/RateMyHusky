@@ -36,7 +36,6 @@ export function ThanksStep({ answers, counter, onRateAnother, popperSlot }: Than
   return (
     <div className="rate-thanks">
       {popperSlot}
-      <div className="rate-party" aria-hidden="true">🎉</div>
       <h1 className="rate-q" tabIndex={-1}>
         Thanks! That helps every student picking {course ? formatCode(course.code) : 'this course'}.
       </h1>

@@ -203,7 +203,12 @@
 .rate-error { margin: 10px 0 0; color: #c0283a; font-size: 0.9rem; font-weight: 700; }
 
 .rate-thanks { text-align: center; }
-.rate-party { margin: 14px 0 6px; font-size: 2rem; }
+.rate-popper { margin: 14px 0 6px; }
+.rate-popper-aim { display: inline-block; line-height: 0; transform-origin: 9% 94%; transition: transform .28s cubic-bezier(.3, 1.4, .5, 1); }
+.rate-popper-aim svg { transform-origin: 9% 94%; }
+.rate-popper-aim svg.kick { animation: kick .3s ease-out; }
+@keyframes kick { 0% { transform: scale(1); } 25% { transform: scale(.85); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
+.rate-confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1000; }
 .rate-thanks .rate-hint { margin-top: 0; }
 .rate-link {
   display: flex;
@@ -302,7 +307,6 @@
   .rate-thanks .rate-btn { border-color: #d6394c; background: #fef0f0; color: #d6394c; }
   .rate-thanks .rate-btn:hover:not(:disabled) { background: #fef0f0; }
   .rate-thanks .rate-ghost:hover { border-color: #d6394c; }
-  .rate-party { font-size: 3.5em; }
 
   .rate-foot {
     display: flex;
