@@ -258,6 +258,21 @@ def test_subjects_pointing_back_or_nowhere_keep_the_label():
     assert exits == {}
 
 
+def test_a_law_label_teaching_cps_subjects_exits_to_professional_studies():
+    # Andrew Guisbond's case: MGT is "Management - CPS", not Business's MGMT.
+    exits = br.track_exits([track(None, "CPS Semester", 11, "ag")], {}, [prof("ag", "Law")],
+                           [bci_row("ag", "MGT3100", 11)], {"MGT": "Professional Studies"})
+    assert exits == {"ag": "Professional Studies"}
+
+
+def test_cps_subjects_are_professional_studies_whoever_votes(monkeypatch):
+    monkeypatch.setattr(br, "get_college", {"Management": "Business"}.get)
+    rows = [{"professor_slug": "m1", "subject_course": "MGT3100"},
+            {"professor_slug": "m1", "subject_course": "MGMT3100"}]
+    assert br.subject_colleges(rows, [prof("m1", "Business", "Management")]) == {
+        "MGT": "Professional Studies", "MGMT": "Business"}
+
+
 def test_other_colleges_are_never_exited():
     exits = br.track_exits([track(None, "Law Semester", 0, "ada-park"),
                             track(None, "Semester", 4, "ada-park")], {},

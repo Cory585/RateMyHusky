@@ -34,12 +34,15 @@ BANNER_FIELDS = PROFESSOR_FIELDS + ("origin",)
 _SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
 
 # Law and CPS run their own term calendars, so the track of the terms someone
-# teaches in names their college where an RMP department label cannot: "Law"
-# on RMP takes in instructors who never taught a Law term, and CPS faculty are
-# labelled by subject (Leadership, Regulatory Affairs) and land in other colleges.
-# CPS Semester is left out on purpose: it carries day-college subjects (CHM,
-# BIO, ENG) taught by day-college faculty, so counting it would move Science
-# professors into Professional Studies.
+# teaches in names their college where an RMP department label cannot: CPS
+# faculty are labelled by subject (Management, Regulatory Affairs) and land in
+# other colleges.
+# CPS Semester is left out on purpose. Its sections are CPS undergraduate
+# courses (CHM, BIO, ENG are the catalog's "Chemistry - CPS" and so on, not the
+# day college's CHEM, BIOL, ENGW), but day-college faculty teach many of them
+# alongside their own: Christopher Toher (Chemistry, 112 ratings) has 49 CHM
+# sections and 14 CHEM. Counting it would move such professors into
+# Professional Studies.
 #
 # Both tracks are ending. Law and CPS Semester terms stop after Summer 2025, when
 # Law moved onto the university Semester calendar, so a LAW-subject section
@@ -48,6 +51,16 @@ _SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
 # subject of its own to stand in, so Professional Studies is decided by the
 # quarters taught up to then.
 TRACK_COLLEGES = {"Law Semester": "Law", "CPS Quarter": "Professional Studies"}
+
+# Subjects the catalog names "<subject> - CPS" or "- CPS Specialty"
+# (catalog.northeastern.edu/course-descriptions/, read 2026-10-19). A CPS
+# subject belongs to Professional Studies whoever votes on it.
+CPS_SUBJECTS = frozenset("""
+    AAI ACC ALY ANT APL ART AVM BIO BTC CED CET CHM CMG CMMN CMN COP DGM ECN
+    ECNM EDU EET ENG ESC ESLG FIN GET GIS GST HMG HRM HSC HST HSTY HSV INS INT
+    ITC LDR LST LWP MATM MET MGT MKT MTH MUS NPM NTR PBR PDM PHL PHLS PHY PJM
+    PLSC POL PST PSY RGA RMS SCLY SIA SLP SOC TCC
+""".split())
 
 # Sections taught per professor and track, counted the way
 # the Banner history counts teaching: Banner's own rows, no supervision or co-op
@@ -139,13 +152,19 @@ def track_colleges(track_rows, new_slug_by_key):
 
 
 def subject_colleges(instructor_rows, professors):
-    """subject -> college, voted as subject_departments does but without the
-    professors labelled with a TRACK_COLLEGES college: their labels are the
-    ones in question, and CRIM or MGT taught by mislabelled Law professors
-    would otherwise vote themselves back into Law."""
+    """subject -> college. A CPS_SUBJECTS subject is Professional Studies: its
+    teachers are CPS adjuncts labelled by subject, so a vote would file MGT
+    under Business. Any other subject is voted as subject_departments does, but
+    without the professors labelled with a TRACK_COLLEGES college: their labels
+    are the ones in question, and CRIM taught by mislabelled Law professors
+    would otherwise vote itself back into Law."""
     voters = {p["slug"]: p["department"] for p in professors
               if p.get("origin") != "banner" and p.get("college") not in TRACK_COLLEGES.values()}
-    return {s: get_college(d) for s, d in subject_departments(instructor_rows, voters).items()}
+    colleges = {s: get_college(d) for s, d in subject_departments(instructor_rows, voters).items()}
+    for row in instructor_rows:
+        if subject_of(row["subject_course"]) in CPS_SUBJECTS:
+            colleges[subject_of(row["subject_course"])] = "Professional Studies"
+    return colleges
 
 
 def track_exits(track_rows, new_slug_by_key, professors, instructor_rows, colleges_by_subject):
@@ -154,8 +173,8 @@ def track_exits(track_rows, new_slug_by_key, professors, instructor_rows, colleg
     contradicts outright. A professor with any Law section keeps the label (Law
     faculty who also teach a day-college course), and so does one with no Banner
     record. The new college is the one most of their sections' subjects belong
-    to (colleges_by_subject); a professor whose subjects point to Law,
-    Professional Studies, Other or nowhere keeps the label rather than getting
+    to (colleges_by_subject), Professional Studies included; a professor whose
+    subjects point to Law, Other or nowhere keeps the label rather than getting
     a guess.
 
     Professional Studies labels are not checked. Most of the ones with no CPS
@@ -182,7 +201,7 @@ def track_exits(track_rows, new_slug_by_key, professors, instructor_rows, colleg
         if not votes:
             continue
         college = min(votes, key=lambda c: (-votes[c], c))
-        if college not in TRACK_COLLEGES.values() and college != "Other":
+        if college not in ("Law", "Other"):
             exits[p["slug"]] = college
     return exits
 
