@@ -11,7 +11,7 @@ from collections import Counter
 
 import moderation
 
-from . import banner_roster, course_codes, name_keys, names, read_models, review_tags, roster, summaries
+from . import banner_roster, course_codes, name_keys, read_models, review_tags, roster, summaries
 from .blend import blend
 from .db import connect, fetch_all
 from .rmp_fields import rmp_id
@@ -36,6 +36,12 @@ def main(argv=None):
         return 1
     professors = fetch_all(conn, "SELECT slug, name, name_key, department, college, image_url, "
                                  "focus_x, focus_y, origin FROM professors")
+    # Before anything reads college: the subject vote and the Law exits skip
+    # professors by it.
+    recolleged = roster.recollege(professors)
+    print(f"colleges to correct from COLLEGE_MAP: {dict(sorted(Counter(c for _, c in recolleged).items()))}")
+    corrected = dict(recolleged)
+    professors = [{**p, "college": corrected.get(p["slug"], p["college"])} for p in professors]
 
     catalog_courses = fetch_all(conn, "SELECT code, name, department, subject, search_text, is_placeholder "
                                       "FROM catalog_courses")
@@ -62,12 +68,7 @@ def main(argv=None):
                                       banner_roster.subject_colleges(bci, professors))
     exits = {slug: c for slug, c in exits.items() if slug not in colleges}
     print(f"out of Law by term track: {dict(sorted(Counter(exits.values()).items()))}")
-    # A corrected department label applies to existing professors too; the term
-    # track still wins over it.
-    relabelled = {p["slug"]: names.get_college(p["department"]) for p in professors
-                  if p["department"] in names.RECOLLEGED_DEPARTMENTS}
-    print(f"colleges from corrected department labels: {dict(sorted(Counter(relabelled.values()).items()))}")
-    colleges = {**relabelled, **exits, **colleges}
+    colleges = {**exits, **colleges}
     # Alias-aware, so a page created before its professor's denial request still drops.
     professors, links = read_models.drop_denied(professors, links, banner_roster.is_denied_banner_key)
 
@@ -121,6 +122,7 @@ def main(argv=None):
         return 0
     # Every write waits for verify, so a failed run leaves no rows behind.
     roster.apply_roster(conn, new_links, new_professors)
+    print(f"colleges corrected: {roster.apply_colleges(conn, recolleged)}")
     banner_roster.apply_banner_professors(conn, new_banner)
     print(f"course codes changed: {course_codes.apply_codes(conn, pairs)}")
     print(f"name keys changed: {name_keys.apply_name_keys(conn, key_pairs)}")

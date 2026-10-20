@@ -152,9 +152,6 @@ SUPPLEMENTAL_COLLEGE_MAP = {
     "Technological Entrepreneurship": "Business",
     # Khoury
     "Information Assurance": "Khoury",
-    "Computer  Informational Tech.": "Khoury",
-    # Health Sciences (Bouve's Applied Psychology)
-    "Counseling  Educational Psych": "Health Sciences",
 }
 
 
@@ -163,11 +160,13 @@ def dept_to_college(department):
     if not department:
         return "Unknown"
     raw = re.sub(r"\s+", " ", str(department)).strip()
-    if raw in COLLEGE_MAP:
-        return COLLEGE_MAP[raw]
+    # Keys collapse the same way, so the double-space keys match too
+    college_map = {re.sub(r"\s+", " ", k).strip(): v for k, v in COLLEGE_MAP.items()}
+    if raw in college_map:
+        return college_map[raw]
     # case-insensitive fallback
     low = raw.lower()
-    for k, v in COLLEGE_MAP.items():
+    for k, v in college_map.items():
         if k.lower() == low:
             return v
     # Supplemental local mapping (collapse whitespace on keys to match `raw`)

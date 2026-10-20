@@ -2,14 +2,14 @@
 
 A page already in rmp_links keeps its frozen slug. A new page links to the
 professor whose name_key its name resolves to, else becomes a new professor.
-Existing slugs and names are never changed.
+Existing slugs and names are never changed; a college follows COLLEGE_MAP.
 """
 
 from denylist import is_denied_key
 from prof_aliases import rmp_link_key
 
 from .db import chunk_insert
-from .names import get_college, name_to_slug
+from .names import COLLEGE_MAP, get_college, name_to_slug
 from .rmp_fields import rmp_id
 from .seed import LINK_FIELDS, PROFESSOR_FIELDS
 
@@ -59,6 +59,30 @@ def resolve_roster(pages, links, professors, is_denied=is_denied_key):
         new_links.append({"rmp_id": pid, "rmp_name": page["name"], "rmp_department": page["department"],
                           "professor_url": page["professor_url"], "slug": slug, "match_method": "exact"})
     return new_links, new_professors, counts
+
+
+def recollege(professors):
+    """[(slug, college)] for professors whose stored college is no longer
+    COLLEGE_MAP's for their department: a label corrected after they were
+    created. A department COLLEGE_MAP doesn't list is left alone rather than
+    sent to Other. Pure."""
+    return [(p["slug"], COLLEGE_MAP[p["department"]]) for p in professors
+            if p["department"] in COLLEGE_MAP and COLLEGE_MAP[p["department"]] != p["college"]]
+
+
+def apply_colleges(conn, pairs):
+    cur = conn.cursor()
+    cur.execute("CREATE TEMP TABLE _college_map (slug TEXT PRIMARY KEY, college TEXT)")
+    chunk_insert(cur, "INSERT INTO _college_map (slug, college) VALUES %s", pairs)
+    cur.execute("""
+        UPDATE professors p SET college = m.college
+        FROM _college_map m
+        WHERE p.slug = m.slug
+    """)
+    changed = cur.rowcount
+    cur.execute("DROP TABLE _college_map")
+    conn.commit()
+    return changed
 
 
 def apply_roster(conn, new_links, new_professors):

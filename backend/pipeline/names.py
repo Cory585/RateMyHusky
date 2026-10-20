@@ -93,13 +93,6 @@ COLLEGE_MAP = {
     "Law": "Law",
 }
 
-# Departments whose college was corrected after professors were created from
-# them. professors.college is never rewritten, so the catalog re-derives these
-# from COLLEGE_MAP every run instead.
-RECOLLEGED_DEPARTMENTS = frozenset({
-    "Counseling & Educational Psych", "Counseling amp Educational Psych",
-    "Counseling  Educational Psych"})
-
 
 def get_college(dept):
     if not isinstance(dept, str):
