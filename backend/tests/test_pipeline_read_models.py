@@ -34,6 +34,11 @@ def test_banner_professor_without_a_link_is_in_the_catalog_with_no_url():
     assert (row["num_ratings"], row["total_reviews"], row["avg_rating"]) == (0, 0, None)
 
 
+def test_survey_professor_without_a_link_is_in_the_catalog_with_no_url():
+    [row] = catalog_rows([{**PROF, "origin": "survey"}], [], [], [], is_denied=lambda k: False)
+    assert row["professor_url"] is None
+
+
 def test_rmp_professor_without_a_link_stays_out_of_the_catalog():
     assert catalog_rows([{**PROF, "origin": "rmp"}], [], [], [], is_denied=lambda k: False) == []
     assert catalog_rows([PROF], [], [], [], is_denied=lambda k: False) == []   # a roster row this run
