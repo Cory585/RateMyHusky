@@ -152,29 +152,30 @@ SUPPLEMENTAL_COLLEGE_MAP = {
     "Technological Entrepreneurship": "Business",
     # Khoury
     "Information Assurance": "Khoury",
-    "Computer  Informational Tech.": "Khoury",
-    # Professional Studies
-    "Counseling  Educational Psych": "Professional Studies",
 }
+
+
+def _collapse(s):
+    return re.sub(r"\s+", " ", str(s)).strip()
+
+
+# Built once: dept_to_college runs per professor. Keys collapse whitespace the
+# way the lookup does, so the double-space keys match too.
+_COLLEGE_MAP = {_collapse(k): v for k, v in COLLEGE_MAP.items()}
+_COLLEGE_MAP_LOWER = {}
+for _k, _v in _COLLEGE_MAP.items():
+    _COLLEGE_MAP_LOWER.setdefault(_k.lower(), _v)
+_SUPPLEMENTAL_COLLEGE_MAP = {_collapse(k): v for k, v in SUPPLEMENTAL_COLLEGE_MAP.items()}
 
 
 def dept_to_college(department):
     """Map a department string to its college via precompute.COLLEGE_MAP."""
     if not department:
         return "Unknown"
-    raw = re.sub(r"\s+", " ", str(department)).strip()
-    if raw in COLLEGE_MAP:
-        return COLLEGE_MAP[raw]
-    # case-insensitive fallback
-    low = raw.lower()
-    for k, v in COLLEGE_MAP.items():
-        if k.lower() == low:
-            return v
-    # Supplemental local mapping (collapse whitespace on keys to match `raw`)
-    for k, v in SUPPLEMENTAL_COLLEGE_MAP.items():
-        if re.sub(r"\s+", " ", k).strip() == raw:
-            return v
-    return "Unknown"
+    raw = _collapse(department)
+    # then case-insensitive, then the supplemental local mapping
+    return (_COLLEGE_MAP.get(raw) or _COLLEGE_MAP_LOWER.get(raw.lower())
+            or _SUPPLEMENTAL_COLLEGE_MAP.get(raw) or "Unknown")
 
 
 def is_plausible_photo_url(url):

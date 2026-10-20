@@ -86,9 +86,10 @@ COLLEGE_MAP = {
     "Urban Studies": "CSSH", "Humanities": "CSSH",
     "Education": "Professional Studies", "Professional Studies": "Professional Studies",
     "Col of Professional Studies": "Professional Studies",
-    "Counseling & Educational Psych": "Professional Studies",
-    "Counseling amp Educational Psych": "Professional Studies",
-    "Counseling  Educational Psych": "Professional Studies",
+    # CAEP, Bouve's Department of Applied Psychology, like Counseling Psychology above.
+    "Counseling & Educational Psych": "Health Sciences",
+    "Counseling amp Educational Psych": "Health Sciences",
+    "Counseling  Educational Psych": "Health Sciences",
     "Law": "Law",
 }
 

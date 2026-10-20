@@ -47,6 +47,12 @@ def test_dept_to_college_known_and_unknown():
     assert pr.dept_to_college("Underwater Basket Weaving") == "Unknown"
 
 
+def test_dept_to_college_matches_double_space_college_map_keys():
+    # Only COLLEGE_MAP has these; its keys keep the double space.
+    assert pr.dept_to_college("Counseling  Educational Psych") == "Health Sciences"
+    assert pr.dept_to_college("Computer  Informational Tech.") == "Khoury"
+
+
 def test_is_plausible_photo_url():
     assert pr.is_plausible_photo_url("https://x.edu/uploads/jane-doe-400x400.jpg")
     assert pr.is_plausible_photo_url("https://x.edu/p.png?cb=1")

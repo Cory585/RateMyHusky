@@ -186,11 +186,8 @@ def track_exits(track_rows, new_slug_by_key, professors, instructor_rows, colleg
     subjects point to Law, Other or nowhere keeps the label rather than getting
     a guess.
 
-    Professional Studies labels are not checked. Most of the ones with no CPS
-    Quarter section are Counseling & Educational Psych, Bouve's Applied
-    Psychology (CAEP), and CAEP's other teachers are labelled Psychology, so the
-    subject vote would send them to CSSH; and with CPS Quarter ending, an absent
-    quarter will soon say nothing about a CPS professor."""
+    Professional Studies labels are not checked: with CPS Quarter ending, an
+    absent quarter will soon say nothing about a CPS professor."""
     track_of = {"Law": "Law Semester"}
     sections = _track_sections(track_rows, new_slug_by_key)
     subjects = defaultdict(Counter)
