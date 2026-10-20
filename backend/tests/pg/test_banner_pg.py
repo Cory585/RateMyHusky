@@ -228,7 +228,7 @@ def test_a_cps_subject_in_a_semester_term_counts_as_cps_quarter(pg):
     pg.commit()
     got = banner_roster.split_cps_vote(rows(pg, banner_roster.TRACK_SECTIONS_SQL))[0]
     assert sorted((r["professor_slug"], r["track"], r["sections"]) for r in got) == [
-        ("chemist", "Semester", 1), ("new-hire", "CPS Quarter", 1),
+        ("chemist", "After CPS Quarter", 1), ("new-hire", "CPS Quarter", 1),
         ("old-hand", "CPS Quarter", 3), ("old-hand", "Semester", 1)]
     assert banner_roster.track_colleges(got, {}) == {
         "new-hire": "Professional Studies", "old-hand": "Professional Studies"}
@@ -270,7 +270,7 @@ def test_a_graduate_catalog_cps_section_counts_as_cps_quarter(pg):
     pg.commit()
     got = banner_roster.split_cps_vote(rows(pg, banner_roster.TRACK_SECTIONS_SQL))[0]
     assert sorted((r["professor_slug"], r["track"]) for r in got) == [
-        ("ai-teacher", "CPS Quarter"), ("chemist", "Semester")]
+        ("ai-teacher", "CPS Quarter"), ("chemist", "After CPS Quarter")]
 
 
 def test_an_undergraduate_cps_subject_on_the_cps_semester_calendar_is_not_voted(pg):
@@ -289,3 +289,22 @@ def test_an_undergraduate_cps_subject_on_the_cps_semester_calendar_is_not_voted(
     got, voted = banner_roster.split_cps_vote(rows(pg, banner_roster.TRACK_SECTIONS_SQL))
     assert voted == frozenset()
     assert sorted((r["track"], r["sections"]) for r in got) == [("CPS Quarter", 1), ("CPS Semester", 2)]
+
+
+def test_a_semester_after_the_last_quarter_does_not_tip_a_cps_professor_out(pg):
+    # Graduate CPS moved to Semester from Fall 2026 (202710). Counted in the
+    # majority, those sections would take a CPS adjunct out of Professional Studies.
+    # MATH, not a CPS subject: one PJM section is under the vote's bar.
+    truncate(pg, *BANNER_TABLES)
+    with pg.cursor() as cur:
+        _term(cur, "202655", "CPS Quarter")
+        _term(cur, "202710", "Semester")
+        _taught(cur, "202655", "1", "PJM5900", "adjunct")
+        _taught(cur, "202710", "2", "MATH6000", "adjunct")
+        _taught(cur, "202710", "3", "MATH6100", "adjunct")
+        for course in ("PJM5900", "MATH6000", "MATH6100"):
+            _course_instructor(cur, course, "adjunct", "adjunct", "adjunct")
+    pg.commit()
+    got = banner_roster.split_cps_vote(rows(pg, banner_roster.TRACK_SECTIONS_SQL))[0]
+    assert sorted((r["track"], r["sections"]) for r in got) == [("After CPS Quarter", 2), ("CPS Quarter", 1)]
+    assert banner_roster.track_colleges(got, {}) == {"adjunct": "Professional Studies"}

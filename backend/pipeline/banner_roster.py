@@ -58,7 +58,12 @@ _SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
 # subject that never ran on the quarter calendar (AAI) or is first offered after
 # it. Only graduate sections: CPS_SUBJECTS also holds the undergraduate subjects
 # (CHM, BIO) left out with CPS Semester above.
+# Any other section after the last CPS Quarter term is AFTER_CPS_QUARTER and
+# stays out of the Professional Studies majority. Counted in it, the day-college
+# Semester sections of a CPS adjunct still teaching would pile up each term and
+# tip them out of Professional Studies.
 TRACK_COLLEGES = {"Law Semester": "Law", "CPS Quarter": "Professional Studies"}
+AFTER_CPS_QUARTER = "After CPS Quarter"
 
 # Subjects the catalog names "<subject> - CPS" or "- CPS Specialty"
 # (catalog.northeastern.edu/course-descriptions/, read 2026-10-19). A CPS
@@ -109,10 +114,13 @@ _TAUGHT_CTES = """
                     WHEN subject IN (SELECT subject FROM cps_subjects) THEN 'CPS Quarter'
                     WHEN subject IN ({cps_catalog})
                          AND substring(subject_course from '[0-9]+')::int >= 5000 THEN 'CPS Quarter'
+                    WHEN term_code > (SELECT max(term_code) FROM banner_terms
+                                      WHERE track = 'CPS Quarter') THEN '{after_cps_quarter}'
                     ELSE term_track END AS track
         FROM listed
     )""".format(non_teaching=", ".join(f"'{s}'" for s in sorted(NON_TEACHING_SCHEDULE_TYPES)),
-                cps_catalog=", ".join(f"'{s}'" for s in sorted(CPS_SUBJECTS)))
+                cps_catalog=", ".join(f"'{s}'" for s in sorted(CPS_SUBJECTS)),
+                after_cps_quarter=AFTER_CPS_QUARTER)
 
 # The voted subjects come back as extra rows (cps_subject set, the rest NULL),
 # so the vote, which follows live data, can be logged without a second scan;
@@ -181,12 +189,15 @@ def _track_sections(track_rows, new_slug_by_key):
 
 def track_colleges(track_rows, new_slug_by_key):
     """slug -> college, for professors who taught more than half their sections
-    in one TRACK_COLLEGES track. track_rows are split_cps_vote's track rows."""
+    in one TRACK_COLLEGES track. track_rows are split_cps_vote's track rows.
+    The CPS Quarter majority leaves out AFTER_CPS_QUARTER sections; Law's counts
+    every section."""
     colleges = {}
     for slug, by_track in _track_sections(track_rows, new_slug_by_key).items():
         total = sum(by_track.values())
         for track, college in TRACK_COLLEGES.items():
-            if by_track[track] * 2 > total:
+            base = total - (by_track[AFTER_CPS_QUARTER] if track == "CPS Quarter" else 0)
+            if by_track[track] * 2 > base:
                 colleges[slug] = college
     return colleges
 
