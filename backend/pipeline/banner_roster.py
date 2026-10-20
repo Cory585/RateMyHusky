@@ -183,8 +183,11 @@ def track_exits(track_rows, new_slug_by_key, professors, instructor_rows, colleg
     sections = _track_sections(track_rows, new_slug_by_key)
     subjects = defaultdict(Counter)
     for row in instructor_rows:
-        if row["professor_slug"]:
-            subjects[row["professor_slug"]][subject_of(row["subject_course"])] += row["sections"]
+        # Resolved as _track_sections does, so a Banner-only professor created
+        # this run votes with the sections that put them in by_track.
+        slug = row["professor_slug"] or new_slug_by_key.get(row["instructor_key"])
+        if slug:
+            subjects[slug][subject_of(row["subject_course"])] += row["sections"]
     exits = {}
     for p in professors:
         track = track_of.get(p.get("college"))
