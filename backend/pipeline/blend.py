@@ -4,7 +4,7 @@ Rating-like values are means weighted by each source's rating count times its
 weight; counts and distributions are summed. With RMP alone, blend == RMP.
 """
 
-SOURCE_WEIGHTS = {"rmp": 1.0}
+SOURCE_WEIGHTS = {"rmp": 1.0, "survey": 1.0}
 
 _AVERAGED = ("rating", "difficulty", "would_take_again_pct", "hours_per_week")
 _DISTRIBUTIONS = ("rating_distribution", "grade_distribution")

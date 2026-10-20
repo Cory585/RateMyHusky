@@ -15,10 +15,11 @@
 import maintenance from './maintenance.config.json';
 
 // Skip the maintenance page itself, the assets it needs, crawler/AdSense
-// files, and Vercel internals (analytics beacons, etc.).
+// files, Vercel internals (analytics beacons, etc.), and professor photo
+// thumbnails (a catalog page loads dozens; each would be a middleware call).
 export const config = {
   matcher:
-    '/((?!maintenance\\.html|logo\\.jpg|neu-husky-icon\\.png|robots\\.txt|ads\\.txt|sitemap\\.xml|llms\\.txt|2c426a030622417e4b03f2011ae5959e\\.txt|_vercel).*)',
+    '/((?!maintenance\\.html|logo\\.jpg|neu-husky-icon\\.png|robots\\.txt|ads\\.txt|sitemap\\.xml|llms\\.txt|2c426a030622417e4b03f2011ae5959e\\.txt|_vercel|photos/).*)',
 };
 
 // Bypass token: "<name>.<expiry-epoch-seconds>.<hex hmac-sha256 of "name.expiry">"
@@ -65,6 +66,12 @@ async function proxyToBackend(request: Request, url: URL): Promise<Response> {
   headers.delete('content-length');
   const proxyKey = process.env.PROXY_SECRET;
   if (proxyKey) headers.set('x-proxy-key', proxyKey);
+  // Railway appends the Vercel edge's own address to X-Forwarded-For, so the
+  // last entry is Vercel, not the student. Vercel overwrites x-real-ip, so
+  // pass it on as the one client IP the backend trusts; drop any client copy.
+  headers.delete('x-rmh-client-ip');
+  const clientIp = request.headers.get('x-real-ip');
+  if (clientIp) headers.set('x-rmh-client-ip', clientIp);
 
   const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
   return fetch(target, {

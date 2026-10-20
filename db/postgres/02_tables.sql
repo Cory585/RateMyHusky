@@ -423,3 +423,50 @@ CREATE TABLE public.source_summary (
     grade_distribution JSONB NULL,
     CONSTRAINT source_summary_new_pkey PRIMARY KEY (professor_slug, course_code, source)
 );
+
+CREATE TABLE public.survey_ratings (
+    id UUID NOT NULL,
+    professor_slug TEXT NULL,
+    pending_professor_id UUID NULL,
+    course_code TEXT NULL,
+    pending_course_id UUID NULL,
+    term_label TEXT NULL,
+    rating BIGINT NOT NULL,
+    hours TEXT NOT NULL,
+    grade TEXT NULL,
+    comment TEXT NULL,
+    comment_hash TEXT NULL,
+    status TEXT NOT NULL,
+    hold_reasons TEXT NULL,
+    device_hash TEXT NOT NULL,
+    new_device BOOLEAN NOT NULL,
+    ip_hash TEXT NULL,
+    ip_prefix_hash TEXT NULL,
+    network_type TEXT NOT NULL,
+    fill_seconds BIGINT NULL,
+    collection TEXT NOT NULL DEFAULT 'turnstile+device',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT survey_ratings_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.survey_pending_professors (
+    id UUID NOT NULL,
+    name TEXT NOT NULL,
+    name_key TEXT NOT NULL,
+    department TEXT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    resolved_slug TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT survey_pending_professors_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.survey_pending_courses (
+    id UUID NOT NULL,
+    code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    resolved_code TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT survey_pending_courses_pkey PRIMARY KEY (id)
+);

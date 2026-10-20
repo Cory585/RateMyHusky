@@ -11,7 +11,7 @@ from collections import Counter
 
 import moderation
 
-from . import banner_roster, course_codes, name_keys, read_models, review_tags, roster, summaries
+from . import banner_roster, course_codes, name_keys, read_models, review_tags, roster, summaries, survey
 from .blend import blend
 from .db import connect, fetch_all
 from .rmp_fields import rmp_id
@@ -45,6 +45,9 @@ def main(argv=None):
 
     catalog_courses = fetch_all(conn, "SELECT code, name, department, subject, search_text, is_placeholder "
                                       "FROM catalog_courses")
+    catalog_courses += survey.approved_courses(
+        fetch_all(conn, "SELECT code, name FROM survey_pending_courses WHERE status = 'approved'"),
+        catalog_courses)
 
     new_links, new_professors, counts = roster.resolve_roster(pages, links, professors)
     _print("roster", counts)
@@ -102,6 +105,11 @@ def main(argv=None):
     rows, coverage = summaries.build_summaries(linked_pages, [r for r in reviews if r["visible"]],
                                                page_slug, name_key_slug, set(slug_by_id.values()))
     _print("coverage", coverage)
+    ratings = fetch_all(conn, "SELECT professor_slug, course_code, rating, hours, grade, comment "
+                              "FROM survey_ratings WHERE status = 'accepted' AND professor_slug IS NOT NULL")
+    survey_summary = survey.survey_rows(ratings)
+    print(f"survey: ratings={len(ratings)}, rows={len(survey_summary)}")
+    rows += survey_summary
     rows += blend(rows)
 
     catalog = read_models.catalog_rows(professors, links, linked_pages, rows, colleges=colleges)
