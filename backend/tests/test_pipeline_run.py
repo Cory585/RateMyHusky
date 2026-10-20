@@ -27,7 +27,6 @@ TABLES = {
          "professor_slug": "olin-guha", "match_method": "name_key", "terms_taught": 3,
          "sections": 3, "last_term_code": "202630"},
     ],
-    # The aggregate run.py reads; keyed by its first table like every query here.
     # TRACK_SECTIONS_SQL opens with a CTE, so _rows matches it by object.
     "track_sections": [
         {"instructor_key": "olin guha", "professor_slug": "olin-guha", "track": "Law Semester", "sections": 3},
