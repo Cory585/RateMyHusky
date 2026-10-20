@@ -12,6 +12,7 @@ import Course from './pages/Course';
 import Departments from './pages/Departments';
 import Department from './pages/Department';
 import Compare from './pages/Compare';
+import Rate from './pages/Rate';
 import Bookmarks from './pages/Bookmarks';
 import NotFound from './pages/NotFound';
 import Terms from './pages/Terms';
@@ -50,6 +51,7 @@ function App() {
               <Route path="/departments/:slug" element={<Department />} />
               <Route path="/compare" element={<Compare />} />
               <Route path="/bookmarks" element={<Bookmarks />} />
+              <Route path="/rate" element={<Rate />} />
               <Route path="/account" element={<Navigate to="/bookmarks" replace />} />
               <Route path="/account/bookmarks" element={<Navigate to="/bookmarks" replace />} />
               <Route path="/terms" element={<Terms />} />
