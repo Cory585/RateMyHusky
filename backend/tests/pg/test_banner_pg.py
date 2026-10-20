@@ -232,3 +232,41 @@ def test_a_cps_subject_in_a_semester_term_counts_as_cps_quarter(pg):
         ("old-hand", "CPS Quarter", 3), ("old-hand", "Semester", 1)]
     assert banner_roster.track_colleges(got, {}) == {
         "new-hire": "Professional Studies", "old-hand": "Professional Studies"}
+
+
+def test_the_cps_vote_skips_sections_that_are_not_teaching(pg):
+    # Cancelled and non-teaching CPS Quarter sections would carry XYZ over half;
+    # they don't count as teaching anywhere else in the query, so not in the vote.
+    truncate(pg, *BANNER_TABLES)
+    with pg.cursor() as cur:
+        _term(cur, "202655", "CPS Quarter")
+        _term(cur, "202630", "Semester")
+        _taught(cur, "202655", "1", "XYZ5000", "adjunct", enrollment=0)
+        _taught(cur, "202655", "2", "XYZ5001", "adjunct", enrollment=0)
+        _taught(cur, "202655", "3", "XYZ5002", "adjunct")
+        cur.execute("UPDATE banner_sections SET schedule_type = 'Coop Placement' WHERE crn = '3'")
+        _taught(cur, "202630", "4", "XYZ5003", "day prof")
+        _taught(cur, "202630", "5", "XYZ5004", "day prof")
+        for course in ("XYZ5003", "XYZ5004"):
+            _course_instructor(cur, course, "day prof", "day-prof", "day prof")
+    pg.commit()
+    assert rows(pg, banner_roster.CPS_VOTE_SQL) == []
+    got = rows(pg, banner_roster.TRACK_SECTIONS_SQL)
+    assert [(r["professor_slug"], r["track"], r["sections"]) for r in got] == [("day-prof", "Semester", 2)]
+
+
+def test_a_graduate_catalog_cps_section_counts_as_cps_quarter(pg):
+    # AAI never ran in a CPS Quarter term, so the vote can't find it; the catalog
+    # files it under CPS. CHM is CPS too, but undergraduate, and stays Semester.
+    truncate(pg, *BANNER_TABLES)
+    with pg.cursor() as cur:
+        _term(cur, "202655", "CPS Quarter")
+        _term(cur, "202710", "Semester")
+        _taught(cur, "202710", "1", "AAI6600", "ai teacher")
+        _taught(cur, "202710", "2", "CHM1211", "chemist")
+        _course_instructor(cur, "AAI6600", "ai teacher", "ai-teacher", "ai teacher")
+        _course_instructor(cur, "CHM1211", "chemist", "chemist", "chemist")
+    pg.commit()
+    got = rows(pg, banner_roster.TRACK_SECTIONS_SQL)
+    assert sorted((r["professor_slug"], r["track"]) for r in got) == [
+        ("ai-teacher", "CPS Quarter"), ("chemist", "Semester")]

@@ -27,8 +27,9 @@ TABLES = {
          "professor_slug": "olin-guha", "match_method": "name_key", "terms_taught": 3,
          "sections": 3, "last_term_code": "202630"},
     ],
-    # The aggregate run.py reads; keyed by its first table like every query here.
-    "banner_sections": [
+    # banner_roster's queries open with CTEs, so _rows matches them by object.
+    "cps_subjects": [{"subject": "PJM"}],
+    "track_sections": [
         {"instructor_key": "olin guha", "professor_slug": "olin-guha", "track": "Law Semester", "sections": 3},
         {"instructor_key": "lucia nunez", "professor_slug": None, "track": "CPS Quarter", "sections": 1},
     ],
@@ -38,13 +39,18 @@ TABLES = {
 }
 
 
+def _rows(sql):
+    by_sql = {run.banner_roster.TRACK_SECTIONS_SQL: "track_sections", run.banner_roster.CPS_VOTE_SQL: "cps_subjects"}
+    return [dict(r) for r in TABLES[by_sql.get(sql) or sql.split(" FROM ")[1].split()[0]]]
+
+
 @pytest.fixture
 def captured(monkeypatch):
     sqls, written = [], {}
 
     def fetch(conn, sql):
         sqls.append(sql)
-        return [dict(r) for r in TABLES[sql.split(" FROM ")[1].split()[0]]]
+        return _rows(sql)
 
     monkeypatch.setattr(run, "connect", lambda: object())
     monkeypatch.setattr(run, "fetch_all", fetch)
@@ -64,8 +70,7 @@ def captured(monkeypatch):
 def writes(monkeypatch):
     calls = []
     monkeypatch.setattr(run, "connect", lambda: object())
-    monkeypatch.setattr(run, "fetch_all",
-                        lambda conn, sql: [dict(r) for r in TABLES[sql.split(" FROM ")[1].split()[0]]])
+    monkeypatch.setattr(run, "fetch_all", lambda conn, sql: _rows(sql))
     monkeypatch.setattr(run.roster, "apply_roster", lambda conn, l, p: calls.append(("roster", l, p)))
     monkeypatch.setattr(run.banner_roster, "apply_banner_professors",
                         lambda conn, rows: calls.append(("banner", rows)))

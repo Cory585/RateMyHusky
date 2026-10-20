@@ -49,15 +49,15 @@ _SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
 # university Semester calendar: a LAW section counts as Law Semester. CPS Quarter
 # stops after Summer 2026 (the registrar moves graduate CPS to Semester from
 # Fall 2026), and CPS courses were renumbered then (PJM6100, ALY6710), so the
-# stand-in is the subject: one with more than half its sections in CPS Quarter
-# terms, up to the last of them, is a CPS subject (ALY, PJM, RGA, LDR), and its
-# sections count as CPS Quarter. Measured on the 2026-10-01 stage file, 31
-# subjects clear that bar, most above 90%. 24 are in CPS_SUBJECTS; the other 7
-# (CJS, EAI, ESL, HLS, PTH, RFA, RPT) are no longer in the catalog and none runs
-# in Fall 2026. CPS_SUBJECTS is not used here because it also holds the
-# undergraduate CPS subjects (CHM, BIO) left out with CPS Semester above. A
-# production dry run on 2026-10-19 puts 94 more professors in Professional
-# Studies (971 to 1,065) and moves none out.
+# stand-in is the subject: one with more than half its teaching sections in CPS
+# Quarter terms, up to the last of them, is a CPS subject (ALY, PJM, RGA, LDR),
+# and its sections count as CPS Quarter. Its sections in Semester terms before
+# then count too: they are CPS courses on the university calendar, and a sample
+# of the professors they add all have CPS faculty pages.
+# A graduate (5000+) section of a CPS_SUBJECTS subject also counts, for a CPS
+# subject that never ran on the quarter calendar (AAI) or is first offered after
+# it. Only graduate sections: CPS_SUBJECTS also holds the undergraduate subjects
+# (CHM, BIO) left out with CPS Semester above.
 TRACK_COLLEGES = {"Law Semester": "Law", "CPS Quarter": "Professional Studies"}
 
 # Subjects the catalog names "<subject> - CPS" or "- CPS Specialty"
@@ -82,17 +82,10 @@ CPS_SUBJECTS = frozenset("""
 # spellings listed it, as build_course_instructors dedupes sections. A linked
 # row's instructor_key is NULL; an unlinked row (a Banner-only professor, linked
 # at apply time) keeps its key and a NULL slug.
-TRACK_SECTIONS_SQL = """
-    WITH cps_subjects AS (
-        SELECT s.subject FROM banner_sections s JOIN banner_terms t ON t.term_code = s.term_code
-        WHERE s.subject IS NOT NULL
-          AND t.term_code <= (SELECT max(term_code) FROM banner_terms WHERE track = 'CPS Quarter')
-        GROUP BY 1 HAVING 2 * count(*) FILTER (WHERE t.track = 'CPS Quarter') > count(*)
-    ), taught AS (
-        SELECT i.term_code, i.crn, i.instructor_key, s.subject_course,
-               CASE WHEN s.subject = 'LAW' THEN 'Law Semester'
-                    WHEN s.subject IN (SELECT subject FROM cps_subjects) THEN 'CPS Quarter'
-                    ELSE t.track END AS track,
+_TAUGHT_CTES = """
+    WITH listed AS (
+        SELECT i.term_code, i.crn, i.instructor_key, s.subject, s.subject_course,
+               t.track AS term_track,
                coalesce(t.scraped_closed, false) AND coalesce(s.enrollment = 0, false) AS cancelled
         FROM banner_section_instructors i
         JOIN banner_sections s ON s.term_code = i.term_code AND s.crn = i.crn
@@ -101,7 +94,28 @@ TRACK_SECTIONS_SQL = """
           AND lower(coalesce(s.schedule_type, '')) NOT IN ({non_teaching})
           AND NOT EXISTS (SELECT 1 FROM banner_roster_duplicates d
                           WHERE d.term_code = i.term_code AND d.instructor_key = i.instructor_key)
-    ), coordinators AS (
+    ), cps_subjects AS (
+        -- Voted on the same teaching sections counted below.
+        SELECT subject FROM listed
+        WHERE NOT cancelled AND subject IS NOT NULL
+          AND term_code <= (SELECT max(term_code) FROM banner_terms WHERE track = 'CPS Quarter')
+        GROUP BY 1 HAVING 2 * count(DISTINCT (term_code, crn)) FILTER (WHERE term_track = 'CPS Quarter')
+                          > count(DISTINCT (term_code, crn))
+    ), taught AS (
+        SELECT term_code, crn, instructor_key, subject_course, cancelled,
+               CASE WHEN subject = 'LAW' THEN 'Law Semester'
+                    WHEN subject IN (SELECT subject FROM cps_subjects) THEN 'CPS Quarter'
+                    WHEN subject IN ({cps_catalog})
+                         AND substring(subject_course from '[0-9]+')::int >= 5000 THEN 'CPS Quarter'
+                    ELSE term_track END AS track
+        FROM listed
+    )""".format(non_teaching=", ".join(f"'{s}'" for s in sorted(NON_TEACHING_SCHEDULE_TYPES)),
+                cps_catalog=", ".join(f"'{s}'" for s in sorted(CPS_SUBJECTS)))
+
+# The subjects voted CPS, for run.py to print: the vote follows live data.
+CPS_VOTE_SQL = _TAUGHT_CTES + " SELECT subject FROM cps_subjects ORDER BY 1"
+
+TRACK_SECTIONS_SQL = _TAUGHT_CTES + """, coordinators AS (
         SELECT term_code, instructor_key FROM taught GROUP BY 1, 2
         HAVING count(DISTINCT subject_course) > {max_courses}
     )
@@ -116,8 +130,7 @@ TRACK_SECTIONS_SQL = """
       AND NOT EXISTS (SELECT 1 FROM coordinators c
                       WHERE c.term_code = t.term_code AND c.instructor_key = t.instructor_key)
     GROUP BY 1, 2, 3
-""".format(non_teaching=", ".join(f"'{s}'" for s in sorted(NON_TEACHING_SCHEDULE_TYPES)),
-           max_courses=int(MAX_COURSES_PER_TERM))
+""".format(max_courses=int(MAX_COURSES_PER_TERM))
 
 
 def _first_last(key):
@@ -195,8 +208,7 @@ def track_exits(track_rows, new_slug_by_key, professors, instructor_rows, colleg
     Professional Studies labels are not checked. Most of the ones with no CPS
     Quarter section are Counseling & Educational Psych, Bouve's Applied
     Psychology (CAEP), and CAEP's other teachers are labelled Psychology, so the
-    subject vote would send them to CSSH; and with CPS Quarter ending, an absent
-    quarter will soon say nothing about a CPS professor."""
+    subject vote would send them to CSSH."""
     track_of = {"Law": "Law Semester"}
     sections = _track_sections(track_rows, new_slug_by_key)
     subjects = defaultdict(Counter)

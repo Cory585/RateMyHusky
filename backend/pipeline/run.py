@@ -55,6 +55,9 @@ def main(argv=None):
     new_banner, banner_counts = banner_roster.resolve_banner_professors(bci, professors, departments)
     _print("banner roster", banner_counts)
     professors = professors + new_banner
+    cps_voted = {r["subject"] for r in fetch_all(conn, banner_roster.CPS_VOTE_SQL)}
+    print(f"CPS Quarter subjects by vote: {len(cps_voted)}; "
+          f"not in the catalog's CPS list: {' '.join(sorted(cps_voted - banner_roster.CPS_SUBJECTS)) or 'none'}")
     # New Banner professors are linked in the database only at apply time, so
     # their keys come from the rows just resolved.
     track_rows = fetch_all(conn, banner_roster.TRACK_SECTIONS_SQL)

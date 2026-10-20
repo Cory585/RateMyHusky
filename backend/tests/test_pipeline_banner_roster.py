@@ -208,7 +208,9 @@ def test_track_sql_joins_every_merged_spelling_and_counts_each_section_once():
 
 def test_track_sql_counts_law_courses_as_law_semester_in_any_term():
     # Law moved onto the Semester calendar in Fall 2025.
-    assert "CASE WHEN s.subject = 'LAW' THEN 'Law Semester'" in br.TRACK_SECTIONS_SQL
+    sql = " ".join(br.TRACK_SECTIONS_SQL.split())
+    assert "CASE WHEN subject = 'LAW' THEN 'Law Semester'" in sql
+    assert "ELSE term_track END AS track" in sql          # every other section keeps its term's track
 
 
 def prof(slug, college, department="Law", origin="rmp"):
@@ -290,6 +292,14 @@ def test_track_labelled_professors_do_not_vote_on_a_subjects_college(monkeypatch
 
 def test_track_sql_counts_cps_subjects_as_cps_quarter_in_any_term():
     # CPS Quarter ends after Summer 2026; its subjects stand in for it.
-    sql = br.TRACK_SECTIONS_SQL
-    assert "WHEN s.subject IN (SELECT subject FROM cps_subjects) THEN 'CPS Quarter'" in sql
+    sql = " ".join(br.TRACK_SECTIONS_SQL.split())
+    assert "WHEN subject IN (SELECT subject FROM cps_subjects) THEN 'CPS Quarter'" in sql
     assert "(SELECT max(term_code) FROM banner_terms WHERE track = 'CPS Quarter')" in sql
+    assert "substring(subject_course from '[0-9]+')::int >= 5000 THEN 'CPS Quarter'" in sql
+
+
+def test_the_cps_vote_counts_the_same_teaching_sections():
+    vote = br.CPS_VOTE_SQL
+    assert vote.startswith(br._TAUGHT_CTES) and br.TRACK_SECTIONS_SQL.startswith(br._TAUGHT_CTES)
+    cps = vote[vote.index("cps_subjects AS"):]
+    assert "FROM listed" in cps and "NOT cancelled" in cps and "count(DISTINCT (term_code, crn))" in cps
