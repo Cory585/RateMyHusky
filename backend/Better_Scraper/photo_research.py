@@ -12,7 +12,7 @@ _BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 
-from pipeline.names import normalize_name, upgrade_image_url, COLLEGE_MAP  # noqa: E402
+from pipeline.names import department_key, get_college, normalize_name, upgrade_image_url  # noqa: E402
 from prof_aliases import ALIAS_MAP  # noqa: E402
 
 
@@ -100,10 +100,10 @@ SKIP_PATTERNS = [
 ]
 
 # Local, photo-pipeline-only department->college mapping. Supplements
-# precompute.COLLEGE_MAP (which we intentionally do NOT modify) so the photo
+# pipeline.names.COLLEGE_MAP (which we intentionally do NOT modify) so the photo
 # run can organize the ~2,800 professors whose department strings are
-# not in the app's COLLEGE_MAP. Keys are verbatim from the data, including the
-# double-space artifacts left when "&" was stripped upstream.
+# not in the app's COLLEGE_MAP. Looked up as COLLEGE_MAP is, by department_key,
+# so the double-space artifacts left when "&" was stripped upstream match too.
 SUPPLEMENTAL_COLLEGE_MAP = {
     # CAMD
     "Art and Design": "CAMD",
@@ -124,7 +124,6 @@ SUPPLEMENTAL_COLLEGE_MAP = {
     "Health Sci - Interdisciplinary": "Health Sciences",
     "Health Informatics": "Health Sciences",
     "Physician Assistant": "Health Sciences",
-    "Health  Physical Education": "Health Sciences",
     # Engineering
     "Mech  Industrial Engineering": "Engineering",
     "Electrical and Comp Engineerng": "Engineering",
@@ -145,7 +144,6 @@ SUPPLEMENTAL_COLLEGE_MAP = {
     "Managerial Economics": "CSSH",
     # Business
     "Entrepreneurship  Innovation": "Business",
-    "Finance  Insurance": "Business",
     "International Bus  Strategy": "Business",
     "Management Science": "Business",
     "Management Information Systems": "Business",
@@ -155,27 +153,16 @@ SUPPLEMENTAL_COLLEGE_MAP = {
 }
 
 
-def _collapse(s):
-    return re.sub(r"\s+", " ", str(s)).strip()
-
-
-# Built once: dept_to_college runs per professor. Keys collapse whitespace the
-# way the lookup does, so the double-space keys match too.
-_COLLEGE_MAP = {_collapse(k): v for k, v in COLLEGE_MAP.items()}
-_COLLEGE_MAP_LOWER = {}
-for _k, _v in _COLLEGE_MAP.items():
-    _COLLEGE_MAP_LOWER.setdefault(_k.lower(), _v)
-_SUPPLEMENTAL_COLLEGE_MAP = {_collapse(k): v for k, v in SUPPLEMENTAL_COLLEGE_MAP.items()}
+_SUPPLEMENTAL_COLLEGE_MAP = {department_key(k): v for k, v in SUPPLEMENTAL_COLLEGE_MAP.items()}
 
 
 def dept_to_college(department):
-    """Map a department string to its college via precompute.COLLEGE_MAP."""
+    """Map a department string to its college via pipeline.names.get_college,
+    then the supplemental local mapping."""
     if not department:
         return "Unknown"
-    raw = _collapse(department)
-    # then case-insensitive, then the supplemental local mapping
-    return (_COLLEGE_MAP.get(raw) or _COLLEGE_MAP_LOWER.get(raw.lower())
-            or _SUPPLEMENTAL_COLLEGE_MAP.get(raw) or "Unknown")
+    return (get_college(department, None)
+            or _SUPPLEMENTAL_COLLEGE_MAP.get(department_key(department)) or "Unknown")
 
 
 def is_plausible_photo_url(url):

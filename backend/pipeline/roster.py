@@ -9,7 +9,7 @@ from denylist import is_denied_key
 from prof_aliases import rmp_link_key
 
 from .db import chunk_insert
-from .names import COLLEGE_MAP, get_college, name_to_slug
+from .names import get_college, name_to_slug
 from .rmp_fields import rmp_id
 from .seed import LINK_FIELDS, PROFESSOR_FIELDS
 
@@ -63,14 +63,16 @@ def resolve_roster(pages, links, professors, is_denied=is_denied_key):
 
 def recollege(professors):
     """[(slug, college)] for professors whose stored college is no longer
-    COLLEGE_MAP's for their department: a label corrected after they were
+    get_college's for their department: a label corrected after they were
     created. A department COLLEGE_MAP doesn't list is left alone rather than
-    sent to Other. Pure. run.py applies these to the professors it loads and
-    never writes them back: only the pipeline reads professors.college, so the
-    catalog and every vote see the correction, and the next COLLEGE_MAP edit is
-    picked up the same way."""
-    return [(p["slug"], COLLEGE_MAP[p["department"]]) for p in professors
-            if p["department"] in COLLEGE_MAP and COLLEGE_MAP[p["department"]] != p["college"]]
+    sent to Other, so a key removed or renamed in COLLEGE_MAP leaves its
+    professors on their old college. Pure. run.py applies these to the
+    professors it loads and never writes them back: only the pipeline reads
+    professors.college, so the catalog and every vote see the correction, and
+    the next edit to an existing key is picked up the same way."""
+    looked_up = ((p, get_college(p["department"], None)) for p in professors)
+    return [(p["slug"], college) for p, college in looked_up
+            if college is not None and college != p["college"]]
 
 
 def apply_roster(conn, new_links, new_professors):

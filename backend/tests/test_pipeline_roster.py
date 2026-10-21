@@ -84,3 +84,9 @@ def test_recollege_corrects_only_a_college_that_left_college_map():
              "college": "Professional Studies"}
     unmapped = {**prof("ada-l", "ada l"), "department": "Underwater Basket Weaving"}
     assert recollege([prof("olin-guha", "olin guha"), stale, unmapped]) == [("jane-doe", "Health Sciences")]
+
+
+def test_recollege_matches_a_department_spelled_with_the_ampersand_stripped():
+    stale = {**prof("jane-doe", "jane doe"), "department": "Counseling  Educational Psych",
+             "college": "Professional Studies"}
+    assert recollege([stale]) == [("jane-doe", "Health Sciences")]

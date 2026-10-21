@@ -48,7 +48,7 @@ def test_dept_to_college_known_and_unknown():
 
 
 def test_dept_to_college_matches_double_space_college_map_keys():
-    # Only COLLEGE_MAP has these; its keys keep the double space.
+    # Only COLLEGE_MAP has these, spelled with "&"; get_college matches the stripped form.
     assert pr.dept_to_college("Counseling  Educational Psych") == "Health Sciences"
     assert pr.dept_to_college("Computer  Informational Tech.") == "Khoury"
 
@@ -62,7 +62,7 @@ def test_is_plausible_photo_url():
 
 
 def test_dept_to_college_supplemental_mapping():
-    # Department strings present in the data but absent from precompute.COLLEGE_MAP
+    # Department strings present in the data but absent from pipeline.names.COLLEGE_MAP
     assert pr.dept_to_college("Art and Design") == "CAMD"
     assert pr.dept_to_college("Chemistry  Chemical Biology") == "Science"   # double space
     assert pr.dept_to_college("Mech  Industrial Engineering") == "Engineering"
