@@ -130,7 +130,8 @@ const Stars = ({ rating }: { rating: number }) => {
 const RANK_NOTE =
   'Professors are ranked by their rating and by how many students rated them. ' +
   'A very high score from only a few students counts for less than a slightly ' +
-  'lower score from hundreds. That is why the ratings below do not always go ' +
+  'lower score from hundreds, and professors with at least 30 ratings always ' +
+  'come before those with fewer. That is why the ratings below do not always go ' +
   'from highest to lowest.';
 
 /* ---- rating cell with hover/click tooltip ---- */

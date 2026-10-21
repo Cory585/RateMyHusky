@@ -726,15 +726,18 @@ FALLBACK_PRIOR = 4.2   # only for an empty or brand-new catalog
 #     all 6 of the boards that fill at 30 change members, 5 of them lose rows,
 #     and Engineering's drops to 0.
 #     Nor does shrinkage do the floor's job: Khoury's rank-10 score needs ~17
-#     reviews at a perfect 5.00, so it is the floor of 30, not the shrunk score,
-#     that keeps a thinly rated 5.00 off the board.
+#     reviews at a perfect 5.00, so on a board that fills at 30 it is the floor,
+#     not the shrunk score, that keeps a thinly rated 5.00 off it. On a short
+#     board the fill below lets one on, under every professor at 30.
 #   - 5 was the old exception's floor, and it comes back as a fill rather than a
 #     floor. Health Sciences has 5 professors at 30, and a short board read as
 #     broken. So a board that has fewer than `limit` professors at 30 is filled
 #     from those with at least BOARD_FILL_MIN_REVIEWS. The fill ranks below
 #     every professor at 30, whatever its score: shrinkage alone would let a
-#     5.00 on 20 ratings pass a 4.50 on 30. A board that is full at 30 never
-#     reaches the fill.
+#     5.00 on 20 ratings pass a 4.50 on 30. No SHRINKAGE_M fixes that: as m
+#     grows the score orders by n * (rating - prior), and 20 * (5.00 - C) beats
+#     30 * (4.50 - C) whenever C is above 3.5. A board with `limit` professors
+#     at 30 and at or above the prior never reaches the fill.
 #
 # Nobody rated below the prior is on a board, however many ratings back it.
 # Ranking the 30+ tier first otherwise put a 2.86 on 250 ratings at Health
@@ -797,9 +800,11 @@ def goat_professors():
     # v5: the ordering has changed three times — to the shrunk score, again when
     # the prior stopped being the whole-catalog average, and again when the
     # per-college review floor collapsed to a single BOARD_MIN_REVIEWS and the
-    # sort gained a name tiebreak (v6: short boards are filled from 5 ratings,
-    # Law and Professional Studies lost their boards, and below-prior ratings left). An unbumped key serves the previous version
-    # from the cache after deploy, which looks exactly like the fix not working.
+    # sort gained a name tiebreak. v6: short boards fill from
+    # BOARD_FILL_MIN_REVIEWS, Law and Professional Studies lost their boards,
+    # and ratings below the prior left. An unbumped key serves the previous
+    # version from the cache after deploy, which looks exactly like the fix not
+    # working.
     # Unknown colleges are answered before the cache: every value would
     # otherwise store its own [] and push real boards out of the LRU. With
     # limit clamped, a college holds at most 50 entries.
@@ -828,7 +833,7 @@ def goat_professors():
         SELECT * FROM professors_catalog
         WHERE college = %s AND total_reviews >= %s AND avg_rating >= %s
         ORDER BY total_reviews >= %s DESC,
-                 {RANKING_SCORE_SQL} DESC NULLS LAST, total_reviews DESC, name
+                 {RANKING_SCORE_SQL} DESC, total_reviews DESC, name
         LIMIT %s
     """, (college, BOARD_FILL_MIN_REVIEWS, prior, BOARD_MIN_REVIEWS, prior, limit))
 
@@ -838,7 +843,8 @@ def goat_professors():
             "name": row["name"],
             "dept": row["department"],
             "rmpRating": round(row["rmp_rating"], 2) if row["rmp_rating"] else None,
-            "avgRating": round(row["avg_rating"], 2) if row["avg_rating"] else None,
+            # Never NULL: `avg_rating >= %s` above drops those rows.
+            "avgRating": round(row["avg_rating"], 2),
             # Displayed as "Ratings": the floor above gates on it and
             # RANKING_SCORE_SQL weights by it.
             "totalReviews": row["total_reviews"] or 0,

@@ -247,10 +247,15 @@ def test_floor_defaults_to_the_constant_not_a_literal():
     assert '"100"' not in body, "the old 100 default must be gone"
 
 
-def test_thin_professors_cannot_reach_a_board_even_at_a_perfect_score():
-    # 7 reviews only reach a board as fill, and even within the fill, shrinkage
-    # sinks a perfect score below real evidence.
-    assert 7 < server.BOARD_MIN_REVIEWS
+def test_thin_professors_reach_a_board_only_as_fill(monkeypatch):
+    # 7 reviews clear the fill floor but not the board floor, so a perfect 5.00
+    # on 7 sorts below every professor at 30. Within the fill, shrinkage still
+    # sinks it below real evidence.
+    assert server.BOARD_FILL_MIN_REVIEWS <= 7 < server.BOARD_MIN_REVIEWS
+    [(sql, params)] = _board_params(monkeypatch, "Khoury")
+    order = " ".join(sql.split()).split("ORDER BY ")[1]
+    assert order.startswith("total_reviews >= %s DESC,")
+    assert params[3] == server.BOARD_MIN_REVIEWS, "the tier splits at the board floor"
     thin = server.shrunk_score(5.0, 7, C)
     real = server.shrunk_score(4.68, 96, C)
     assert real > thin, "96 reviews at 4.68 outweigh 7 at a perfect 5.00"
