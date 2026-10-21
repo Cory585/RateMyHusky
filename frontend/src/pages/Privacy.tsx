@@ -8,7 +8,7 @@ const Privacy = () => {
         <div className="terms-shell">
           <header className="terms-header">
             <h1>Privacy Policy</h1>
-            <p className="terms-meta">Effective October 19, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective October 20, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -390,6 +390,10 @@ const Privacy = () => {
                   Name, department, and college, together with metrics we compute from the
                   underlying data (average rating, difficulty, would-take-again, and
                   department comparisons).
+                </li>
+                <li>
+                  The courses and terms they taught since Fall 2021, taken from Northeastern's
+                  public course schedule.
                 </li>
                 <li>
                   Ratings and written reviews from RateMyProfessors, and ratings submitted by
