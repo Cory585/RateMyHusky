@@ -44,16 +44,35 @@ _SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
 # sections and 14 CHEM. Counting it would move such professors into
 # Professional Studies.
 #
-# Both tracks are ending. Law and CPS Semester terms stop after Summer 2025, when
-# Law moved onto the university Semester calendar, so a LAW-subject section
-# counts as Law Semester whatever its term. CPS Quarter stops after Summer 2026
-# (the registrar moves graduate CPS to Semester from Fall 2026), and CPS has no
-# subject of its own to stand in, so Professional Studies is decided by the
-# quarters taught up to then: a later section is AFTER_CPS_QUARTER and stays out
-# of that majority. Counted in it, the Semester sections of a CPS adjunct still
-# teaching would pile up each term and tip them out of Professional Studies.
+# Both tracks are ending, so each has a subject stand-in that holds in any term.
+# Law and CPS Semester terms stop after Summer 2025, when Law moved onto the
+# university Semester calendar: a LAW section counts as Law Semester. CPS Quarter
+# stops after Summer 2026 (the registrar moves graduate CPS to Semester from
+# Fall 2026), and CPS courses were renumbered then (PJM6100, ALY6710), so the
+# stand-in is the subject: one with more than half its teaching sections in CPS
+# Quarter terms, up to the last of them, is a CPS subject (ALY, PJM, RGA, LDR),
+# and its sections count as CPS Quarter. Its sections in Semester terms before
+# then count too: they are CPS courses on the university calendar, and a sample
+# of the professors they add all have CPS faculty pages.
+# A graduate (5000+) section of a CPS_SUBJECTS subject also counts, for a CPS
+# subject that never ran on the quarter calendar (AAI) or is first offered after
+# it. Only graduate sections: CPS_SUBJECTS also holds the undergraduate subjects
+# (CHM, BIO) left out with CPS Semester above.
+# Any other section after the last CPS Quarter term is AFTER_CPS_QUARTER and
+# stays out of the Professional Studies majority. Counted in it, the day-college
+# Semester sections of a CPS adjunct still teaching would pile up each term and
+# tip them out of Professional Studies.
 TRACK_COLLEGES = {"Law Semester": "Law", "CPS Quarter": "Professional Studies"}
 AFTER_CPS_QUARTER = "After CPS Quarter"
+# The cutoff, for the vote and for AFTER_CPS_QUARTER, is pinned rather than read
+# as the newest CPS Quarter term in banner_terms: Banner lists a 202715 "Fall
+# 2026 CPS Quarter" sibling term, and once that is scraped, even empty, the vote
+# would take in the renumbered Semester-term sections and drift, and 202710's
+# day-college sections would count in the Professional Studies majority.
+CPS_QUARTER_LAST_TERM = "202655"  # Summer 2026
+# A voted subject under this CPS Quarter share is named in run.py's log, so a
+# subject sliding toward the bar shows before it drops out.
+CPS_VOTE_NEAR_BAR = 0.6
 
 # Subjects the catalog names "<subject> - CPS" or "- CPS Specialty"
 # (catalog.northeastern.edu/course-descriptions/, read 2026-10-19). A CPS
@@ -77,13 +96,10 @@ CPS_SUBJECTS = frozenset("""
 # spellings listed it, as build_course_instructors dedupes sections. A linked
 # row's instructor_key is NULL; an unlinked row (a Banner-only professor, linked
 # at apply time) keeps its key and a NULL slug.
-TRACK_SECTIONS_SQL = """
-    WITH taught AS (
-        SELECT i.term_code, i.crn, i.instructor_key, s.subject_course,
-               CASE WHEN s.subject = 'LAW' THEN 'Law Semester'
-                    WHEN i.term_code > (SELECT max(term_code) FROM banner_terms
-                                        WHERE track = 'CPS Quarter') THEN '{after_cps_quarter}'
-                    ELSE t.track END AS track,
+_TAUGHT_CTES = """
+    WITH listed AS (
+        SELECT i.term_code, i.crn, i.instructor_key, s.subject, s.subject_course,
+               t.track AS term_track,
                coalesce(t.scraped_closed, false) AND coalesce(s.enrollment = 0, false) AS cancelled
         FROM banner_section_instructors i
         JOIN banner_sections s ON s.term_code = i.term_code AND s.crn = i.crn
@@ -92,12 +108,45 @@ TRACK_SECTIONS_SQL = """
           AND lower(coalesce(s.schedule_type, '')) NOT IN ({non_teaching})
           AND NOT EXISTS (SELECT 1 FROM banner_roster_duplicates d
                           WHERE d.term_code = i.term_code AND d.instructor_key = i.instructor_key)
-    ), coordinators AS (
+    ), cps_subjects AS (
+        -- Voted on the listed teaching sections, cancelled ones dropped. The
+        -- undergraduate CPS subjects (CHM, BIO, ENG) ran on the CPS Semester
+        -- calendar, not CPS Quarter, so they cannot clear the bar.
+        SELECT subject,
+               count(DISTINCT (term_code, crn)) FILTER (WHERE term_track = 'CPS Quarter')::float
+                   / count(DISTINCT (term_code, crn)) AS share
+        FROM listed
+        WHERE NOT cancelled AND subject IS NOT NULL AND term_code <= '{last_quarter}'
+        GROUP BY 1 HAVING 2 * count(DISTINCT (term_code, crn)) FILTER (WHERE term_track = 'CPS Quarter')
+                          > count(DISTINCT (term_code, crn))
+    ), taught AS (
+        SELECT term_code, crn, instructor_key, subject_course, cancelled,
+               CASE WHEN subject = 'LAW' THEN 'Law Semester'
+                    WHEN term_track = 'Law Semester' THEN term_track
+                    WHEN subject IN (SELECT subject FROM cps_subjects) THEN 'CPS Quarter'
+                    WHEN subject IN ({cps_catalog})
+                         AND subject_course ~* '^[a-z]+([5-9][0-9]{{3}}|[1-9][0-9]{{4,}})' THEN 'CPS Quarter'
+                    WHEN term_code > '{last_quarter}' THEN '{after_cps_quarter}'
+                    ELSE term_track END AS track
+        FROM listed
+    )""".format(non_teaching=", ".join(f"'{s}'" for s in sorted(NON_TEACHING_SCHEDULE_TYPES)),
+                cps_catalog=", ".join(f"'{s}'" for s in sorted(CPS_SUBJECTS)),
+                after_cps_quarter=AFTER_CPS_QUARTER, last_quarter=CPS_QUARTER_LAST_TERM)
+
+# The voted subjects come back as extra rows (cps_subject and cps_share set,
+# the rest NULL),
+# so the vote, which follows live data, can be logged without a second scan;
+# split_cps_vote separates them.
+TRACK_SECTIONS_SQL = _TAUGHT_CTES + """, coordinators AS (
         SELECT term_code, instructor_key FROM taught GROUP BY 1, 2
         HAVING count(DISTINCT subject_course) > {max_courses}
     )
-    SELECT CASE WHEN b.professor_slug IS NULL THEN b.instructor_key END AS instructor_key,
-           b.professor_slug, t.track, count(DISTINCT (t.term_code, t.crn)) AS sections
+    SELECT NULL AS instructor_key, NULL AS professor_slug, NULL AS track, NULL::bigint AS sections,
+           subject AS cps_subject, share AS cps_share
+    FROM cps_subjects
+    UNION ALL
+    SELECT CASE WHEN b.professor_slug IS NULL THEN b.instructor_key END,
+           b.professor_slug, t.track, count(DISTINCT (t.term_code, t.crn)), NULL, NULL
     FROM taught t
     -- instructor_keys is NULL until the matcher's first run that writes it.
     JOIN banner_course_instructors b
@@ -107,8 +156,19 @@ TRACK_SECTIONS_SQL = """
       AND NOT EXISTS (SELECT 1 FROM coordinators c
                       WHERE c.term_code = t.term_code AND c.instructor_key = t.instructor_key)
     GROUP BY 1, 2, 3
-""".format(non_teaching=", ".join(f"'{s}'" for s in sorted(NON_TEACHING_SCHEDULE_TYPES)),
-           max_courses=int(MAX_COURSES_PER_TERM), after_cps_quarter=AFTER_CPS_QUARTER)
+""".format(max_courses=int(MAX_COURSES_PER_TERM))
+
+
+def split_cps_vote(rows):
+    """(track rows, subjects voted CPS) from TRACK_SECTIONS_SQL rows."""
+    return ([r for r in rows if r["cps_subject"] is None],
+            frozenset(r["cps_subject"] for r in rows if r["cps_subject"] is not None))
+
+
+def cps_vote_near_bar(rows):
+    """subject -> CPS Quarter share, for voted subjects under CPS_VOTE_NEAR_BAR."""
+    return {r["cps_subject"]: r["cps_share"] for r in rows
+            if r["cps_subject"] is not None and r["cps_share"] < CPS_VOTE_NEAR_BAR}
 
 
 def _first_last(key):
@@ -147,8 +207,8 @@ def _track_sections(track_rows, new_slug_by_key):
 
 def track_colleges(track_rows, new_slug_by_key):
     """slug -> college, for professors who taught more than half their sections
-    in one TRACK_COLLEGES track. track_rows are TRACK_SECTIONS_SQL rows. The
-    CPS Quarter majority leaves out AFTER_CPS_QUARTER sections; Law's counts
+    in one TRACK_COLLEGES track. track_rows are split_cps_vote's track rows.
+    The CPS Quarter majority leaves out AFTER_CPS_QUARTER sections; Law's counts
     every section."""
     colleges = {}
     for slug, by_track in _track_sections(track_rows, new_slug_by_key).items():
@@ -160,18 +220,20 @@ def track_colleges(track_rows, new_slug_by_key):
     return colleges
 
 
-def subject_colleges(instructor_rows, professors):
-    """subject -> college. A CPS_SUBJECTS subject is Professional Studies: its
+def subject_colleges(instructor_rows, professors, cps_subjects=CPS_SUBJECTS):
+    """subject -> college. A CPS subject is Professional Studies: its
     teachers are CPS adjuncts labelled by subject, so a vote would file MGT
     under Business. Any other subject is voted as subject_departments does, but
     without the professors labelled with a TRACK_COLLEGES college: their labels
     are the ones in question, and CRIM taught by mislabelled Law professors
-    would otherwise vote itself back into Law."""
+    would otherwise vote itself back into Law. run.py passes CPS_SUBJECTS plus
+    the subjects TRACK_SECTIONS_SQL voted, so this and the track agree on what
+    a CPS subject is."""
     voters = {p["slug"]: p["department"] for p in professors
               if p.get("origin") != "banner" and p.get("college") not in TRACK_COLLEGES.values()}
     colleges = {s: get_college(d) for s, d in subject_departments(instructor_rows, voters).items()}
     for row in instructor_rows:
-        if subject_of(row["subject_course"]) in CPS_SUBJECTS:
+        if subject_of(row["subject_course"]) in cps_subjects:
             colleges[subject_of(row["subject_course"])] = "Professional Studies"
     return colleges
 
@@ -186,11 +248,7 @@ def track_exits(track_rows, new_slug_by_key, professors, instructor_rows, colleg
     subjects point to Law, Other or nowhere keeps the label rather than getting
     a guess.
 
-    Professional Studies labels are not checked. Most of the ones with no CPS
-    Quarter section are Counseling & Educational Psych, Bouve's Applied
-    Psychology (CAEP), and CAEP's other teachers are labelled Psychology, so the
-    subject vote would send them to CSSH; and with CPS Quarter ending, an absent
-    quarter will soon say nothing about a CPS professor."""
+    Professional Studies labels are not checked."""
     track_of = {"Law": "Law Semester"}
     sections = _track_sections(track_rows, new_slug_by_key)
     subjects = defaultdict(Counter)

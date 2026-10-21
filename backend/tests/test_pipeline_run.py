@@ -29,8 +29,14 @@ TABLES = {
     ],
     # TRACK_SECTIONS_SQL opens with a CTE, so _rows matches it by object.
     "track_sections": [
-        {"instructor_key": "olin guha", "professor_slug": "olin-guha", "track": "Law Semester", "sections": 3},
-        {"instructor_key": "lucia nunez", "professor_slug": None, "track": "CPS Quarter", "sections": 1},
+        {"instructor_key": None, "professor_slug": None, "track": None, "sections": None, "cps_subject": "PJM",
+         "cps_share": 0.9},
+        {"instructor_key": None, "professor_slug": None, "track": None, "sections": None, "cps_subject": "ITC",
+         "cps_share": 0.58},
+        {"instructor_key": "olin guha", "professor_slug": "olin-guha", "track": "Law Semester", "sections": 3,
+         "cps_subject": None, "cps_share": None},
+        {"instructor_key": "lucia nunez", "professor_slug": None, "track": "CPS Quarter", "sections": 1,
+         "cps_subject": None, "cps_share": None},
     ],
     "survey_ratings": [{"professor_slug": "olin-guha", "course_code": "CS2500", "rating": 5,
                         "hours": "3-4", "grade": None, "comment": ""}],
@@ -39,8 +45,8 @@ TABLES = {
 
 
 def _rows(sql):
-    key = "track_sections" if sql is run.banner_roster.TRACK_SECTIONS_SQL else sql.split(" FROM ")[1].split()[0]
-    return [dict(r) for r in TABLES[key]]
+    by_sql = {run.banner_roster.TRACK_SECTIONS_SQL: "track_sections"}
+    return [dict(r) for r in TABLES[by_sql.get(sql) or sql.split(" FROM ")[1].split()[0]]]
 
 
 @pytest.fixture
@@ -69,8 +75,7 @@ def captured(monkeypatch):
 def writes(monkeypatch):
     calls = []
     monkeypatch.setattr(run, "connect", lambda: object())
-    monkeypatch.setattr(run, "fetch_all",
-                        lambda conn, sql: _rows(sql))
+    monkeypatch.setattr(run, "fetch_all", lambda conn, sql: _rows(sql))
     monkeypatch.setattr(run.roster, "apply_roster", lambda conn, l, p: calls.append(("roster", l, p)))
     monkeypatch.setattr(run.banner_roster, "apply_banner_professors",
                         lambda conn, rows: calls.append(("banner", rows)))
@@ -110,6 +115,54 @@ def test_term_track_sets_catalog_college_for_linked_and_new_banner_professors(wr
     catalog = {r["slug"]: r["college"] for r in writes[-1][1]}
     assert catalog["olin-guha"] == "Law"                       # linked by the matcher
     assert catalog["lucia-nunez"] == "Professional Studies"    # created this run, linked by name_key
+
+
+def _caep(monkeypatch, track):
+    monkeypatch.setattr(run.read_models, "verify", lambda *a: [])
+    olin = TABLES["professors"][0]
+    monkeypatch.setitem(TABLES, "professors", [
+        {**olin, "department": "Counseling & Educational Psych", "college": "Professional Studies"}])
+    monkeypatch.setitem(TABLES, "track_sections", [
+        {"instructor_key": "olin guha", "professor_slug": "olin-guha", "track": track, "sections": 3,
+         "cps_subject": None, "cps_share": None}])
+
+
+def test_a_corrected_department_label_is_shown(writes, monkeypatch):
+    _caep(monkeypatch, "Semester")
+    assert run.main([]) == 0
+    assert {r["slug"]: r["college"] for r in writes[-1][1]}["olin-guha"] == "Health Sciences"
+
+
+def test_the_subject_vote_and_the_law_exits_read_the_corrected_label(writes, monkeypatch):
+    # They skip professors by college, so the correction has to come first.
+    _caep(monkeypatch, "Semester")
+    seen = {}
+    real_subjects, real_exits = run.banner_roster.subject_colleges, run.banner_roster.track_exits
+
+    def subjects(rows, profs, *a):
+        seen["subject_colleges"] = {p["slug"]: p["college"] for p in profs}
+        return real_subjects(rows, profs, *a)
+
+    def exits(track_rows, new, profs, *a):
+        seen["track_exits"] = {p["slug"]: p["college"] for p in profs}
+        return real_exits(track_rows, new, profs, *a)
+
+    monkeypatch.setattr(run.banner_roster, "subject_colleges", subjects)
+    monkeypatch.setattr(run.banner_roster, "track_exits", exits)
+    assert run.main([]) == 0
+    assert seen["subject_colleges"]["olin-guha"] == "Health Sciences"
+    assert seen["track_exits"]["olin-guha"] == "Health Sciences"
+
+
+def test_the_term_track_wins_over_a_corrected_department_label(writes, monkeypatch):
+    _caep(monkeypatch, "CPS Quarter")
+    assert run.main([]) == 0
+    assert {r["slug"]: r["college"] for r in writes[-1][1]}["olin-guha"] == "Professional Studies"
+
+
+def test_the_log_names_voted_subjects_near_the_bar(captured, capsys):
+    run.main(["--dry-run"])
+    assert "CPS Quarter subjects by vote: 2 (near the bar: ITC 58%); " in capsys.readouterr().out
 
 
 def test_survey_rows_reach_the_read_models(captured):
