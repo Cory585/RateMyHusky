@@ -939,3 +939,46 @@ def test_chip_is_stamped_with_its_oldest_term_scrape():
             {"term_code": "202715", "scraped_at": "2026-09-29 08:00:00"},
             {"term_code": "202630", "scraped_at": "2026-01-01 08:00:00"}]
     assert chip_scraped_at(rows, ["202710", "202715"]).startswith("2026-09-01T08:00:00")
+
+
+def test_a_denied_professor_leaves_every_banner_table(monkeypatch):
+    # The course page names an instructor from instructor_name even with no
+    # catalog row, so the rows themselves have to go, not just the profile link.
+    import match_banner_instructors as m
+    monkeypatch.setattr(m, "is_denied", lambda name: False)
+    monkeypatch.setattr(m, "is_denied_key", lambda key: key == "yvonne leung")
+    rows = [{"instructor_key": "wan yee yvonne leung"},   # Banner's spelling, aliased
+            {"instructor_key": "yvonne leung"},
+            {"instructor_key": "annie witte"}]
+    assert m.drop_denied(rows) == [{"instructor_key": "annie witte"}]
+
+
+def test_the_matcher_drops_denied_instructors_before_building(monkeypatch, tmp_path):
+    import match_banner_instructors as m
+    monkeypatch.setattr(m, "is_denied", lambda name: name == "annie witte")
+    path = str(tmp_path / "stage.db")
+    conn = sqlite3.connect(path)
+    c = conn.cursor()
+    apply_ddl(c)
+    stats = {"section_count": 1, "attributed_sections": 1, "instructor_count": 2}
+    write_term(c, "202630", {"label": "Spring 2026", "season": "Spring",
+                             "season_group": "Spring", "year": 2026,
+                             "track": "Semester", "view_only": False}, None,
+               {"sections": [{"crn": "1", "subject": "CS", "subject_course": "CS3500",
+                              "schedule_type": "Lecture", "enrollment": 30}],
+                "instructors": [{"term_code": "202630", "crn": "1",
+                                 "instructor_key": "annie witte",
+                                 "instructor_name": "Witte, Annie", "is_primary": True},
+                                {"term_code": "202630", "crn": "1",
+                                 "instructor_key": "patrick hurley",
+                                 "instructor_name": "Hurley, Patrick", "is_primary": False}],
+                "stats": stats})
+    conn.commit()
+    conn.close()
+
+    assert m.main(["--local-db", path]) == 0
+    db = sqlite3.connect(path)
+    assert db.execute("SELECT instructor_key FROM banner_course_instructors").fetchall() \
+        == [("patrick hurley",)]
+    assert ("annie witte",) not in db.execute(
+        "SELECT instructor_key FROM banner_unmatched").fetchall()

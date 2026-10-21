@@ -49,6 +49,7 @@ from banner_api import pattern_season, section_label  # noqa: E402
 from banner_history import (academic_year,  # noqa: E402
                             build_course_instructors, build_course_offerings,
                             is_teaching, place, rename_candidates)
+from denylist import is_denied, is_denied_key  # noqa: E402
 from prof_aliases import ALIAS_MAP  # noqa: E402
 
 # One definition of how to reach the database, shared with the loader: sslmode must
@@ -886,6 +887,22 @@ def read_banner(cur):
     return terms, sections, instructors
 
 
+def is_denied_instructor(key):
+    """Denied as the key itself, as a name, or under its Banner alias. The same
+    test as pipeline.banner_roster.is_denied_banner_key, which imports this
+    module and so cannot be imported by it."""
+    return is_denied_key(key) or is_denied(key) or is_denied_key(BANNER_ALIASES.get(key))
+
+
+def drop_denied(instructors, denied=is_denied_instructor):
+    """Instructor rows minus the professors on the denylist.
+
+    Applied before anything is built, so a denied professor reaches none of the
+    published tables: not the chip, and not a course page's instructor list,
+    which names them from instructor_name even with no catalog row to join."""
+    return [r for r in instructors if not denied(r["instructor_key"])]
+
+
 def read_roster_duplicates(cur):
     """{(term_code, instructor_key)} a term's roster listed more than once."""
     cur.execute("SELECT term_code, instructor_key FROM banner_roster_duplicates")
@@ -950,6 +967,7 @@ def main(argv=None):
     conn.commit()
 
     term_rows, sections, instructors = read_banner(cur)
+    instructors = drop_denied(instructors)
     if not sections:
         print("banner_sections is empty — run load_banner.py first",
               file=sys.stderr)
