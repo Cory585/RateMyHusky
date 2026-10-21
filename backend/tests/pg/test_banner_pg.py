@@ -9,6 +9,8 @@ import json
 import pathlib
 import sys
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3] / "scraper"))
 
 import load_banner  # noqa: E402
@@ -308,3 +310,50 @@ def test_a_semester_after_the_last_quarter_does_not_tip_a_cps_professor_out(pg):
     got = banner_roster.split_cps_vote(rows(pg, banner_roster.TRACK_SECTIONS_SQL))[0]
     assert sorted((r["track"], r["sections"]) for r in got) == [("After CPS Quarter", 2), ("CPS Quarter", 1)]
     assert banner_roster.track_colleges(got, {}) == {"adjunct": "Professional Studies"}
+
+
+def test_a_later_cps_quarter_term_does_not_move_the_vote_cutoff(pg):
+    # Banner lists a 202715 "Fall 2026 CPS Quarter" sibling. Read from the data,
+    # the cutoff would move past 202710 and the renumbered PJM sections there
+    # would dilute PJM under the bar.
+    truncate(pg, *BANNER_TABLES)
+    with pg.cursor() as cur:
+        _term(cur, "202655", "CPS Quarter")
+        _term(cur, "202710", "Semester")
+        _term(cur, "202715", "CPS Quarter")
+        _taught(cur, "202655", "1", "PJM5900", "adjunct")
+        for crn, course in (("2", "PJM6100"), ("3", "PJM6110")):
+            _taught(cur, "202710", crn, course, "adjunct")
+        _taught(cur, "202715", "4", "XYZ1000", "adjunct")
+        for course in ("PJM5900", "PJM6100", "PJM6110", "XYZ1000"):
+            _course_instructor(cur, course, "adjunct", "adjunct", "adjunct")
+    pg.commit()
+    got = rows(pg, banner_roster.TRACK_SECTIONS_SQL)
+    assert banner_roster.split_cps_vote(got)[1] == {"PJM"}
+    assert banner_roster.cps_vote_near_bar(got) == {}
+
+
+def test_the_vote_reports_a_subject_close_to_the_bar(pg):
+    # ITC clears the bar at 58% on production: 4 of 7 here.
+    truncate(pg, *BANNER_TABLES)
+    with pg.cursor() as cur:
+        _term(cur, "202655", "CPS Quarter")
+        _term(cur, "202630", "Semester")
+        for n in range(7):
+            _taught(cur, "202655" if n < 4 else "202630", str(n), f"ITC{5000 + n}", "adjunct")
+    pg.commit()
+    assert banner_roster.cps_vote_near_bar(rows(pg, banner_roster.TRACK_SECTIONS_SQL)) == {
+        "ITC": pytest.approx(4 / 7)}
+
+
+def test_a_cps_section_in_a_law_semester_term_stays_law_semester(pg):
+    # LST is a graduate catalog CPS subject; taught in a Law Semester term it is Law's.
+    truncate(pg, *BANNER_TABLES)
+    with pg.cursor() as cur:
+        _term(cur, "202655", "CPS Quarter")
+        _term(cur, "202514", "Law Semester")
+        _taught(cur, "202514", "1", "LST6000", "law prof")
+        _course_instructor(cur, "LST6000", "law prof", "law-prof", "law prof")
+    pg.commit()
+    got = banner_roster.split_cps_vote(rows(pg, banner_roster.TRACK_SECTIONS_SQL))[0]
+    assert [(r["track"], r["sections"]) for r in got] == [("Law Semester", 1)]

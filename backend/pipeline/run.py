@@ -61,8 +61,11 @@ def main(argv=None):
     new_banner, banner_counts = banner_roster.resolve_banner_professors(bci, professors, departments)
     _print("banner roster", banner_counts)
     professors = professors + new_banner
-    track_rows, cps_voted = banner_roster.split_cps_vote(fetch_all(conn, banner_roster.TRACK_SECTIONS_SQL))
-    print(f"CPS Quarter subjects by vote: {len(cps_voted)}; "
+    track_sql_rows = fetch_all(conn, banner_roster.TRACK_SECTIONS_SQL)
+    track_rows, cps_voted = banner_roster.split_cps_vote(track_sql_rows)
+    near_bar = sorted(banner_roster.cps_vote_near_bar(track_sql_rows).items(), key=lambda kv: kv[1])
+    near_bar = f" (near the bar: {', '.join(f'{s} {share:.0%}' for s, share in near_bar)})" if near_bar else ""
+    print(f"CPS Quarter subjects by vote: {len(cps_voted)}{near_bar}; "
           f"not in the catalog's CPS list: {' '.join(sorted(cps_voted - banner_roster.CPS_SUBJECTS)) or 'none'}")
     # New Banner professors are linked in the database only at apply time, so
     # their keys come from the rows just resolved.

@@ -64,6 +64,14 @@ _SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
 # tip them out of Professional Studies.
 TRACK_COLLEGES = {"Law Semester": "Law", "CPS Quarter": "Professional Studies"}
 AFTER_CPS_QUARTER = "After CPS Quarter"
+# The vote's cutoff is pinned rather than read as the newest CPS Quarter term in
+# banner_terms: Banner lists a 202715 "Fall 2026 CPS Quarter" sibling term, and
+# if that ever held sections the vote would take in the renumbered Semester-term
+# sections and drift.
+CPS_QUARTER_LAST_TERM = "202655"  # Summer 2026
+# A voted subject under this CPS Quarter share is named in run.py's log, so a
+# subject sliding toward the bar shows before it drops out.
+CPS_VOTE_NEAR_BAR = 0.6
 
 # Subjects the catalog names "<subject> - CPS" or "- CPS Specialty"
 # (catalog.northeastern.edu/course-descriptions/, read 2026-10-19). A CPS
@@ -100,17 +108,20 @@ _TAUGHT_CTES = """
           AND NOT EXISTS (SELECT 1 FROM banner_roster_duplicates d
                           WHERE d.term_code = i.term_code AND d.instructor_key = i.instructor_key)
     ), cps_subjects AS (
-        -- Voted on the same teaching sections counted below. The undergraduate
-        -- CPS subjects (CHM, BIO, ENG) ran on the CPS Semester calendar, not
-        -- CPS Quarter, so they cannot clear the bar.
-        SELECT subject FROM listed
-        WHERE NOT cancelled AND subject IS NOT NULL
-          AND term_code <= (SELECT max(term_code) FROM banner_terms WHERE track = 'CPS Quarter')
+        -- Voted on the listed teaching sections, cancelled ones dropped. The
+        -- undergraduate CPS subjects (CHM, BIO, ENG) ran on the CPS Semester
+        -- calendar, not CPS Quarter, so they cannot clear the bar.
+        SELECT subject,
+               count(DISTINCT (term_code, crn)) FILTER (WHERE term_track = 'CPS Quarter')::float
+                   / count(DISTINCT (term_code, crn)) AS share
+        FROM listed
+        WHERE NOT cancelled AND subject IS NOT NULL AND term_code <= '{last_quarter}'
         GROUP BY 1 HAVING 2 * count(DISTINCT (term_code, crn)) FILTER (WHERE term_track = 'CPS Quarter')
                           > count(DISTINCT (term_code, crn))
     ), taught AS (
         SELECT term_code, crn, instructor_key, subject_course, cancelled,
                CASE WHEN subject = 'LAW' THEN 'Law Semester'
+                    WHEN term_track = 'Law Semester' THEN term_track
                     WHEN subject IN (SELECT subject FROM cps_subjects) THEN 'CPS Quarter'
                     WHEN subject IN ({cps_catalog})
                          AND substring(subject_course from '[0-9]+')::int >= 5000 THEN 'CPS Quarter'
@@ -120,9 +131,10 @@ _TAUGHT_CTES = """
         FROM listed
     )""".format(non_teaching=", ".join(f"'{s}'" for s in sorted(NON_TEACHING_SCHEDULE_TYPES)),
                 cps_catalog=", ".join(f"'{s}'" for s in sorted(CPS_SUBJECTS)),
-                after_cps_quarter=AFTER_CPS_QUARTER)
+                after_cps_quarter=AFTER_CPS_QUARTER, last_quarter=CPS_QUARTER_LAST_TERM)
 
-# The voted subjects come back as extra rows (cps_subject set, the rest NULL),
+# The voted subjects come back as extra rows (cps_subject and cps_share set,
+# the rest NULL),
 # so the vote, which follows live data, can be logged without a second scan;
 # split_cps_vote separates them.
 TRACK_SECTIONS_SQL = _TAUGHT_CTES + """, coordinators AS (
@@ -130,11 +142,11 @@ TRACK_SECTIONS_SQL = _TAUGHT_CTES + """, coordinators AS (
         HAVING count(DISTINCT subject_course) > {max_courses}
     )
     SELECT NULL AS instructor_key, NULL AS professor_slug, NULL AS track, NULL::bigint AS sections,
-           subject AS cps_subject
+           subject AS cps_subject, share AS cps_share
     FROM cps_subjects
     UNION ALL
     SELECT CASE WHEN b.professor_slug IS NULL THEN b.instructor_key END,
-           b.professor_slug, t.track, count(DISTINCT (t.term_code, t.crn)), NULL
+           b.professor_slug, t.track, count(DISTINCT (t.term_code, t.crn)), NULL, NULL
     FROM taught t
     -- instructor_keys is NULL until the matcher's first run that writes it.
     JOIN banner_course_instructors b
@@ -151,6 +163,12 @@ def split_cps_vote(rows):
     """(track rows, subjects voted CPS) from TRACK_SECTIONS_SQL rows."""
     return ([r for r in rows if r["cps_subject"] is None],
             frozenset(r["cps_subject"] for r in rows if r["cps_subject"] is not None))
+
+
+def cps_vote_near_bar(rows):
+    """subject -> CPS Quarter share, for voted subjects under CPS_VOTE_NEAR_BAR."""
+    return {r["cps_subject"]: r["cps_share"] for r in rows
+            if r["cps_subject"] is not None and r["cps_share"] < CPS_VOTE_NEAR_BAR}
 
 
 def _first_last(key):
