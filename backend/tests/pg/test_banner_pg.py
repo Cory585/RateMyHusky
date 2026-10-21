@@ -325,12 +325,35 @@ def test_a_later_cps_quarter_term_does_not_move_the_vote_cutoff(pg):
         for crn, course in (("2", "PJM6100"), ("3", "PJM6110")):
             _taught(cur, "202710", crn, course, "adjunct")
         _taught(cur, "202715", "4", "XYZ1000", "adjunct")
-        for course in ("PJM5900", "PJM6100", "PJM6110", "XYZ1000"):
+        _taught(cur, "202710", "5", "XYZ2000", "adjunct")
+        for course in ("PJM5900", "PJM6100", "PJM6110", "XYZ1000", "XYZ2000"):
             _course_instructor(cur, course, "adjunct", "adjunct", "adjunct")
     pg.commit()
     got = rows(pg, banner_roster.TRACK_SECTIONS_SQL)
-    assert banner_roster.split_cps_vote(got)[1] == {"PJM"}
+    track_rows, voted = banner_roster.split_cps_vote(got)
+    assert voted == {"PJM"}
     assert banner_roster.cps_vote_near_bar(got) == {}
+    # Nor the track cutoff: the 202710 and 202715 XYZ sections stay out of the majority.
+    assert {r["track"]: r["sections"] for r in track_rows} == {
+        "CPS Quarter": 3, banner_roster.AFTER_CPS_QUARTER: 2}
+
+
+def test_a_course_number_past_int_range_does_not_abort_the_track_query(pg):
+    truncate(pg, *BANNER_TABLES)
+    with pg.cursor() as cur:
+        _term(cur, "202630", "Semester")
+        # _taught takes the subject as all but the last 4 characters.
+        cur.execute("INSERT INTO banner_sections (term_code, crn, subject, subject_course, "
+                    "schedule_type, enrollment) VALUES ('202630', '1', 'MGT', 'MGT99999999999', "
+                    "'Lecture', 20)")
+        cur.execute("INSERT INTO banner_section_instructors (term_code, crn, instructor_key, "
+                    "instructor_name) VALUES ('202630', '1', 'adjunct', 'Adjunct')")
+        _taught(cur, "202630", "2", "MGT6100", "adjunct")
+        for course in ("MGT99999999999", "MGT6100"):
+            _course_instructor(cur, course, "adjunct", "adjunct", "adjunct")
+    pg.commit()
+    track_rows, _ = banner_roster.split_cps_vote(rows(pg, banner_roster.TRACK_SECTIONS_SQL))
+    assert {r["track"]: r["sections"] for r in track_rows} == {"CPS Quarter": 2}
 
 
 def test_the_vote_reports_a_subject_close_to_the_bar(pg):

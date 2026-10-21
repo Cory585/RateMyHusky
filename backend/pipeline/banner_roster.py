@@ -64,10 +64,11 @@ _SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
 # tip them out of Professional Studies.
 TRACK_COLLEGES = {"Law Semester": "Law", "CPS Quarter": "Professional Studies"}
 AFTER_CPS_QUARTER = "After CPS Quarter"
-# The vote's cutoff is pinned rather than read as the newest CPS Quarter term in
-# banner_terms: Banner lists a 202715 "Fall 2026 CPS Quarter" sibling term, and
-# if that ever held sections the vote would take in the renumbered Semester-term
-# sections and drift.
+# The cutoff, for the vote and for AFTER_CPS_QUARTER, is pinned rather than read
+# as the newest CPS Quarter term in banner_terms: Banner lists a 202715 "Fall
+# 2026 CPS Quarter" sibling term, and once that is scraped, even empty, the vote
+# would take in the renumbered Semester-term sections and drift, and 202710's
+# day-college sections would count in the Professional Studies majority.
 CPS_QUARTER_LAST_TERM = "202655"  # Summer 2026
 # A voted subject under this CPS Quarter share is named in run.py's log, so a
 # subject sliding toward the bar shows before it drops out.
@@ -124,9 +125,8 @@ _TAUGHT_CTES = """
                     WHEN term_track = 'Law Semester' THEN term_track
                     WHEN subject IN (SELECT subject FROM cps_subjects) THEN 'CPS Quarter'
                     WHEN subject IN ({cps_catalog})
-                         AND substring(subject_course from '[0-9]+')::int >= 5000 THEN 'CPS Quarter'
-                    WHEN term_code > (SELECT max(term_code) FROM banner_terms
-                                      WHERE track = 'CPS Quarter') THEN '{after_cps_quarter}'
+                         AND subject_course ~ '^[A-Z]+[5-9][0-9]{{3}}' THEN 'CPS Quarter'
+                    WHEN term_code > '{last_quarter}' THEN '{after_cps_quarter}'
                     ELSE term_track END AS track
         FROM listed
     )""".format(non_teaching=", ".join(f"'{s}'" for s in sorted(NON_TEACHING_SCHEDULE_TYPES)),

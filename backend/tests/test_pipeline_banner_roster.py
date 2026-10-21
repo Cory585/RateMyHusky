@@ -212,7 +212,7 @@ def test_track_sql_counts_law_courses_as_law_semester_in_any_term():
     sql = " ".join(br.TRACK_SECTIONS_SQL.split())
     assert ("CASE WHEN subject = 'LAW' THEN 'Law Semester' "
             "WHEN term_track = 'Law Semester' THEN term_track WHEN subject IN") in sql
-    assert ("WHEN term_code > (SELECT max(term_code) FROM banner_terms WHERE track = 'CPS Quarter') "
+    assert ("WHEN term_code > '202655' "
             "THEN 'After CPS Quarter' ELSE term_track END AS track") in sql
 
 
@@ -319,8 +319,8 @@ def test_track_sql_counts_cps_subjects_as_cps_quarter_in_any_term():
     # CPS Quarter ends after Summer 2026; its subjects stand in for it.
     sql = " ".join(br.TRACK_SECTIONS_SQL.split())
     assert "WHEN subject IN (SELECT subject FROM cps_subjects) THEN 'CPS Quarter'" in sql
-    assert "(SELECT max(term_code) FROM banner_terms WHERE track = 'CPS Quarter')" in sql
-    assert "substring(subject_course from '[0-9]+')::int >= 5000 THEN 'CPS Quarter'" in sql
+    # A regex, not an int cast: a course number past int range would abort the query.
+    assert "AND subject_course ~ '^[A-Z]+[5-9][0-9]{3}' THEN 'CPS Quarter'" in sql
 
 
 def test_the_cps_vote_counts_the_same_teaching_sections():
