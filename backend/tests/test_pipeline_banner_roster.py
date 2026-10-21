@@ -320,7 +320,7 @@ def test_track_sql_counts_cps_subjects_as_cps_quarter_in_any_term():
     sql = " ".join(br.TRACK_SECTIONS_SQL.split())
     assert "WHEN subject IN (SELECT subject FROM cps_subjects) THEN 'CPS Quarter'" in sql
     # A regex, not an int cast: a course number past int range would abort the query.
-    assert "AND subject_course ~ '^[A-Z]+[5-9][0-9]{3}' THEN 'CPS Quarter'" in sql
+    assert "AND subject_course ~* '^[a-z]+([5-9][0-9]{3}|[1-9][0-9]{4,})' THEN 'CPS Quarter'" in sql
 
 
 def test_the_cps_vote_counts_the_same_teaching_sections():

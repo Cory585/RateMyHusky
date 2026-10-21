@@ -125,7 +125,7 @@ _TAUGHT_CTES = """
                     WHEN term_track = 'Law Semester' THEN term_track
                     WHEN subject IN (SELECT subject FROM cps_subjects) THEN 'CPS Quarter'
                     WHEN subject IN ({cps_catalog})
-                         AND subject_course ~ '^[A-Z]+[5-9][0-9]{{3}}' THEN 'CPS Quarter'
+                         AND subject_course ~* '^[a-z]+([5-9][0-9]{{3}}|[1-9][0-9]{{4,}})' THEN 'CPS Quarter'
                     WHEN term_code > '{last_quarter}' THEN '{after_cps_quarter}'
                     ELSE term_track END AS track
         FROM listed

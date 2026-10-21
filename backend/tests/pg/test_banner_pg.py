@@ -321,12 +321,13 @@ def test_a_later_cps_quarter_term_does_not_move_the_vote_cutoff(pg):
         _term(cur, "202655", "CPS Quarter")
         _term(cur, "202710", "Semester")
         _term(cur, "202715", "CPS Quarter")
-        _taught(cur, "202655", "1", "PJM5900", "adjunct")
-        for crn, course in (("2", "PJM6100"), ("3", "PJM6110")):
+        # Below 5000, so only the vote sends PJM to CPS Quarter.
+        _taught(cur, "202655", "1", "PJM1900", "adjunct")
+        for crn, course in (("2", "PJM4100"), ("3", "PJM4110")):
             _taught(cur, "202710", crn, course, "adjunct")
         _taught(cur, "202715", "4", "XYZ1000", "adjunct")
         _taught(cur, "202710", "5", "XYZ2000", "adjunct")
-        for course in ("PJM5900", "PJM6100", "PJM6110", "XYZ1000", "XYZ2000"):
+        for course in ("PJM1900", "PJM4100", "PJM4110", "XYZ1000", "XYZ2000"):
             _course_instructor(cur, course, "adjunct", "adjunct", "adjunct")
     pg.commit()
     got = rows(pg, banner_roster.TRACK_SECTIONS_SQL)
@@ -342,18 +343,21 @@ def test_a_course_number_past_int_range_does_not_abort_the_track_query(pg):
     truncate(pg, *BANNER_TABLES)
     with pg.cursor() as cur:
         _term(cur, "202630", "Semester")
-        # _taught takes the subject as all but the last 4 characters.
-        cur.execute("INSERT INTO banner_sections (term_code, crn, subject, subject_course, "
-                    "schedule_type, enrollment) VALUES ('202630', '1', 'MGT', 'MGT99999999999', "
-                    "'Lecture', 20)")
-        cur.execute("INSERT INTO banner_section_instructors (term_code, crn, instructor_key, "
-                    "instructor_name) VALUES ('202630', '1', 'adjunct', 'Adjunct')")
-        _taught(cur, "202630", "2", "MGT6100", "adjunct")
-        for course in ("MGT99999999999", "MGT6100"):
+        # _taught takes the subject as all but the last 4 characters. Each of
+        # these is graduate: past int range, 5 digits from 1, and lowercase.
+        courses = ("MGT99999999999", "MGT10000", "mgt6100")
+        for crn, course in enumerate(courses, 1):
+            cur.execute("INSERT INTO banner_sections (term_code, crn, subject, subject_course, "
+                        "schedule_type, enrollment) VALUES ('202630', %s, 'MGT', %s, 'Lecture', 20)",
+                        (str(crn), course))
+            cur.execute("INSERT INTO banner_section_instructors (term_code, crn, instructor_key, "
+                        "instructor_name) VALUES ('202630', %s, 'adjunct', 'Adjunct')", (str(crn),))
+        _taught(cur, "202630", "9", "MGT4100", "adjunct")
+        for course in (*courses, "MGT4100"):
             _course_instructor(cur, course, "adjunct", "adjunct", "adjunct")
     pg.commit()
     track_rows, _ = banner_roster.split_cps_vote(rows(pg, banner_roster.TRACK_SECTIONS_SQL))
-    assert {r["track"]: r["sections"] for r in track_rows} == {"CPS Quarter": 2}
+    assert {r["track"]: r["sections"] for r in track_rows} == {"CPS Quarter": 3, "Semester": 1}
 
 
 def test_the_vote_reports_a_subject_close_to_the_bar(pg):
