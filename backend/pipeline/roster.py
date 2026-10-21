@@ -9,7 +9,7 @@ from denylist import is_denied_key
 from prof_aliases import rmp_link_key
 
 from .db import chunk_insert
-from .names import get_college, name_to_slug
+from .names import COLLEGE_MAP, get_college, name_to_slug
 from .rmp_fields import rmp_id
 from .seed import LINK_FIELDS, PROFESSOR_FIELDS
 
@@ -59,6 +59,18 @@ def resolve_roster(pages, links, professors, is_denied=is_denied_key):
         new_links.append({"rmp_id": pid, "rmp_name": page["name"], "rmp_department": page["department"],
                           "professor_url": page["professor_url"], "slug": slug, "match_method": "exact"})
     return new_links, new_professors, counts
+
+
+def recollege(professors):
+    """[(slug, college)] for professors whose stored college is no longer
+    COLLEGE_MAP's for their department: a label corrected after they were
+    created. A department COLLEGE_MAP doesn't list is left alone rather than
+    sent to Other. Pure. run.py applies these to the professors it loads and
+    never writes them back: only the pipeline reads professors.college, so the
+    catalog and every vote see the correction, and the next COLLEGE_MAP edit is
+    picked up the same way."""
+    return [(p["slug"], COLLEGE_MAP[p["department"]]) for p in professors
+            if p["department"] in COLLEGE_MAP and COLLEGE_MAP[p["department"]] != p["college"]]
 
 
 def apply_roster(conn, new_links, new_professors):

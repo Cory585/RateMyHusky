@@ -36,6 +36,12 @@ def main(argv=None):
         return 1
     professors = fetch_all(conn, "SELECT slug, name, name_key, department, college, image_url, "
                                  "focus_x, focus_y, origin FROM professors")
+    # Before anything reads college: the subject vote and the Law exits skip
+    # professors by it.
+    recolleged = roster.recollege(professors)
+    print(f"colleges from COLLEGE_MAP over the stored label: {dict(sorted(Counter(c for _, c in recolleged).items()))}")
+    corrected = dict(recolleged)
+    professors = [{**p, "college": corrected.get(p["slug"], p["college"])} for p in professors]
 
     catalog_courses = fetch_all(conn, "SELECT code, name, department, subject, search_text, is_placeholder "
                                       "FROM catalog_courses")
