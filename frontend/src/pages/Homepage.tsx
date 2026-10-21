@@ -99,7 +99,7 @@ const Stars = ({ rating }: { rating: number }) => {
    The board sorts on the rating shrunk toward the site average by how many
    ratings back it, while the Rating column shows the unshrunk average — so that
    column legitimately moves backwards between adjacent rows, 1-6 times per board
-   on every board with rows.
+   on every board with two or more rows.
 
    Behind a "?" beside the heading rather than always on. What keeps the board
    from going unexplained without it is that both Rating and Ratings carry

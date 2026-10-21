@@ -675,9 +675,10 @@ def colleges():
 
 # ── Leaderboard ranking ──────────────────────────────────────────────
 # Ranking by raw avg_rating lets a 5.00 built on 3 reviews outrank a 4.9 built on
-# 500. 551 professors sit at exactly 5.00 and 97% of them have under 15 reviews,
-# which is why the Law and Professional Studies boards (which used to carry a
-# review floor of 5 rather than 100) filled up with them.
+# 500. 551 professors sit at exactly 5.00 and 97% of them have under 15 reviews.
+# That is why the Law and Professional Studies boards filled up with them when
+# those boards carried a review floor of 5 rather than 100 and course
+# evaluations still counted toward total_reviews.
 #
 # So rank on a Bayesian posterior mean instead — the IMDb Top 250 formula —
 # blending each professor toward the global mean with a prior worth SHRINKAGE_M
@@ -722,7 +723,8 @@ FALLBACK_PRIOR = 4.2   # only for an empty or brand-new catalog
 #
 #   - 100 is too strict for total_reviews as it now stands: RMP ratings and
 #     survey ratings only, since course evaluations left it (2026-10-04). At 100,
-#     6 of the boards that fill at 30 lose rows, and Engineering's is empty.
+#     all 6 of the boards that fill at 30 change members, 5 of them lose rows,
+#     and Engineering's drops to 0.
 #     Nor does shrinkage do the floor's job: Khoury's rank-10 score needs ~17
 #     reviews at a perfect 5.00, so it is the floor of 30, not the shrunk score,
 #     that keeps a thinly rated 5.00 off the board.
@@ -730,7 +732,7 @@ FALLBACK_PRIOR = 4.2   # only for an empty or brand-new catalog
 #     Studies 5, so a "top 10" was every rated professor in the college, on 5
 #     to 16 ratings each and scoring within 0.25 of the prior — an ordering
 #     that reflects the prior, not the professors. At 30 the Professional Studies
-#     board has 0 professors, and Law's is empty too, which is the honest answer:
+#     board has 0 professors and Law's has 0, which is the honest answer:
 #     neither college has well-measured ones yet.
 #
 # So a short board is a feature. Do not backfill it to reach `limit`.
