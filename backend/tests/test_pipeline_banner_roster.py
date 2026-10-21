@@ -207,12 +207,13 @@ def test_track_sql_joins_every_merged_spelling_and_counts_each_section_once():
 
 
 def test_track_sql_counts_law_courses_as_law_semester_in_any_term():
-    # Law moved onto the Semester calendar in Fall 2025; sections after the last
-    # CPS Quarter term are set apart, LAW ones excepted.
+    # Law moved onto the Semester calendar in Fall 2025; other sections after
+    # the last CPS Quarter term are set apart.
     sql = " ".join(br.TRACK_SECTIONS_SQL.split())
-    assert ("CASE WHEN s.subject = 'LAW' THEN 'Law Semester' "
-            "WHEN i.term_code > (SELECT max(term_code) FROM banner_terms WHERE track = 'CPS Quarter') "
-            "THEN 'After CPS Quarter' ELSE t.track END AS track") in sql
+    assert ("CASE WHEN subject = 'LAW' THEN 'Law Semester' "
+            "WHEN term_track = 'Law Semester' THEN term_track WHEN subject IN") in sql
+    assert ("WHEN term_code > (SELECT max(term_code) FROM banner_terms WHERE track = 'CPS Quarter') "
+            "THEN 'After CPS Quarter' ELSE term_track END AS track") in sql
 
 
 def test_sections_after_the_last_quarter_do_not_tip_a_cps_professor_out():
@@ -312,3 +313,47 @@ def test_track_labelled_professors_do_not_vote_on_a_subjects_college(monkeypatch
     rows = [{"professor_slug": s, "subject_course": "BLAW3100"} for s in ("l1", "l2", "b1")]
     profs = [prof("l1", "Law"), prof("l2", "Law"), prof("b1", "Business", "Business Law")]
     assert br.subject_colleges(rows, profs) == {"BLAW": "Business"}
+
+
+def test_track_sql_counts_cps_subjects_as_cps_quarter_in_any_term():
+    # CPS Quarter ends after Summer 2026; its subjects stand in for it.
+    sql = " ".join(br.TRACK_SECTIONS_SQL.split())
+    assert "WHEN subject IN (SELECT subject FROM cps_subjects) THEN 'CPS Quarter'" in sql
+    assert "(SELECT max(term_code) FROM banner_terms WHERE track = 'CPS Quarter')" in sql
+    assert "substring(subject_course from '[0-9]+')::int >= 5000 THEN 'CPS Quarter'" in sql
+
+
+def test_the_cps_vote_counts_the_same_teaching_sections():
+    sql = br.TRACK_SECTIONS_SQL
+    cps = sql[sql.index("cps_subjects AS"):sql.index("taught AS")]
+    assert "FROM listed" in cps and "NOT cancelled" in cps and "count(DISTINCT (term_code, crn))" in cps
+
+
+def test_the_cps_vote_cutoff_is_pinned_to_the_last_quarter():
+    sql = br.TRACK_SECTIONS_SQL
+    cps = sql[sql.index("cps_subjects AS"):sql.index("taught AS")]
+    assert f"term_code <= '{br.CPS_QUARTER_LAST_TERM}'" in cps and "max(term_code)" not in cps
+
+
+def test_the_vote_rows_are_split_from_the_track_rows():
+    rows = [{"instructor_key": None, "professor_slug": None, "track": None, "sections": None,
+             "cps_subject": "PJM", "cps_share": 0.9},
+            {"instructor_key": None, "professor_slug": "a", "track": "CPS Quarter", "sections": 2,
+             "cps_subject": None, "cps_share": None}]
+    assert br.split_cps_vote(rows) == ([rows[1]], frozenset({"PJM"}))
+
+
+def test_only_voted_subjects_close_to_the_bar_are_named():
+    # ITC clears the bar at 58% on production; a backfill could take it under.
+    rows = [{"cps_subject": s, "cps_share": share} for s, share in (("PJM", 0.9), ("ITC", 0.58))]
+    rows.append({"cps_subject": None, "cps_share": None})
+    assert br.cps_vote_near_bar(rows) == {"ITC": 0.58}
+
+
+def test_voted_cps_subjects_are_professional_studies_in_the_subject_vote(monkeypatch):
+    # ESL left the catalog but the track counts it as CPS; the exits must agree.
+    monkeypatch.setattr(br, "get_college", {"English": "CSSH"}.get)
+    rows = [{"professor_slug": "e1", "subject_course": "ESL5100"}]
+    profs = [prof("e1", "CSSH", "English")]
+    assert br.subject_colleges(rows, profs) == {"ESL": "CSSH"}
+    assert br.subject_colleges(rows, profs, br.CPS_SUBJECTS | {"ESL"}) == {"ESL": "Professional Studies"}
