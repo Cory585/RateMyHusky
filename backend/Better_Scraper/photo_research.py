@@ -12,7 +12,7 @@ _BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 
-from pipeline.names import department_key, get_college, normalize_name, upgrade_image_url  # noqa: E402
+from pipeline.names import COLLEGE_MAP, department_key, normalize_name, upgrade_image_url  # noqa: E402
 from prof_aliases import ALIAS_MAP  # noqa: E402
 
 
@@ -100,7 +100,7 @@ SKIP_PATTERNS = [
 ]
 
 # Local, photo-pipeline-only department->college mapping. Supplements
-# pipeline.names.COLLEGE_MAP (which we intentionally do NOT modify) so the photo
+# pipeline.names.COLLEGE_MAP, which the site's colleges come from, so the photo
 # run can organize the ~2,800 professors whose department strings are
 # not in the app's COLLEGE_MAP. Looked up as COLLEGE_MAP is, by department_key,
 # so the double-space artifacts left when "&" was stripped upstream match too.
@@ -153,16 +153,17 @@ SUPPLEMENTAL_COLLEGE_MAP = {
 }
 
 
-_SUPPLEMENTAL_COLLEGE_MAP = {department_key(k): v for k, v in SUPPLEMENTAL_COLLEGE_MAP.items()}
+# Built once: dept_to_college runs per professor. COLLEGE_MAP wins a shared key.
+_COLLEGE_BY_KEY = {department_key(k): v
+                   for m in (SUPPLEMENTAL_COLLEGE_MAP, COLLEGE_MAP) for k, v in m.items()}
 
 
 def dept_to_college(department):
-    """Map a department string to its college via pipeline.names.get_college,
-    then the supplemental local mapping."""
-    if not department:
+    """Map a department string to its college via pipeline.names.COLLEGE_MAP,
+    then the supplemental local mapping. A non-string (a pandas NaN) is Unknown."""
+    if not isinstance(department, str):
         return "Unknown"
-    return (get_college(department, None)
-            or _SUPPLEMENTAL_COLLEGE_MAP.get(department_key(department)) or "Unknown")
+    return _COLLEGE_BY_KEY.get(department_key(department), "Unknown")
 
 
 def is_plausible_photo_url(url):

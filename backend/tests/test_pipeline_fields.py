@@ -32,6 +32,7 @@ def test_names():
 
 def test_get_college_ignores_case_whitespace_and_how_the_ampersand_was_stripped():
     for dept in ("Counseling & Educational Psych", "Counseling amp Educational Psych",
-                 "Counseling  Educational Psych", " counseling &  educational psych "):
+                 "Counseling  Educational Psych", " counseling &  educational psych ",
+                 "Counseling Amp Educational Psych"):
         assert get_college(dept) == "Health Sciences"
     assert get_college("Underwater Basket Weaving", None) is None

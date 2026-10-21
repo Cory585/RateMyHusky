@@ -94,7 +94,7 @@ COLLEGE_MAP = {
 def department_key(dept):
     """dept as COLLEGE_MAP is looked up: case and whitespace ignored, and "&"
     the same as the "amp" or bare gap it is left as when stripped upstream."""
-    return re.sub(r"\s+", " ", re.sub(r"&|\bamp\b", " ", dept)).strip().lower()
+    return re.sub(r"\s+", " ", re.sub(r"&|\bamp\b", " ", dept.lower())).strip()
 
 
 # Built once: get_college runs per professor.

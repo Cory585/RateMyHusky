@@ -69,3 +69,4 @@ def test_dept_to_college_supplemental_mapping():
     # genuinely unmapped admin departments stay Unknown
     assert pr.dept_to_college("Army ROTC") == "Unknown"
     assert pr.dept_to_college("") == "Unknown"
+    assert pr.dept_to_college(float("nan")) == "Unknown"
