@@ -1,7 +1,7 @@
 """Tests for the GOATED leaderboard's Bayesian ranking.
 
 Ranking by raw avg_rating let a 5.00 from 3 reviews outrank a 4.9 from 500 --
-276 professors sit at exactly 5.00 and 95% of them have fewer than 15 reviews.
+551 professors sit at exactly 5.00 and 97% of them have fewer than 15 reviews.
 The board now sorts on a shrunk posterior mean instead, while still *displaying*
 avg_rating.
 """

@@ -103,12 +103,18 @@ class Corpus:
 
     def board(self, college, floor=None, limit=10):
         floor = server.BOARD_MIN_REVIEWS if floor is None else floor
-        return self.rows(
-            f"SELECT * FROM professors_catalog WHERE college = %s "
-            f"AND total_reviews >= %s "
-            f"ORDER BY {server.RANKING_SCORE_SQL} DESC NULLS LAST, "
-            f"total_reviews DESC, name LIMIT %s",
-            (college, floor, self.prior, limit))
+        # Cached: several claims read the same board, each a round trip to a
+        # remote database otherwise.
+        if not hasattr(self, "_boards"):
+            self._boards = {}
+        if (college, floor, limit) not in self._boards:
+            self._boards[college, floor, limit] = self.rows(
+                f"SELECT * FROM professors_catalog WHERE college = %s "
+                f"AND total_reviews >= %s "
+                f"ORDER BY {server.RANKING_SCORE_SQL} DESC NULLS LAST, "
+                f"total_reviews DESC, name LIMIT %s",
+                (college, floor, self.prior, limit))
+        return self._boards[college, floor, limit]
 
     @property
     def all_board_rows(self):
@@ -121,6 +127,18 @@ class Corpus:
         board = self.board(college)
         return sum(1 for a, b in zip(board, board[1:])
                    if (a["avg_rating"] or 0) < (b["avg_rating"] or 0))
+
+    def full_boards(self):
+        """(names at the floor, names at a floor of 100) for each board that fills at the floor."""
+        return [([r["name"] for r in self.board(x)], [r["name"] for r in self.board(x, floor=100)])
+                for x in self.colleges if len(self.board(x)) == 10]
+
+    def eligible_at_five(self):
+        """Law and Professional Studies professors the old floor of 5 ranked."""
+        return self.rows(
+            f"SELECT total_reviews, {server.RANKING_SCORE_SQL} s FROM professors_catalog "
+            f"WHERE college IN ('Law', 'Professional Studies') "
+            f"AND avg_rating IS NOT NULL AND total_reviews >= 5", (self.prior,))
 
 
 @pytest.fixture(scope="module")
@@ -174,41 +192,75 @@ CLAIMS = [
      ("rel", 0.15)),
 
     ("Law professors eligible at a floor of 5", SERVER_PY,
-     r"Law survives it on population \((\d+) eligible\)",
+     r"Law had (\d+) eligible at that floor",
      lambda c: c.val("SELECT count(*) FROM professors_catalog WHERE college = 'Law' "
                      "AND avg_rating IS NOT NULL AND total_reviews >= 5"),
-     ("rel", 0.10)),
+     ("abs", 2)),
 
     ("Professional Studies eligible at a floor of 5", SERVER_PY,
-     r"Professional Studies had (\d+),",
+     r"and Professional\s*\n#\s*Studies (\d+), so",
      lambda c: c.val("SELECT count(*) FROM professors_catalog "
                      "WHERE college = 'Professional Studies' "
                      "AND avg_rating IS NOT NULL AND total_reviews >= 5"),
      ("abs", 3)),
 
     ("length of the Professional Studies board", SERVER_PY,
-     r"At 30 that board is (\d+) professors long",
+     r"At 30 the Professional Studies\s*\n#\s*board has (\d+) professors",
      lambda c: len(c.board("Professional Studies")),
+     ("abs", 1)),
+
+    ("most ratings among those", SERVER_PY,
+     r"\bto (\d+) ratings each",
+     lambda c: max(r["total_reviews"] for r in c.eligible_at_five()),
+     ("abs", 3)),
+
+    ("furthest of those from the prior", SERVER_PY,
+     r"scoring within (0\.\d+) of the prior",
+     lambda c: max(abs(float(r["s"]) - c.prior) for r in c.eligible_at_five()),
+     ("abs", 0.05)),
+
+    ("length of the Law board", SERVER_PY,
+     r"and Law's has (\d+), which",
+     lambda c: len(c.board("Law")),
+     ("abs", 1)),
+
+    # Names, not lengths: a 10-row board can keep its length at 100 and still
+    # change who is on it.
+    ("full boards a floor of 100 would change", SERVER_PY,
+     r"all (\d+) of the boards that fill at 30 change members",
+     lambda c: sum(1 for at_30, at_100 in c.full_boards() if at_30 != at_100),
+     ("abs", 1)),
+
+    ("full boards a floor of 100 would shorten", SERVER_PY,
+     r"change members, (\d+) of them lose rows",
+     lambda c: sum(1 for at_30, at_100 in c.full_boards() if len(at_100) < len(at_30)),
+     ("abs", 1)),
+
+    ("length of the Engineering board at 100", SERVER_PY,
+     r"and Engineering's drops to (\d+)\.",
+     lambda c: len(c.board("Engineering", floor=100)),
      ("abs", 1)),
 
     ("score/review-count tie groups", SERVER_PY,
      r"\b(\d+) such groups across the catalog",
      lambda c: _tie_groups(c)[0],
-     ("rel", 0.25)),
+     ("abs", 2)),
 
     ("professors involved in those ties", SERVER_PY,
      r"covering (\d+) professors",
      lambda c: _tie_groups(c)[1],
-     ("rel", 0.25)),
+     ("abs", 4)),
 
+    # Exact at the low end: a board with two or more rows and no inversion
+    # makes "every board" false.
     ("fewest rating inversions on a board", HOMEPAGE_TSX,
      r"moves backwards between adjacent rows, (\d+)-\d+ times per board",
-     lambda c: min(c.rating_inversions(x) for x in c.colleges),
-     ("abs", 1)),
+     lambda c: min(_inversions(c), default=None),
+     ("abs", 0)),
 
     ("most rating inversions on a board", HOMEPAGE_TSX,
      r"moves backwards between adjacent rows, \d+-(\d+) times per board",
-     lambda c: max(c.rating_inversions(x) for x in c.colleges),
+     lambda c: max(_inversions(c), default=None),
      ("abs", 1)),
 
     ("professors at exactly 5.00 (goat test docstring)", GOAT_TEST,
@@ -216,6 +268,12 @@ CLAIMS = [
      lambda c: c.val("SELECT count(*) FROM professors_catalog WHERE avg_rating = 5.0"),
      ("rel", 0.10)),
 ]
+
+
+def _inversions(corpus):
+    """Rating inversions per board, over boards with two or more rows, as the
+    Homepage comment counts them."""
+    return [corpus.rating_inversions(x) for x in corpus.colleges if len(corpus.board(x)) > 1]
 
 
 def _reviews_to_reach(corpus, college):
@@ -239,8 +297,8 @@ def _tie_group_sizes(corpus, college=None):
     Grouped by college as well as by score and review count, because each board
     is a single college: two professors in different colleges never compete for a
     slot, so a tie between them is not a tie the `name` tiebreak has to settle.
-    Grouping globally instead reports 520 professors where the boards actually
-    contain 127.
+    Grouping globally would also count ties between professors on different
+    boards.
 
     Deliberately not wrapped in an outer count(*): that returns a single row
     holding the number of groups, which reads as one group of that size and gets
@@ -302,27 +360,6 @@ def test_claim_still_matches_the_corpus(label, path, pattern, measure, tol, corp
         f"  tolerance: +/-{slack:g}\n"
         f"Rewrite the comment with the measured value. If precompute.py has just "
         f"run, expect several of these together.")
-
-
-# Law and Professional Studies are excluded from the floor comparison because
-# they never carried the 100 floor -- they were the two colleges the old code
-# dropped to 5. Comparing them to a hypothetical 100 would test a floor that was
-# never in force and always "fail".
-NEVER_ON_THE_100_FLOOR = {"Law", "Professional Studies"}
-
-
-def test_business_is_the_only_board_the_review_floor_changes(corpus):
-    """server.py names Business rank 10 as the one row a 100 -> 30 floor moves."""
-    moved = {}
-    for college in set(corpus.colleges) - NEVER_ON_THE_100_FLOOR:
-        strict = [r["name"] for r in corpus.board(college, floor=100)]
-        actual = [r["name"] for r in corpus.board(college, floor=30)]
-        if strict != actual:
-            moved[college] = (strict, actual)
-    assert set(moved) <= {"Business"}, (
-        f"the review floor now changes boards server.py does not mention: "
-        f"{sorted(set(moved) - {'Business'})}. The '100 was doing almost no work' "
-        f"argument needs re-measuring.")
 
 
 def test_no_tie_group_reaches_a_board_top_ten(corpus):
