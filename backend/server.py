@@ -728,16 +728,28 @@ FALLBACK_PRIOR = 4.2   # only for an empty or brand-new catalog
 #     Nor does shrinkage do the floor's job: Khoury's rank-10 score needs ~17
 #     reviews at a perfect 5.00, so it is the floor of 30, not the shrunk score,
 #     that keeps a thinly rated 5.00 off the board.
-#   - 5 was the actual bug. Law had 7 eligible at that floor and Professional
-#     Studies 5, so a "top 10" was every rated professor in the college, on 5
-#     to 16 ratings each and scoring within 0.25 of the prior — an ordering
-#     that reflects the prior, not the professors. At 30 the Professional Studies
-#     board has 0 professors and Law's has 0, which is the honest answer:
-#     neither college has well-measured ones yet.
+#   - 5 was the old exception's floor, and it comes back as a fill rather than a
+#     floor. Health Sciences has 5 professors at 30, and a short board read as
+#     broken. So a board that has fewer than `limit` professors at 30 is filled
+#     from those with at least BOARD_FILL_MIN_REVIEWS. The fill ranks below
+#     every professor at 30, whatever its score: shrinkage alone would let a
+#     5.00 on 20 ratings pass a 4.50 on 30. A board that is full at 30 never
+#     reaches the fill.
 #
-# So a short board is a feature. Do not backfill it to reach `limit`.
+# Nobody rated below the prior is on a board, however many ratings back it.
+# Ranking the 30+ tier first otherwise put a 2.86 on 250 ratings at Health
+# Sciences #5, above fill professors at 4.57-5.00.
 BOARD_MIN_REVIEWS = 30
-BOARD_COLLEGES = frozenset(COLLEGE_MAP.values())
+BOARD_FILL_MIN_REVIEWS = 5
+
+# Law and Professional Studies have no board at all. Neither has a professor
+# at 30 (their grad, part-time and online students barely use RMP), and even
+# the fill cannot reach 10: Law had 7 eligible at that floor and Professional
+# Studies 5, so a "top 10" would be every rated professor in the college, on 5
+# to 16 ratings each and scoring within 0.25 of the prior. Homepage.tsx leaves
+# them out of COLLEGES to match.
+NO_BOARD_COLLEGES = frozenset({"Law", "Professional Studies"})
+BOARD_COLLEGES = frozenset(COLLEGE_MAP.values()) - NO_BOARD_COLLEGES
 
 # total_reviews (BIGINT) is cast to float so the shrinkage arithmetic is
 # floating-point throughout instead of leaning on implicit int/float coercion.
@@ -785,16 +797,17 @@ def goat_professors():
     # v5: the ordering has changed three times — to the shrunk score, again when
     # the prior stopped being the whole-catalog average, and again when the
     # per-college review floor collapsed to a single BOARD_MIN_REVIEWS and the
-    # sort gained a name tiebreak. An unbumped key serves the previous version
+    # sort gained a name tiebreak (v6: short boards are filled from 5 ratings,
+    # Law and Professional Studies lost their boards, and below-prior ratings left). An unbumped key serves the previous version
     # from the cache after deploy, which looks exactly like the fix not working.
     # Unknown colleges are answered before the cache: every value would
     # otherwise store its own [] and push real boards out of the LRU. With
     # limit clamped, a college holds at most 50 entries.
     if college not in BOARD_COLLEGES:
         return jsonify([])
-    cache_key = f"goat:v5:{college}:{limit}"
+    cache_key = f"goat:v6:{college}:{limit}"
     cached = cache_get(cache_key)
-    # `is not None`: an empty board (Law) is a real answer and must cache too.
+    # `is not None`: an empty board is a real answer and must cache too.
     if cached is not None:
         return jsonify(cached)
 
@@ -813,10 +826,11 @@ def goat_professors():
     # is the only place the ordering is visible.
     rows = query(f"""
         SELECT * FROM professors_catalog
-        WHERE college = %s AND total_reviews >= %s
-        ORDER BY {RANKING_SCORE_SQL} DESC NULLS LAST, total_reviews DESC, name
+        WHERE college = %s AND total_reviews >= %s AND avg_rating >= %s
+        ORDER BY total_reviews >= %s DESC,
+                 {RANKING_SCORE_SQL} DESC NULLS LAST, total_reviews DESC, name
         LIMIT %s
-    """, (college, BOARD_MIN_REVIEWS, prior, limit))
+    """, (college, BOARD_FILL_MIN_REVIEWS, prior, BOARD_MIN_REVIEWS, prior, limit))
 
     result = []
     for row in rows:
