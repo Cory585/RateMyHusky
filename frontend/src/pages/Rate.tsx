@@ -79,6 +79,8 @@ export default function Rate() {
   const panelRef = useRef<HTMLDivElement>(null);
   const visitRef = useRef(0);
   const { containerRef, token, failed, reset } = useTurnstile();
+  // The checkpoint holds the form back until the first token; later re-checks happen under the form.
+  const [cleared, setCleared] = useState(false);
   const isDesktop = useMediaQuery('(min-width: 1024px)');
 
   const slug = answers.professor?.slug ?? null;
@@ -223,9 +225,17 @@ export default function Rate() {
     beginVisit();
   };
 
+  useEffect(() => { if (token) setCleared(true); }, [token]);
+
+  // The checkpoint stands alone, like Cloudflare's own page, so the navbar waits with the form.
+  useEffect(() => {
+    document.body.classList.toggle('rate-checking', !cleared);
+    return () => document.body.classList.remove('rate-checking');
+  }, [cleared]);
+
   useEffect(() => {
     if (ready) panelRef.current?.querySelector<HTMLElement>('h1')?.focus({ preventScroll: true });
-  }, [step, ready, coursesLoading]);
+  }, [step, ready, coursesLoading, cleared]);
 
   const go = (next: Answers, from: StepId) => {
     setAnswers(next);
@@ -370,11 +380,12 @@ export default function Rate() {
 
   const chip = contextChip(answers);
   const edit = (to: StepId) => setStep(to === 'course' || to === 'term' ? editScreen(to, answers) : to);
+  const host = window.location.hostname;
 
   return (
-    <div className="rate-page">
+    <div className={`rate-page${cleared ? '' : ' rate-page-check'}`}>
       <div className="rate-shell">
-        {isDesktop && ready && (
+        {isDesktop && ready && cleared && (
           <SidePanel
             answers={answers}
             step={step}
@@ -385,7 +396,7 @@ export default function Rate() {
           />
         )}
         <div className="rate-panel" ref={panelRef}>
-          {step !== 'thanks' && (
+          {cleared && step !== 'thanks' && (
             <div className="rate-prog" aria-hidden="true">
               {Array.from({ length: QUESTION_COUNT }, (_, i) => (
                 <i key={i} className={i <= progressIndex(step) ? 'on' : undefined} />
@@ -393,9 +404,27 @@ export default function Rate() {
             </div>
           )}
           {startFailed && <p className="rate-hint" role="alert">We couldn't start the form. Please reload and try again.</p>}
-          {ready && chip && step !== 'thanks' && <div className="rate-chip">{chip}</div>}
-          {ready && renderStep()}
-          <div ref={containerRef} className="rate-turnstile" />
+          {cleared && ready && chip && step !== 'thanks' && <div className="rate-chip">{chip}</div>}
+          {cleared && ready && renderStep()}
+          {!cleared && (
+            <div className="rate-check">
+              <h1 className="rate-check-host" tabIndex={-1}>{host}</h1>
+              {failed ? (
+                <p className="rate-error" role="alert">We couldn't verify your browser. Try turning off a VPN or ad blocker, then try again.</p>
+              ) : (
+                <p className="rate-check-lead" role="status">Verifying you are human. This may take a few seconds.</p>
+              )}
+            </div>
+          )}
+          {/* One container in one place for the whole visit, so the widget survives the checkpoint giving way to the form. */}
+          <div ref={containerRef} className={`rate-turnstile${cleared && token ? ' is-done' : ''}`} />
+          {!cleared && (
+            <div className="rate-check">
+              {failed && <button type="button" className="rate-check-retry" onClick={reset}>Try again</button>}
+              <p className="rate-check-note">{host} needs to review the security of your connection before you can rate.</p>
+              <p className="rate-check-foot">Protected by Cloudflare Turnstile</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

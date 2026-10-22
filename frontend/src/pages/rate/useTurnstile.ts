@@ -19,7 +19,8 @@ export function useTurnstile(): { containerRef: RefObject<HTMLDivElement | null>
       clearInterval(interval);
       const id = window.turnstile.render(containerRef.current, {
         sitekey: TURNSTILE_SITE_KEY,
-        appearance: 'interaction-only',
+        // Visible so the checkpoint shows Cloudflare's box; Rate hides it again once a token is in hand.
+        appearance: 'always',
         callback: (t: string) => {
           setToken(t);
           setFailed(false); // an automatic retry recovered from an earlier error
