@@ -388,16 +388,6 @@ const Professor = () => {
     () => unfiltered ? reviews : reviews.filter(r => r.courseCode !== null && selectedCourses.has(r.courseCode)),
     [reviews, selectedCourses, unfiltered]);
 
-  /* A rating is any score; a review is a rating with a written comment. Only reviews get cards. */
-  const writtenReviews = useMemo(() => reviews.filter(r => r.comment?.trim()), [reviews]);
-
-  /* Reviews per course, counted the way the list shows them when only that course is picked. */
-  const reviewCountByCourse = useMemo(() => {
-    const byCourse = new Map<string, typeof reviews>();
-    for (const r of writtenReviews) if (r.courseCode !== null) byCourse.set(r.courseCode, [...(byCourse.get(r.courseCode) ?? []), r]);
-    return new Map([...byCourse].map(([code, rs]) => [code, deduplicateByText(rs, r => r.comment).length]));
-  }, [writtenReviews]);
-
   const filteredRmpReviews = useMemo(
     () => deduplicateByText(rmpRatingsInSelection.filter(r => r.comment?.trim()), r => r.comment),
     [rmpRatingsInSelection]);
@@ -625,7 +615,6 @@ const Professor = () => {
     const terms = [...new Set((c.terms ?? []).map(cleanTerm))].filter(t => /\b20\d{2}\b/.test(t)).sort((a, b) => termSortKey(b) - termSortKey(a));
     const termsExpanded = expandedTerms.has(code);
     const hiddenTermCount = terms.length - MAX_VISIBLE_TERMS;
-    const reviewCount = reviewCountByCourse.get(c.code) ?? 0;
     const unrated = c.numRatings === 0;
     const hasPage = c.hasPage ?? c.name != null;
     return (
@@ -637,14 +626,7 @@ const Professor = () => {
       <div className="prof-course-row-main">
         <span className="prof-course-code">{c.code}</span>
         <span className="prof-course-title">{c.name ?? ''}</span>
-        <span className="prof-course-terms">
-          {unrated ? 'No ratings yet' : (
-            <>
-              {c.numRatings.toLocaleString()} rating{c.numRatings === 1 ? '' : 's'}
-              {reviewCount > 0 && <>{' · '}{reviewCount.toLocaleString()} review{reviewCount === 1 ? '' : 's'}</>}
-            </>
-          )}
-        </span>
+        {unrated && <span className="prof-course-terms">No ratings yet</span>}
       </div>
       {(hasPage || terms.length > 0) && (
         <div className="prof-course-lower">

@@ -2,6 +2,7 @@
 Primary Homepage Codespace
 */
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import SearchBar from '../components/SearchBar';
 import Footer from '../components/Footer';
@@ -217,6 +218,9 @@ const Homepage = () => {
   const shuffleSectionRef = useRef<HTMLElement>(null);
   const [shuffling, setShuffling] = useState(false);
   const [openTooltip, setOpenTooltip] = useState<number | null>(null);
+  const [rankSheetOpen, setRankSheetOpen] = useState(false);
+  const rankHelpRef = useRef<HTMLButtonElement>(null);
+  const rankSheetBtnRef = useRef<HTMLButtonElement>(null);
   const [showAskTip, setShowAskTip] = useState(() => localStorage.getItem('home_ask_tip_dismissed') !== '1');
   const [askTrigger, setAskTrigger] = useState<number | undefined>(undefined);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -241,6 +245,19 @@ const Homepage = () => {
     el.addEventListener('scroll', updateLeaderFade, { passive: true });
     return () => el.removeEventListener('scroll', updateLeaderFade);
   }, [profs, updateLeaderFade]);
+
+  // The ranking sheet takes focus while open, closes on Escape, and hands focus back to the "?".
+  useEffect(() => {
+    if (!rankSheetOpen) return;
+    const help = rankHelpRef.current;
+    rankSheetBtnRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setRankSheetOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      help?.focus();
+    };
+  }, [rankSheetOpen]);
 
   // Pill animation state
   const [pillStyle, setPillStyle] = useState({ left: 0, width: 0, opacity: 0 });
@@ -536,21 +553,33 @@ const Homepage = () => {
             <h2 className="section-title">GOATED Professors</h2>
             {/* A real button, not a styled span, so the tooltip is reachable
                 without a pointer: it opens on :hover for mice and :focus-visible
-                for keyboards, and on a touch device a tap fires the sticky
-                :hover. All three paths are CSS, so there is no open/closed state
-                to track here — unlike RatingCell, which needs click-toggling
-                because its tooltip sits inside a row that is itself a link. */}
+                for keyboards. Both paths are CSS. On a phone the bubble is hidden
+                and a tap opens the bottom sheet below instead. */}
             <button
               type="button"
               className="goat-rank-help"
               aria-label="How the ranking works"
               aria-describedby="goat-rank-note"
+              ref={rankHelpRef}
+              onClick={() => { if (window.matchMedia('(max-width: 768px)').matches) setRankSheetOpen(true); }}
             >
               ?
               <span id="goat-rank-note" role="tooltip" className="goat-rank-tooltip">
                 {RANK_NOTE}
               </span>
             </button>
+            {/* Portaled so the overlay escapes the section and covers the fixed navbar too. */}
+            {rankSheetOpen && createPortal(
+              <>
+                <div className="goat-rank-overlay" onClick={() => setRankSheetOpen(false)} />
+                <div className="goat-rank-sheet" role="dialog" aria-modal="true" aria-labelledby="goat-rank-sheet-title">
+                  <h2 id="goat-rank-sheet-title">How the ranking works</h2>
+                  <p>{RANK_NOTE}</p>
+                  <button type="button" ref={rankSheetBtnRef} onClick={() => setRankSheetOpen(false)}>Got it</button>
+                </div>
+              </>,
+              document.body,
+            )}
           </div>
         </div>
 
