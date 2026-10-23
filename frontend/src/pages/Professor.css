@@ -134,11 +134,15 @@
   position: relative; z-index: 2;
 }
 @media (min-width: 1280px) {
-  .prof-stats { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 14px; }
+  .prof-stats { grid-template-columns: none; grid-template-rows: repeat(3, auto); grid-auto-flow: column; grid-auto-columns: 1fr; gap: 14px; }
 }
+/* Each card's value, label and third row are rows of the shared grid, so a label that wraps
+   grows its row for every card and nothing falls out of line. */
 .prof-stat-card {
   background: #fff; border-radius: 16px; padding: 21px 18px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  display: grid; grid-row: span 3; grid-template-rows: subgrid; grid-template-columns: 100%; justify-items: center; row-gap: 6px;
+  /* Lets a 1fr column stay narrower than an unshrunk term, so FitText has a width to fit. */
+  min-width: 0;
   box-shadow: 0 2px 12px rgba(0,0,0,0.06);
   transition: transform 0.2s, box-shadow 0.2s;
   animation: profCardIn 0.5s ease both;
@@ -194,7 +198,8 @@
 .prof-stat-value { font-size: clamp(1.6rem, 2.5vw, 2.3rem); font-weight: 900; color: #333; line-height: 1; }
 .prof-stat-value.accent { color: #d6394c; }
 .prof-stat-value.green { color: #27ae60; }
-.prof-stat-value-text { text-align: center; }
+/* Full card width, which FitText shrinks the term to fit. */
+.prof-stat-value-text { justify-self: stretch; text-align: center; }
 .prof-stat-label {
   font-size: 0.72rem;
   font-weight: 700;

@@ -11,10 +11,11 @@ import Seo from '../components/Seo';
 import { fetchProfessorFull } from '../api/api';
 import type { ProfessorPage, ProfessorCourse, RatingDistribution, RedditMention, TeachingAward } from '../api/api';
 import { SHOW_SURVEY_STATS } from '../config';
-import { relativeTerm, termSortKey } from '../utils/termUtils';
+import { relativeTerm, seasonYear, termSortKey } from '../utils/termUtils';
 import { isPinned, pinnedFirst } from '../utils/askPinMatch';
 import { photoThumb, thumbOnError } from '../utils/photoThumb';
 import BookmarkButton from '../components/BookmarkButton';
+import FitText from '../components/FitText';
 import neuIcon from '../assets/neu-circle-icon.png';
 import './Professor.css';
 
@@ -851,7 +852,7 @@ const Professor = () => {
         </>)}
         {profile.lastTaught && (
           <div className="prof-stat-card">
-            <span className="prof-stat-value prof-stat-value-text">{profile.lastTaught}</span>
+            <span className="prof-stat-value prof-stat-value-text"><FitText>{seasonYear(profile.lastTaught)}</FitText></span>
             <span className="prof-stat-label">Last Taught</span>
             <div className="prof-stat-extra"><span className="prof-stat-hint">{relativeTerm(profile.lastTaught)}</span></div>
           </div>

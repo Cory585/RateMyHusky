@@ -32,9 +32,12 @@ export function termSortKey(title: string): number {
 
 const SEASONS = ['spring', 'summer', 'fall'] as const;
 
+/** "Summer 1 2026" / "Summer Full 2026" -> "Summer 2026", short enough for a stat card. */
+export const seasonYear = (label: string) => label.replace(/^Summer (?:1|2|Full) /, 'Summer ');
+
 /**
  * Reads a Banner term label ("Fall 2026", "Summer 1 2026", "Winter 2027") against today:
- * "This semester", "Next semester", "Last semester", "Last summer", "2 years ago".
+ * "This semester", "Next semester", "Upcoming", "Last semester", "Last summer", "2 years ago".
  * Summer sessions count as one summer, Winter as spring. Null for a label it can't read.
  */
 export function relativeTerm(label: string, now = new Date()): string | null {
@@ -47,7 +50,14 @@ export function relativeTerm(label: string, now = new Date()): string | null {
   const term = index(Number(m[2]), season);
   const isSummer = season === 'summer';
 
-  if (term > current) return isSummer ? 'Next summer' : 'Next semester';
+  if (term > current) {
+    // The first spring/fall after now, skipping a summer the same way lastSemester does.
+    let nextSemester = current + 1;
+    if (nextSemester % 3 === SEASONS.indexOf('summer')) nextSemester += 1;
+    if (term === nextSemester) return 'Next semester';
+    if (isSummer && term - current < 3) return 'Next summer';
+    return 'Upcoming';
+  }
   if (term === current) return isSummer ? 'This summer' : 'This semester';
   // The newest spring/fall before now; summers in between don't count as a semester.
   let lastSemester = current - 1;

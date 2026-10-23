@@ -88,22 +88,31 @@
 	z-index: 2;
 }
 
-/* One row of 6 only once cards are wide enough that "Fall 2026" and "Typical Class Size"
-   stay on one line; a wrapped card would center its value off the others'. */
+/* One row once cards are wide enough that "Typical Class Size" stays on one line. Columns
+   follow the card count, so a course without Banner history doesn't leave empty ones. */
 @media (min-width: 1280px) {
-	.course-stats-grid { grid-template-columns: repeat(6, 1fr); }
+	.course-stats-grid {
+		grid-template-columns: none;
+		grid-template-rows: repeat(3, auto);
+		grid-auto-flow: column;
+		grid-auto-columns: 1fr;
+	}
 }
 
+/* Each card's value, label and third row are rows of the shared grid, so a label that wraps
+   grows its row for every card and nothing falls out of line. */
 .course-stat-card {
 	background: #fff;
 	border-radius: 16px;
 	padding: 21px 18px;
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	gap: 6px;
-	min-height: 130px;
+	display: grid;
+	grid-row: span 3;
+	grid-template-rows: subgrid;
+	grid-template-columns: 100%;
+	justify-items: center;
+	row-gap: 6px;
+	/* Lets a 1fr column stay narrower than an unshrunk term, so FitText has a width to fit. */
+	min-width: 0;
 	box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
 	transition: transform 0.2s, box-shadow 0.2s;
 	animation: courseCardIn 0.5s ease both;
@@ -197,8 +206,9 @@
 	white-space: nowrap;
 }
 
+/* Full card width, which FitText shrinks the term to fit. */
 .course-stat-value--text {
-	white-space: normal;
+	justify-self: stretch;
 	text-align: center;
 }
 
@@ -654,7 +664,6 @@
 
 	.course-stat-card {
 		padding: 17px 12px;
-		min-height: 105px;
 	}
 
 	.course-stat-value {
@@ -933,7 +942,8 @@
 		row-gap: 2px;
 	}
 
-	.course-catalog-facts dd + dt {
+	/* Each dt/dd pair is wrapped in its own div, so the gap goes on the next pair's dt. */
+	.course-catalog-facts > div + div dt {
 		margin-top: 8px;
 	}
 }

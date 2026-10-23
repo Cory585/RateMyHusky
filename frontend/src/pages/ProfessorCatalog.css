@@ -768,17 +768,20 @@
   transition: height 0.25s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s;
 }
 
-.prof-list-bookmark:hover::before {
-  height: 32px;
-  background: #b5b5b5;
-}
-
 .prof-list-bookmark.bookmarked::before {
   background: #d6394c;
 }
 
-.prof-list-bookmark.bookmarked:hover::before {
-  background: #b82e3f;
+/* Hover only where it exists: on touch, :hover sticks after a tap and leaves the ribbon dropped. */
+@media (hover: hover) {
+  .prof-list-bookmark:hover::before {
+    height: 32px;
+    background: #b5b5b5;
+  }
+
+  .prof-list-bookmark.bookmarked:hover::before {
+    background: #b82e3f;
+  }
 }
 
 .prof-list-item:last-child {
@@ -1468,8 +1471,10 @@
     min-height: 72px;
   }
 
+  /* Ends at 34px, where the row's padding does, so a tap on the avatar's edge isn't a bookmark. */
   .catalog-list .prof-list-bookmark.bookmark-btn {
     left: 7px;
+    width: 27px;
   }
 
   .catalog-list .prof-list-avatar {
@@ -1730,8 +1735,10 @@
   background: #4a4a4a;
 }
 
-.dark .prof-list-bookmark:hover::before {
-  background: #5e5e5e;
+@media (hover: hover) {
+  .dark .prof-list-bookmark:hover::before {
+    background: #5e5e5e;
+  }
 }
 
 .dark .prof-list-bookmark.bookmarked::before {
