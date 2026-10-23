@@ -1,4 +1,5 @@
 import Footer from '../components/Footer';
+import { BANNER_SINCE } from '../config';
 import './Terms.css';
 
 const Privacy = () => {
@@ -8,7 +9,7 @@ const Privacy = () => {
         <div className="terms-shell">
           <header className="terms-header">
             <h1>Privacy Policy</h1>
-            <p className="terms-meta">Effective October 19, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective October 21, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -265,7 +266,7 @@ const Privacy = () => {
                   privacy policies.
                 </li>
                 <li>
-                  <strong>RateMyProfessors, Northeastern faculty and award pages, the Northeastern course catalog &amp; Reddit</strong>: these are data sources only. We do not send any user
+                  <strong>RateMyProfessors, Northeastern faculty and award pages, the Northeastern course catalog and course schedule (NUBanner) &amp; Reddit</strong>: these are data sources only. We do not send any user
                   data to these services.
                 </li>
                 <li>
@@ -392,6 +393,11 @@ const Privacy = () => {
                   department comparisons).
                 </li>
                 <li>
+                  The courses and terms they taught since {BANNER_SINCE}, with the average class
+                  size of each course they taught, taken from Northeastern's public course
+                  schedule.
+                </li>
+                <li>
                   Ratings and written reviews from RateMyProfessors, and ratings submitted by
                   students through RateMyHusky's own rating form.
                 </li>
@@ -426,7 +432,8 @@ const Privacy = () => {
                 requests. Once processed, your name is added to a
                 removal list that every data loader checks before writing, so a weekly refresh
                 cannot reinstate you, and the rows already loaded — your page, your imported ratings and
-                comments, your Reddit mentions, and the evidence corpus built from them — are
+                comments, your course-schedule history, your Reddit mentions, and the evidence
+                corpus built from them — are
                 deleted. Ratings that students submitted through our own rating form about you
                 are deleted on request; our team handles those by hand. Two limits are worth being straight about: we cannot remove your data
                 from RateMyProfessors or Reddit themselves, and our own private source
