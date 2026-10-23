@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ChoiceGroup, StepFoot } from './ChoiceGroup';
 import type { ChoiceOption } from './ChoiceGroup';
-import { SEASONS, displayTerm, formatCode, lastName, termYears } from './rateFlow';
+import { SEASONS, displayTerm, formatCode, lastName, splitTerm, termYears } from './rateFlow';
 import type { RateCourse, RateProfessor } from './rateFlow';
 
 const OTHER = '+other';
@@ -9,7 +9,7 @@ const OTHER = '+other';
 interface TermStepProps {
   professor: RateProfessor;
   course: RateCourse;
-  selected?: string;
+  selected?: string | null;
   onPick: (term: string | null) => void;
   onOther: () => void;
 }
@@ -18,27 +18,34 @@ export function TermStep({ professor, course, selected, onPick, onOther }: TermS
   const options: ChoiceOption<string>[] = course.terms.map((t) => ({ value: t, label: displayTerm(t), aria: displayTerm(t) }));
   options.push({ value: OTHER, aria: 'A different term', label: '+ A different term', className: 'dash' });
   return (
-    <ChoiceGroup
-      legend="When did you take it?"
-      subtitle={`Terms Prof. ${lastName(professor.name)} taught ${formatCode(course.code)}, or pick any other.`}
-      options={options}
-      value={selected}
-      layout="stack"
-      onPick={(v) => (v === OTHER ? onOther() : onPick(v))}
-    />
+    <>
+      <ChoiceGroup
+        legend="When did you take it?"
+        subtitle={`Terms Prof. ${lastName(professor.name)} taught ${formatCode(course.code)}, or pick any other.`}
+        options={options}
+        value={selected ?? undefined}
+        layout="stack"
+        onPick={(v) => (v === OTHER ? onOther() : onPick(v))}
+      />
+      {selected === null && (
+        <button type="button" className="rate-ghost on" aria-pressed="true" onClick={() => onPick(null)}>Not sure</button>
+      )}
+    </>
   );
 }
 
 interface OtherTermStepProps {
   now: Date;
+  selected?: string | null;
   onPick: (term: string | null) => void;
   onBack: () => void;
 }
 
-export function OtherTermStep({ now, onPick, onBack }: OtherTermStepProps) {
+export function OtherTermStep({ now, selected, onPick, onBack }: OtherTermStepProps) {
   const years = termYears(now);
-  const [season, setSeason] = useState<string>();
-  const [year, setYear] = useState(years[0]);
+  const earlier = splitTerm(selected, now);
+  const [season, setSeason] = useState<string | undefined>(earlier?.season);
+  const [year, setYear] = useState(earlier?.year ?? years[0]);
 
   return (
     <>
@@ -82,7 +89,14 @@ export function OtherTermStep({ now, onPick, onBack }: OtherTermStepProps) {
         <button type="button" className="rate-btn" disabled={!season} onClick={() => onPick(`${season} ${year}`)}>
           Continue
         </button>
-        <button type="button" className="rate-ghost" onClick={() => onPick(null)}>Not sure</button>
+        <button
+          type="button"
+          className={`rate-ghost${selected === null ? ' on' : ''}`}
+          aria-pressed={selected === null}
+          onClick={() => onPick(null)}
+        >
+          Not sure
+        </button>
       </StepFoot>
     </>
   );

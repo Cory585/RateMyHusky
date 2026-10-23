@@ -10,8 +10,8 @@ const OTHER = '+other';
 
 interface CourseStepProps {
   professor: RateProfessor;
-  courses: RateCourse[];
-  ratedCourses: string[];
+  fresh: RateCourse[];
+  rated: RateCourse[];
   selected?: string;
   onPick: (c: RateCourse) => void;
   onOther: () => void;
@@ -28,26 +28,23 @@ export function Pencil() {
   );
 }
 
-export function CourseStep({ professor, courses, ratedCourses, selected, onPick, onOther }: CourseStepProps) {
-  const option = (c: RateCourse): ChoiceOption<string> => {
-    const rated = ratedCourses.includes(c.code);
-    return {
-      value: c.code,
-      aria: `${formatCode(c.code)}${c.name ? `, ${c.name}` : ''}${rated ? ', update your rating' : ''}`,
-      className: rated ? 'course rated' : 'course',
-      label: (
-        <>
-          <span className="rate-cmain"><b>{formatCode(c.code)}</b>{c.name && <span className="rate-cname">{c.name}</span>}</span>
-          {rated && <Pencil />}
-        </>
-      ),
-    };
-  };
-  const options = courses.filter((c) => !ratedCourses.includes(c.code)).map(option);
+export function CourseStep({ professor, fresh, rated, selected, onPick, onOther }: CourseStepProps) {
+  const option = (c: RateCourse, isRated: boolean): ChoiceOption<string> => ({
+    value: c.code,
+    aria: `${formatCode(c.code)}${c.name ? `, ${c.name}` : ''}${isRated ? ', update your rating' : ''}`,
+    className: isRated ? 'course rated' : 'course',
+    label: (
+      <>
+        <span className="rate-cmain"><b>{formatCode(c.code)}</b>{c.name && <span className="rate-cname">{c.name}</span>}</span>
+        {isRated && <Pencil />}
+      </>
+    ),
+  });
+  const options = fresh.map((c) => option(c, false));
   options.push({ value: OTHER, aria: 'A different course', label: '+ A different course', className: 'course dash' });
-  const rated = courses.filter((c) => ratedCourses.includes(c.code)).map(option);
-  if (rated.length) rated[0].heading = 'Already rated';
-  options.push(...rated);
+  const ratedOptions = rated.map((c) => option(c, true));
+  if (ratedOptions.length) ratedOptions[0].heading = 'Already rated';
+  options.push(...ratedOptions);
 
   return (
     <ChoiceGroup
@@ -56,7 +53,7 @@ export function CourseStep({ professor, courses, ratedCourses, selected, onPick,
       options={options}
       value={selected}
       layout="stack"
-      onPick={(v) => (v === OTHER ? onOther() : onPick(courses.find((c) => c.code === v)!))}
+      onPick={(v) => (v === OTHER ? onOther() : onPick([...fresh, ...rated].find((c) => c.code === v)!))}
     />
   );
 }
@@ -66,11 +63,12 @@ const NEW_CODE = /^[A-Z]{2,5}\d{4}[A-Z]?$/;
 const CODE_LIKE = /^[A-Za-z]{2,5}\s*\d{1,4}[A-Za-z]?$/;
 
 interface OtherCourseStepProps {
+  rated: string[];
   onPick: (c: RateCourse) => void;
   onBack: () => void;
 }
 
-export function OtherCourseStep({ onPick, onBack }: OtherCourseStepProps) {
+export function OtherCourseStep({ rated, onPick, onBack }: OtherCourseStepProps) {
   const [query, setQuery] = useState('');
   const [newName, setNewName] = useState('');
   const typed = query.trim();
@@ -112,12 +110,24 @@ export function OtherCourseStep({ onPick, onBack }: OtherCourseStepProps) {
       </div>
       {settled && settled.length > 0 && (
         <div className="rate-suggs">
-          {settled.map((c) => (
-            <button key={c.code} type="button" className="rate-sugg" onClick={() => onPick(c)}>
-              <b>{formatCode(c.code)}</b>
-              {c.name && <small>{c.name}</small>}
-            </button>
-          ))}
+          {settled.map((c) => {
+            const isRated = rated.includes(c.code);
+            return (
+              <button
+                key={c.code}
+                type="button"
+                className={`rate-sugg${isRated ? ' rated' : ''}`}
+                aria-label={isRated ? `${formatCode(c.code)}${c.name ? `, ${c.name}` : ''}, update your rating` : undefined}
+                onClick={() => onPick(c)}
+              >
+                <span>
+                  <b>{formatCode(c.code)}</b>
+                  {c.name && <small>{c.name}</small>}
+                </span>
+                {isRated && <Pencil />}
+              </button>
+            );
+          })}
         </div>
       )}
       {canAdd && (

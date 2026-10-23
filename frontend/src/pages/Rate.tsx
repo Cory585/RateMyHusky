@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { fetchProfessorFull, fetchRateContext, startRating, submitRating } from '../api/api';
-import type { ProfessorPage, RateProfessorContext, RateStart, RateSubmission } from '../api/api';
+import type { ProfessorPage, RatedCourse, RateStart, RateSubmission } from '../api/api';
 import { useTurnstile } from './rate/useTurnstile';
 import { WhoStep, NewProfessorStep } from './rate/WhoStep';
 import { CourseStep, OtherCourseStep } from './rate/CourseStep';
@@ -14,8 +14,8 @@ import { ProgressBar } from './rate/ProgressBar';
 import { useMediaQuery } from './rate/useMediaQuery';
 import type { ChoiceOption } from './rate/ChoiceGroup';
 import {
-  GRADES, HOURS, OVERALL, answer, buildSubmission, contextTags, firstStep, lastName, nextStep,
-  prefillCourse, prevStep, progressIndex, toRateCourse,
+  GRADES, HOURS, OVERALL, answer, buildSubmission, contextTags, courseGroups, firstStep, lastName, nextStep,
+  pickCourse, prefillCourse, prevStep, progressIndex, toRateCourse,
 } from './rate/rateFlow';
 import type { Answers, RateCourse, RateProfessor, StepId } from './rate/rateFlow';
 import './Rate.css';
@@ -63,7 +63,7 @@ export default function Rate() {
   const [start, setStart] = useState<RateStart | null>(null);
   const [startFailed, setStartFailed] = useState(false);
   const [loaded, setLoaded] = useState<{ slug: string; list: RateCourse[] } | null>(null);
-  const [context, setContext] = useState<RateProfessorContext | null>(null);
+  const [context, setContext] = useState<{ slug: string; rated: RatedCourse[] } | null>(null);
   const [typedName, setTypedName] = useState('');
   const [counter, setCounter] = useState<number | null>(null);
   const [submitError, setSubmitError] = useState('');
@@ -83,25 +83,31 @@ export default function Rate() {
   const slug = answers.professor?.slug ?? null;
   // null while the professor's courses load; a new professor has none to load.
   const courses = slug === null ? [] : loaded?.slug === slug ? loaded.list : null;
-  const coursesLoading = courses === null;
+  // null until the context call settles; a failed call or a new professor leaves every course not rated.
+  const rated: RatedCourse[] | null = slug === null || startFailed ? [] : context?.slug === slug ? context.rated : null;
+  const coursesLoading = courses === null || rated === null;
 
   // Only the latest visit's start lands, so a slow earlier one can't overwrite it.
-  const beginVisit = () => {
+  const beginVisit = (): Promise<RateStart | null> => {
     const visit = ++visitRef.current;
     setStartFailed(false);
-    startRating(readMirror())
+    return startRating(readMirror())
       .then((s) => {
-        if (visitRef.current !== visit) return;
+        if (visitRef.current !== visit) return null;
         writeMirror(s.deviceToken);
         setStart(s);
+        return s;
       })
-      .catch(() => { if (visitRef.current === visit) setStartFailed(true); });
+      .catch(() => {
+        if (visitRef.current === visit) setStartFailed(true);
+        return null;
+      });
   };
 
   // Start the visit, then resolve any ?professor / ?course prefill.
   useEffect(() => {
     let cancelled = false;
-    beginVisit();
+    const visit = beginVisit();
 
     (async () => {
       const profSlug = params.get('professor');
@@ -113,6 +119,13 @@ export default function Rate() {
           const professor: RateProfessor = { slug: identity.slug, name: identity.name, department: identity.department };
           const course = prefillCourse(res.data.courses, (params.get('course') ?? '').replace(/\s+/g, '').toUpperCase() || null, new Date());
           initial = answer(initial, { professor, ...(course && { course }) });
+          if (course) {
+            // A prefilled rated course opens in update mode, so wait for the context before the first screen.
+            const s = await visit;
+            const ctx = s ? await fetchRateContext(identity.slug, s.deviceToken).catch(() => null) : null;
+            const prior = ctx?.ratedCourses.find((r) => r.code === course.code);
+            if (prior) initial = pickCourse(initial, course, prior, new Date());
+          }
         }
       }
       if (cancelled) return;
@@ -138,8 +151,9 @@ export default function Rate() {
     if (!start || !slug) return;
     let cancelled = false;
     fetchRateContext(slug, start.deviceToken)
-      .then((c) => { if (!cancelled) setContext(c); })
-      .catch(() => { /* no "Already rated" group, so every course shows as not rated */ });
+      .then((c) => { if (!cancelled) setContext({ slug, rated: c?.ratedCourses ?? [] }); })
+      // No "Already rated" group, so every course shows as not rated.
+      .catch(() => { if (!cancelled) setContext({ slug, rated: [] }); });
     return () => { cancelled = true; };
   }, [start, slug, contextReload]);
 
@@ -255,7 +269,6 @@ export default function Rate() {
   };
 
   const pickProfessor = (p: RateProfessor, from: StepId) => {
-    if (p.slug !== slug) setContext(null);
     go(answer(answers, { professor: p }), from);
   };
 
@@ -264,6 +277,12 @@ export default function Rate() {
     const prev = prevStep(step, answers);
     if (prev) setStep(prev);
   };
+
+  // In update mode a step with an earlier answer can be passed over without tapping a tile.
+  const continueButton = (answered: boolean) =>
+    answers.updating && answered ? (
+      <button type="button" className="rate-btn" onClick={() => setStep(nextStep(step, answers))}>Continue</button>
+    ) : undefined;
 
   const renderStep = () => {
     switch (step) {
@@ -279,43 +298,55 @@ export default function Rate() {
         );
       case 'newProfessor':
         return <NewProfessorStep initialName={typedName} onContinue={(p) => pickProfessor(p, 'newProfessor')} onBack={back} />;
-      case 'course':
-        return answers.professor && courses === null ? (
-          <>
-            <h1 className="rate-q" tabIndex={-1}>Which course?</h1>
-            <p className="rate-hint" role="status">Loading courses…</p>
-            <StepFoot onBack={back} />
-          </>
-        ) : answers.professor && courses && (
+      case 'course': {
+        if (!answers.professor) return null;
+        if (courses === null || rated === null) {
+          return (
+            <>
+              <h1 className="rate-q" tabIndex={-1}>Which course?</h1>
+              <p className="rate-hint" role="status">Loading courses…</p>
+              <StepFoot onBack={back} />
+            </>
+          );
+        }
+        const groups = courseGroups(courses, rated);
+        return (
           <>
             <CourseStep
               professor={answers.professor}
-              courses={courses}
-              ratedCourses={(context?.ratedCourses ?? []).map((r) => r.code)}
+              fresh={groups.fresh}
+              rated={groups.rated}
               selected={answers.course?.code}
-              onPick={(c) => choose(answer(answers, { course: c }), 'course')}
+              onPick={(c) => choose(pickCourse(answers, c, rated.find((r) => r.code === c.code), new Date()), 'course')}
               onOther={() => open('otherCourse')}
             />
             <StepFoot onBack={back} />
           </>
         );
+      }
       case 'otherCourse':
-        return <OtherCourseStep onPick={(c) => go(answer(answers, { course: c }), 'otherCourse')} onBack={back} />;
+        return (
+          <OtherCourseStep
+            rated={(rated ?? []).map((r) => r.code)}
+            onPick={(c) => go(pickCourse(answers, c, rated?.find((r) => r.code === c.code), new Date()), 'otherCourse')}
+            onBack={back}
+          />
+        );
       case 'term':
         return answers.course && (
           <>
             <TermStep
               professor={answers.professor!}
               course={answers.course}
-              selected={answers.term ?? undefined}
+              selected={answers.term}
               onPick={(t) => choose(answer(answers, { term: t }), 'term')}
               onOther={() => open('otherTerm')}
             />
-            <StepFoot onBack={back} />
+            <StepFoot onBack={back}>{continueButton(answers.term !== undefined)}</StepFoot>
           </>
         );
       case 'otherTerm':
-        return <OtherTermStep now={new Date()} onPick={(t) => go(answer(answers, { term: t }), 'otherTerm')} onBack={back} />;
+        return <OtherTermStep now={new Date()} selected={answers.term} onPick={(t) => go(answer(answers, { term: t }), 'otherTerm')} onBack={back} />;
       case 'overall': {
         const options: ChoiceOption<number>[] = OVERALL.map((o) => ({
           value: o.value,
@@ -338,7 +369,7 @@ export default function Rate() {
               layout="stack"
               onPick={(v) => choose(answer(answers, { rating: v }), 'overall')}
             />
-            <StepFoot onBack={back} />
+            <StepFoot onBack={back}>{continueButton(answers.rating !== undefined)}</StepFoot>
           </>
         );
       }
@@ -353,7 +384,7 @@ export default function Rate() {
               layout="stack"
               onPick={(v) => choose(answer(answers, { hours: v }), 'workload')}
             />
-            <StepFoot onBack={back} />
+            <StepFoot onBack={back}>{continueButton(answers.hours !== undefined)}</StepFoot>
           </>
         );
       case 'grade':
@@ -367,10 +398,15 @@ export default function Rate() {
               layout="grid"
               onPick={(v) => choose(answer(answers, { grade: v }), 'grade')}
             />
-            <button type="button" className="rate-ghost" onClick={() => go(answer(answers, { grade: null }), 'grade')}>
+            <button
+              type="button"
+              className={`rate-ghost${answers.grade === null ? ' on' : ''}`}
+              aria-pressed={answers.grade === null}
+              onClick={() => go(answer(answers, { grade: null }), 'grade')}
+            >
               Prefer not to say
             </button>
-            <StepFoot onBack={back} />
+            <StepFoot onBack={back}>{continueButton(answers.grade !== undefined)}</StepFoot>
           </>
         );
       case 'comment':
@@ -381,6 +417,7 @@ export default function Rate() {
             onSubmit={submit}
             onBack={back}
             submitting={locked}
+            updating={!!answers.updating}
             error={submitError}
           />
         );
@@ -408,7 +445,12 @@ export default function Rate() {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5" /><path d="m12 19-7-7 7-7" /></svg>
                 Back
               </button>
-              {tags.length > 0 && <div className="rate-tags">{tags.map((t) => <span key={t} className="rate-tag">{t}</span>)}</div>}
+              {(tags.length > 0 || answers.updating) && (
+                <div className="rate-tags">
+                  {answers.updating && <span className="rate-tag is-updating">Updating</span>}
+                  {tags.map((t) => <span key={t} className="rate-tag">{t}</span>)}
+                </div>
+              )}
             </div>
           )}
           {cleared && ready && <Fragment key={step}>{renderStep()}</Fragment>}

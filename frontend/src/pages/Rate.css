@@ -140,6 +140,8 @@
   overflow-wrap: anywhere;
 }
 
+.rate-tag.is-updating { border-color: transparent; background: #fef0f0; color: #d6394c; }
+
 .rate-input {
   width: 100%;
   min-height: 48px;
@@ -172,6 +174,7 @@
   transition: background-color 0.12s;
 }
 
+.rate-sugg.rated { display: flex; align-items: center; justify-content: space-between; gap: 0.75em; }
 .rate-sugg b { transition: color 0.12s; }
 .rate-sugg:last-child { border-bottom: 0; }
 .rate-sugg:hover { background: #fef0f0; }
@@ -219,6 +222,8 @@
 }
 
 .rate-ghost { text-decoration: underline; }
+.rate-ghost.on { color: #d6394c; font-weight: 800; text-decoration: none; }
+.rate-ghost.on::before { content: '✓ '; }
 .rate-back { text-align: left; }
 .rate-back:disabled { opacity: 0.45; cursor: default; }
 
@@ -440,6 +445,7 @@ body.rate-checking .navbar { display: none; }
 .dark .rate-page { background: #1a1a1a; color: #e0e0e0; }
 .dark .rate-prog i { background: #333; }
 .dark .rate-tag { border-color: #3a3a3a; color: #999; }
+.dark .rate-tag.is-updating { border-color: transparent; background: #3a2020; color: #f06a7a; }
 .dark .rate-link,
 .dark .rate-sub,
 .dark .rate-hint,
@@ -447,6 +453,7 @@ body.rate-checking .navbar { display: none; }
 .dark .rate-back,
 .dark .rate-back-top,
 .dark .rate-opt.dash { color: #999; }
+.dark .rate-ghost.on { color: #f06a7a; }
 .dark .rate-opt { border-color: #3a3a3a; }
 .dark .rate-opt.on { border-color: #d6394c; background: #3a2020; color: #f06a7a; }
 .dark .rate-cname,
