@@ -166,7 +166,15 @@
   z-index: 20;
   padding: 120px 24px 60px;
   background-color: #f5f5f5;
+}
+
+/* Clips the oversized, rotated pattern. Kept off .homepage-hero itself so the search
+   suggestions can hang past the hero over the stats banner. */
+.hero-bg-clip {
+  position: absolute;
+  inset: 0;
   overflow: hidden;
+  pointer-events: none;
 }
 
 .hero-bg-pattern {

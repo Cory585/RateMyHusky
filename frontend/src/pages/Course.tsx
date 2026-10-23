@@ -13,6 +13,8 @@ import Breadcrumbs from '../components/Breadcrumbs';
 import Seo from '../components/Seo';
 import BookmarkButton from '../components/BookmarkButton';
 import { SHOW_SURVEY_STATS } from '../config';
+import FitText from '../components/FitText';
+import { relativeTerm, seasonYear } from '../utils/termUtils';
 import './Course.css';
 
 const INITIAL_PROFESSORS_VISIBLE = 5;
@@ -21,6 +23,7 @@ const TOP_PROFESSORS = 10;
 
 /* Display names for summary.bySource keys; an unlisted source shows its key. */
 const SOURCE_LABELS: Record<string, string> = { rmp: 'RMP' };
+const sourceLabel = (source: string) => SOURCE_LABELS[source] ?? source.toUpperCase();
 
 const Course = () => {
 	const { code = '' } = useParams<{ code: string }>();
@@ -30,6 +33,7 @@ const Course = () => {
 	const [visibleCount, setVisibleCount] = useState(INITIAL_PROFESSORS_VISIBLE);
 	const [showBackToTop, setShowBackToTop] = useState(false);
 	const tableWrapRef = useRef<HTMLDivElement>(null);
+	const professorsRef = useRef<HTMLElement>(null);
 	const [tableAtStart, setTableAtStart] = useState(true);
 	const [tableAtEnd, setTableAtEnd] = useState(false);
 
@@ -185,27 +189,39 @@ const Course = () => {
 				<section className="course-stats-grid">
 					<article className="course-stat-card">
 						<strong className="course-stat-value">{summary.rating != null ? summary.rating.toFixed(2) : '—'}</strong>
-						<StarRating rating={summary.rating ?? 0} size="lg" />
 						<span className="course-stat-label" style={{ display: 'block', textAlign: 'center', position: 'relative' }}>
 							Overall Rating
 							{breakdown.length > 0 && (
 								<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', marginLeft: '4px', opacity: 0.6 }}><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
 							)}
 						</span>
+						<div className="course-stat-extra"><StarRating rating={summary.rating ?? 0} size="lg" /></div>
 						{breakdown.length > 0 && (
 							<div className="course-stat-breakdown">
 								{breakdown.map(([source, v]) => (
-									<span key={source}>{SOURCE_LABELS[source] ?? source.toUpperCase()}: {v.rating!.toFixed(2)}</span>
+									<span key={source}>{sourceLabel(source)}: {v.rating!.toFixed(2)}</span>
 								))}
 							</div>
 						)}
 					</article>
 					<DifficultyStatCard value={summary.difficulty} />
-					<StatCard label="Ratings" value={summary.numRatings ? summary.numRatings.toLocaleString() : '—'} />
-					<StatCard label="Professors" value={professors.length.toLocaleString()} />
-					{history?.lastOffered && <StatCard label="Last Taught" value={history.lastOffered} text />}
+					<StatCard
+						label="Ratings"
+						value={summary.numRatings ? summary.numRatings.toLocaleString() : '—'}
+						hint={breakdown.length > 0 ? `from ${breakdown.map(([source]) => sourceLabel(source)).join(' + ')}` : undefined}
+					/>
+					{/* With no professors the table below is just an empty-state note, so nothing to jump to. */}
+					<StatCard
+						label="Professors"
+						value={professors.length.toLocaleString()}
+						hint={professors.length > 0 ? 'View professors ↓' : undefined}
+						onClick={professors.length > 0 ? () => professorsRef.current?.scrollIntoView({ behavior: 'smooth' }) : undefined}
+					/>
+					{history?.lastOffered && (
+						<StatCard label="Last Taught" value={seasonYear(history.lastOffered)} text hint={relativeTerm(history.lastOffered) ?? undefined} />
+					)}
 					{history?.typicalClassSize != null && (
-						<StatCard label="Typical Class Size" value={history.typicalClassSize.toLocaleString()} />
+						<StatCard label="Typical Class Size" value={history.typicalClassSize.toLocaleString()} hint="students per section" />
 					)}
 					{SHOW_SURVEY_STATS && (
 						<StatCard label="Avg Hrs / Week" value={summary.hoursPerWeek != null ? `${summary.hoursPerWeek.toFixed(1)}h` : '—'} />
@@ -262,7 +278,7 @@ const Course = () => {
 					</section>
 				)}
 
-				<section className="course-panel">
+				<section className="course-panel" ref={professorsRef}>
 					<div className="course-panel-header">
 						<h2>Professors</h2>
 					</div>
@@ -327,11 +343,22 @@ const Course = () => {
 	);
 };
 
-function StatCard({ label, value, text = false }: { label: string; value: string; text?: boolean }) {
+function StatCard({ label, value, text = false, hint, onClick }: {
+	label: string; value: string; text?: boolean; hint?: string; onClick?: () => void;
+}) {
 	return (
-		<article className="course-stat-card">
-			<strong className={`course-stat-value${text ? ' course-stat-value--text' : ''}`}>{value}</strong>
+		<article
+			className={`course-stat-card${onClick ? ' course-stat-clickable' : ''}`}
+			role={onClick ? 'button' : undefined}
+			tabIndex={onClick ? 0 : undefined}
+			onClick={onClick}
+			onKeyDown={onClick && (e => {
+				if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); }
+			})}
+		>
+			<strong className={`course-stat-value${text ? ' course-stat-value--text' : ''}`}>{text ? <FitText>{value}</FitText> : value}</strong>
 			<span className="course-stat-label">{label}</span>
+			<div className="course-stat-extra">{hint && <span className="course-stat-hint">{hint}</span>}</div>
 		</article>
 	);
 }
@@ -347,10 +374,12 @@ function DifficultyStatCard({ value }: { value: number | null }) {
 	return (
 		<article className="course-stat-card">
 			<strong className="course-stat-value">{value != null ? value.toFixed(2) : '—'}</strong>
-			<div className="course-difficulty-bar">
-				<div className="course-difficulty-fill" style={{ width: `${((value ?? 0) / 5) * 100}%`, background: color }} />
-			</div>
 			<span className="course-stat-label">Avg Difficulty</span>
+			<div className="course-stat-extra">
+				<div className="course-difficulty-bar">
+					<div className="course-difficulty-fill" style={{ width: `${((value ?? 0) / 5) * 100}%`, background: color }} />
+				</div>
+			</div>
 		</article>
 	);
 }
