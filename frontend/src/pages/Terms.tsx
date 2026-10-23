@@ -1,5 +1,9 @@
 import Footer from '../components/Footer';
+import { RATE_ENABLED } from '../config';
 import './Terms.css';
+
+// Section 9 (ratings) is hidden while the rating form is off, so later sections shift up by this much.
+const n = RATE_ENABLED ? 0 : 1;
 
 const Terms = () => {
   return (
@@ -25,8 +29,7 @@ const Terms = () => {
                 Northeastern University students. Data displayed on this platform is sourced from
                 RateMyProfessors, from Northeastern's public course catalog, faculty directory
                 pages, and teaching award announcements, and from publicly available discussion
-                on Reddit, and it also includes ratings that students submit through the rating
-                form on this site.
+                on Reddit{RATE_ENABLED ? ', and it also includes ratings that students submit through the rating form on this site' : ''}.
                 Alongside that source data we show figures we compute from it — averages, blended
                 ratings, department comparisons, and sentiment labels derived from Reddit text.
                 Those are our estimates, not numbers published by any source.
@@ -64,7 +67,7 @@ const Terms = () => {
                 This information is encoded in a JWT (JSON Web Token) that is stored in your
                 browser's <code>localStorage</code>. The token expires after 30 days.
                 RateMyHusky does not maintain user accounts or profiles. The only per-user data
-                we store server-side is your bookmarks and your pseudonymous ratings, described
+                we store server-side is your bookmarks{RATE_ENABLED ? ' and your pseudonymous ratings' : ''}, described
                 below and in our <a href="/privacy">Privacy Policy</a>. Signing out deletes the
                 token from your browser.
               </p>
@@ -98,6 +101,7 @@ const Terms = () => {
                   Insights, and Google Analytics collect anonymous page view and performance
                   metrics. No personally identifiable information is included.
                 </li>
+                {RATE_ENABLED && (
                 <li>
                   <strong>Ratings:</strong> when you submit a rating, we store your answers and
                   an optional comment, with keyed hashes of a random device ID and of your IP
@@ -105,6 +109,7 @@ const Terms = () => {
                   is pseudonymous, not anonymous. See our <a href="/privacy">Privacy Policy</a>{' '}
                   for what is kept, for how long, and how to request deletion.
                 </li>
+                )}
                 <li>
                   <strong>Bookmarks:</strong> when you bookmark a professor or course while
                   signed in, we store your Google account id, the item type (professor or
@@ -117,7 +122,7 @@ const Terms = () => {
                 We do <strong>not</strong> log or store your search queries, which professor or
                 course pages you viewed, or any other browsing activity on our servers. Your IP
                 address is used in the moment to enforce rate limits. We never store it in raw
-                form; only if you submit a rating do we store keyed hashes of it.
+                form{RATE_ENABLED ? '; only if you submit a rating do we store keyed hashes of it' : ''}.
               </p>
             </section>
 
@@ -149,12 +154,14 @@ const Terms = () => {
                 </li>
                 <li>
                   <strong>Cloudflare Turnstile</strong>: a CAPTCHA that protects the feedback
-                  form and the rating form from automated abuse.
+                  form{RATE_ENABLED ? ' and the rating form' : ''} from automated abuse.
                 </li>
+                {RATE_ENABLED && (
                 <li>
                   <strong>OpenAI Moderation</strong>: checks the text of rating comments for
                   abuse before they are stored.
                 </li>
+                )}
                 <li>
                   <strong>Vercel Analytics &amp; Speed Insights</strong>: collects anonymous
                   performance and usage data to help improve the service.
@@ -226,8 +233,8 @@ const Terms = () => {
                 <li>Use automated scripts, bots, or crawlers to access the service (rate limiting is enforced)</li>
                 <li>Attempt to access, steal, or forge other users' session tokens or credentials</li>
                 <li>
-                  Circumvent rate limits, access controls, the CAPTCHA on the feedback and rating
-                  forms, or a maintenance page
+                  Circumvent rate limits, access controls, the CAPTCHA on the
+                  feedback{RATE_ENABLED ? ' and rating forms' : ' form'}, or a maintenance page
                 </li>
                 <li>
                   Use data from this platform — including review text and Reddit excerpts — to
@@ -237,10 +244,11 @@ const Terms = () => {
               </ul>
               <p>
                 We enforce per-IP rate limits across the site. Repeated misuse may result in
-                suspension of your access, as described in Section 16.
+                suspension of your access, as described in Section {16 - n}.
               </p>
             </section>
 
+            {RATE_ENABLED && (
             <section className="terms-section">
               <h2>9. Ratings You Submit</h2>
               <p>
@@ -250,9 +258,10 @@ const Terms = () => {
                 for what we store with a rating.
               </p>
             </section>
+            )}
 
             <section className="terms-section">
-              <h2>10. Availability &amp; Changes to the Service</h2>
+              <h2>{10 - n}. Availability &amp; Changes to the Service</h2>
               <p>
                 RateMyHusky is a student-run project offered without any uptime commitment. We
                 take the site down for maintenance, add and remove features, and switch features
@@ -263,7 +272,7 @@ const Terms = () => {
             </section>
 
             <section className="terms-section">
-              <h2>11. Professor &amp; Instructor Removal Requests</h2>
+              <h2>{11 - n}. Professor &amp; Instructor Removal Requests</h2>
               <p>
                 If you are a professor or instructor and you want your information removed from
                 RateMyHusky, email{' '}
@@ -273,8 +282,8 @@ const Terms = () => {
                 request at that address before acting on it, so that no one can remove or change
                 a professor's information by using their name; a request without a Northeastern
                 email address cannot be verified or answered. We honor confirmed requests: your
-                page, imported ratings and comments, and Reddit mentions are deleted, ratings submitted
-                through our own rating form about you are deleted on request, and your name is added to a removal list that every data
+                page, imported ratings and comments, and Reddit mentions are deleted,
+                {RATE_ENABLED ? ' ratings submitted through our own rating form about you are deleted on request,' : ''} and your name is added to a removal list that every data
                 loader checks, so a later refresh does not bring them back. We cannot remove your
                 data from RateMyProfessors or Reddit themselves — contact those sources
                 directly. Our <a href="/privacy">Privacy Policy</a> describes what we publish and
@@ -288,10 +297,10 @@ const Terms = () => {
             </section>
 
             <section className="terms-section">
-              <h2>12. No Warranties &amp; Data Accuracy</h2>
+              <h2>{12 - n}. No Warranties &amp; Data Accuracy</h2>
               <p>
-                Professor ratings and review comments are sourced from external systems and from
-                students, and may be
+                Professor ratings and review comments are sourced from external
+                systems{RATE_ENABLED ? ' and from students' : ''}, and may be
                 incomplete, outdated, or inaccurate. Figures we compute — blended ratings,
                 averages, and Reddit sentiment labels — depend
                 on that source data and on matching a professor's name across systems that spell
@@ -307,7 +316,7 @@ const Terms = () => {
             </section>
 
             <section className="terms-section">
-              <h2>13. Limitation of Liability</h2>
+              <h2>{13 - n}. Limitation of Liability</h2>
               <p>
                 RateMyHusky is provided "as-is" without warranties of any kind, express or
                 implied. To the fullest extent permitted by law, RateMyHusky and its developers
@@ -317,7 +326,7 @@ const Terms = () => {
             </section>
 
             <section className="terms-section">
-              <h2>14. Changes to These Terms</h2>
+              <h2>{14 - n}. Changes to These Terms</h2>
               <p>
                 We may update these Terms from time to time. The effective date at the top of
                 this page will be updated when changes are made. Continued use of RateMyHusky
@@ -326,7 +335,7 @@ const Terms = () => {
             </section>
 
             <section className="terms-section">
-              <h2>15. Indemnification</h2>
+              <h2>{15 - n}. Indemnification</h2>
               <p>
                 You agree to defend, indemnify, and hold harmless RateMyHusky and its developers
                 from and against any claims, damages, losses, or expenses (including reasonable
@@ -336,7 +345,7 @@ const Terms = () => {
             </section>
 
             <section className="terms-section">
-              <h2>16. Termination</h2>
+              <h2>{16 - n}. Termination</h2>
               <p>
                 We reserve the right to suspend or terminate your access to RateMyHusky at any
                 time, with or without notice, if we believe you have violated these Terms or are
@@ -346,7 +355,7 @@ const Terms = () => {
             </section>
 
             <section className="terms-section">
-              <h2>17. DMCA &amp; Content Removal</h2>
+              <h2>{17 - n}. DMCA &amp; Content Removal</h2>
               <p>
                 RateMyHusky aggregates publicly available data from third-party sources. If you
                 believe content displayed on this platform infringes your copyright or should be
@@ -354,12 +363,12 @@ const Terms = () => {
                 <a href="mailto:legal@ratemyhusky.com">legal@ratemyhusky.com</a> with a
                 description of the content and the basis for your removal request. We will
                 review and respond in good faith. Professors and instructors asking to be removed
-                should see Section 11, which does not require a legal basis.
+                should see Section {11 - n}, which does not require a legal basis.
               </p>
             </section>
 
             <section className="terms-section">
-              <h2>18. Governing Law</h2>
+              <h2>{18 - n}. Governing Law</h2>
               <p>
                 These Terms are governed by the laws of the Commonwealth of Massachusetts,
                 without regard to conflict of law principles. Any disputes arising from these
@@ -370,7 +379,7 @@ const Terms = () => {
             </section>
 
             <section className="terms-section">
-              <h2>19. Severability</h2>
+              <h2>{19 - n}. Severability</h2>
               <p>
                 If any provision of these Terms is found to be unenforceable or invalid under
                 applicable law, that provision will be modified to the minimum extent necessary
@@ -380,7 +389,7 @@ const Terms = () => {
             </section>
 
             <section className="terms-section terms-section--last">
-              <h2>20. Contact</h2>
+              <h2>{20 - n}. Contact</h2>
               <p>
                 If you have questions about these Terms or want to report an issue, please email
                 us at <a href="mailto:support@ratemyhusky.com">support@ratemyhusky.com</a>.
