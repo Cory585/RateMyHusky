@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { StepFoot } from './ChoiceGroup';
 
 interface CommentStepProps {
@@ -12,12 +12,22 @@ interface CommentStepProps {
 
 export function CommentStep({ value, onChange, onSubmit, onBack, submitting, error }: CommentStepProps) {
   const [honeypot, setHoneypot] = useState('');
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  // Grows with the text; the CSS max-height caps it and the box scrolls inside past that.
+  useLayoutEffect(() => {
+    const t = ref.current;
+    if (!t) return;
+    t.style.height = 'auto';
+    t.style.height = `${t.scrollHeight + t.offsetHeight - t.clientHeight}px`;
+  }, [value]);
 
   return (
     <>
       <h1 className="rate-q" tabIndex={-1}>Anything other students should know?</h1>
       <p className="rate-sub">Optional. Tips, how exams felt, what to expect.</p>
       <textarea
+        ref={ref}
         className="rate-input rate-textarea"
         aria-label="Anything other students should know?"
         maxLength={2000}

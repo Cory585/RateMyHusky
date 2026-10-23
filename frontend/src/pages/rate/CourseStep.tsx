@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { fetchSearchSuggestions } from '../../api/api';
 import { useDebouncedValue } from '../../utils/useDebouncedValue';
 import { ChoiceGroup, StepFoot } from './ChoiceGroup';
@@ -73,7 +73,6 @@ interface OtherCourseStepProps {
 export function OtherCourseStep({ onPick, onBack }: OtherCourseStepProps) {
   const [query, setQuery] = useState('');
   const [newName, setNewName] = useState('');
-  const nameRef = useRef<HTMLInputElement>(null);
   const typed = query.trim();
   const term = CODE_LIKE.test(typed) ? typed.replace(/\s+/g, '') : typed;
   const debounced = useDebouncedValue(term, 200);
@@ -123,16 +122,11 @@ export function OtherCourseStep({ onPick, onBack }: OtherCourseStepProps) {
       )}
       {canAdd && (
         <>
-          <div className="rate-suggs">
-            <button type="button" className="rate-sugg add" onClick={() => nameRef.current?.focus()}>
-              + Not listed? Add "{formatCode(code)}" as a new course
-            </button>
-          </div>
+          <p className="rate-hint">{formatCode(code)} isn't in our catalog yet. Name it and it's added with your rating.</p>
           <div className="rate-field">
-            <label htmlFor="rate-course-name">Course name (for new courses)</label>
+            <label htmlFor="rate-course-name">Course name</label>
             <input
               id="rate-course-name"
-              ref={nameRef}
               className="rate-input"
               autoComplete="off"
               placeholder="e.g. Topics: Applied ML"
@@ -141,6 +135,9 @@ export function OtherCourseStep({ onPick, onBack }: OtherCourseStepProps) {
             />
           </div>
         </>
+      )}
+      {settled && settled.length === 0 && !NEW_CODE.test(code) && (
+        <p className="rate-hint" role="status">No courses match. Type the full code, like CS 4999, to add a new one.</p>
       )}
       <StepFoot onBack={onBack}>
         {canAdd && (

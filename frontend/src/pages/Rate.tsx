@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { fetchProfessorFull, fetchRateContext, startRating, submitRating } from '../api/api';
 import type { ProfessorPage, RateProfessorContext, RateStart, RateSubmission } from '../api/api';
@@ -10,13 +10,17 @@ import { CommentStep } from './rate/CommentStep';
 import { ThanksStep } from './rate/ThanksStep';
 import { Celebration } from './rate/Celebration';
 import { ChoiceGroup, StepFoot } from './rate/ChoiceGroup';
+import { ProgressBar } from './rate/ProgressBar';
+import { useMediaQuery } from './rate/useMediaQuery';
 import type { ChoiceOption } from './rate/ChoiceGroup';
 import {
-  GRADES, HOURS, OVERALL, QUESTION_COUNT, answer, buildSubmission, contextTags, firstStep, lastName, nextStep,
+  GRADES, HOURS, OVERALL, answer, buildSubmission, contextTags, firstStep, lastName, nextStep,
   prefillCourse, prevStep, progressIndex, toRateCourse,
 } from './rate/rateFlow';
 import type { Answers, RateCourse, RateProfessor, StepId } from './rate/rateFlow';
 import './Rate.css';
+
+const PICK_DELAY_MS = 200;
 
 const DEVICE_KEY = 'rmh_device';
 
@@ -69,6 +73,8 @@ export default function Rate() {
   const [contextReload, setContextReload] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
   const visitRef = useRef(0);
+  const pickTimer = useRef<number | undefined>(undefined);
+  const reduced = useMediaQuery('(prefers-reduced-motion: reduce)');
   const { containerRef, token, failed, interactive, reset } = useTurnstile();
   // The checkpoint holds the form back until the first token; later re-checks happen under the form.
   // Starts cleared when the token is already there (no site key), so the checkpoint never flashes.
@@ -199,6 +205,7 @@ export default function Rate() {
   }, [pending, failed, startFailed, reset, start]);
 
   const rateAnother = () => {
+    window.clearTimeout(pickTimer.current);
     setAnswers({ comment: '' });
     setStep('who');
     setStart(null);
@@ -209,6 +216,8 @@ export default function Rate() {
     setContextReload((n) => n + 1);
     beginVisit();
   };
+
+  useEffect(() => () => window.clearTimeout(pickTimer.current), []);
 
   useEffect(() => { if (token) setCleared(true); }, [token]);
 
@@ -223,8 +232,23 @@ export default function Rate() {
   }, [step, ready, coursesLoading, cleared]);
 
   const go = (next: Answers, from: StepId) => {
+    window.clearTimeout(pickTimer.current);
     setAnswers(next);
     setStep(nextStep(from, next));
+  };
+
+  // Shows the pick for a beat before the next step opens; a later tap replaces a pending one.
+  const choose = (next: Answers, from: StepId) => {
+    setAnswers(next);
+    window.clearTimeout(pickTimer.current);
+    if (reduced) setStep(nextStep(from, next));
+    else pickTimer.current = window.setTimeout(() => setStep(nextStep(from, next)), PICK_DELAY_MS);
+  };
+
+  // A direct move to a sub-screen also cancels a pick still waiting to advance.
+  const open = (next: StepId) => {
+    window.clearTimeout(pickTimer.current);
+    setStep(next);
   };
 
   const pickProfessor = (p: RateProfessor, from: StepId) => {
@@ -233,6 +257,7 @@ export default function Rate() {
   };
 
   const back = () => {
+    window.clearTimeout(pickTimer.current);
     const prev = prevStep(step, answers);
     if (prev) setStep(prev);
   };
@@ -244,7 +269,7 @@ export default function Rate() {
           <>
             <WhoStep
               onPick={(p) => pickProfessor(p, 'who')}
-              onAddNew={(name) => { setTypedName(name); setStep('newProfessor'); }}
+              onAddNew={(name) => { setTypedName(name); open('newProfessor'); }}
             />
             <StepFoot />
           </>
@@ -265,8 +290,8 @@ export default function Rate() {
               courses={courses}
               ratedCourses={context?.ratedCourses ?? []}
               selected={answers.course?.code}
-              onPick={(c) => go(answer(answers, { course: c }), 'course')}
-              onOther={() => setStep('otherCourse')}
+              onPick={(c) => choose(answer(answers, { course: c }), 'course')}
+              onOther={() => open('otherCourse')}
             />
             <StepFoot onBack={back} />
           </>
@@ -280,8 +305,8 @@ export default function Rate() {
               professor={answers.professor!}
               course={answers.course}
               selected={answers.term ?? undefined}
-              onPick={(t) => go(answer(answers, { term: t }), 'term')}
-              onOther={() => setStep('otherTerm')}
+              onPick={(t) => choose(answer(answers, { term: t }), 'term')}
+              onOther={() => open('otherTerm')}
             />
             <StepFoot onBack={back} />
           </>
@@ -308,7 +333,7 @@ export default function Rate() {
               options={options}
               value={answers.rating}
               layout="stack"
-              onPick={(v) => go(answer(answers, { rating: v }), 'overall')}
+              onPick={(v) => choose(answer(answers, { rating: v }), 'overall')}
             />
             <StepFoot onBack={back} />
           </>
@@ -323,7 +348,7 @@ export default function Rate() {
               options={HOURS.map((h, i) => ({ value: h.value, label: h.label, aria: h.aria, digit: i + 1 }))}
               value={answers.hours}
               layout="stack"
-              onPick={(v) => go(answer(answers, { hours: v }), 'workload')}
+              onPick={(v) => choose(answer(answers, { hours: v }), 'workload')}
             />
             <StepFoot onBack={back} />
           </>
@@ -337,7 +362,7 @@ export default function Rate() {
               options={GRADES.map((g) => ({ value: g, label: g, aria: gradeAria(g) }))}
               value={answers.grade ?? undefined}
               layout="grid"
-              onPick={(v) => go(answer(answers, { grade: v }), 'grade')}
+              onPick={(v) => choose(answer(answers, { grade: v }), 'grade')}
             />
             <button type="button" className="rate-ghost" onClick={() => go(answer(answers, { grade: null }), 'grade')}>
               Prefer not to say
@@ -372,13 +397,7 @@ export default function Rate() {
     <div className={`rate-page${cleared ? '' : ' rate-page-check'}`}>
       <div className="rate-shell">
         <div className="rate-panel" ref={panelRef}>
-          {cleared && step !== 'thanks' && (
-            <div className="rate-prog" aria-hidden="true">
-              {Array.from({ length: QUESTION_COUNT }, (_, i) => (
-                <i key={i} className={i <= progressIndex(step) ? 'on' : undefined} />
-              ))}
-            </div>
-          )}
+          {cleared && <ProgressBar index={progressIndex(step)} done={step === 'thanks'} />}
           {startFailed && <p className="rate-hint" role="alert">We couldn't start the form. Please reload and try again.</p>}
           {cleared && ready && step !== 'thanks' && (
             <div className="rate-top">
@@ -389,7 +408,7 @@ export default function Rate() {
               {tags.length > 0 && <div className="rate-tags">{tags.map((t) => <span key={t} className="rate-tag">{t}</span>)}</div>}
             </div>
           )}
-          {cleared && ready && renderStep()}
+          {cleared && ready && <Fragment key={step}>{renderStep()}</Fragment>}
           {!cleared && (
             <div className="rate-check">
               <h1 className="rate-check-host" tabIndex={-1}>{host}</h1>

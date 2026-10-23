@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useRef } from 'react';
+import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent, ReactNode } from 'react';
 
 export interface ChoiceOption<T> {
@@ -36,6 +36,7 @@ export function StepFoot({ onBack, backDisabled, children }: { onBack?: () => vo
 export function ChoiceGroup<T>({ legend, subtitle, options, value, onPick, layout }: ChoiceGroupProps<T>) {
   const headingId = useId();
   const groupRef = useRef<HTMLDivElement>(null);
+  const [popped, setPopped] = useState<number | null>(null);
 
   // Keys 1-5 pick the option whose digit matches, never by position.
   useEffect(() => {
@@ -45,7 +46,9 @@ export function ChoiceGroup<T>({ legend, subtitle, options, value, onPick, layou
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return;
       if (!/^[1-5]$/.test(e.key)) return;
       const hit = options.find((o) => o.digit === Number(e.key));
-      if (hit) onPick(hit.value);
+      if (!hit) return;
+      setPopped(options.indexOf(hit));
+      onPick(hit.value);
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -86,8 +89,8 @@ export function ChoiceGroup<T>({ legend, subtitle, options, value, onPick, layou
               aria-checked={i === checked}
               aria-label={o.aria}
               tabIndex={i === tabStop ? 0 : -1}
-              className={`rate-opt${i === checked ? ' on' : ''}${o.className ? ` ${o.className}` : ''}`}
-              onClick={() => onPick(o.value)}
+              className={`rate-opt${i === checked ? ' on' : ''}${o.className ? ` ${o.className}` : ''}${i === popped ? ' pop' : ''}`}
+              onClick={() => { setPopped(i); onPick(o.value); }}
             >
               {o.label}
             </button>
