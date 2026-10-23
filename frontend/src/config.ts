@@ -15,3 +15,8 @@ export const SHOW_SURVEY_STATS = false;
 // DEFAULT_SINCE_TERM (202210). The FAQ and Privacy Policy state it; change it here
 // when the backfill floor moves.
 export const BANNER_SINCE = 'Fall 2021';
+
+// The /rate form is live on dev (Vercel Preview) and local dev only. Production (main) hides
+// the route, the professor page's "Rate this professor" button, and the FAQ mentions.
+// VITE_VERCEL_ENV is a Vercel system env var: "production", "preview", or unset locally.
+export const RATE_ENABLED = import.meta.env.VITE_VERCEL_ENV !== 'production';

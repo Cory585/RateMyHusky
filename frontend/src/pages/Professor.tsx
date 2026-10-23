@@ -10,7 +10,7 @@ import Breadcrumbs from '../components/Breadcrumbs';
 import Seo from '../components/Seo';
 import { fetchProfessorFull } from '../api/api';
 import type { ProfessorPage, ProfessorCourse, RatingDistribution, RedditMention, TeachingAward } from '../api/api';
-import { SHOW_SURVEY_STATS } from '../config';
+import { RATE_ENABLED, SHOW_SURVEY_STATS } from '../config';
 import { termSortKey } from '../utils/termUtils';
 import { isPinned, pinnedFirst } from '../utils/askPinMatch';
 import { photoThumb, thumbOnError } from '../utils/photoThumb';
@@ -855,12 +855,14 @@ const Professor = () => {
       </section>
 
       <div className="prof-hero-actions-row">
+        {RATE_ENABLED && (
         <Link to={`/rate?professor=${identity.slug}`} className="prof-rate-btn">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
           </svg>
           Rate this professor
         </Link>
+        )}
         <Link
           to={`/compare?a=${identity.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`}
           className="prof-compare-btn"
