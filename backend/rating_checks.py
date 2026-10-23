@@ -154,14 +154,18 @@ def moderate(comment, score=moderation.score_texts):
         return "unavailable"
 
 
-def assess(fill_seconds, network_type, bursts, duplicate_comment, moderation_action):
-    """("rejected", [...]) | ("held", reasons) | ("accepted", [])."""
+def assess(fill_seconds, network_type, bursts, duplicate_comment, moderation_action, edit=False):
+    """("rejected", [...]) | ("held", reasons) | ("accepted", []).
+
+    edit: this replaces an accepted rating. The form prefills the earlier answers,
+    so a quick update is normal and isn't held as too_fast.
+    """
     if moderation_action == "block":
         return "rejected", ["moderation_block"]
     reasons = []
     if fill_seconds is None:
         reasons.append("no_timer")
-    elif fill_seconds < MIN_FILL_SECONDS:
+    elif fill_seconds < MIN_FILL_SECONDS and not edit:
         reasons.append("too_fast")
     elif fill_seconds > MAX_FILL_SECONDS:
         reasons.append("stale")

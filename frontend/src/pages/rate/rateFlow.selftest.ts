@@ -150,7 +150,7 @@ function selftest(): number {
   const priorB: RatedCourse = { code: 'CS4973', name: 'Topics in HCI', term: null, rating: 5, hours: '8-10', grade: null, comment: 'Best course.' };
   const cs3500: RateCourse = { code: 'CS3500', name: 'Object-Oriented Design', isNew: false, terms: ['Fall 2025', 'Spring 2025'] };
   const cs4973: RateCourse = { code: 'CS4973', name: 'Topics in HCI', isNew: false, terms: ['Spring 2025'] };
-  const u = pickCourse({ comment: '', professor: alex }, cs3500, prior, now);
+  const u = pickCourse({ comment: '', professor: alex }, cs3500, [prior], now);
   check('update: pick fills the earlier answers', u.term === 'Fall 2025' && u.rating === 4 && u.hours === '5-7'
     && u.grade === 'A-' && u.comment === 'Projects take time.' && u.updating?.code === 'CS3500');
   check('update: every step follows in order', nextStep('course', u) === 'term' && nextStep('term', u) === 'overall'
@@ -158,27 +158,37 @@ function selftest(): number {
     && nextStep('grade', u) === 'comment' && nextStep('comment', u) === 'thanks');
   check('update: otherTerm -> overall, firstStep is term, edit overall -> workload',
     nextStep('otherTerm', u) === 'overall' && firstStep(u) === 'term' && nextStep('overall', answer(u, { rating: 2 })) === 'workload');
-  check('update: re-picking the same course keeps edits', pickCourse(answer(u, { rating: 2 }), cs3500, prior, now).rating === 2);
-  const ub = pickCourse(u, cs4973, priorB, now);
+  check('update: re-picking the same course keeps edits', pickCourse(answer(u, { rating: 2 }), cs3500, [prior], now).rating === 2);
+  const ub = pickCourse(u, cs4973, [prior, priorB], now);
   check('update: rated A -> rated B fills B only', ub.term === null && ub.rating === 5 && ub.grade === null
     && ub.comment === 'Best course.' && ub.updating?.code === 'CS4973');
-  const toFresh = pickCourse(answer(u, { rating: 2 }), cs2500, undefined, now);
+  const toFresh = pickCourse(answer(u, { rating: 2 }), cs2500, [prior], now);
   check('update: rated -> unrated clears everything', toFresh.updating === undefined && toFresh.term === undefined
     && toFresh.rating === undefined && toFresh.hours === undefined && toFresh.grade === undefined
     && toFresh.comment === '' && toFresh.course?.code === 'CS2500' && nextStep('course', toFresh) === 'term');
-  const plain = pickCourse(a, { ...cs2500, code: 'CS2510' }, undefined, now);
+  const plain = pickCourse(a, { ...cs2500, code: 'CS2510' }, [], now);
   check('unrated pick outside update mode behaves like answer', plain.rating === 5 && plain.term === undefined);
-  const odd = pickCourse({ comment: '', professor: alex }, cs3500, { ...prior, term: 'Summer 1 2024' }, now);
+  const odd = pickCourse({ comment: '', professor: alex }, cs3500, [{ ...prior, term: 'Summer 1 2024' }], now);
   check('earlier term in the window but unlisted is added', odd.course?.terms.includes('Summer 1 2024') === true && odd.term === 'Summer 1 2024');
-  const stale = pickCourse({ comment: '', professor: alex }, cs3500, { ...prior, term: 'Fall 2021' }, now);
+  const stale = pickCourse({ comment: '', professor: alex }, cs3500, [{ ...prior, term: 'Fall 2021' }], now);
   check('earlier term older than the window is not selected', stale.term === undefined
     && same(stale.course?.terms, cs3500.terms) && nextStep('course', stale) === 'term');
-  const off = pickCourse({ comment: '', professor: alex }, { ...cs3500, terms: [] }, prior, now);
+  const off = pickCourse({ comment: '', professor: alex }, { ...cs3500, terms: [] }, [prior], now);
   check('off-list course keeps terms empty and opens otherTerm', off.course?.terms.length === 0 && nextStep('course', off) === 'otherTerm');
   const swapped = answer(u, { professor: { slug: 'sam-lee', name: 'Sam Lee', department: null } });
   check('professor change leaves update mode', swapped.updating === undefined && swapped.course === undefined
     && swapped.term === undefined && swapped.rating === undefined && swapped.hours === undefined
     && swapped.grade === undefined && swapped.comment === '');
+  const drafted: Answers = { comment: 'Half-written draft.', professor: alex, course: cs2500, term: 'Fall 2025', rating: 3, hours: '3-4', grade: 'B' };
+  const misTap = pickCourse(drafted, cs3500, [prior], now);
+  check('update: entering keeps the fresh draft aside', misTap.rating === 4 && misTap.comment === 'Projects take time.');
+  const backToDraft = pickCourse(pickCourse(misTap, cs4973, [prior, priorB], now), cs2500, [prior, priorB], now);
+  check('update: leaving restores the fresh draft', backToDraft.updating === undefined && backToDraft.rating === 3
+    && backToDraft.hours === '3-4' && backToDraft.grade === 'B' && backToDraft.comment === 'Half-written draft.'
+    && backToDraft.term === undefined && backToDraft.course?.code === 'CS2500');
+  const swappedDraft = answer(misTap, { professor: { slug: 'sam-lee', name: 'Sam Lee', department: null } });
+  check('update: professor change restores the fresh draft', swappedDraft.updating === undefined
+    && swappedDraft.rating === 3 && swappedDraft.comment === 'Half-written draft.' && swappedDraft.course === undefined);
   const groups = courseGroups([cs2500, cs3500], [prior, priorB]);
   check('courseGroups splits fresh and rated', same(groups.fresh.map((c) => c.code), ['CS2500'])
     && same(groups.rated.map((c) => c.code), ['CS3500', 'CS4973'])

@@ -17,6 +17,8 @@ export interface Answers {
   grade?: string | null;
   comment: string;
   updating?: RatedCourse;
+  // The fresh answers set aside while update mode shows the earlier ones.
+  draft?: Pick<Answers, 'rating' | 'hours' | 'grade' | 'comment'>;
 }
 
 export const OVERALL: { value: number; label: string }[] = [
@@ -115,18 +117,20 @@ function sameProfessor(x: RateProfessor | undefined, y: RateProfessor): boolean 
   return x !== undefined && x.slug === y.slug && (x.slug !== null || x.name === y.name);
 }
 
+// Leaving update mode brings back what the student had answered before entering it.
+function leaveUpdate(a: Answers): Answers {
+  const next: Answers = { ...a, rating: undefined, hours: undefined, grade: undefined, comment: '', ...a.draft };
+  delete next.updating;
+  delete next.draft;
+  return next;
+}
+
 export function answer(a: Answers, change: Partial<Answers>): Answers {
-  const next: Answers = { ...a, ...change };
+  let next: Answers = { ...a, ...change };
   if (change.professor !== undefined && !sameProfessor(a.professor, change.professor)) {
+    if (a.updating) next = leaveUpdate(next);
     if (!('course' in change)) delete next.course;
     if (!('term' in change)) delete next.term;
-    if (a.updating) {
-      delete next.updating;
-      delete next.rating;
-      delete next.hours;
-      delete next.grade;
-      next.comment = '';
-    }
   }
   if (change.course !== undefined && a.course?.code !== change.course.code) {
     if (!('term' in change)) delete next.term;
@@ -135,16 +139,10 @@ export function answer(a: Answers, change: Partial<Answers>): Answers {
 }
 
 // Picking a course: a rated one fills the student's earlier answers (update mode).
-export function pickCourse(a: Answers, c: RateCourse, rated: RatedCourse | undefined, now: Date): Answers {
+export function pickCourse(a: Answers, c: RateCourse, ratedCourses: RatedCourse[], now: Date): Answers {
   if (a.updating && a.course?.code === c.code) return a;
-  const base: Answers = { ...a, comment: a.updating ? '' : a.comment };
-  if (a.updating) {
-    delete base.updating;
-    delete base.term;
-    delete base.rating;
-    delete base.hours;
-    delete base.grade;
-  }
+  const base = a.updating ? leaveUpdate(a) : a;
+  const rated = ratedCourses.find((r) => r.code === c.code);
   if (!rated) return answer(base, { course: c });
   const keep = rated.term === null || inTermWindow(rated.term, now);
   const addTerm = keep && rated.term !== null && c.terms.length > 0 && !c.terms.includes(rated.term);
@@ -152,6 +150,7 @@ export function pickCourse(a: Answers, c: RateCourse, rated: RatedCourse | undef
   return answer(base, {
     course, term: keep ? rated.term : undefined, rating: rated.rating, hours: rated.hours,
     grade: rated.grade, comment: rated.comment, updating: rated,
+    draft: { rating: base.rating, hours: base.hours, grade: base.grade, comment: base.comment },
   });
 }
 

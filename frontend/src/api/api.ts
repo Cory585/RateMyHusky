@@ -517,10 +517,14 @@ export interface RateSubmission {
 }
 export type RateSubmitResult = { ok: true; counter: number | null } | { ok: false; status: number; error: string };
 
+/* The form waits on start and the context before it shows courses, so a hung request fails like any other. */
+const RATE_WAIT_MS = 10000;
+
 /* The localStorage mirror of the device token goes in a header so it stays out of access logs. */
 export async function startRating(deviceMirror: string | null): Promise<RateStart> {
   const res = await fetch(`${API_BASE}/api/rate/start`, {
     headers: deviceMirror ? { "X-Rmh-Device": deviceMirror } : {},
+    signal: AbortSignal.timeout(RATE_WAIT_MS),
   });
   if (maintenanceGuard(res)) throw new Error("Site is under maintenance");
   if (!res.ok) throw new Error(`API ${res.status}`);
@@ -531,6 +535,7 @@ export async function startRating(deviceMirror: string | null): Promise<RateStar
 export async function fetchRateContext(slug: string, deviceToken: string): Promise<RateProfessorContext | null> {
   const res = await fetch(`${API_BASE}/api/rate/professors/${encodeURIComponent(slug)}`, {
     headers: { "X-Rmh-Device": deviceToken },
+    signal: AbortSignal.timeout(RATE_WAIT_MS),
   });
   if (maintenanceGuard(res)) throw new Error("Site is under maintenance");
   if (res.status === 404) return null;

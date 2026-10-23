@@ -112,6 +112,7 @@ export default function Rate() {
     (async () => {
       const profSlug = params.get('professor');
       let initial: Answers = { comment: '' };
+      let prefetched: RatedCourse[] | null = null;
       if (profSlug) {
         const res = await fetchProfessorFull(profSlug);
         if (res.ok) {
@@ -122,13 +123,14 @@ export default function Rate() {
           if (course) {
             // A prefilled rated course opens in update mode, so wait for the context before the first screen.
             const s = await visit;
-            const ctx = s ? await fetchRateContext(identity.slug, s.deviceToken).catch(() => null) : null;
-            const prior = ctx?.ratedCourses.find((r) => r.code === course.code);
-            if (prior) initial = pickCourse(initial, course, prior, new Date());
+            if (s) prefetched = (await fetchRateContext(identity.slug, s.deviceToken).catch(() => null))?.ratedCourses ?? [];
+            initial = pickCourse(initial, course, prefetched ?? [], new Date());
           }
         }
       }
       if (cancelled) return;
+      // Kept so Back to the course step doesn't wait on the context effect fetching it again.
+      if (prefetched && initial.professor?.slug) setContext({ slug: initial.professor.slug, rated: prefetched });
       setAnswers(initial);
       setStep(firstStep(initial));
       setReady(true);
@@ -317,7 +319,7 @@ export default function Rate() {
               fresh={groups.fresh}
               rated={groups.rated}
               selected={answers.course?.code}
-              onPick={(c) => choose(pickCourse(answers, c, rated.find((r) => r.code === c.code), new Date()), 'course')}
+              onPick={(c) => choose(pickCourse(answers, c, rated, new Date()), 'course')}
               onOther={() => open('otherCourse')}
             />
             <StepFoot onBack={back} />
@@ -328,7 +330,7 @@ export default function Rate() {
         return (
           <OtherCourseStep
             rated={(rated ?? []).map((r) => r.code)}
-            onPick={(c) => go(pickCourse(answers, c, rated?.find((r) => r.code === c.code), new Date()), 'otherCourse')}
+            onPick={(c) => go(pickCourse(answers, c, rated ?? [], new Date()), 'otherCourse')}
             onBack={back}
           />
         );

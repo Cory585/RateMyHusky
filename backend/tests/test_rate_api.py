@@ -36,9 +36,11 @@ def rate(monkeypatch):
     server.limiter.reset()
 
     state = {"writes": [], "emails": [], "moderation": "allow", "network": "other",
-             "turnstile": True, "turnstile_calls": 0, "seen": False}
+             "turnstile": True, "turnstile_calls": 0, "seen": False, "existing": None}
 
     def fake_query_one(sql, params=()):
+        if "SELECT id, status, hold_reasons FROM survey_ratings" in sql:
+            return state["existing"]
         if "WHERE device_hash = %s LIMIT 1" in sql:
             return {"x": 1} if state["seen"] else None
         if "FROM professors_catalog" in sql:
@@ -173,6 +175,20 @@ def test_moderation_timeout_holds(rate):
     (sql, params), = rating_writes(state)
     assert "held" in params
     assert "moderation_unavailable" in params
+
+
+def test_quick_update_keeps_an_accepted_rating_accepted(rate):
+    server, client, state, ri = rate
+    quick = {"opened": ri.sign_opened(SECRET, int(time.time()) - 2, ri.keyed_hash(SECRET, "device", DEVICE), False)}
+    post(client, ri, quick)
+    state["existing"] = {"id": "r1", "status": "accepted", "hold_reasons": None}
+    post(client, ri, quick)
+    state["existing"] = {"id": "r1", "status": "held", "hold_reasons": "datacenter"}
+    post(client, ri, quick)
+    new, edit, held = (params for sql, params in rating_writes(state))
+    assert "held" in new and "too_fast" in new
+    assert "accepted" in edit and "too_fast" not in edit
+    assert "held" in held and "datacenter,too_fast" in held
 
 
 def test_new_professor_creates_one_pending_entry_and_one_email(rate):
