@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import Footer from '../components/Footer';
 import Seo from '../components/Seo';
-import { BANNER_SINCE } from '../config';
+import { BANNER_SINCE, RATE_ENABLED } from '../config';
 import './Terms.css';
 import './Faq.css';
 
@@ -43,8 +43,9 @@ const Faq = () => {
 
               <h3>Where do the ratings and reviews come from?</h3>
               <p>
-                Ratings and written reviews come from RateMyProfessors, and ratings also come
-                from students through our own rating form. The Reddit tab on a
+                Ratings and written reviews come from RateMyProfessors
+                {RATE_ENABLED ? ', and ratings also come from students through our own rating form' : ''}.
+                The Reddit tab on a
                 professor's page shows public posts and comments from Northeastern subreddits
                 that mention that professor, with a link back to each original. We refresh the
                 data every week.
@@ -57,6 +58,7 @@ const Faq = () => {
                 RateMyProfessors.
               </p>
 
+              {RATE_ENABLED && (<>
               <h3>Can I write a review here?</h3>
               <p>
                 Yes. Use the <Link to="/rate">rating form</Link> to rate a professor and course you
@@ -67,6 +69,7 @@ const Faq = () => {
                 shown on the site yet. You can still post a review on RateMyProfessors too, and
                 it will show up here after the refresh.
               </p>
+              </>)}
 
               <h3>How are the GOATED Professors ranked?</h3>
               <p>
