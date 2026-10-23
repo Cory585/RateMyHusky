@@ -78,9 +78,10 @@ export default function Rate() {
   const [thanksBase, setThanksBase] = useState<RatePairSummary | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const visitRef = useRef(0);
-  const { containerRef, token, failed, reset } = useTurnstile();
+  const { containerRef, token, failed, interactive, reset } = useTurnstile();
   // The checkpoint holds the form back until the first token; later re-checks happen under the form.
-  const [cleared, setCleared] = useState(false);
+  // Starts cleared when the token is already there (no site key), so the checkpoint never flashes.
+  const [cleared, setCleared] = useState(() => !!token);
   const isDesktop = useMediaQuery('(min-width: 1024px)');
 
   const slug = answers.professor?.slug ?? null;
@@ -417,10 +418,11 @@ export default function Rate() {
             </div>
           )}
           {/* One container in one place for the whole visit, so the widget survives the checkpoint giving way to the form. */}
-          <div ref={containerRef} className={`rate-turnstile${cleared && token ? ' is-done' : ''}`} />
+          <div ref={containerRef} className={`rate-turnstile${cleared && !interactive ? ' is-done' : ''}`} />
           {!cleared && (
             <div className="rate-check">
-              {failed && <button type="button" className="rate-check-retry" onClick={reset}>Try again</button>}
+              {/* A reload, since a blocked script never rendered a widget to reset; nothing is filled in yet to lose. */}
+              {failed && <button type="button" className="rate-check-retry" onClick={() => window.location.reload()}>Try again</button>}
               <p className="rate-check-note">{host} needs to review the security of your connection before you can rate.</p>
               <p className="rate-check-foot">Protected by Cloudflare Turnstile</p>
             </div>

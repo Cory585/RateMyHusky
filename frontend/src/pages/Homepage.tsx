@@ -11,6 +11,7 @@ import { fetchGoatProfessors, fetchProfessorsCatalog } from '../api/api';
 import type { CatalogProfessor, Professor } from '../api/api';
 import neuIcon from '../assets/neu-circle-icon.png';
 import { ASK_ENABLED } from '../config';
+import { useMediaQuery } from './rate/useMediaQuery';
 import './Homepage.css';
 
 const STATS = [
@@ -219,6 +220,9 @@ const Homepage = () => {
   const [shuffling, setShuffling] = useState(false);
   const [openTooltip, setOpenTooltip] = useState<number | null>(null);
   const [rankSheetOpen, setRankSheetOpen] = useState(false);
+  const isMobile = useMediaQuery('(max-width: 768px)');
+  // The sheet's styles exist only at phone width, so it closes if the screen grows past it.
+  const showRankSheet = rankSheetOpen && isMobile;
   const rankHelpRef = useRef<HTMLButtonElement>(null);
   const rankSheetBtnRef = useRef<HTMLButtonElement>(null);
   const [showAskTip, setShowAskTip] = useState(() => localStorage.getItem('home_ask_tip_dismissed') !== '1');
@@ -246,18 +250,26 @@ const Homepage = () => {
     return () => el.removeEventListener('scroll', updateLeaderFade);
   }, [profs, updateLeaderFade]);
 
-  // The ranking sheet takes focus while open, closes on Escape, and hands focus back to the "?".
+  // The ranking sheet takes focus while open, locks the page scroll, closes on Escape, and hands focus back to the "?".
   useEffect(() => {
     if (!rankSheetOpen) return;
+    if (!isMobile) { setRankSheetOpen(false); return; }
     const help = rankHelpRef.current;
     rankSheetBtnRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setRankSheetOpen(false); };
+    // "Got it" is the sheet's only control, so Tab stays on it.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setRankSheetOpen(false);
+      if (e.key === 'Tab') e.preventDefault();
+    };
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     document.addEventListener('keydown', onKey);
     return () => {
+      document.body.style.overflow = prevOverflow;
       document.removeEventListener('keydown', onKey);
       help?.focus();
     };
-  }, [rankSheetOpen]);
+  }, [rankSheetOpen, isMobile]);
 
   // Pill animation state
   const [pillStyle, setPillStyle] = useState({ left: 0, width: 0, opacity: 0 });
@@ -561,7 +573,7 @@ const Homepage = () => {
               aria-label="How the ranking works"
               aria-describedby="goat-rank-note"
               ref={rankHelpRef}
-              onClick={() => { if (window.matchMedia('(max-width: 768px)').matches) setRankSheetOpen(true); }}
+              onClick={() => { if (isMobile) setRankSheetOpen(true); }}
             >
               ?
               <span id="goat-rank-note" role="tooltip" className="goat-rank-tooltip">
@@ -569,7 +581,7 @@ const Homepage = () => {
               </span>
             </button>
             {/* Portaled so the overlay escapes the section and covers the fixed navbar too. */}
-            {rankSheetOpen && createPortal(
+            {showRankSheet && createPortal(
               <>
                 <div className="goat-rank-overlay" onClick={() => setRankSheetOpen(false)} />
                 <div className="goat-rank-sheet" role="dialog" aria-modal="true" aria-labelledby="goat-rank-sheet-title">
