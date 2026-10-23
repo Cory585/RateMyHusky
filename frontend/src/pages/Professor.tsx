@@ -10,7 +10,7 @@ import Breadcrumbs from '../components/Breadcrumbs';
 import Seo from '../components/Seo';
 import { fetchProfessorFull } from '../api/api';
 import type { ProfessorPage, ProfessorCourse, RatingDistribution, RedditMention, TeachingAward } from '../api/api';
-import { SHOW_SURVEY_STATS } from '../config';
+import { RATE_ENABLED, SHOW_SURVEY_STATS } from '../config';
 import { relativeTerm, seasonYear, termSortKey } from '../utils/termUtils';
 import { isPinned, pinnedFirst } from '../utils/askPinMatch';
 import { photoThumb, thumbOnError } from '../utils/photoThumb';
@@ -389,16 +389,6 @@ const Professor = () => {
     () => unfiltered ? reviews : reviews.filter(r => r.courseCode !== null && selectedCourses.has(r.courseCode)),
     [reviews, selectedCourses, unfiltered]);
 
-  /* A rating is any score; a review is a rating with a written comment. Only reviews get cards. */
-  const writtenReviews = useMemo(() => reviews.filter(r => r.comment?.trim()), [reviews]);
-
-  /* Reviews per course, counted the way the list shows them when only that course is picked. */
-  const reviewCountByCourse = useMemo(() => {
-    const byCourse = new Map<string, typeof reviews>();
-    for (const r of writtenReviews) if (r.courseCode !== null) byCourse.set(r.courseCode, [...(byCourse.get(r.courseCode) ?? []), r]);
-    return new Map([...byCourse].map(([code, rs]) => [code, deduplicateByText(rs, r => r.comment).length]));
-  }, [writtenReviews]);
-
   const filteredRmpReviews = useMemo(
     () => deduplicateByText(rmpRatingsInSelection.filter(r => r.comment?.trim()), r => r.comment),
     [rmpRatingsInSelection]);
@@ -626,7 +616,6 @@ const Professor = () => {
     const terms = [...new Set((c.terms ?? []).map(cleanTerm))].filter(t => /\b20\d{2}\b/.test(t)).sort((a, b) => termSortKey(b) - termSortKey(a));
     const termsExpanded = expandedTerms.has(code);
     const hiddenTermCount = terms.length - MAX_VISIBLE_TERMS;
-    const reviewCount = reviewCountByCourse.get(c.code) ?? 0;
     const unrated = c.numRatings === 0;
     const hasPage = c.hasPage ?? c.name != null;
     return (
@@ -638,14 +627,7 @@ const Professor = () => {
       <div className="prof-course-row-main">
         <span className="prof-course-code">{c.code}</span>
         <span className="prof-course-title">{c.name ?? ''}</span>
-        <span className="prof-course-terms">
-          {unrated ? 'No ratings yet' : (
-            <>
-              {c.numRatings.toLocaleString()} rating{c.numRatings === 1 ? '' : 's'}
-              {reviewCount > 0 && <>{' · '}{reviewCount.toLocaleString()} review{reviewCount === 1 ? '' : 's'}</>}
-            </>
-          )}
-        </span>
+        {unrated && <span className="prof-course-terms">No ratings yet</span>}
       </div>
       {(hasPage || terms.length > 0) && (
         <div className="prof-course-lower">
@@ -867,12 +849,14 @@ const Professor = () => {
       </section>
 
       <div className="prof-hero-actions-row">
+        {RATE_ENABLED && (
         <Link to={`/rate?professor=${identity.slug}`} className="prof-rate-btn">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
           </svg>
           Rate this professor
         </Link>
+        )}
         <Link
           to={`/compare?a=${identity.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`}
           className="prof-compare-btn"

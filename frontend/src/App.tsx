@@ -22,6 +22,7 @@ import Navbar from './components/Navbar';
 import FeedbackTab from './components/FeedbackTab';
 import ThemeToggle from './components/ThemeToggle';
 import ErrorBoundary from './components/ErrorBoundary';
+import { RATE_ENABLED } from './config';
 import './App.css';
 
 function ScrollToTop() {
@@ -51,7 +52,7 @@ function App() {
               <Route path="/departments/:slug" element={<Department />} />
               <Route path="/compare" element={<Compare />} />
               <Route path="/bookmarks" element={<Bookmarks />} />
-              <Route path="/rate" element={<Rate />} />
+              {RATE_ENABLED && <Route path="/rate" element={<Rate />} />}
               <Route path="/account" element={<Navigate to="/bookmarks" replace />} />
               <Route path="/account/bookmarks" element={<Navigate to="/bookmarks" replace />} />
               <Route path="/terms" element={<Terms />} />

@@ -174,6 +174,26 @@
 .rate-back:disabled { opacity: 0.45; cursor: default; }
 
 .rate-turnstile { margin-top: 16px; }
+.rate-turnstile.is-done { display: none; }
+
+/* The checkpoint before the form, laid out like Cloudflare's "Just a moment" page. */
+body.rate-checking .navbar { display: none; }
+.rate-page.rate-page-check { padding-top: 12vh; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+.rate-check-host { margin: 0 0 16px; font-size: 1.75rem; font-weight: 500; outline: none; overflow-wrap: anywhere; }
+.rate-check-lead { margin: 0; font-size: 1.15rem; line-height: 1.4; }
+.rate-check .rate-error { margin: 0; font-size: 1.05rem; line-height: 1.4; }
+.rate-check-retry {
+  margin-top: 14px;
+  padding: 8px 16px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.rate-check-note { margin: 20px 0 0; color: #555; font-size: 0.9rem; line-height: 1.45; }
+.rate-check-foot { margin: 48px 0 0; padding-top: 12px; border-top: 1px solid #e5e5e5; color: #777; font-size: 0.8rem; text-align: center; }
 
 .rate-n {
   display: flex;
@@ -424,6 +444,13 @@
   .rate-edit:focus-visible .rate-pen { display: inline-block; }
   .rate-note { margin: 0.1em 0 0; color: #999; font-size: 0.8em; }
   .rate-why { margin: auto 0 0; color: #888; font-size: 0.9em; }
+
+  /* The checkpoint drops the two-panel card for a plain page, as Cloudflare's has. */
+  .rate-page.rate-page-check { height: auto; min-height: 100dvh; padding: 18dvh 0 0; background: #fff; }
+  .rate-page-check .rate-shell { display: block; height: auto; font-size: 16px; }
+  .rate-page-check .rate-panel { width: min(640px, 100%); margin: 0 auto; padding: 0; border: none; background: transparent; overflow: visible; }
+  .rate-check-host { font-size: 2.5rem; }
+  .rate-check-lead { font-size: 1.4rem; }
 }
 
 .dark .rate-page { background: #1a1a1a; color: #e0e0e0; }
@@ -447,10 +474,15 @@
 .dark .rate-sugg small { color: #888; }
 .dark .rate-sugg.add { color: #f06a7a; }
 .dark .rate-error { color: #f06a7a; }
+.dark .rate-check-note { color: #aaa; }
+.dark .rate-check-foot { border-top-color: #333; color: #999; }
+.dark .rate-check-retry { border-color: #444; background: #2a2a2a; }
 
 @media (min-width: 1024px) {
   .dark .rate-panel,
   .dark .rate-pane { border-color: #333; background: #1e1e1e; }
+  .dark .rate-page.rate-page-check { background: #1a1a1a; }
+  .dark .rate-page-check .rate-panel { background: transparent; }
   .dark .rate-av,
   .dark .rate-pchip { background: #3a2020; color: #f06a7a; }
   .dark .rate-who p,
