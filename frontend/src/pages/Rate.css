@@ -120,10 +120,13 @@
   .rate-opt.course:hover .rate-pencil { background: #d6394c; color: #fff; }
   .rate-opt.course:hover .rate-pencil svg { transform: rotate(-12deg); }
   .rate-sugg:hover b { color: #d6394c; }
+  /* The pop keeps the hover lift, so the tile doesn't drop 2px while it plays. */
+  .rate-opt.pop:hover { animation-name: rate-pop-lifted; }
 }
 .rate-opt:active { transform: translateY(0) scale(0.98); box-shadow: none; }
 .rate-opt.pop { animation: rate-pop 0.2s ease-out; }
 @keyframes rate-pop { 0% { transform: scale(0.97); } 60% { transform: scale(1.02); } 100% { transform: scale(1); } }
+@keyframes rate-pop-lifted { 0% { transform: translateY(-2px) scale(0.97); } 60% { transform: translateY(-2px) scale(1.02); } 100% { transform: translateY(-2px) scale(1); } }
 
 .rate-tag {
   flex: 0 0 auto;
@@ -483,5 +486,6 @@ body.rate-checking .navbar { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .rate-opt, .rate-btn, .rate-n, .rate-pencil svg, .rate-back-top svg, .rate-sugg, .rate-sugg b, .rate-prog i b { transition: none; }
   .rate-opt:hover, .rate-opt:active, .rate-btn:active { transform: none; }
-  .rate-opt.pop { animation: none; }
+  .rate-opt.pop,
+  .rate-opt.pop:hover { animation: none; }
 }
