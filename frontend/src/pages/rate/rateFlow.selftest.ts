@@ -146,8 +146,8 @@ function selftest(): number {
 
   // Update mode
   const now = new Date(2026, 9, 23);
-  const prior: RatedCourse = { code: 'CS3500', name: 'Object-Oriented Design', term: 'Fall 2025', rating: 4, hours: '5-7', grade: 'A-', comment: 'Projects take time.' };
-  const priorB: RatedCourse = { code: 'CS4973', name: 'Topics in HCI', term: null, rating: 5, hours: '8-10', grade: null, comment: 'Best course.' };
+  const prior: RatedCourse = { code: 'CS3500', name: 'Object-Oriented Design', pending: false, term: 'Fall 2025', rating: 4, hours: '5-7', grade: 'A-', comment: 'Projects take time.' };
+  const priorB: RatedCourse = { code: 'CS4973', name: 'Topics in HCI', pending: false, term: null, rating: 5, hours: '8-10', grade: null, comment: 'Best course.' };
   const cs3500: RateCourse = { code: 'CS3500', name: 'Object-Oriented Design', isNew: false, terms: ['Fall 2025', 'Spring 2025'] };
   const cs4973: RateCourse = { code: 'CS4973', name: 'Topics in HCI', isNew: false, terms: ['Spring 2025'] };
   const u = pickCourse({ comment: '', professor: alex }, cs3500, [prior], now);
@@ -193,6 +193,10 @@ function selftest(): number {
   check('courseGroups splits fresh and rated', same(groups.fresh.map((c) => c.code), ['CS2500'])
     && same(groups.rated.map((c) => c.code), ['CS3500', 'CS4973'])
     && same(groups.rated[0].terms, cs3500.terms) && same(groups.rated[1].terms, []) && groups.rated[1].name === 'Topics in HCI');
+  const pendingPrior: RatedCourse = { ...prior, code: 'CS4999', name: 'Applied ML', pending: true };
+  const [pendingTile] = courseGroups([], [pendingPrior]).rated;
+  const subPending = buildSubmission(pickCourse({ comment: '', professor: alex }, pendingTile, [pendingPrior], now), start, 't', '');
+  check('a rated course awaiting review resends as a new course', same(subPending.course, { code: 'CS4999', name: 'Applied ML' }));
   check('splitTerm', same(splitTerm('Summer 1 2025', now), { season: 'Summer 1', year: 2025 })
     && same(splitTerm('Summer 2025', now), { season: 'Summer', year: 2025 })
     && splitTerm('Winter 2026', now) === null && splitTerm('Fall 2021', now) === null && splitTerm(null, now) === null);

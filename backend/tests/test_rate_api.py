@@ -276,7 +276,7 @@ def test_professor_context_reads_the_mirror_header_without_a_cookie(rate, monkey
     server, client, state, ri = rate
     device_hash = ri.keyed_hash(SECRET, "device", DEVICE)
     monkeypatch.setattr(server, "query", lambda sql, params=None: (
-        [{"course_code": "CS2500", "name": "Fundamentals of CS 1", "term_label": "Fall 2025",
+        [{"code": "CS2500", "name": "Fundamentals of CS 1", "pending": False, "term_label": "Fall 2025",
           "rating": 4, "hours": "5-7", "grade": "A-", "comment": "Fine."}] if "FROM survey_ratings" in sql and params[0] == device_hash else []))
     assert client.get("/api/rate/professors/alice-smith").get_json()["ratedCourses"] == []
     resp = client.get("/api/rate/professors/alice-smith", headers={"X-Rmh-Device": DEVICE})

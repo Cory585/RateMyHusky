@@ -159,7 +159,7 @@ export function courseGroups(courses: RateCourse[], rated: RatedCourse[]): { fre
   const codes = new Set(rated.map((r) => r.code));
   const listed = new Set(courses.map((c) => c.code));
   const off = rated.filter((r) => !listed.has(r.code))
-    .map((r): RateCourse => ({ code: r.code, name: r.name, isNew: false, terms: [] }));
+    .map((r): RateCourse => ({ code: r.code, name: r.name, isNew: r.pending, terms: [] }));
   return {
     fresh: courses.filter((c) => !codes.has(c.code)),
     rated: [...courses.filter((c) => codes.has(c.code)), ...off],

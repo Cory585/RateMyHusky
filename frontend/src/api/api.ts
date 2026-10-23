@@ -498,7 +498,8 @@ export async function submitFeedback(payload: {
 /* ---- Student ratings (/rate) ---- */
 export interface RateStart { opened: string; deviceToken: string; counter: number | null }
 export interface RatedCourse {
-  code: string; name: string | null; term: string | null;
+  /* pending: the course is still awaiting review, so the form resends it as a new course. */
+  code: string; name: string | null; pending: boolean; term: string | null;
   rating: number; hours: string; grade: string | null; comment: string;
 }
 export interface RateProfessorContext { ratedCourses: RatedCourse[] }
