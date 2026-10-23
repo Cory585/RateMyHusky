@@ -505,10 +505,12 @@ const Homepage = () => {
 
       {/* ======== Hero ======== */}
       <main className="homepage-hero">
-        <div
-          className="hero-bg-pattern"
-          style={{ backgroundImage: `url(${neuIcon})` }}
-        />
+        <div className="hero-bg-clip">
+          <div
+            className="hero-bg-pattern"
+            style={{ backgroundImage: `url(${neuIcon})` }}
+          />
+        </div>
         <h1 className="hero-tagline">
           Find the <span>right professor</span>, every semester
         </h1>

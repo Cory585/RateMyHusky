@@ -11,7 +11,7 @@ import Seo from '../components/Seo';
 import { fetchProfessorFull } from '../api/api';
 import type { ProfessorPage, ProfessorCourse, RatingDistribution, RedditMention, TeachingAward } from '../api/api';
 import { SHOW_SURVEY_STATS } from '../config';
-import { termSortKey } from '../utils/termUtils';
+import { relativeTerm, termSortKey } from '../utils/termUtils';
 import { isPinned, pinnedFirst } from '../utils/askPinMatch';
 import { photoThumb, thumbOnError } from '../utils/photoThumb';
 import BookmarkButton from '../components/BookmarkButton';
@@ -799,7 +799,7 @@ const Professor = () => {
               <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', marginLeft: '4px', opacity: 0.6 }}><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
             )}
           </span>
-          <StarRating rating={stats.rating ?? 0} size="lg" />
+          <div className="prof-stat-extra"><StarRating rating={stats.rating ?? 0} size="lg" /></div>
           {stats.breakdown.length > 0 && (
             <div className="prof-stat-breakdown">
               {stats.breakdown.map(([source, rating]) => (
@@ -811,11 +811,13 @@ const Professor = () => {
         <div className="prof-stat-card">
           <span className="prof-stat-value">{stats.difficulty !== null ? <AnimatedNumber value={stats.difficulty} /> : '—'}</span>
           <span className="prof-stat-label">Difficulty</span>
-          <div className="prof-difficulty-bar">
-            <div className="prof-difficulty-fill" style={{
-              width: `${((stats.difficulty ?? 0) / 5) * 100}%`,
-              background: difficultyColor(stats.difficulty ?? 0),
-            }} />
+          <div className="prof-stat-extra">
+            <div className="prof-difficulty-bar">
+              <div className="prof-difficulty-fill" style={{
+                width: `${((stats.difficulty ?? 0) / 5) * 100}%`,
+                background: difficultyColor(stats.difficulty ?? 0),
+              }} />
+            </div>
           </div>
         </div>
         <div className="prof-stat-card">
@@ -823,7 +825,14 @@ const Professor = () => {
             {summary.wouldTakeAgainPct !== null ? <AnimatedNumber value={summary.wouldTakeAgainPct} decimals={0} suffix="%" /> : '—'}
           </span>
           <span className="prof-stat-label">Would Take Again</span>
-          {!unfiltered && <span className="prof-stat-hint">All courses</span>}
+          {/* The percentage isn't split by course, so a course filter swaps the bar for that note. */}
+          <div className="prof-stat-extra">
+            {unfiltered ? (
+              <div className="prof-difficulty-bar">
+                <div className="prof-difficulty-fill" style={{ width: `${summary.wouldTakeAgainPct ?? 0}%`, background: '#27ae60' }} />
+              </div>
+            ) : <span className="prof-stat-hint">All courses</span>}
+          </div>
         </div>
         {SHOW_SURVEY_STATS && (
           <div className="prof-stat-card">
@@ -831,25 +840,27 @@ const Professor = () => {
               {summary.hoursPerWeek !== null ? <AnimatedNumber value={summary.hoursPerWeek} decimals={1} suffix="h" /> : '—'}
             </span>
             <span className="prof-stat-label">Hrs / Week</span>
+            <div className="prof-stat-extra" />
           </div>
         )}
         <div className="prof-stat-card prof-stat-clickable" onClick={() => chartsRef.current?.scrollIntoView({ behavior: 'smooth' })}>
           <span className="prof-stat-value">{stats.numRatings ? stats.numRatings.toLocaleString() : '—'}</span>
           <span className="prof-stat-label">Total Ratings</span>
-          <span className="prof-stat-hint">View distribution ↓</span>
+          <div className="prof-stat-extra"><span className="prof-stat-hint">View distribution ↓</span></div>
         </div>
         </>)}
         {profile.lastTaught && (
           <div className="prof-stat-card">
             <span className="prof-stat-value prof-stat-value-text">{profile.lastTaught}</span>
             <span className="prof-stat-label">Last Taught</span>
+            <div className="prof-stat-extra"><span className="prof-stat-hint">{relativeTerm(profile.lastTaught)}</span></div>
           </div>
         )}
         {SHOW_SURVEY_STATS && (
           <div className="prof-stat-card prof-stat-clickable" onClick={() => reviewsRef.current?.scrollIntoView({ behavior: 'smooth' })}>
             <span className="prof-stat-value">{summary.numComments.toLocaleString()}</span>
             <span className="prof-stat-label">Reviews &amp; Mentions</span>
-            <span className="prof-stat-hint">Read reviews ↓</span>
+            <div className="prof-stat-extra"><span className="prof-stat-hint">Read reviews ↓</span></div>
           </div>
         )}
       </section>
