@@ -19,9 +19,10 @@ const STATS = [
   { label: 'Departments', value: '80' },
 ];
 
+// Law and Professional Studies are left out: see BOARD_COLLEGES in server.py.
 const COLLEGES = [
   'Business', 'CAMD', 'CSSH', 'Engineering',
-  'Health Sciences', 'Khoury', 'Law', 'Professional Studies', 'Science',
+  'Health Sciences', 'Khoury', 'Science',
 ];
 
 // Module-level caches so data survives component unmounts
@@ -98,7 +99,7 @@ const Stars = ({ rating }: { rating: number }) => {
 /* ---- how the board is ordered ----
    The board sorts on the rating shrunk toward the site average by how many
    ratings back it, while the Rating column shows the unshrunk average — so that
-   column legitimately moves backwards between adjacent rows, 1-6 times per board
+   column legitimately moves backwards between adjacent rows, 2-6 times per board
    on every board with two or more rows.
 
    Behind a "?" beside the heading rather than always on. What keeps the board
@@ -129,7 +130,8 @@ const Stars = ({ rating }: { rating: number }) => {
 const RANK_NOTE =
   'Professors are ranked by their rating and by how many students rated them. ' +
   'A very high score from only a few students counts for less than a slightly ' +
-  'lower score from hundreds. That is why the ratings below do not always go ' +
+  'lower score from hundreds, and professors with at least 30 ratings always ' +
+  'come before those with fewer. That is why the ratings below do not always go ' +
   'from highest to lowest.';
 
 /* ---- rating cell with hover/click tooltip ---- */

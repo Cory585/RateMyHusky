@@ -97,24 +97,35 @@ class Corpus:
 
     @property
     def colleges(self):
+        """Colleges that have a board."""
         return [r["college"] for r in self.rows(
             "SELECT DISTINCT college FROM professors_catalog "
-            "WHERE college IS NOT NULL ORDER BY college")]
+            "WHERE college IS NOT NULL ORDER BY college")
+            if r["college"] in server.BOARD_COLLEGES]
 
     def board(self, college, floor=None, limit=10):
-        floor = server.BOARD_MIN_REVIEWS if floor is None else floor
+        """The board as served when floor is None: the professors at
+        BOARD_MIN_REVIEWS first, filled from BOARD_FILL_MIN_REVIEWS. Otherwise
+        the board a floor of `floor` with no fill would serve. Both drop ratings
+        below the prior, as the endpoint does, so a hypothetical floor is
+        measured under the same rules as the real one."""
         # Cached: several claims read the same board, each a round trip to a
-        # remote database otherwise.
+        # remote database otherwise. Keyed on the floor as passed, so the served
+        # board (None) never shares an entry with a plain board at 5.
         if not hasattr(self, "_boards"):
             self._boards = {}
-        if (college, floor, limit) not in self._boards:
-            self._boards[college, floor, limit] = self.rows(
+        key = (college, floor, limit)
+        if key not in self._boards:
+            served = floor is None
+            lowest = server.BOARD_FILL_MIN_REVIEWS if served else floor
+            tier = server.BOARD_MIN_REVIEWS if served else floor
+            self._boards[key] = self.rows(
                 f"SELECT * FROM professors_catalog WHERE college = %s "
-                f"AND total_reviews >= %s "
-                f"ORDER BY {server.RANKING_SCORE_SQL} DESC NULLS LAST, "
+                f"AND total_reviews >= %s AND avg_rating >= %s "
+                f"ORDER BY total_reviews >= %s DESC, {server.RANKING_SCORE_SQL} DESC, "
                 f"total_reviews DESC, name LIMIT %s",
-                (college, floor, self.prior, limit))
-        return self._boards[college, floor, limit]
+                (college, lowest, self.prior, tier, self.prior, limit))
+        return self._boards[key]
 
     @property
     def all_board_rows(self):
@@ -129,9 +140,13 @@ class Corpus:
                    if (a["avg_rating"] or 0) < (b["avg_rating"] or 0))
 
     def full_boards(self):
-        """(names at the floor, names at a floor of 100) for each board that fills at the floor."""
-        return [([r["name"] for r in self.board(x)], [r["name"] for r in self.board(x, floor=100)])
-                for x in self.colleges if len(self.board(x)) == 10]
+        """(names at the floor, names at a floor of 100) for each board that fills
+        at the floor. A board full at the floor never reaches the fill, so the
+        first list is the board as served."""
+        at_30 = server.BOARD_MIN_REVIEWS
+        return [([r["name"] for r in self.board(x, floor=at_30)],
+                 [r["name"] for r in self.board(x, floor=100)])
+                for x in self.colleges if len(self.board(x, floor=at_30)) == 10]
 
     def eligible_at_five(self):
         """Law and Professional Studies professors the old floor of 5 ranked."""
@@ -204,11 +219,6 @@ CLAIMS = [
                      "AND avg_rating IS NOT NULL AND total_reviews >= 5"),
      ("abs", 3)),
 
-    ("length of the Professional Studies board", SERVER_PY,
-     r"At 30 the Professional Studies\s*\n#\s*board has (\d+) professors",
-     lambda c: len(c.board("Professional Studies")),
-     ("abs", 1)),
-
     ("most ratings among those", SERVER_PY,
      r"\bto (\d+) ratings each",
      lambda c: max(r["total_reviews"] for r in c.eligible_at_five()),
@@ -218,11 +228,6 @@ CLAIMS = [
      r"scoring within (0\.\d+) of the prior",
      lambda c: max(abs(float(r["s"]) - c.prior) for r in c.eligible_at_five()),
      ("abs", 0.05)),
-
-    ("length of the Law board", SERVER_PY,
-     r"and Law's has (\d+), which",
-     lambda c: len(c.board("Law")),
-     ("abs", 1)),
 
     # Names, not lengths: a 10-row board can keep its length at 100 and still
     # change who is on it.
@@ -277,8 +282,11 @@ def _inversions(corpus):
 
 
 def _reviews_to_reach(corpus, college):
-    """How many reviews a flawless 5.00 needs to reach a board's rank-10 score."""
-    board = corpus.board(college)
+    """How many reviews a flawless 5.00 needs to reach a board's rank-10 score.
+
+    Rank 10 of the board at the floor, not the served one: on a short board the
+    served rank 10 is a fill professor, and the claim is about the floor."""
+    board = corpus.board(college, floor=server.BOARD_MIN_REVIEWS)
     if len(board) < 10:
         return 0
     target = server.shrunk_score(
@@ -374,17 +382,16 @@ def test_no_tie_group_reaches_a_board_top_ten(corpus):
     Measured the way the endpoint measures it: the same ORDER BY, per college,
     limited to the same 10.
     """
-    ranked = (f"{server.RANKING_SCORE_SQL} DESC NULLS LAST, total_reviews DESC, name")
+    ranked = (f"{server.RANKING_SCORE_SQL} DESC, total_reviews DESC, name")
     visible = []
-    for row in corpus.rows(
-            "SELECT DISTINCT college FROM professors_catalog "
-            "WHERE college IS NOT NULL", ()):
-        college = row["college"]
+    for college in corpus.colleges:
         top = corpus.rows(
             f"SELECT name, {server.RANKING_SCORE_SQL} s, total_reviews "
             f"FROM professors_catalog WHERE college = %s AND total_reviews >= %s "
-            f"ORDER BY {ranked} LIMIT 10",
-            (corpus.prior, college, server.BOARD_MIN_REVIEWS, corpus.prior))
+            f"AND avg_rating >= %s "
+            f"ORDER BY total_reviews >= %s DESC, {ranked} LIMIT 10",
+            (corpus.prior, college, server.BOARD_FILL_MIN_REVIEWS, corpus.prior,
+             server.BOARD_MIN_REVIEWS, corpus.prior))
         seen = {}
         for r in top:
             seen.setdefault((r["s"], r["total_reviews"]), []).append(r["name"])
