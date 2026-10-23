@@ -98,7 +98,7 @@ def validate_submission(body, this_year):
     term = body.get("term")
     if term is not None:
         m = TERM_RE.fullmatch(term) if isinstance(term, str) else None
-        if not m or label_code(term) is None or not this_year - 6 <= int(m.group(2)) <= this_year + 1:
+        if not m or label_code(term) is None or not this_year - 3 <= int(m.group(2)) <= this_year + 1:
             return None, "Invalid term"
 
     rating = body.get("rating")

@@ -1,5 +1,5 @@
 // Step logic and pure helpers for the /rate form. No React, no runtime imports from api.ts.
-import type { ProfessorCourse, RatePairSummary, RateStart, RateSubmission } from '../../api/api';
+import type { ProfessorCourse, RateStart, RateSubmission } from '../../api/api';
 
 export type StepId = 'who' | 'newProfessor' | 'course' | 'otherCourse' | 'term' | 'otherTerm'
   | 'overall' | 'workload' | 'grade' | 'comment' | 'thanks';
@@ -34,8 +34,6 @@ export const HOURS: { value: string; label: string; aria: string }[] = [
   { value: '8-10', label: '8–10 hrs', aria: '8 to 10 hours' },
   { value: '10+', label: '10+ hrs', aria: 'More than 10 hours' },
 ];
-
-const HOURS_MIDPOINT: Record<string, number> = { '0-2': 1, '3-4': 3.5, '5-7': 6, '8-10': 9, '10+': 12 };
 
 export const GRADES: string[] = ['A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C- or below'];
 
@@ -84,11 +82,6 @@ function screenFor(step: MainStep, a: Answers): StepId {
   return step;
 }
 
-// The screen an edit from the side panel opens: the picker, or its fallback for a new professor or course.
-export function editScreen(step: 'course' | 'term', a: Answers): StepId {
-  return screenFor(step, a);
-}
-
 function firstUnansweredFrom(index: number, a: Answers): StepId {
   for (let i = index; i < MAIN_ORDER.length; i++) {
     if (!isAnswered(MAIN_ORDER[i], a)) return screenFor(MAIN_ORDER[i], a);
@@ -133,7 +126,16 @@ export function answer(a: Answers, change: Partial<Answers>): Answers {
 
 export function termYears(now: Date): number[] {
   const y = now.getFullYear();
-  return Array.from({ length: 7 }, (_, i) => y - i);
+  return Array.from({ length: 4 }, (_, i) => y - i);
+}
+
+export function inTermWindow(label: string, now: Date): boolean {
+  const year = Number(label.match(/(\d{4})$/)?.[1]);
+  return termYears(now).includes(year);
+}
+
+export function toRateCourse(c: ProfessorCourse, now: Date): RateCourse {
+  return { code: c.code, name: c.name, isNew: false, terms: c.terms.filter((t) => inTermWindow(t, now)) };
 }
 
 export function formatCode(code: string): string {
@@ -148,56 +150,18 @@ export function lastName(name: string): string {
   return name.trim().split(/\s+/).pop() ?? '';
 }
 
-export function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '';
-  const first = parts[0][0];
-  return (parts.length === 1 ? first : first + parts[parts.length - 1][0]).toUpperCase();
-}
-
-export function contextChip(a: Answers): string {
-  if (!a.professor) return '';
-  if (!a.course) return `Prof. ${a.professor.name}`;
+export function contextTags(a: Answers): string[] {
+  if (!a.professor) return [];
+  if (!a.course) return [`Prof. ${a.professor.name}`];
   const parts = [lastName(a.professor.name), formatCode(a.course.code)];
   if (a.term !== undefined) parts.push(a.term === null ? 'Term not sure' : displayTerm(a.term));
-  return parts.join(' · ');
+  return parts;
 }
 
-export function hoursBucket(hours: number): string {
-  if (hours < 2.5) return '0–2';
-  if (hours < 4.5) return '3–4';
-  if (hours < 7.5) return '5–7';
-  if (hours < 10.5) return '8–10';
-  return '10+';
-}
-
-export function prefillCourse(courses: ProfessorCourse[], code: string | null): RateCourse | undefined {
+export function prefillCourse(courses: ProfessorCourse[], code: string | null, now: Date): RateCourse | undefined {
   if (!code) return undefined;
   const c = courses.find((x) => x.code === code);
-  return c && { code: c.code, name: c.name, isNew: false, terms: c.terms };
-}
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
-
-export function withMyRating(s: RatePairSummary | undefined, a: Answers): RatePairSummary {
-  const base: RatePairSummary = s ?? {
-    rating: null, numRatings: 0, hoursPerWeek: null, hoursCount: 0, gradeDistribution: {}, gradeCount: 0,
-  };
-  const out: RatePairSummary = { ...base, gradeDistribution: { ...base.gradeDistribution } };
-  if (a.rating !== undefined) {
-    out.rating = base.rating === null ? a.rating : round2((base.rating * base.numRatings + a.rating) / (base.numRatings + 1));
-    out.numRatings = base.numRatings + 1;
-  }
-  if (a.hours !== undefined) {
-    const mine = HOURS_MIDPOINT[a.hours];
-    out.hoursPerWeek = base.hoursPerWeek === null ? mine : round2((base.hoursPerWeek * base.hoursCount + mine) / (base.hoursCount + 1));
-    out.hoursCount = base.hoursCount + 1;
-  }
-  if (a.grade) {
-    out.gradeDistribution[a.grade] = (base.gradeDistribution[a.grade] ?? 0) + 1;
-    out.gradeCount = base.gradeCount + 1;
-  }
-  return out;
+  return c && toRateCourse(c, now);
 }
 
 export function buildSubmission(a: Answers, start: RateStart, turnstileToken: string, honeypot: string): RateSubmission {

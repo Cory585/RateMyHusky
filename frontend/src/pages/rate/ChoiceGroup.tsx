@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from 'react';
+import { Fragment, useEffect, useId, useRef } from 'react';
 import type { CSSProperties, KeyboardEvent, ReactNode } from 'react';
 
 export interface ChoiceOption<T> {
@@ -7,6 +7,7 @@ export interface ChoiceOption<T> {
   aria: string;
   className?: string;
   digit?: number;
+  heading?: string;
 }
 
 interface ChoiceGroupProps<T> {
@@ -77,18 +78,20 @@ export function ChoiceGroup<T>({ legend, subtitle, options, value, onPick, layou
         onKeyDown={onKeyDown}
       >
         {options.map((o, i) => (
-          <button
-            key={i}
-            type="button"
-            role="radio"
-            aria-checked={i === checked}
-            aria-label={o.aria}
-            tabIndex={i === tabStop ? 0 : -1}
-            className={`rate-opt${i === checked ? ' on' : ''}${o.className ? ` ${o.className}` : ''}`}
-            onClick={() => onPick(o.value)}
-          >
-            {o.label}
-          </button>
+          <Fragment key={i}>
+            {o.heading && <h2 className="rate-group">{o.heading}</h2>}
+            <button
+              type="button"
+              role="radio"
+              aria-checked={i === checked}
+              aria-label={o.aria}
+              tabIndex={i === tabStop ? 0 : -1}
+              className={`rate-opt${i === checked ? ' on' : ''}${o.className ? ` ${o.className}` : ''}`}
+              onClick={() => onPick(o.value)}
+            >
+              {o.label}
+            </button>
+          </Fragment>
         ))}
       </div>
     </>

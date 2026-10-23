@@ -4,9 +4,9 @@
 import { argv } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import {
-  answer, buildSubmission, contextChip, displayTerm, firstStep, formatCode, hoursBucket,
-  initials, lastName, nextStep, prefillCourse, prevStep, progressIndex, termYears,
-  withMyRating, SEASONS,
+  answer, buildSubmission, contextTags, displayTerm, firstStep, formatCode,
+  inTermWindow, lastName, nextStep, prefillCourse, prevStep, progressIndex, termYears, toRateCourse,
+  SEASONS,
   type Answers, type RateCourse, type RateProfessor,
 } from './rateFlow';
 import type { ProfessorCourse, RateStart } from '../../api/api';
@@ -88,21 +88,22 @@ function selftest(): number {
   check('firstStep with new professor prefilled is otherCourse', firstStep({ comment: '', professor: newProf }) === 'otherCourse');
 
   // prefillCourse
+  const june26 = new Date(2026, 5, 1);
   const courses = [
     { code: 'CS2500', name: 'Fundamentals of CS 1', terms: ['Fall 2024'] },
   ] as ProfessorCourse[];
-  check('prefillCourse unknown code is undefined', prefillCourse(courses, 'ZZ1111') === undefined);
-  check('prefillCourse null code is undefined', prefillCourse(courses, null) === undefined);
-  const pf = prefillCourse(courses, 'CS2500');
+  check('prefillCourse unknown code is undefined', prefillCourse(courses, 'ZZ1111', june26) === undefined);
+  check('prefillCourse null code is undefined', prefillCourse(courses, null, june26) === undefined);
+  const pf = prefillCourse(courses, 'CS2500', june26);
   check('prefillCourse known code', pf?.code === 'CS2500' && pf.isNew === false && same(pf.terms, ['Fall 2024']));
 
-  // contextChip
-  check('contextChip empty answers', contextChip({ comment: '' }) === '');
-  check('contextChip professor only', contextChip({ comment: '', professor: alex }) === 'Prof. Alex Rivera');
-  check('contextChip professor + course', contextChip({ comment: '', professor: alex, course: cs2500 }) === 'Rivera · CS 2500');
-  check('contextChip full', contextChip(a) === 'Rivera · CS 2500 · Summer 1 2025');
-  check('contextChip Not sure term', contextChip(answer(a, { term: null })) === 'Rivera · CS 2500 · Term not sure');
-  check('contextChip full summer', contextChip(answer(a, { term: 'Summer 2025' })) === 'Rivera · CS 2500 · Full Summer 2025');
+  // contextTags
+  check('contextTags empty answers', same(contextTags({ comment: '' }), []));
+  check('contextTags professor only', same(contextTags({ comment: '', professor: alex }), ['Prof. Alex Rivera']));
+  check('contextTags professor + course', same(contextTags({ comment: '', professor: alex, course: cs2500 }), ['Rivera', 'CS 2500']));
+  check('contextTags full', same(contextTags(a), ['Rivera', 'CS 2500', 'Summer 1 2025']));
+  check('contextTags Not sure term', same(contextTags(answer(a, { term: null })), ['Rivera', 'CS 2500', 'Term not sure']));
+  check('contextTags full summer', same(contextTags(answer(a, { term: 'Summer 2025' })), ['Rivera', 'CS 2500', 'Full Summer 2025']));
 
   // Terms
   check('displayTerm Summer 2025', displayTerm('Summer 2025') === 'Full Summer 2025');
@@ -111,27 +112,18 @@ function selftest(): number {
   const full = SEASONS.find((x) => x.label === 'Full Summer');
   check('Full Summer + 2025 answers Summer 2025', full !== undefined && answer({ comment: '' }, { term: `${full.value} 2025` }).term === 'Summer 2025');
   check('SEASONS has five options', SEASONS.length === 5);
-  check('termYears', same(termYears(new Date(2026, 5, 1)), [2026, 2025, 2024, 2023, 2022, 2021, 2020]));
+  check('termYears is four years', same(termYears(june26), [2026, 2025, 2024, 2023]));
+  check('inTermWindow edges', inTermWindow('Fall 2023', june26) && inTermWindow('Winter 2026', june26)
+    && !inTermWindow('Summer 2 2022', june26) && !inTermWindow('Spring 2027', june26));
+  const old = toRateCourse({ code: 'CS3000', name: 'Algorithms', terms: ['Fall 2026', 'Spring 2027', 'Fall 2021'] } as ProfessorCourse, june26);
+  check('toRateCourse keeps only window terms', same(old.terms, ['Fall 2026']) && old.isNew === false);
+  const allOld = toRateCourse({ code: 'CS3000', name: 'Algorithms', terms: ['Fall 2021'] } as ProfessorCourse, june26);
+  check('course with only old terms opens otherTerm', firstStep({ comment: '', professor: alex, course: allOld }) === 'otherTerm');
 
   // Misc formatting
-  check('hoursBucket 8.5', hoursBucket(8.5) === '8–10');
-  check('hoursBucket 5', hoursBucket(5) === '5–7');
-  check('hoursBucket 1 / 3 / 11', hoursBucket(1) === '0–2' && hoursBucket(3) === '3–4' && hoursBucket(11) === '10+');
   check('formatCode CS4973', formatCode('CS4973') === 'CS 4973');
-  check('lastName / initials', lastName('Lucia Nunez') === 'Nunez' && initials('Lucia Nunez') === 'LN');
+  check('lastName', lastName('Lucia Nunez') === 'Nunez');
   check('progressIndex', progressIndex('newProfessor') === 0 && progressIndex('who') === 0 && progressIndex('comment') === 6 && progressIndex('thanks') === 7);
-
-  // withMyRating
-  const mine: Answers = { comment: '', rating: 2, hours: '10+', grade: 'A' };
-  const fresh = withMyRating(undefined, mine);
-  check('withMyRating undefined summary',
-    fresh.numRatings === 1 && fresh.hoursCount === 1 && fresh.gradeCount === 1 &&
-    fresh.rating === 2 && fresh.hoursPerWeek === 12 && same(fresh.gradeDistribution, { A: 1 }));
-  const merged = withMyRating({ rating: 4, numRatings: 3, hoursPerWeek: 5, hoursCount: 1, gradeDistribution: { A: 1 }, gradeCount: 1 }, mine);
-  check('withMyRating weighted merge',
-    same(merged, { rating: 3.5, numRatings: 4, hoursPerWeek: 8.5, hoursCount: 2, gradeDistribution: { A: 2 }, gradeCount: 2 }));
-  const noGrade = withMyRating(undefined, { comment: '', rating: 5, hours: '0-2', grade: null });
-  check('withMyRating null grade adds no grade', noGrade.gradeCount === 0 && same(noGrade.gradeDistribution, {}));
 
   // buildSubmission
   const start: RateStart = { opened: 'tok', deviceToken: 'dev', counter: 3 };

@@ -17,21 +17,37 @@ interface CourseStepProps {
   onOther: () => void;
 }
 
+export function Pencil() {
+  return (
+    <span className="rate-pencil" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 20h9" />
+        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+      </svg>
+    </span>
+  );
+}
+
 export function CourseStep({ professor, courses, ratedCourses, selected, onPick, onOther }: CourseStepProps) {
-  const options: ChoiceOption<string>[] = courses.map((c) => {
+  const option = (c: RateCourse): ChoiceOption<string> => {
     const rated = ratedCourses.includes(c.code);
     return {
       value: c.code,
-      aria: `${formatCode(c.code)}${c.name ? `, ${c.name}` : ''}${rated ? ', you rated this' : ''}`,
+      aria: `${formatCode(c.code)}${c.name ? `, ${c.name}` : ''}${rated ? ', update your rating' : ''}`,
+      className: rated ? 'course rated' : 'course',
       label: (
         <>
-          <span>{formatCode(c.code)}{c.name ? ` · ${c.name}` : ''}</span>
-          {rated && <span className="rate-tag">You rated this</span>}
+          <span className="rate-cmain"><b>{formatCode(c.code)}</b>{c.name && <span className="rate-cname">{c.name}</span>}</span>
+          {rated && <Pencil />}
         </>
       ),
     };
-  });
-  options.push({ value: OTHER, aria: 'A different course', label: '+ A different course', className: 'dash' });
+  };
+  const options = courses.filter((c) => !ratedCourses.includes(c.code)).map(option);
+  options.push({ value: OTHER, aria: 'A different course', label: '+ A different course', className: 'course dash' });
+  const rated = courses.filter((c) => ratedCourses.includes(c.code)).map(option);
+  if (rated.length) rated[0].heading = 'Already rated';
+  options.push(...rated);
 
   return (
     <ChoiceGroup
