@@ -110,7 +110,8 @@
 }
 .rate-pencil svg { width: 1em; height: 1em; transition: transform 0.18s ease; }
 .rate-opt.course.on .rate-pencil { background: #d6394c; color: #fff; }
-.rate-group { margin: 1.8em 0 0.7em; color: #888; font-size: 0.72em; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+/* The heading shares the tile stack, so its margins give up the stack's gap to land on the mockup's 1.8em / 0.7em. */
+.rate-group { margin: calc(1.8em - 8px) 0 calc(0.7em - 8px); color: #888; font-size: 0.72em; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
 /* Tiles lift on hover and press in on click, and the picked tile pops once. Hover is skipped on touch screens. */
 @media (hover: hover) {
   .rate-opt:hover { border-color: #d6394c; transform: translateY(-2px); box-shadow: 0 6px 16px -6px rgba(214, 57, 76, 0.35); }
@@ -179,6 +180,8 @@
 .rate-label { display: block; margin-bottom: 6px; font-size: 0.85rem; font-weight: 800; }
 
 .rate-hint { margin: 6px 0 0; color: #888; font-size: 0.85rem; }
+/* The mockup's .m-note: room above and below the line under the course search. */
+.rate-note { margin: 0.8em 0 1em; }
 
 .rate-btn {
   display: block;
@@ -259,7 +262,7 @@ body.rate-checking .navbar { display: none; }
 .rate-n[data-score='1'] { background: #e74c3c; }
 .rate-opt:has(.rate-n) { justify-content: flex-start; }
 
-.rate-textarea { min-height: 120px; max-height: 35dvh; resize: none; overflow-y: auto; }
+.rate-textarea { min-height: 9em; max-height: 35dvh; resize: none; overflow-y: auto; }
 
 /* Season and year tiles share one equal-width grid. Five seasons don't fit a phone row, so Fall and Spring take halves and the three summers take thirds. */
 .rate-row { display: grid; gap: 8px; }
@@ -352,6 +355,7 @@ body.rate-checking .navbar { display: none; }
   .rate-field label,
   .rate-label { font-size: 0.85em; }
   .rate-sugg small { font-size: 0.8em; }
+  .rate-group { margin: 1.04em 0 -0.06em; } /* the stack gap here is 0.55em of the column, 0.76em of the heading */
 
   .rate-thanks { display: flex; flex-direction: column; gap: 0.55em; padding-top: 2em; }
   .rate-thanks > .rate-hint { margin-bottom: 1.1em; font-size: 1em; }
@@ -411,7 +415,6 @@ body.rate-checking .navbar { display: none; }
 
   .rate-n { width: 1.9em; height: 1.9em; border-radius: 0.55em; font-size: 0.95em; }
   .rate-n-label { min-width: 5em; text-align: left; }
-  .rate-textarea { min-height: 9em; }
   .rate-row { gap: 0.55em; }
   .rate-row .rate-opt { font-size: 0.92em; }
   .rate-seasons { grid-template-columns: repeat(5, minmax(0, 1fr)); }

@@ -119,6 +119,8 @@ function selftest(): number {
   check('toRateCourse keeps only window terms', same(old.terms, ['Fall 2026']) && old.isNew === false);
   const allOld = toRateCourse({ code: 'CS3000', name: 'Algorithms', terms: ['Fall 2021'] } as ProfessorCourse, june26);
   check('course with only old terms opens otherTerm', firstStep({ comment: '', professor: alex, course: allOld }) === 'otherTerm');
+  const futureOnly = toRateCourse({ code: 'CS3000', name: 'Algorithms', terms: ['Spring 2027'] } as ProfessorCourse, june26);
+  check('course with only a future term opens otherTerm', firstStep({ comment: '', professor: alex, course: futureOnly }) === 'otherTerm');
 
   // Misc formatting
   check('formatCode CS4973', formatCode('CS4973') === 'CS 4973');

@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
-import type { CSSProperties, KeyboardEvent, ReactNode } from 'react';
+import type { KeyboardEvent, ReactNode } from 'react';
 
 export interface ChoiceOption<T> {
   value: T;
@@ -16,14 +16,14 @@ interface ChoiceGroupProps<T> {
   options: ChoiceOption<T>[];
   value?: T;
   onPick: (v: T) => void;
-  layout: 'stack' | 'row' | 'grid';
+  layout: 'stack' | 'grid';
 }
 
 export function BackLink({ onBack, disabled }: { onBack: () => void; disabled?: boolean }) {
   return <button type="button" className="rate-back" disabled={disabled} onClick={onBack}>‹ Back</button>;
 }
 
-/* On mobile this renders in place; from 1024px it is the pinned footer, Back left and the step's action right. */
+/* On mobile this renders in place; from 1024px it is the pinned footer, the step's action with the ghost link under it; Back is hidden there because it lives in the top row. */
 export function StepFoot({ onBack, backDisabled, children }: { onBack?: () => void; backDisabled?: boolean; children?: ReactNode }) {
   return (
     <div className="rate-foot">
@@ -77,7 +77,6 @@ export function ChoiceGroup<T>({ legend, subtitle, options, value, onPick, layou
         role="radiogroup"
         aria-labelledby={headingId}
         className={`rate-choices rate-choices-${layout}`}
-        style={{ '--cols': options.length } as CSSProperties}
         onKeyDown={onKeyDown}
       >
         {options.map((o, i) => (

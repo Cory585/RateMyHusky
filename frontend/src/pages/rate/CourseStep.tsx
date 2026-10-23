@@ -122,7 +122,7 @@ export function OtherCourseStep({ onPick, onBack }: OtherCourseStepProps) {
       )}
       {canAdd && (
         <>
-          <p className="rate-hint">{formatCode(code)} isn't in our catalog yet. Name it and it's added with your rating.</p>
+          <p className="rate-hint rate-note">{formatCode(code)} isn't in our catalog yet. Name it and it's added with your rating.</p>
           <div className="rate-field">
             <label htmlFor="rate-course-name">Course name</label>
             <input
@@ -137,7 +137,7 @@ export function OtherCourseStep({ onPick, onBack }: OtherCourseStepProps) {
         </>
       )}
       {settled && settled.length === 0 && !NEW_CODE.test(code) && (
-        <p className="rate-hint" role="status">No courses match. Type the full code, like CS 4999, to add a new one.</p>
+        <p className="rate-hint rate-note" role="status">No courses match. Type the full code, like CS 4999, to add a new one.</p>
       )}
       <StepFoot onBack={onBack}>
         {canAdd && (

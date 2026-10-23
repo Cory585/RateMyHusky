@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { fetchProfessorFull, fetchRateContext, startRating, submitRating } from '../api/api';
 import type { ProfessorPage, RateProfessorContext, RateStart, RateSubmission } from '../api/api';
@@ -139,7 +139,7 @@ export default function Rate() {
     let cancelled = false;
     fetchRateContext(slug, start.deviceToken)
       .then((c) => { if (!cancelled) setContext(c); })
-      .catch(() => { /* no "You rated this" tags */ });
+      .catch(() => { /* no "Already rated" group, so every course shows as not rated */ });
     return () => { cancelled = true; };
   }, [start, slug, contextReload]);
 
@@ -226,6 +226,9 @@ export default function Rate() {
     document.body.classList.toggle('rate-checking', !cleared);
     return () => document.body.classList.remove('rate-checking');
   }, [cleared]);
+
+  // /rate's URL never changes, so ScrollToTop never fires; every step opens at the top, as an instant jump.
+  useLayoutEffect(() => { window.scrollTo(0, 0); }, [step]);
 
   useEffect(() => {
     if (ready) panelRef.current?.querySelector<HTMLElement>('h1')?.focus({ preventScroll: true });

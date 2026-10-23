@@ -10,7 +10,8 @@ export function ProgressBar({ index, done }: { index: number; done: boolean }) {
     const bar = barRef.current;
     const from = shown.current;
     if (from === index || !bar) return;
-    void bar.offsetWidth; // commit the current fills so the change transitions, including on first mount
+    // Resolve the segments' current style so the change transitions, including on first mount (offsetWidth alone skips them there).
+    bar.querySelectorAll('b').forEach((b) => void getComputedStyle(b).transform);
     Array.from(bar.children).forEach((seg, i) => {
       const on = i <= index;
       if (seg.classList.contains('on') === on) return;
