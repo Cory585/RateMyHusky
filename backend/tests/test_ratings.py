@@ -207,7 +207,9 @@ def test_professor_context_returns_earlier_answers():
     sql, params = f.calls[0]
     assert "LEFT JOIN course_catalog" in sql and params == ("d1", "jane-doe")
     assert len(f.calls) == 1
-    assert ratings.professor_context("jane-doe", None, Fake(many=many).query) == {"ratedCourses": []}
+    f2 = Fake(many=many)
+    assert ratings.professor_context("jane-doe", None, f2.query) == {"ratedCourses": []}
+    assert len(f2.calls) == 0
 
 
 def test_purge_clears_hashes_older_than_30_days():

@@ -281,7 +281,7 @@ export default function Rate() {
   // In update mode a step with an earlier answer can be passed over without tapping a tile.
   const continueButton = (answered: boolean) =>
     answers.updating && answered ? (
-      <button type="button" className="rate-btn" onClick={() => setStep(nextStep(step, answers))}>Continue</button>
+      <button type="button" className="rate-btn" onClick={() => open(nextStep(step, answers))}>Continue</button>
     ) : undefined;
 
   const renderStep = () => {

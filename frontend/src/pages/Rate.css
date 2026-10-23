@@ -120,6 +120,7 @@
   .rate-opt.course:hover .rate-pencil { background: #d6394c; color: #fff; }
   .rate-opt.course:hover .rate-pencil svg { transform: rotate(-12deg); }
   .rate-sugg:hover b { color: #d6394c; }
+  .rate-sugg.rated:hover .rate-pencil { background: #d6394c; color: #fff; }
   /* The pop keeps the hover lift, so the tile doesn't drop 2px while it plays. */
   .rate-opt.pop:hover { animation-name: rate-pop-lifted; }
 }
@@ -223,7 +224,7 @@
 
 .rate-ghost { text-decoration: underline; }
 .rate-ghost.on { color: #d6394c; font-weight: 800; text-decoration: none; }
-.rate-ghost.on::before { content: '✓ '; }
+.rate-ghost.on::before { content: '✓ ' / ''; }
 .rate-back { text-align: left; }
 .rate-back:disabled { opacity: 0.45; cursor: default; }
 
