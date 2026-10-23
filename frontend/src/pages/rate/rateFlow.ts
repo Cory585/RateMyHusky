@@ -1,5 +1,5 @@
 // Step logic and pure helpers for the /rate form. No React, no runtime imports from api.ts.
-import type { ProfessorCourse, RateStart, RateSubmission } from '../../api/api';
+import type { ProfessorCourse, RateStart, RateSubmission, RatedCourse } from '../../api/api';
 
 export type StepId = 'who' | 'newProfessor' | 'course' | 'otherCourse' | 'term' | 'otherTerm'
   | 'overall' | 'workload' | 'grade' | 'comment' | 'thanks';
@@ -16,6 +16,7 @@ export interface Answers {
   hours?: string;
   grade?: string | null;
   comment: string;
+  updating?: RatedCourse;
 }
 
 export const OVERALL: { value: number; label: string }[] = [
@@ -90,11 +91,13 @@ function firstUnansweredFrom(index: number, a: Answers): StepId {
 }
 
 export function firstStep(a: Answers): StepId {
+  if (a.updating && a.course) return screenFor('term', a);
   return firstUnansweredFrom(0, a);
 }
 
 export function nextStep(step: StepId, a: Answers): StepId {
   const main = mainOf(step);
+  if (a.updating && main !== null && main !== 'comment') return screenFor(MAIN_ORDER[MAIN_ORDER.indexOf(main) + 1], a);
   // Scans from the start so an edit can't skip a question the student hasn't answered.
   return main === null || main === 'comment' ? 'thanks' : firstUnansweredFrom(0, a);
 }
@@ -117,11 +120,63 @@ export function answer(a: Answers, change: Partial<Answers>): Answers {
   if (change.professor !== undefined && !sameProfessor(a.professor, change.professor)) {
     if (!('course' in change)) delete next.course;
     if (!('term' in change)) delete next.term;
+    if (a.updating) {
+      delete next.updating;
+      delete next.rating;
+      delete next.hours;
+      delete next.grade;
+      next.comment = '';
+    }
   }
   if (change.course !== undefined && a.course?.code !== change.course.code) {
     if (!('term' in change)) delete next.term;
   }
   return next;
+}
+
+// Picking a course: a rated one fills the student's earlier answers (update mode).
+export function pickCourse(a: Answers, c: RateCourse, rated: RatedCourse | undefined, now: Date): Answers {
+  if (a.updating && a.course?.code === c.code) return a;
+  const base: Answers = { ...a, comment: a.updating ? '' : a.comment };
+  if (a.updating) {
+    delete base.updating;
+    delete base.term;
+    delete base.rating;
+    delete base.hours;
+    delete base.grade;
+  }
+  if (!rated) return answer(base, { course: c });
+  const keep = rated.term === null || inTermWindow(rated.term, now);
+  const addTerm = keep && rated.term !== null && c.terms.length > 0 && !c.terms.includes(rated.term);
+  const course = addTerm ? { ...c, terms: [...c.terms, rated.term as string] } : c;
+  return answer(base, {
+    course, term: keep ? rated.term : undefined, rating: rated.rating, hours: rated.hours,
+    grade: rated.grade, comment: rated.comment, updating: rated,
+  });
+}
+
+// Rated courses are the professor's listed ones, then any the term list no longer carries.
+export function courseGroups(courses: RateCourse[], rated: RatedCourse[]): { fresh: RateCourse[]; rated: RateCourse[] } {
+  const codes = new Set(rated.map((r) => r.code));
+  const listed = new Set(courses.map((c) => c.code));
+  const off = rated.filter((r) => !listed.has(r.code))
+    .map((r): RateCourse => ({ code: r.code, name: r.name, isNew: false, terms: [] }));
+  return {
+    fresh: courses.filter((c) => !codes.has(c.code)),
+    rated: [...courses.filter((c) => codes.has(c.code)), ...off],
+  };
+}
+
+export function splitTerm(label: string | null | undefined, now: Date): { season: string; year: number } | null {
+  const m = label?.match(/^(.+) (\d{4})$/);
+  if (!m || !SEASONS.some((x) => x.value === m[1]) || !termYears(now).includes(Number(m[2]))) return null;
+  return { season: m[1], year: Number(m[2]) };
+}
+
+export function replacedLine(prior: RatedCourse): string {
+  return prior.term === null
+    ? 'Your new answers replaced your earlier ones.'
+    : `Your new answers replaced the ones from ${displayTerm(prior.term)}.`;
 }
 
 export function termYears(now: Date): number[] {

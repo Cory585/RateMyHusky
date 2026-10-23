@@ -291,7 +291,7 @@ export default function Rate() {
             <CourseStep
               professor={answers.professor}
               courses={courses}
-              ratedCourses={context?.ratedCourses ?? []}
+              ratedCourses={(context?.ratedCourses ?? []).map((r) => r.code)}
               selected={answers.course?.code}
               onPick={(c) => choose(answer(answers, { course: c }), 'course')}
               onOther={() => open('otherCourse')}
