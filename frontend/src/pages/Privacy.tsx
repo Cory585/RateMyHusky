@@ -1,4 +1,5 @@
 import Footer from '../components/Footer';
+import { BANNER_SINCE } from '../config';
 import './Terms.css';
 
 const Privacy = () => {
@@ -8,7 +9,7 @@ const Privacy = () => {
         <div className="terms-shell">
           <header className="terms-header">
             <h1>Privacy Policy</h1>
-            <p className="terms-meta">Effective October 10, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective October 21, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -16,7 +17,8 @@ const Privacy = () => {
               <h2>1. Introduction</h2>
               <p>
                 RateMyHusky is an aggregator of professor and course information for
-                Northeastern University students. This Privacy Policy describes what information
+                Northeastern University students. It also collects first-party ratings from
+                students. This Privacy Policy describes what information
                 we collect, how we use it, and the choices you have. By using RateMyHusky,
                 you also agree to our{' '}
                 <a href="/terms">Terms &amp; Conditions</a>.
@@ -48,14 +50,18 @@ const Privacy = () => {
                   <strong>Browser preferences:</strong> your selected theme (dark/light), your
                   catalog view mode, and flags recording that you dismissed an on-page tip are
                   saved to <code>localStorage</code> on your device only and are never
-                  transmitted to our servers. Which review tab you had open on a professor page
+                  transmitted to our servers. The one exception is the rating device ID,
+                  described under Ratings below. Which review tab you had open on a professor page
                   is held in <code>sessionStorage</code> so navigation works, and is dropped
                   when you close the tab.
                 </li>
                 <li>
                   <strong>IP address:</strong> your IP address is used in the moment a request
                   arrives to apply rate limits, and it is discarded when the request finishes.
-                  We do not write your IP address to our database.
+                  We never store your raw IP address. If you submit a rating, we store keyed
+                  hashes of your IP address and its network, plus the type of network. The hashes
+                  are kept for 30 days and then deleted in routine cleanup. See the Ratings
+                  item below.
                 </li>
                 <li>
                   <strong>Feedback form:</strong> the feedback form collects a message type,
@@ -77,10 +83,26 @@ const Privacy = () => {
                   account is capped at 200 bookmarks. These records are retained on our servers
                   — see <em>How We Store Your Information</em> below.
                 </li>
+                <li>
+                  <strong>Ratings:</strong> you do not need to sign in to submit a rating. We
+                  store your answers (professor, course, term, overall rating, weekly hours,
+                  grade, and an optional comment), a keyed hash of a random device ID that your
+                  browser keeps, keyed hashes of your IP address and of its /24 (IPv4) or /64
+                  (IPv6) network, the network type (campus, mobile carrier, Private Relay,
+                  datacenter, other, or unknown), and how long the form took to fill in. The hashes use
+                  a secret key that we keep private, so they cannot be matched to an address
+                  or device without it. This data is <strong>pseudonymous, not anonymous</strong>:
+                  it is not tied to your name or email, but the device ID hash links ratings
+                  from the same device to each other. Comment text is also sent to OpenAI's
+                  moderation service, which checks it for abuse before it is stored. See{' '}
+                  <em>Retention of Ratings</em> in Section 4 for how long each item is kept.
+                </li>
               </ul>
               <p>
                 We do <strong>not</strong> log your search queries, which professor or course
-                pages you viewed, or any other browsing activity on our servers. The analytics
+                pages you viewed, or any other browsing activity on our servers. The one
+                exception is the time taken to fill in the rating form, stored with a rating
+                you submit. The analytics
                 providers listed under <em>Third-Party Services</em> collect their own data
                 about your visit.
               </p>
@@ -94,10 +116,14 @@ const Privacy = () => {
                 <li>Display your name and profile photo in the navigation bar while signed in</li>
                 <li>Save and display the professors and courses you bookmark</li>
                 <li>Apply rate limits across the site so automated traffic cannot overwhelm it</li>
+                <li>Prevent duplicate or fraudulent ratings</li>
+                <li>Count the ratings students submit and show them on professor pages</li>
               </ul>
               <p>
                 We do not sell, rent, or share your personal information with third parties for
-                their own use, and we do not build profiles of individual users.
+                their own use, and we do not build profiles of individual users. The rating
+                device ID links one device's ratings to each other, to catch duplicate and
+                fraudulent ratings and to limit abuse.
               </p>
             </section>
 
@@ -110,7 +136,7 @@ const Privacy = () => {
                 browser's <code>localStorage</code> and the handshake cookies are cleared.
                 The token expires automatically after 30 days. RateMyHusky does not maintain
                 user accounts or profiles; the only per-user data we store server-side is your
-                bookmarks, described below.
+                bookmarks and your ratings (which are pseudonymous), described below.
               </p>
               <p>
                 Signing out deletes the token from your browser immediately.
@@ -121,6 +147,19 @@ const Privacy = () => {
                 item type, the professor or course identifier, and a timestamp. Bookmarks
                 persist across sign-ins until you remove them or request deletion — see{' '}
                 <em>Your Rights &amp; Choices</em>.
+              </p>
+              <p>
+                If you submit a rating, it is stored in our database with the data listed under
+                Ratings in Section 2. A rating is not tied to a Google account.
+              </p>
+              <p>
+                <strong>Retention of Ratings.</strong> The keyed IP and network hashes are
+                kept for 30 days and then deleted in routine cleanup; the rating itself stays,
+                and so do the network type and the form fill time. The device
+                ID hash and a hash of the comment text (used to spot copied comments) live with
+                the rating and are deleted with it. Comments are stored but are not shown
+                publicly. A rating is kept until we remove it or you ask us to delete it (see{' '}
+                <em>Your Rights &amp; Choices</em>).
               </p>
               <p>
                 Our database is a self-hosted PostgreSQL server on Oracle Cloud Infrastructure in
@@ -187,7 +226,7 @@ const Privacy = () => {
                 </li>
                 <li>
                   <strong>Cloudflare Turnstile</strong>: a CAPTCHA that protects the feedback
-                  form from automated abuse. It may process your IP address and browser signals
+                  form and the rating form from automated abuse. It may process your IP address and browser signals
                   to verify you are human. Subject to{' '}
                   <a
                     href="https://www.cloudflare.com/privacypolicy/"
@@ -227,8 +266,25 @@ const Privacy = () => {
                   privacy policies.
                 </li>
                 <li>
-                  <strong>RateMyProfessors, Northeastern faculty and award pages, the Northeastern course catalog &amp; Reddit</strong>: these are data sources only. We do not send any user
+                  <strong>RateMyProfessors, Northeastern faculty and award pages, the Northeastern course catalog and course schedule (NUBanner) &amp; Reddit</strong>: these are data sources only. We do not send any user
                   data to these services.
+                </li>
+                <li>
+                  <strong>OpenAI Moderation</strong>: the text of an optional rating comment is
+                  sent to OpenAI's moderation service to check it for abuse before the rating is
+                  stored. Subject to{' '}
+                  <a
+                    href="https://openai.com/policies/privacy-policy/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    OpenAI's Privacy Policy
+                  </a>.
+                </li>
+                <li>
+                  <strong>ipinfo</strong>: we use ipinfo's IP address database to tell what
+                  type of network a rating came from. The database is used locally on our
+                  server, and no data about you is sent to ipinfo.
                 </li>
               </ul>
             </section>
@@ -238,7 +294,10 @@ const Privacy = () => {
               <p>
                 During the Google OAuth sign-in flow, short-lived <code>httpOnly</code> cookies
                 are set to carry your return destination through the handshake; they are not used
-                for tracking and are cleared once sign-in completes. Google Analytics may set
+                for tracking and are cleared once sign-in completes. If you use the rating
+                form, we also set a long-lived <code>rmh_device</code> cookie (up to 400 days,
+                <code>httpOnly</code>) holding a random device ID; it is used to count each
+                device's rating once, let you update it, and limit abuse. Google Analytics may set
                 cookies (e.g., <code>_ga</code>, <code>_gid</code>) to distinguish unique users
                 and track anonymous session data. You can opt out of Google Analytics tracking by
                 installing the{' '}
@@ -255,22 +314,28 @@ const Privacy = () => {
                 (<code>auth_token</code>), your theme, your catalog view mode, and flags for
                 on-page tips you have dismissed. <code>sessionStorage</code> holds the review tab
                 you last opened, and is cleared when you close the tab. None of this data is
-                synced to our servers.
+                synced to our servers, with one exception: the rating form also keeps a copy of
+                its device ID (<code>rmh_device</code>) in <code>localStorage</code>, and that
+                copy is sent to our servers when you use the rating form.
               </p>
             </section>
 
             <section className="terms-section">
               <h2>7. Your Rights &amp; Choices</h2>
               <p>
-                Because we keep so little data, most of your data is under your direct control.
+                We keep little data, and much of it is under your direct control.
                 The rights below describe what you can request and how to exercise them:
               </p>
               <ul>
                 <li>
                   <strong>Right to access:</strong> you may request a copy of the data we hold
-                  that is associated with you. In practice this is limited to your bookmarks;
-                  your sign-in details and preferences live only in your own browser and are not
-                  accessible to us.
+                  that is associated with you. In practice this is limited to your bookmarks and
+                  your ratings; your sign-in details and preferences live only in your own
+                  browser and are not accessible to us. Ratings are not tied to an account, so
+                  to ask for yours, email{' '}
+                  <a href="mailto:support@ratemyhusky.com">support@ratemyhusky.com</a> with the
+                  device ID from the browser you rated with (see Right to deletion below). We
+                  look them up by hand.
                 </li>
                 <li>
                   <strong>Right to deletion:</strong> you can <strong>sign out</strong> at any
@@ -281,7 +346,13 @@ const Privacy = () => {
                   sign in and submit a <strong>Data Deletion Request</strong> through the
                   feedback form: an email address is required, and your signed-in account
                   identifier is included so we can verify your identity and delete the records
-                  tied to your account. (You may also email{' '}
+                  tied to your account. To delete ratings, which are not tied to an account,
+                  email{' '}
+                  <a href="mailto:support@ratemyhusky.com">support@ratemyhusky.com</a> with the
+                  device ID from the browser you rated with: it is the value of the{' '}
+                  <code>rmh_device</code> key in this site's <code>localStorage</code> (browser
+                  developer tools, Application or Storage tab). We find those ratings by hand
+                  and delete them. (For everything else you may also email{' '}
                   <a href="mailto:support@ratemyhusky.com">support@ratemyhusky.com</a>, though
                   because we never store your email address, we can only act on a request we can
                   tie to your account — submitting the form while signed in is the reliable path.)
@@ -303,8 +374,8 @@ const Privacy = () => {
               </ul>
               <p>
                 Note that there is no account to delete. Once your token is cleared, no personal
-                data remains in our systems except for any bookmarks, which remain until you
-                request their deletion.
+                data remains in our systems except for any bookmarks and ratings, which remain
+                until you request their deletion.
               </p>
             </section>
 
@@ -322,7 +393,13 @@ const Privacy = () => {
                   department comparisons).
                 </li>
                 <li>
-                  Ratings and written reviews from RateMyProfessors.
+                  The courses and terms they taught since {BANNER_SINCE}, with the average class
+                  size of each course they taught, taken from Northeastern's public course
+                  schedule.
+                </li>
+                <li>
+                  Ratings and written reviews from RateMyProfessors, and ratings submitted by
+                  students through RateMyHusky's own rating form.
                 </li>
                 <li>
                   A profile photo, taken from the public Northeastern faculty and college
@@ -354,9 +431,11 @@ const Privacy = () => {
                 Northeastern email address cannot be verified or answered. We honor confirmed
                 requests. Once processed, your name is added to a
                 removal list that every data loader checks before writing, so a weekly refresh
-                cannot reinstate you, and the rows already loaded — your page, your ratings and
-                comments, your Reddit mentions, and the evidence corpus built from them — are
-                deleted. Two limits are worth being straight about: we cannot remove your data
+                cannot reinstate you, and the rows already loaded — your page, your imported ratings and
+                comments, your course-schedule history, your Reddit mentions, and the evidence
+                corpus built from them — are
+                deleted. Ratings that students submitted through our own rating form about you
+                are deleted on request; our team handles those by hand. Two limits are worth being straight about: we cannot remove your data
                 from RateMyProfessors or Reddit themselves, and our own private source
                 files can still contain your rows until the upstream source stops publishing
                 them, though nothing published on the site can reach them. If you

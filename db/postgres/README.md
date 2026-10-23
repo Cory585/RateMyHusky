@@ -88,7 +88,8 @@ If the connection fails:
 ## Schema changes since the migration
 
 The NUBanner teaching-history code added a table and five columns, and review
-tags added three tables, after the production database was loaded. `02_tables.sql` already declares them (the
+tags added three tables, after the production database was loaded; the term-track
+colleges added `banner_course_instructors.instructor_keys`. `02_tables.sql` already declares them (the
 columns last in their tables, where `ADD COLUMN` puts them). A database loaded
 before this needs the following, which the loaders no longer run for you. Run it
 once at cutover:
@@ -105,6 +106,7 @@ ALTER TABLE public.banner_course_offerings
     ADD COLUMN IF NOT EXISTS summer2_years BIGINT NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS first_term_label TEXT,
     ADD COLUMN IF NOT EXISTS offering_years TEXT;
+ALTER TABLE public.banner_course_instructors ADD COLUMN IF NOT EXISTS instructor_keys TEXT;
 CREATE TABLE IF NOT EXISTS public.review_tags (
     source TEXT NOT NULL,
     source_id BIGINT NOT NULL,
@@ -127,12 +129,115 @@ CREATE TABLE IF NOT EXISTS public.professor_tags (
     CONSTRAINT professor_tags_pkey PRIMARY KEY (name_key, tag)
 );
 CREATE INDEX IF NOT EXISTS professor_tags_tag ON public.professor_tags (tag ASC, review_count DESC);
+ALTER TABLE public.professors ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'rmp';
 ```
+
+Banner-only professors record which source first created each professor in `professors.origin` (`'rmp'`, `'banner'`, or `'survey'`, created by `review_ratings.py approve-professor`). It is never updated, so a Banner-created professor that later gains an RMP link keeps `'banner'`. Run the ALTER before deploying: without the column the new `pipeline.run` fails at the Banner insert, after `apply_roster` has already committed.
 
 Until they run, the course-history query in `backend/teaching_history.py` fails
 on the missing columns, the Banner loader and matcher stop at start-up naming
 the missing table or column, and the tags routes and `pipeline.review_tags` fail
 on the missing tag tables.
+
+The student rating form added three tables: `survey_ratings`, plus
+`survey_pending_professors` and `survey_pending_courses` for professors and
+courses a student typed in that aren't in the catalog yet. `02_tables.sql` and
+`03_constraints.sql` declare them. Run this once before deploying. The CHECKs use
+plain `ADD CONSTRAINT`, which has no `IF NOT EXISTS`, so a second run fails on the
+first CHECK that already exists. `NULLS NOT DISTINCT` needs PostgreSQL 15 or later.
+
+Deploy order:
+
+1. Run the SQL below as `appuser` (or after `SET ROLE appuser`) with
+   `psql -1 -v ON_ERROR_STOP=1`. The `ADD CONSTRAINT` lines aren't rerunnable
+   after a partial failure.
+2. Confirm `PROXY_SECRET`, `TURNSTILE_SECRET_KEY` and `OPENAI_API_KEY` are set on
+   Railway. Without `PROXY_SECRET` every student shares Vercel's edge address, so
+   the IP bursts add up across everyone and ratings get held.
+3. Set `IPINFO_TOKEN`.
+4. Set `RATING_SECRET` last. Until it's set, the rating routes return 503.
+
+```sql
+CREATE TABLE IF NOT EXISTS public.survey_ratings (
+    id UUID NOT NULL,
+    professor_slug TEXT NULL,
+    pending_professor_id UUID NULL,
+    course_code TEXT NULL,
+    pending_course_id UUID NULL,
+    term_label TEXT NULL,
+    rating BIGINT NOT NULL,
+    hours TEXT NOT NULL,
+    grade TEXT NULL,
+    comment TEXT NULL,
+    comment_hash TEXT NULL,
+    status TEXT NOT NULL,
+    hold_reasons TEXT NULL,
+    device_hash TEXT NOT NULL,
+    new_device BOOLEAN NOT NULL,
+    ip_hash TEXT NULL,
+    ip_prefix_hash TEXT NULL,
+    network_type TEXT NOT NULL,
+    fill_seconds BIGINT NULL,
+    collection TEXT NOT NULL DEFAULT 'turnstile+device',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT survey_ratings_pkey PRIMARY KEY (id)
+);
+CREATE TABLE IF NOT EXISTS public.survey_pending_professors (
+    id UUID NOT NULL,
+    name TEXT NOT NULL,
+    name_key TEXT NOT NULL,
+    department TEXT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    resolved_slug TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT survey_pending_professors_pkey PRIMARY KEY (id)
+);
+CREATE TABLE IF NOT EXISTS public.survey_pending_courses (
+    id UUID NOT NULL,
+    code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    resolved_code TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT survey_pending_courses_pkey PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS survey_ratings_pair    ON public.survey_ratings (professor_slug, course_code);
+CREATE INDEX IF NOT EXISTS survey_ratings_created ON public.survey_ratings (created_at);
+CREATE INDEX IF NOT EXISTS survey_ratings_ip      ON public.survey_ratings (ip_hash);
+CREATE INDEX IF NOT EXISTS survey_ratings_prefix  ON public.survey_ratings (ip_prefix_hash);
+CREATE INDEX IF NOT EXISTS survey_ratings_comment ON public.survey_ratings (comment_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS survey_ratings_one_per_device ON public.survey_ratings
+    (device_hash, professor_slug, pending_professor_id, course_code, pending_course_id) NULLS NOT DISTINCT;
+ALTER TABLE public.survey_ratings ADD CONSTRAINT check_survey_rating CHECK (rating BETWEEN 1 AND 5);
+ALTER TABLE public.survey_ratings ADD CONSTRAINT check_survey_status CHECK (status IN ('accepted', 'held'));
+ALTER TABLE public.survey_ratings ADD CONSTRAINT check_survey_professor
+    CHECK (professor_slug IS NOT NULL OR pending_professor_id IS NOT NULL);
+ALTER TABLE public.survey_ratings ADD CONSTRAINT check_survey_course
+    CHECK (course_code IS NOT NULL OR pending_course_id IS NOT NULL);
+CREATE INDEX IF NOT EXISTS survey_pending_professors_key ON public.survey_pending_professors (name_key);
+CREATE UNIQUE INDEX IF NOT EXISTS survey_pending_professors_one_pending ON public.survey_pending_professors (name_key)
+    WHERE status = 'pending';
+ALTER TABLE public.survey_pending_professors ADD CONSTRAINT check_survey_pending_professor_status
+    CHECK (status IN ('pending', 'approved', 'merged', 'rejected'));
+CREATE INDEX IF NOT EXISTS survey_pending_courses_code ON public.survey_pending_courses (code);
+CREATE UNIQUE INDEX IF NOT EXISTS survey_pending_courses_one_pending ON public.survey_pending_courses (code)
+    WHERE status = 'pending';
+ALTER TABLE public.survey_pending_courses ADD CONSTRAINT check_survey_pending_course_status
+    CHECK (status IN ('pending', 'approved', 'merged', 'rejected'));
+```
+
+If the three tables already exist, run just the two partial unique indexes
+before deploying. They allow one pending row per name key and per course code,
+and the rating route's `ON CONFLICT` needs them, so without them every rating
+for a new professor or course fails. Both are rerunnable:
+
+```sql
+CREATE UNIQUE INDEX IF NOT EXISTS survey_pending_professors_one_pending ON public.survey_pending_professors (name_key)
+    WHERE status = 'pending';
+CREATE UNIQUE INDEX IF NOT EXISTS survey_pending_courses_one_pending ON public.survey_pending_courses (code)
+    WHERE status = 'pending';
+```
 
 ### Optional cleanup (destructive; take a backup first)
 

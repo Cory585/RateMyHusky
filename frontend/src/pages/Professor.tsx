@@ -10,10 +10,12 @@ import Breadcrumbs from '../components/Breadcrumbs';
 import Seo from '../components/Seo';
 import { fetchProfessorFull } from '../api/api';
 import type { ProfessorPage, ProfessorCourse, RatingDistribution, RedditMention, TeachingAward } from '../api/api';
-import { SHOW_SURVEY_STATS } from '../config';
-import { termSortKey } from '../utils/termUtils';
+import { RATE_ENABLED, SHOW_SURVEY_STATS } from '../config';
+import { relativeTerm, seasonYear, termSortKey } from '../utils/termUtils';
 import { isPinned, pinnedFirst } from '../utils/askPinMatch';
+import { photoThumb, thumbOnError } from '../utils/photoThumb';
 import BookmarkButton from '../components/BookmarkButton';
+import FitText from '../components/FitText';
 import neuIcon from '../assets/neu-circle-icon.png';
 import './Professor.css';
 
@@ -387,16 +389,6 @@ const Professor = () => {
     () => unfiltered ? reviews : reviews.filter(r => r.courseCode !== null && selectedCourses.has(r.courseCode)),
     [reviews, selectedCourses, unfiltered]);
 
-  /* A rating is any score; a review is a rating with a written comment. Only reviews get cards. */
-  const writtenReviews = useMemo(() => reviews.filter(r => r.comment?.trim()), [reviews]);
-
-  /* Reviews per course, counted the way the list shows them when only that course is picked. */
-  const reviewCountByCourse = useMemo(() => {
-    const byCourse = new Map<string, typeof reviews>();
-    for (const r of writtenReviews) if (r.courseCode !== null) byCourse.set(r.courseCode, [...(byCourse.get(r.courseCode) ?? []), r]);
-    return new Map([...byCourse].map(([code, rs]) => [code, deduplicateByText(rs, r => r.comment).length]));
-  }, [writtenReviews]);
-
   const filteredRmpReviews = useMemo(
     () => deduplicateByText(rmpRatingsInSelection.filter(r => r.comment?.trim()), r => r.comment),
     [rmpRatingsInSelection]);
@@ -574,6 +566,7 @@ const Professor = () => {
   const identity = profile.identity;
   const summary = profile.summary;
   const rmp = profile.sources.rmp;
+  const noRatings = summary.numRatings === 0;
   // `?? []`: a payload cached before awards shipped has no key.
   const awards = profile.awards ?? [];
 
@@ -583,7 +576,7 @@ const Professor = () => {
     ? `${identity.name} professor reviews and ratings: ${rmp.rating.toFixed(2)}/5 from ${rmp.numRatings} RMP ratings at Northeastern` +
       (rmp.wouldTakeAgainPct != null ? ` (${rmp.wouldTakeAgainPct}% would take again)` : '') +
       `. RateMyProfessor + Reddit.`
-    : `${identity.name}, Northeastern ${identity.department} professor: no Rate My Professors ratings yet. RateMyProfessor + Reddit.`;
+    : `${identity.name}, Northeastern${identity.department ? ` ${identity.department}` : ''} professor: no Rate My Professors ratings yet. RateMyProfessor + Reddit.`;
 
   const profCanonical = `https://ratemyhusky.com/professors/${slug}`;
   const profJsonLd = {
@@ -599,7 +592,7 @@ const Professor = () => {
         name: 'Northeastern University',
         sameAs: 'https://www.northeastern.edu',
       },
-      knowsAbout: identity.department,
+      ...(identity.department ? { knowsAbout: identity.department } : {}),
       url: profCanonical,
       ...(identity.imageUrl ? { image: identity.imageUrl } : {}),
       ...(rmp.professorUrl ? { sameAs: [rmp.professorUrl] } : {}),
@@ -623,7 +616,6 @@ const Professor = () => {
     const terms = [...new Set((c.terms ?? []).map(cleanTerm))].filter(t => /\b20\d{2}\b/.test(t)).sort((a, b) => termSortKey(b) - termSortKey(a));
     const termsExpanded = expandedTerms.has(code);
     const hiddenTermCount = terms.length - MAX_VISIBLE_TERMS;
-    const reviewCount = reviewCountByCourse.get(c.code) ?? 0;
     const unrated = c.numRatings === 0;
     const hasPage = c.hasPage ?? c.name != null;
     return (
@@ -635,14 +627,7 @@ const Professor = () => {
       <div className="prof-course-row-main">
         <span className="prof-course-code">{c.code}</span>
         <span className="prof-course-title">{c.name ?? ''}</span>
-        <span className="prof-course-terms">
-          {unrated ? 'No ratings yet' : (
-            <>
-              {c.numRatings.toLocaleString()} rating{c.numRatings === 1 ? '' : 's'}
-              {reviewCount > 0 && <>{' · '}{reviewCount.toLocaleString()} review{reviewCount === 1 ? '' : 's'}</>}
-            </>
-          )}
-        </span>
+        {unrated && <span className="prof-course-terms">No ratings yet</span>}
       </div>
       {(hasPage || terms.length > 0) && (
         <div className="prof-course-lower">
@@ -701,7 +686,7 @@ const Professor = () => {
   return (
     <div className="prof-page">
       <Seo
-        title={`${identity.name} Reviews & Ratings — Northeastern ${identity.department}`}
+        title={`${identity.name} Reviews & Ratings — Northeastern${identity.department ? ` ${identity.department}` : ''}`}
         description={seoDescription}
         canonical={profCanonical}
         image={identity.imageUrl}
@@ -734,19 +719,20 @@ const Professor = () => {
           >
             {identity.imageUrl ? (
               <img
-                src={identity.imageUrl}
+                key={identity.imageUrl}
+                src={photoThumb(identity.imageUrl)}
                 alt={identity.name}
                 className="prof-avatar-img"
                 style={{ objectPosition: `${identity.focusX ?? 50}% ${identity.focusY ?? 30}%` }}
-                onError={(e) => {
-                  const target = e.currentTarget;
+                onError={thumbOnError(identity.imageUrl, (target) => {
                   target.style.display = 'none';
                   const initials = target.parentElement?.querySelector('.prof-avatar-initials') as HTMLElement;
                   if (initials) initials.style.display = 'flex';
-                }}
+                })}
               />
             ) : null}
             <span
+              key={identity.imageUrl ?? ''}
               className="prof-avatar-initials"
               style={identity.imageUrl ? { display: 'none' } : undefined}
             >
@@ -758,7 +744,7 @@ const Professor = () => {
               {identity.name}
               <BookmarkButton itemType="professor" itemKey={slug!} size="md" className="prof-hero-bookmark" />
             </h1>
-            <p className="prof-dept">{identity.department}</p>
+            {identity.department && <p className="prof-dept">{identity.department}</p>}
             {awards.length > 0 && (
               <ul className="prof-awards" aria-label="Teaching awards">
                 {groupAwards(awards).map(({ label, award: a, years }) => (
@@ -783,6 +769,11 @@ const Professor = () => {
       </header>
 
       <section className="prof-stats">
+        {noRatings ? (
+          <div className="prof-stat-card">
+            <span className="prof-stat-value prof-stat-value-text">No ratings yet</span>
+          </div>
+        ) : (<>
         <div className="prof-stat-card prof-stat-clickable">
           <span className="prof-stat-value">{stats.rating !== null ? <AnimatedNumber value={stats.rating} /> : '—'}</span>
           <span className="prof-stat-label" style={{ display: 'block', textAlign: 'center', position: 'relative' }}>
@@ -791,7 +782,7 @@ const Professor = () => {
               <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', marginLeft: '4px', opacity: 0.6 }}><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
             )}
           </span>
-          <StarRating rating={stats.rating ?? 0} size="lg" />
+          <div className="prof-stat-extra"><StarRating rating={stats.rating ?? 0} size="lg" /></div>
           {stats.breakdown.length > 0 && (
             <div className="prof-stat-breakdown">
               {stats.breakdown.map(([source, rating]) => (
@@ -803,11 +794,13 @@ const Professor = () => {
         <div className="prof-stat-card">
           <span className="prof-stat-value">{stats.difficulty !== null ? <AnimatedNumber value={stats.difficulty} /> : '—'}</span>
           <span className="prof-stat-label">Difficulty</span>
-          <div className="prof-difficulty-bar">
-            <div className="prof-difficulty-fill" style={{
-              width: `${((stats.difficulty ?? 0) / 5) * 100}%`,
-              background: difficultyColor(stats.difficulty ?? 0),
-            }} />
+          <div className="prof-stat-extra">
+            <div className="prof-difficulty-bar">
+              <div className="prof-difficulty-fill" style={{
+                width: `${((stats.difficulty ?? 0) / 5) * 100}%`,
+                background: difficultyColor(stats.difficulty ?? 0),
+              }} />
+            </div>
           </div>
         </div>
         <div className="prof-stat-card">
@@ -815,7 +808,14 @@ const Professor = () => {
             {summary.wouldTakeAgainPct !== null ? <AnimatedNumber value={summary.wouldTakeAgainPct} decimals={0} suffix="%" /> : '—'}
           </span>
           <span className="prof-stat-label">Would Take Again</span>
-          {!unfiltered && <span className="prof-stat-hint">All courses</span>}
+          {/* The percentage isn't split by course, so a course filter swaps the bar for that note. */}
+          <div className="prof-stat-extra">
+            {unfiltered ? (
+              <div className="prof-difficulty-bar">
+                <div className="prof-difficulty-fill" style={{ width: `${summary.wouldTakeAgainPct ?? 0}%`, background: '#27ae60' }} />
+              </div>
+            ) : <span className="prof-stat-hint">All courses</span>}
+          </div>
         </div>
         {SHOW_SURVEY_STATS && (
           <div className="prof-stat-card">
@@ -823,29 +823,40 @@ const Professor = () => {
               {summary.hoursPerWeek !== null ? <AnimatedNumber value={summary.hoursPerWeek} decimals={1} suffix="h" /> : '—'}
             </span>
             <span className="prof-stat-label">Hrs / Week</span>
+            <div className="prof-stat-extra" />
           </div>
         )}
         <div className="prof-stat-card prof-stat-clickable" onClick={() => chartsRef.current?.scrollIntoView({ behavior: 'smooth' })}>
           <span className="prof-stat-value">{stats.numRatings ? stats.numRatings.toLocaleString() : '—'}</span>
           <span className="prof-stat-label">Total Ratings</span>
-          <span className="prof-stat-hint">View distribution ↓</span>
+          <div className="prof-stat-extra"><span className="prof-stat-hint">View distribution ↓</span></div>
         </div>
+        </>)}
         {profile.lastTaught && (
           <div className="prof-stat-card">
-            <span className="prof-stat-value prof-stat-value-text">{profile.lastTaught}</span>
+            <span className="prof-stat-value prof-stat-value-text"><FitText>{seasonYear(profile.lastTaught)}</FitText></span>
             <span className="prof-stat-label">Last Taught</span>
+            <div className="prof-stat-extra"><span className="prof-stat-hint">{relativeTerm(profile.lastTaught)}</span></div>
           </div>
         )}
         {SHOW_SURVEY_STATS && (
           <div className="prof-stat-card prof-stat-clickable" onClick={() => reviewsRef.current?.scrollIntoView({ behavior: 'smooth' })}>
             <span className="prof-stat-value">{summary.numComments.toLocaleString()}</span>
             <span className="prof-stat-label">Reviews &amp; Mentions</span>
-            <span className="prof-stat-hint">Read reviews ↓</span>
+            <div className="prof-stat-extra"><span className="prof-stat-hint">Read reviews ↓</span></div>
           </div>
         )}
       </section>
 
       <div className="prof-hero-actions-row">
+        {RATE_ENABLED && (
+        <Link to={`/rate?professor=${identity.slug}`} className="prof-rate-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
+          Rate this professor
+        </Link>
+        )}
         <Link
           to={`/compare?a=${identity.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`}
           className="prof-compare-btn"
@@ -859,7 +870,9 @@ const Professor = () => {
         )}
       </div>
 
+      {(!noRatings || gradeDistribution.length > 0) && (
       <section className="prof-section prof-charts-row" ref={chartsRef}>
+        {!noRatings && (
         <div className="prof-chart-card">
           <h3 className="prof-chart-title">Rating Distribution</h3>
           <div className="prof-distribution">
@@ -868,6 +881,7 @@ const Professor = () => {
             ))}
           </div>
         </div>
+        )}
         {gradeDistribution.length > 0 && (
           <div className="prof-chart-card" ref={gradesRef}>
             <h3 className="prof-chart-title">Grade Distribution</h3>
@@ -885,6 +899,7 @@ const Professor = () => {
           </div>
         )}
       </section>
+      )}
 
       {isImageModalOpen && identity.imageUrl && (
         <div className="prof-image-modal-overlay" onClick={() => setIsImageModalOpen(false)}>
@@ -977,7 +992,7 @@ const Professor = () => {
             )}
             <div className="prof-reviews-list">
               {sortedReviews.length === 0 ? (
-                <p className="prof-no-reviews">No reviews match current filters.</p>
+                <p className="prof-no-reviews">{reviews.length === 0 ? 'No reviews yet.' : 'No reviews match current filters.'}</p>
               ) : (
                 sortedReviews.slice(0, visibleReviews).map((r, i) => (
                   <div key={i} className={`prof-review-card ${isPinned(r.comment || '', pinSnippets.rmp) ? 'is-ask-pinned' : ''}`} style={{ borderLeftColor: r.quality >= 4 ? '#27ae60' : r.quality >= 3 ? '#f39c12' : '#e74c3c' }}>

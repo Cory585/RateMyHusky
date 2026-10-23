@@ -67,6 +67,16 @@ export interface RmpData {
   reviews: ProfessorReview[];
 }
 
+export interface SurveyData {
+  /** False without survey ratings; every number below is null then. */
+  available: boolean;
+  rating: number | null;
+  numRatings: number;
+  hoursPerWeek: number | null;
+  ratingDistribution: RatingDistribution;
+  gradeDistribution: Record<string, number>;
+}
+
 export interface ProfessorCourse {
   code: string;
   /** The catalog name, else Banner's title. null when neither has one. */
@@ -100,7 +110,7 @@ export interface ProfessorPage {
   version: 2;
   identity: ProfessorIdentity;
   summary: ProfessorSummary;
-  sources: { rmp: RmpData };
+  sources: { rmp: RmpData; survey: SurveyData };
   courses: ProfessorCourse[];
   redditMentions: RedditMention[];
   awards: TeachingAward[];
@@ -483,6 +493,71 @@ export async function submitFeedback(payload: {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error ?? `API ${res.status}`);
   }
+}
+
+/* ---- Student ratings (/rate) ---- */
+export interface RateStart { opened: string; deviceToken: string; counter: number | null }
+export interface RatePairSummary {
+  rating: number | null;
+  numRatings: number;
+  hoursPerWeek: number | null;
+  hoursCount: number;
+  gradeDistribution: Record<string, number>;
+  gradeCount: number;
+}
+export interface RateProfessorContext { ratedCourses: string[]; summaries: Record<string, RatePairSummary> }
+export interface RateSubmission {
+  professor: { slug: string } | { name: string; department: string | null };
+  course: { code: string } | { code: string; name: string };
+  term: string | null;
+  rating: number;
+  hours: string;
+  grade: string | null;
+  comment: string;
+  opened: string;
+  deviceToken: string | null;
+  website: string;
+  turnstileToken: string;
+}
+export type RateSubmitResult = { ok: true; counter: number | null } | { ok: false; status: number; error: string };
+
+/* The localStorage mirror of the device token goes in a header so it stays out of access logs. */
+export async function startRating(deviceMirror: string | null): Promise<RateStart> {
+  const res = await fetch(`${API_BASE}/api/rate/start`, {
+    headers: deviceMirror ? { "X-Rmh-Device": deviceMirror } : {},
+  });
+  if (maintenanceGuard(res)) throw new Error("Site is under maintenance");
+  if (!res.ok) throw new Error(`API ${res.status}`);
+  return res.json();
+}
+
+/* The device cookie doesn't reach a cross-site API, so the token also goes in the header. */
+export async function fetchRateContext(slug: string, deviceToken: string): Promise<RateProfessorContext | null> {
+  const res = await fetch(`${API_BASE}/api/rate/professors/${encodeURIComponent(slug)}`, {
+    headers: { "X-Rmh-Device": deviceToken },
+  });
+  if (maintenanceGuard(res)) throw new Error("Site is under maintenance");
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`API ${res.status}`);
+  return res.json();
+}
+
+/* status 0 = network failure or the maintenance redirect. */
+export async function submitRating(body: RateSubmission): Promise<RateSubmitResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/rate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    return { ok: false, status: 0, error: "" };
+  }
+  if (maintenanceGuard(res)) return { ok: false, status: 0, error: "" };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, status: res.status, error: typeof data.error === "string" ? data.error : "" };
+  return { ok: true, counter: typeof data.counter === "number" ? data.counter : null };
 }
 
 /* ---- Bookmarks ---- */

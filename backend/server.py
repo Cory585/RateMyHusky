@@ -14,6 +14,7 @@ from psycopg2.extras import RealDictCursor
 from functools import lru_cache
 from dotenv import load_dotenv
 from prof_aliases import ALIAS_MAP
+from pipeline.names import COLLEGE_MAP
 from flask import Flask, g, jsonify, request, redirect, make_response
 from flask_cors import CORS
 from flask_compress import Compress
@@ -38,6 +39,11 @@ from course_page import build_course
 from professor_full import build_payload
 import bookmarks
 import moderation
+import notify
+import ip_networks
+import rating_identity
+import rating_checks
+import ratings
 import usage_alert
 
 load_dotenv()
@@ -130,7 +136,14 @@ EXTENSION_ORIGINS = [
 # the ALLOWED_ORIGINS entry below, because Chrome does send an Origin header.
 CORS(app, supports_credentials=True, origins=[FRONTEND_URL])
 def get_real_ip():
-    """Get the real client IP from X-Forwarded-For (set by Vercel/Railway proxy)."""
+    """Client IP: X-RMH-Client-IP from the keyed proxy, else last X-Forwarded-For."""
+    # Only the Vercel middleware can send the key, so only then is the client
+    # IP header it sets trustworthy. Checked here, not assumed from
+    # require_proxy_key: the limiter's hook runs before that one.
+    if PROXY_SECRET and request.headers.get("X-Proxy-Key") == PROXY_SECRET:
+        client_ip = request.headers.get("X-RMH-Client-IP", "").strip()
+        if client_ip:
+            return client_ip
     xff = request.headers.get("X-Forwarded-For", "")
     if xff:
         # Last entry is the IP appended by our trusted proxy (Vercel/Railway);
@@ -547,8 +560,9 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 # ──────────────────────────────────────────────
 #  Search helper
 # ──────────────────────────────────────────────
-def _professor_search(q, limit=5):
-    """Search professors with tiered relevance ranking."""
+def _professor_search(q, limit=5, rated_only=False):
+    """Search professors with tiered relevance ranking. rated_only applies the
+    caller's avg_rating filter before the 100-row cut, not after it."""
     # Normalize first: name_key is stored lowercase/ASCII, and LIKE is
     # case-sensitive. Callers like the chat/Ask path pass a raw gate hint ("Wu Chieh"),
     # so without this the LIKE filter (and the lowercase ALIAS_MAP) never match.
@@ -580,12 +594,14 @@ def _professor_search(q, limit=5):
             conditions.append("name_key LIKE %s")
             params.append(f"%{word}%")
 
+    if rated_only:
+        conditions.append("avg_rating IS NOT NULL")
     where = " AND ".join(conditions)
     rows = query(
         f"SELECT slug, name, name_key, department, avg_rating, total_reviews "
         f"FROM professors_catalog WHERE {where} "
-        f"ORDER BY total_reviews DESC LIMIT 100",
-        params
+        f"ORDER BY (name_key LIKE %s OR name_key LIKE %s) DESC, total_reviews DESC LIMIT 100",
+        params + [f"{q_resolved}%", f"% {q_resolved}%"]
     )
 
     # Rank in Python for proper tiered relevance (use resolved query)
@@ -659,9 +675,10 @@ def colleges():
 
 # ── Leaderboard ranking ──────────────────────────────────────────────
 # Ranking by raw avg_rating lets a 5.00 built on 3 reviews outrank a 4.9 built on
-# 500. 276 professors sit at exactly 5.00 and 95% of them have under 15 reviews,
-# which is why the Law and Professional Studies boards (which used to carry a
-# review floor of 5 rather than 100) filled up with them.
+# 500. 551 professors sit at exactly 5.00 and 97% of them have under 15 reviews.
+# That is why the Law and Professional Studies boards filled up with them when
+# those boards carried a review floor of 5 rather than 100 and course
+# evaluations still counted toward total_reviews.
 #
 # So rank on a Bayesian posterior mean instead — the IMDb Top 250 formula —
 # blending each professor toward the global mean with a prior worth SHRINKAGE_M
@@ -704,23 +721,38 @@ FALLBACK_PRIOR = 4.2   # only for an empty or brand-new catalog
 # Professional Studies to 5. Both halves of that were wrong in opposite
 # directions, and shrinkage is what makes a single number workable:
 #
-#   - 100 was doing almost no work. Reaching Khoury's rank-10 score needs ~57
-#     reviews even at a perfect 5.00, so the shrunk score already excludes
-#     nearly everyone the floor was excluding. Re-measured after the
-#     total_reviews rebuild, going 100 -> 30 changes one row across every
-#     100-floor board: Business rank 10, Peggy O'Kelly -> Laura Huang. (Before
-#     the rebuild it changed nothing at all, so expect this to keep drifting
-#     with the corpus — the argument is that the floor is near-redundant, not
-#     that it is exactly redundant.)
-#   - 5 was the actual bug. Law survives it on population (232 eligible), but
-#     Professional Studies had 15, so a "top 10" showed two thirds of the
-#     department including professors with 7 ratings, scoring within 0.04 of each
-#     other and of the prior — an ordering that reflects the prior, not the
-#     professors. At 30 that board is 5 professors long, which is the honest
-#     answer: the department does not have ten well-measured ones.
+#   - 100 is too strict for total_reviews as it now stands: RMP ratings and
+#     survey ratings only, since course evaluations left it (2026-10-04). At 100,
+#     all 6 of the boards that fill at 30 change members, 5 of them lose rows,
+#     and Engineering's drops to 0.
+#     Nor does shrinkage do the floor's job: Khoury's rank-10 score needs ~17
+#     reviews at a perfect 5.00, so on a board that fills at 30 it is the floor,
+#     not the shrunk score, that keeps a thinly rated 5.00 off it. On a short
+#     board the fill below lets one on, under every professor at 30.
+#   - 5 was the old exception's floor, and it comes back as a fill rather than a
+#     floor. Health Sciences has 5 professors at 30, and a short board read as
+#     broken. So a board that has fewer than `limit` professors at 30 is filled
+#     from those with at least BOARD_FILL_MIN_REVIEWS. The fill ranks below
+#     every professor at 30, whatever its score: shrinkage alone would let a
+#     5.00 on 20 ratings pass a 4.50 on 30. No SHRINKAGE_M fixes that: as m
+#     grows the score orders by n * (rating - prior), and 20 * (5.00 - C) beats
+#     30 * (4.50 - C) whenever C is above 3.5. A board with `limit` professors
+#     at 30 and at or above the prior never reaches the fill.
 #
-# So a short board is a feature. Do not backfill it to reach `limit`.
+# Nobody rated below the prior is on a board, however many ratings back it.
+# Ranking the 30+ tier first otherwise put a 2.86 on 250 ratings at Health
+# Sciences #5, above fill professors at 4.57-5.00.
 BOARD_MIN_REVIEWS = 30
+BOARD_FILL_MIN_REVIEWS = 5
+
+# Law and Professional Studies have no board at all. Neither has a professor
+# at 30 (their grad, part-time and online students barely use RMP), and even
+# the fill cannot reach 10: Law had 7 eligible at that floor and Professional
+# Studies 5, so a "top 10" would be every rated professor in the college, on 5
+# to 16 ratings each and scoring within 0.25 of the prior. Homepage.tsx leaves
+# them out of COLLEGES to match.
+NO_BOARD_COLLEGES = frozenset({"Law", "Professional Studies"})
+BOARD_COLLEGES = frozenset(COLLEGE_MAP.values()) - NO_BOARD_COLLEGES
 
 # total_reviews (BIGINT) is cast to float so the shrinkage arithmetic is
 # floating-point throughout instead of leaning on implicit int/float coercion.
@@ -761,24 +793,34 @@ def shrunk_score(avg_rating, total_reviews, prior_mean, m=SHRINKAGE_M):
 @app.route("/api/goat-professors")
 def goat_professors():
     college = request.args.get("college", "Khoury")
-    limit = min(int(request.args.get("limit", "10")), 50)
-    min_reviews = int(request.args.get("min_reviews", str(BOARD_MIN_REVIEWS)))
+    # Clamped, and the floor is not a parameter: every distinct value would
+    # store its own cache entry, and a negative LIMIT is a Postgres error.
+    limit = max(1, min(request.args.get("limit", 10, type=int), 50))
 
     # v5: the ordering has changed three times — to the shrunk score, again when
     # the prior stopped being the whole-catalog average, and again when the
     # per-college review floor collapsed to a single BOARD_MIN_REVIEWS and the
-    # sort gained a name tiebreak. An unbumped key serves the previous version
-    # from the cache after deploy, which looks exactly like the fix not working.
-    cache_key = f"goat:v5:{college}:{limit}:{min_reviews}"
+    # sort gained a name tiebreak. v6: short boards fill from
+    # BOARD_FILL_MIN_REVIEWS, Law and Professional Studies lost their boards,
+    # and ratings below the prior left. An unbumped key serves the previous
+    # version from the cache after deploy, which looks exactly like the fix not
+    # working.
+    # Unknown colleges are answered before the cache: every value would
+    # otherwise store its own [] and push real boards out of the LRU. With
+    # limit clamped, a college holds at most 50 entries.
+    if college not in BOARD_COLLEGES:
+        return jsonify([])
+    cache_key = f"goat:v6:{college}:{limit}"
     cached = cache_get(cache_key)
-    if cached:
+    # `is not None`: an empty board is a real answer and must cache too.
+    if cached is not None:
         return jsonify(cached)
 
     prior = ranking_prior(query_one)
     # `name` breaks ties last. Without it, professors equal on both score and
     # review count come back in whatever order the scan produces, so the board
     # could reshuffle between requests. Measured on the current corpus:
-    # 64 such groups across the catalog, covering 137 professors, and none
+    # 3 such groups across the catalog, covering 6 professors, and none
     # reaching a top 10. So this closes the door rather than fixing a visible bug.
     #
     # Which colleges hold them is not worth stating: an earlier version of this
@@ -789,10 +831,11 @@ def goat_professors():
     # is the only place the ordering is visible.
     rows = query(f"""
         SELECT * FROM professors_catalog
-        WHERE college = %s AND total_reviews >= %s
-        ORDER BY {RANKING_SCORE_SQL} DESC NULLS LAST, total_reviews DESC, name
+        WHERE college = %s AND total_reviews >= %s AND avg_rating >= %s
+        ORDER BY total_reviews >= %s DESC,
+                 {RANKING_SCORE_SQL} DESC, total_reviews DESC, name
         LIMIT %s
-    """, (college, min_reviews, prior, limit))
+    """, (college, BOARD_FILL_MIN_REVIEWS, prior, BOARD_MIN_REVIEWS, prior, limit))
 
     result = []
     for row in rows:
@@ -800,7 +843,8 @@ def goat_professors():
             "name": row["name"],
             "dept": row["department"],
             "rmpRating": round(row["rmp_rating"], 2) if row["rmp_rating"] else None,
-            "avgRating": round(row["avg_rating"], 2) if row["avg_rating"] else None,
+            # Never NULL: `avg_rating >= %s` above drops those rows.
+            "avgRating": round(row["avg_rating"], 2),
             # Displayed as "Ratings": the floor above gates on it and
             # RANKING_SCORE_SQL weights by it.
             "totalReviews": row["total_reviews"] or 0,
@@ -1086,7 +1130,8 @@ def department_slug(name):
 
 def _department_hub_map():
     """slug -> {name, professorCount, avgRating} for every department with
-    >=1 rated professor (same inclusion rule as professors_catalog), built
+    >=1 rated professor (avg_rating set, so unrated Banner-only professors
+    in professors_catalog are not counted), built
     from a single grouped query. Cached like the other catalog lookups.
     Collisions (two department names slugging to the same value) keep the
     first-seen entry and drop the rest."""
@@ -1203,7 +1248,7 @@ def professors_catalog():
     # If there's a search query, get matching name_keys first
     matched_name_keys = None
     if q and len(q) >= 2:
-        matches = _professor_search(q, limit=200)
+        matches = _professor_search(q, limit=200, rated_only=True)
         matched_name_keys = [m["name_key"] for m in matches]
         if not matched_name_keys:
             return jsonify({"professors": [], "total": 0, "page": 1, "totalPages": 1})
@@ -1810,6 +1855,221 @@ def submit_feedback():
         return jsonify({"error": "Failed to send email"}), 500
 
     return jsonify({"ok": True})
+
+
+# ──────────────────────────────────────────────
+#  Student ratings (no login): /api/rate
+# ──────────────────────────────────────────────
+
+RATING_SECRET = os.getenv("RATING_SECRET")
+# Loaded at import so gunicorn --preload reads the data files once.
+_networks = ip_networks.load_index(os.getenv("IP_DATA_DIR", "/tmp/ipdata"))
+_rating_moderation_client = None
+_last_ip_purge = 0.0
+_IP_PURGE_INTERVAL = 3600
+_MIN_RATING_SECRET = 32
+
+
+def _rating_enabled():
+    """A RATING_SECRET shorter than 32 characters counts as unset."""
+    return bool(RATING_SECRET) and len(RATING_SECRET) >= _MIN_RATING_SECRET
+
+
+def _turnstile_passes(token):
+    try:
+        resp = http_requests.post(
+            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+            data={"secret": os.getenv("TURNSTILE_SECRET_KEY"), "response": token, "remoteip": get_real_ip()},
+            timeout=5,
+        )
+        return bool(resp.ok and resp.json().get("success"))
+    except Exception:
+        return False
+
+
+def _rating_moderation_score(texts):
+    """moderation.score_texts through a client that gives up after 5 s, so a slow API holds the rating."""
+    global _rating_moderation_client
+    if _rating_moderation_client is None:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise moderation.ModerationUnavailable("OPENAI_API_KEY is not set")
+        from openai import OpenAI
+        _rating_moderation_client = OpenAI(api_key=api_key, timeout=5, max_retries=0)
+    return moderation.score_texts(texts, client=_rating_moderation_client)
+
+
+def _rating_limit_key():
+    token = request.cookies.get(rating_identity.DEVICE_COOKIE, "")
+    if not rating_identity.valid_device_token(token):
+        body = request.get_json(silent=True)
+        token = body.get("deviceToken") if isinstance(body, dict) else None
+    if _rating_enabled() and rating_identity.valid_device_token(token):
+        return rating_identity.keyed_hash(RATING_SECRET, "device", token) + "|" + get_real_ip()
+    return get_real_ip()
+
+
+def _network_type():
+    """The client's network type, looked up once per request."""
+    if "network_type" not in g:
+        g.network_type = _networks.network_type(get_real_ip())
+    return g.network_type
+
+
+def _shared_network():
+    """Campus and Private Relay addresses are shared by many students, so the IP-only limit skips them."""
+    return _network_type() in ("campus", "relay")
+
+
+def _rating_unavailable():
+    return jsonify({"error": "Ratings are not available right now"}), 503
+
+
+def _rating_response(body, status, token=None):
+    resp = make_response(jsonify(body), status)
+    resp.headers["Cache-Control"] = "no-store"
+    if token:
+        resp.set_cookie(rating_identity.DEVICE_COOKIE, token, max_age=rating_identity.DEVICE_MAX_AGE,
+                        httponly=True, secure=True, samesite="Lax", path="/api")
+    return resp
+
+
+def _device_token(mirror):
+    """(token, minted_now): the cookie, else a valid localStorage mirror, else a new one."""
+    for candidate in (request.cookies.get(rating_identity.DEVICE_COOKIE), mirror):
+        if rating_identity.valid_device_token(candidate):
+            return candidate, False
+    return rating_identity.new_device_token(), True
+
+
+@app.route("/api/rate/start")
+def rate_start():
+    if not _rating_enabled():
+        return _rating_unavailable()
+    now = datetime.now(timezone.utc)
+    # The localStorage mirror comes in a header, not the query string, so it stays out of access logs.
+    token, minted = _device_token(request.headers.get("X-Rmh-Device"))
+    device_hash = rating_identity.keyed_hash(RATING_SECRET, "device", token)
+    opened = rating_identity.sign_opened(RATING_SECRET, int(now.timestamp()), device_hash, minted)
+    counter = ratings.huskies_this_term(query_one, now)
+    return _rating_response({"opened": opened, "deviceToken": token, "counter": counter}, 200, token)
+
+
+@app.route("/api/rate/professors/<slug>")
+def rate_professor(slug):
+    if not _rating_enabled():
+        return _rating_unavailable()
+    if not ratings.professor_exists(slug, query_one):
+        return _rating_response({"error": "Professor not found"}, 404)
+    # The cookie doesn't reach a cross-site API, so the localStorage mirror comes in a header too.
+    token = request.cookies.get(rating_identity.DEVICE_COOKIE)
+    if not rating_identity.valid_device_token(token):
+        token = request.headers.get("X-Rmh-Device")
+    device_hash = (rating_identity.keyed_hash(RATING_SECRET, "device", token)
+                   if rating_identity.valid_device_token(token) else None)
+    return _rating_response(ratings.professor_context(slug, device_hash, query), 200)
+
+
+@app.route("/api/rate", methods=["POST"])
+@limiter.limit("20 per hour", key_func=_rating_limit_key)
+@limiter.limit("300 per hour", exempt_when=_shared_network)
+def rate_submit():
+    global _last_ip_purge
+    # 1. Secret
+    if not _rating_enabled():
+        return _rating_unavailable()
+    body = request.get_json(silent=True)
+    now = datetime.now(timezone.utc)
+
+    # 2. Honeypot: look accepted, verify and store nothing
+    if isinstance(body, dict) and body.get("website"):
+        return _rating_response({"ok": True, "counter": ratings.huskies_this_term(query_one, now)}, 200)
+
+    # 3. Validation
+    clean, err = rating_checks.validate_submission(body, now.year)
+    if err:
+        return _rating_response({"error": err}, 400)
+
+    # 4. Turnstile
+    if os.getenv("TURNSTILE_SECRET_KEY"):
+        token = body.get("turnstileToken")
+        if not token:
+            return _rating_response({"error": "CAPTCHA verification required"}, 400)
+        if not _turnstile_passes(token):
+            return _rating_response({"error": "CAPTCHA verification failed"}, 403)
+
+    # 5. Existence
+    if clean["professor_slug"] and not ratings.professor_exists(clean["professor_slug"], query_one):
+        return _rating_response({"error": "Unknown professor"}, 400)
+    new_course = None
+    if not ratings.course_exists(clean["course_code"], query_one):
+        if not clean["new_course_name"]:
+            return _rating_response({"error": "Unknown course code: give the course name"}, 400)
+        new_course = clean["new_course_name"]
+
+    # 6. Device, hashes, network, fill time
+    device, minted_now = _device_token(body.get("deviceToken"))
+    device_hash = rating_identity.keyed_hash(RATING_SECRET, "device", device)
+    ip = get_real_ip()
+    ip_hash = rating_identity.keyed_hash(RATING_SECRET, "ip", ip)
+    prefix = rating_identity.ip_prefix(ip)
+    prefix_hash = rating_identity.keyed_hash(RATING_SECRET, "net", prefix) if prefix else None
+    network_type = _network_type()
+    fill_seconds, opened_minted = rating_identity.read_opened(
+        RATING_SECRET, body.get("opened"), device_hash, int(now.timestamp()))
+
+    # A well-formed token the client picked is no returning device unless it already has a rating.
+    new_device = minted_now or opened_minted or not ratings.device_seen(device_hash, query_one)
+
+    # 7. Moderation: a blocked comment stops here, before anything is written
+    moderation_action = rating_checks.moderate(clean["comment"], score=_rating_moderation_score)
+    if moderation_action == "block":
+        return _rating_response({"error": "comment_blocked"}, 422, device)
+
+    # 8. Pending professor / course; the team emails wait until the rating is saved
+    pending_professor_id = pending_course_id = None
+    emails = []
+    if clean["new_professor"]:
+        name, dept = clean["new_professor"]["name"], clean["new_professor"]["department"]
+        pending_professor_id, created = ratings.pending_professor(name, dept, query_one, _write)
+        if created:
+            emails.append((f"[RateMyHusky] New professor to review: {name}",
+                           f"Name: {name}\nDepartment: {dept or '-'}\n\nReview with: python review_ratings.py list"))
+    if new_course:
+        pending_course_id, created = ratings.pending_course(clean["course_code"], new_course, query_one, _write)
+        if created:
+            emails.append((f"[RateMyHusky] New course to review: {clean['course_code']}",
+                           f"Code: {clean['course_code']}\nName: {new_course}\n\nReview with: python review_ratings.py list"))
+
+    # 9. Replace-or-insert, holds and bursts
+    key = ratings.rating_key(clean, pending_professor_id, pending_course_id)
+    existing = ratings.existing_rating(device_hash, key, query_one)
+    chash = rating_checks.comment_hash(clean["comment"])
+    duplicate = ratings.duplicate_comment(chash, existing["id"] if existing else None, query_one)
+    bursts = ratings.burst_reasons(key, ip_hash, prefix_hash, network_type, query_one, now)
+    status, reasons = rating_checks.assess(fill_seconds, network_type, bursts, duplicate, moderation_action)
+    row = {
+        **key,
+        "term_label": clean["term_label"], "rating": clean["rating"], "hours": clean["hours"],
+        "grade": clean["grade"], "comment": clean["comment"] or None, "comment_hash": chash,
+        "status": status, "hold_reasons": ",".join(reasons) or None,
+        "device_hash": device_hash, "new_device": new_device,
+        "ip_hash": ip_hash, "ip_prefix_hash": prefix_hash, "network_type": network_type,
+        "fill_seconds": fill_seconds, "collection": "turnstile+device",
+    }
+    ratings.save_rating(row, existing, _write)
+    if bursts:
+        ratings.hold_burst(bursts, key, ip_hash, prefix_hash, _write, now)
+    for subject, text in emails:
+        notify.send_team_email(subject, text)
+
+    # 10. Clear old IP hashes, at most hourly per process
+    if time.time() - _last_ip_purge >= _IP_PURGE_INTERVAL:
+        _last_ip_purge = time.time()
+        ratings.purge_ip_hashes(_write, now)
+
+    # 11. Same body whether accepted or held
+    return _rating_response({"ok": True, "counter": ratings.huskies_this_term(query_one, now)}, 200, device)
 
 
 from render import render_bp

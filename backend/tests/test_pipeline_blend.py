@@ -27,6 +27,11 @@ def test_two_sources_are_rating_count_weighted():
     assert b["rating_distribution"]["5"] == 40 and b["grade_distribution"] == {"A": 40}
 
 
+def test_survey_and_rmp_with_equal_counts_blend_to_the_plain_mean():
+    [b] = blend([row("rmp", 4.0, 5), row("survey", 2.0, 5)])
+    assert b["rating"] == 3.0                  # survey weight 1.0, same as RMP
+
+
 def test_value_with_zero_weight_still_blends():
     # An RMP page rating with no stored reviews: num_ratings 0 but a real rating.
     [b] = blend([row("rmp", 4.0, 0)])

@@ -131,12 +131,29 @@ def test_summary_keys_and_values():
     }
 
 
-def test_sources_holds_rmp_only_with_exact_keys():
+def test_sources_holds_rmp_and_survey_with_exact_keys():
     data, _, _ = _build()
-    assert set(data["sources"]) == {"rmp"}
+    assert set(data["sources"]) == {"rmp", "survey"}
     assert set(data["sources"]["rmp"]) == {
         "available", "rating", "difficulty", "wouldTakeAgainPct", "numRatings",
         "professorUrl", "ratingDistribution", "gradeDistribution", "reviews"}
+
+
+def test_survey_section_present_and_empty_without_ratings():
+    data, _, _ = _build()
+    assert data["sources"]["survey"] == {
+        "available": False, "rating": None, "numRatings": 0, "hoursPerWeek": None,
+        "ratingDistribution": {"1": 0, "2": 0, "3": 0, "4": 0, "5": 0}, "gradeDistribution": {}}
+
+
+def test_survey_section_from_the_survey_row():
+    survey = {"course_code": "", "source": "survey", "rating": 4.0, "difficulty": None,
+              "would_take_again_pct": None, "num_ratings": 3, "num_comments": 1, "hours_per_week": 8.5,
+              "rating_distribution": {"3": 1, "4": 1, "5": 1}, "grade_distribution": {"A": 2}, "course_name": None}
+    data, _, _ = _build(db=FakeDB(summaries=[*SUMMARY_ROWS, survey]))
+    assert data["sources"]["survey"] == {
+        "available": True, "rating": 4.0, "numRatings": 3, "hoursPerWeek": 8.5,
+        "ratingDistribution": {"1": 0, "2": 0, "3": 1, "4": 1, "5": 1}, "gradeDistribution": {"A": 2}}
 
 
 def test_course_row_keys():
@@ -299,6 +316,23 @@ def test_unrated_professor_is_all_null():
     assert rmp["available"] is False
     assert (rmp["rating"], rmp["difficulty"], rmp["wouldTakeAgainPct"]) == (None, None, None)
     assert data["courses"] == []
+
+
+def test_banner_only_professor_payload():
+    banner_only = {**CATALOG, "slug": "ada-newhire", "name": "Ada Newhire", "name_key": "ada newhire",
+                   "avg_rating": None, "rmp_rating": None, "num_ratings": 0, "total_reviews": 0,
+                   "would_take_again_pct": None, "difficulty": None, "professor_url": None,
+                   "total_comments": 0}
+    history = [{"code": "CS3100", "name": "Program Design and Implementation 2", "termsTaught": 1,
+                "lastTerm": "Spring 2026", "recentTerms": ["Spring 2026"],
+                "avgClassSize": 100, "hasPage": False}]
+    data, _ = _with_history(history, slug="ada-newhire", db=FakeDB(catalog=banner_only, reviews=[], summaries=[]), mentions=[])
+    assert data["sources"]["rmp"]["available"] is False
+    assert data["sources"]["rmp"]["professorUrl"] is None
+    assert data["summary"]["rating"] is None
+    assert data["summary"]["numRatings"] == 0
+    assert [c["code"] for c in data["courses"]] == ["CS3100"]
+    assert data["lastTaught"] == "Spring 2026"
 
 
 def test_zero_ratings_are_null_not_zero():
