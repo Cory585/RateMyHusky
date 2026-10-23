@@ -99,7 +99,7 @@ const Faq = () => {
               <h3>Why does a professor have a page but no ratings?</h3>
               <p>
                 Most instructors on Northeastern's course schedule since {BANNER_SINCE} get a
-                page even when nobody has rated them on RateMyProfessors or here. Their page
+                page even when nobody has rated them on RateMyProfessors{RATE_ENABLED ? ' or here' : ''}. Their page
                 shows the courses and terms they taught, and ratings appear after students
                 submit them and the next weekly refresh runs.
               </p>
@@ -150,7 +150,7 @@ const Faq = () => {
               <p>
                 Your name, department, and college; the courses and terms you taught and their
                 average class sizes, from Northeastern's public course schedule; your ratings and
-                reviews from RateMyProfessors, and ratings from our rating form; public Reddit
+                reviews from RateMyProfessors{RATE_ENABLED ? ', and ratings from our rating form' : ''}; public Reddit
                 comments that mention you; any teaching awards
                 Northeastern has announced; and a photo if Northeastern publishes one on its
                 directory pages. We publish no contact details and nothing that isn't already
