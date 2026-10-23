@@ -1,5 +1,13 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { StepFoot } from './ChoiceGroup';
+
+// Measuring collapses the box for a moment, which can pull a page scrolled to the bottom up, so the scroll is put back.
+function fit(t: HTMLTextAreaElement) {
+  const y = window.scrollY;
+  t.style.height = 'auto';
+  t.style.height = `${t.scrollHeight + t.offsetHeight - t.clientHeight}px`;
+  if (window.scrollY !== y) window.scrollTo(0, y);
+}
 
 interface CommentStepProps {
   value: string;
@@ -17,11 +25,22 @@ export function CommentStep({ value, onChange, onSubmit, onBack, submitting, upd
 
   // Grows with the text; the CSS max-height caps it and the box scrolls inside past that.
   useLayoutEffect(() => {
+    if (ref.current) fit(ref.current);
+  }, [value]);
+
+  // A wider or narrower column rewraps the text, so refit on width changes too.
+  useEffect(() => {
     const t = ref.current;
     if (!t) return;
-    t.style.height = 'auto';
-    t.style.height = `${t.scrollHeight + t.offsetHeight - t.clientHeight}px`;
-  }, [value]);
+    let width = t.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (t.clientWidth === width) return;
+      width = t.clientWidth;
+      fit(t);
+    });
+    observer.observe(t);
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <>

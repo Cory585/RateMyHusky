@@ -1,5 +1,6 @@
-import { Fragment, useEffect, useId, useRef, useState } from 'react';
-import type { KeyboardEvent, ReactNode } from 'react';
+import { Fragment, useEffect, useId, useState } from 'react';
+import type { ReactNode } from 'react';
+import { moveRadioFocus } from './moveRadioFocus';
 
 export interface ChoiceOption<T> {
   value: T;
@@ -35,8 +36,8 @@ export function StepFoot({ onBack, backDisabled, children }: { onBack?: () => vo
 
 export function ChoiceGroup<T>({ legend, subtitle, options, value, onPick, layout }: ChoiceGroupProps<T>) {
   const headingId = useId();
-  const groupRef = useRef<HTMLDivElement>(null);
-  const [popped, setPopped] = useState<number | null>(null);
+  // The picked value, not its position, so the pop stays on the picked tile if the options reorder.
+  const [popped, setPopped] = useState<T | null>(null);
 
   // Keys 1-5 pick the option whose digit matches, never by position.
   useEffect(() => {
@@ -47,23 +48,12 @@ export function ChoiceGroup<T>({ legend, subtitle, options, value, onPick, layou
       if (!/^[1-5]$/.test(e.key)) return;
       const hit = options.find((o) => o.digit === Number(e.key));
       if (!hit) return;
-      setPopped(options.indexOf(hit));
+      setPopped(hit.value);
       onPick(hit.value);
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [options, onPick]);
-
-  // Arrow keys move focus only; Enter, Space and click select.
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    const step = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 0;
-    if (!step) return;
-    const radios = Array.from(groupRef.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? []);
-    const at = radios.indexOf(document.activeElement as HTMLButtonElement);
-    if (at < 0) return;
-    e.preventDefault();
-    radios[(at + step + radios.length) % radios.length].focus();
-  };
 
   const checked = options.findIndex((o) => o.value === value);
   const tabStop = checked < 0 ? 0 : checked;
@@ -73,23 +63,23 @@ export function ChoiceGroup<T>({ legend, subtitle, options, value, onPick, layou
       <h1 id={headingId} className="rate-q" tabIndex={-1}>{legend}</h1>
       {subtitle && <p className="rate-sub">{subtitle}</p>}
       <div
-        ref={groupRef}
         role="radiogroup"
         aria-labelledby={headingId}
         className={`rate-choices rate-choices-${layout}`}
-        onKeyDown={onKeyDown}
+        onKeyDown={moveRadioFocus}
       >
         {options.map((o, i) => (
           <Fragment key={i}>
-            {o.heading && <h2 className="rate-group">{o.heading}</h2>}
+            {/* Hidden from screen readers, since a radiogroup holds only radios; the tiles under it say so in their labels. */}
+            {o.heading && <h2 className="rate-group" aria-hidden="true">{o.heading}</h2>}
             <button
               type="button"
               role="radio"
               aria-checked={i === checked}
               aria-label={o.aria}
               tabIndex={i === tabStop ? 0 : -1}
-              className={`rate-opt${i === checked ? ' on' : ''}${o.className ? ` ${o.className}` : ''}${i === popped ? ' pop' : ''}`}
-              onClick={() => { setPopped(i); onPick(o.value); }}
+              className={`rate-opt${i === checked ? ' on' : ''}${o.className ? ` ${o.className}` : ''}${o.value === popped ? ' pop' : ''}`}
+              onClick={() => { setPopped(o.value); onPick(o.value); }}
             >
               {o.label}
             </button>

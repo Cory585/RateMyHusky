@@ -179,9 +179,12 @@ export function replacedLine(prior: RatedCourse): string {
     : `Your new answers replaced the ones from ${displayTerm(prior.term)}.`;
 }
 
+// The backend's check (TERM_YEARS in backend/rating_checks.py) allows one more year each side, for a clock that differs from UTC.
+const TERM_YEARS = 4;
+
 export function termYears(now: Date): number[] {
   const y = now.getFullYear();
-  return Array.from({ length: 4 }, (_, i) => y - i);
+  return Array.from({ length: TERM_YEARS }, (_, i) => y - i);
 }
 
 export function inTermWindow(label: string, now: Date): boolean {

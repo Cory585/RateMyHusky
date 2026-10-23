@@ -60,7 +60,7 @@ def _body(**over):
     _body(hours="15+"),
     _body(grade="D"),
     _body(term="Fall 2015"),
-    _body(term="Fall 2022"),
+    _body(term="Fall 2021"),
     _body(term="Autumn 2025"),
     _body(term="Summer Full 2025"),
     _body(term="Fall 2025\n"),
@@ -145,7 +145,9 @@ def test_validate_accepts_banner_labels():
         assert err is None and clean["term_label"] == term
 
 
-def test_validate_term_window_is_four_years():
-    for term in ("Fall 2023", "Spring 2026", "Fall 2027"):
+def test_validate_term_window_is_four_years_plus_a_year_each_side():
+    # The form's four years, plus one each side for a browser whose year differs from UTC's.
+    for term in ("Fall 2022", "Fall 2023", "Spring 2026", "Fall 2027"):
         assert rc.validate_submission(_body(term=term), 2026)[1] is None
-    assert rc.validate_submission(_body(term="Summer 2 2022"), 2026)[1] == "Invalid term"
+    for term in ("Summer 2 2021", "Spring 2028"):
+        assert rc.validate_submission(_body(term=term), 2026)[1] == "Invalid term"

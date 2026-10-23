@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ChoiceGroup, StepFoot } from './ChoiceGroup';
+import { moveRadioFocus } from './moveRadioFocus';
 import type { ChoiceOption } from './ChoiceGroup';
 import { SEASONS, displayTerm, formatCode, lastName, splitTerm, termYears } from './rateFlow';
 import type { RateCourse, RateProfessor } from './rateFlow';
@@ -53,13 +54,14 @@ export function OtherTermStep({ now, selected, onPick, onBack }: OtherTermStepPr
       <p className="rate-sub">Pick the term and year.</p>
       <div className="rate-field">
         <span id="rate-season-label" className="rate-label">Term</span>
-        <div role="radiogroup" aria-labelledby="rate-season-label" className="rate-row rate-seasons">
+        <div role="radiogroup" aria-labelledby="rate-season-label" className="rate-row rate-seasons" onKeyDown={moveRadioFocus}>
           {SEASONS.map((s) => (
             <button
               key={s.value}
               type="button"
               role="radio"
               aria-checked={s.value === season}
+              tabIndex={s.value === (season ?? SEASONS[0].value) ? 0 : -1}
               className={`rate-opt pill${s.value === season ? ' on' : ''}`}
               onClick={() => setSeason(s.value)}
             >
@@ -70,13 +72,14 @@ export function OtherTermStep({ now, selected, onPick, onBack }: OtherTermStepPr
       </div>
       <div className="rate-field">
         <span id="rate-year-label" className="rate-label">Year</span>
-        <div role="radiogroup" aria-labelledby="rate-year-label" className="rate-row rate-years">
+        <div role="radiogroup" aria-labelledby="rate-year-label" className="rate-row rate-years" onKeyDown={moveRadioFocus}>
           {years.map((y) => (
             <button
               key={y}
               type="button"
               role="radio"
               aria-checked={y === year}
+              tabIndex={y === year ? 0 : -1}
               className={`rate-opt pill${y === year ? ' on' : ''}`}
               onClick={() => setYear(y)}
             >
