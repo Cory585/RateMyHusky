@@ -121,14 +121,15 @@ export default function Rate() {
         if (res.ok) {
           const { identity } = res.data;
           const professor: RateProfessor = { slug: identity.slug, name: identity.name, department: identity.department };
-          const course = prefillCourse(res.data.courses, (params.get('course') ?? '').replace(/\s+/g, '').toUpperCase() || null, new Date());
-          initial = answer(initial, { professor, ...(course && { course }) });
-          if (course) {
+          const code = (params.get('course') ?? '').replace(/\s+/g, '').toUpperCase() || null;
+          initial = answer(initial, { professor });
+          if (code) {
             // A prefilled rated course opens in update mode, so wait for the context before the first screen.
             s = await visit;
             // A failed call stays null, so the context effect fetches it again rather than keep an empty list.
             if (s) prefetched = await fetchRateContext(identity.slug, s.deviceToken).then((c) => c?.ratedCourses ?? [], () => null);
-            initial = pickCourse(initial, course, prefetched ?? [], new Date());
+            const course = prefillCourse(res.data.courses, prefetched ?? [], code, new Date());
+            if (course) initial = pickCourse(initial, course, prefetched ?? [], new Date());
           }
         }
       }

@@ -214,6 +214,10 @@ def professor_context(slug, device_hash, query):
 
     A course still awaiting review comes back as `pending`, so the form resends it
     as a new course and the submit reuses its pending row instead of adding a rating.
+
+    Accepted risk: the answers, comment included, go to whoever holds the device token,
+    so the next person on a shared browser sees them. That person could already
+    overwrite the rating, since the device is the identity.
     """
     if device_hash is None:
         return {"ratedCourses": []}

@@ -93,10 +93,13 @@ function selftest(): number {
   const courses = [
     { code: 'CS2500', name: 'Fundamentals of CS 1', terms: ['Fall 2024'] },
   ] as ProfessorCourse[];
-  check('prefillCourse unknown code is undefined', prefillCourse(courses, 'ZZ1111', june26) === undefined);
-  check('prefillCourse null code is undefined', prefillCourse(courses, null, june26) === undefined);
-  const pf = prefillCourse(courses, 'CS2500', june26);
+  check('prefillCourse unknown code is undefined', prefillCourse(courses, [], 'ZZ1111', june26) === undefined);
+  check('prefillCourse null code is undefined', prefillCourse(courses, [], null, june26) === undefined);
+  const pf = prefillCourse(courses, [], 'CS2500', june26);
   check('prefillCourse known code', pf?.code === 'CS2500' && pf.isNew === false && same(pf.terms, ['Fall 2024']));
+  const ratedOff: RatedCourse = { code: 'CS4973', name: 'Topics in HCI', pending: false, term: null, rating: 5, hours: '8-10', grade: null, comment: '' };
+  const pfOff = prefillCourse(courses, [ratedOff], 'CS4973', june26);
+  check('prefillCourse finds a rated course the list no longer carries', same(pfOff, { code: 'CS4973', name: 'Topics in HCI', isNew: false, terms: [] }));
 
   // contextTags
   check('contextTags empty answers', same(contextTags({ comment: '' }), []));
@@ -170,6 +173,15 @@ function selftest(): number {
   check('unrated pick outside update mode behaves like answer', plain.rating === 5 && plain.term === undefined);
   const odd = pickCourse({ comment: '', professor: alex }, cs3500, [{ ...prior, term: 'Summer 1 2024' }], now);
   check('earlier term in the window but unlisted is added', odd.course?.terms.includes('Summer 1 2024') === true && odd.term === 'Summer 1 2024');
+  const newer = pickCourse({ comment: '', professor: alex }, cs3500, [{ ...prior, term: 'Spring 2026' }], now);
+  check('an added earlier term keeps the list newest-first', same(newer.course?.terms, ['Spring 2026', 'Fall 2025', 'Spring 2025']));
+  const summers = pickCourse({ comment: '', professor: alex }, { ...cs3500, terms: ['Fall 2025', 'Summer 2 2025', 'Spring 2025'] }, [{ ...prior, term: 'Summer 1 2025' }], now);
+  check('an added summer session orders by its session', same(summers.course?.terms, ['Fall 2025', 'Summer 2 2025', 'Summer 1 2025', 'Spring 2025']));
+  const winterOff = pickCourse({ comment: '', professor: alex }, { ...cs3500, terms: [] }, [{ ...prior, term: 'Winter 2026' }], now);
+  check('an earlier term the different-term screen cannot show is asked again', winterOff.term === undefined && firstStep(winterOff) === 'otherTerm');
+  const winterListed = pickCourse({ comment: '', professor: alex }, cs3500, [{ ...prior, term: 'Winter 2026' }], now);
+  check('an earlier Winter term on a listed course stays as a tile', winterListed.term === 'Winter 2026'
+    && same(winterListed.course?.terms, ['Winter 2026', 'Fall 2025', 'Spring 2025']));
   const stale = pickCourse({ comment: '', professor: alex }, cs3500, [{ ...prior, term: 'Fall 2021' }], now);
   check('earlier term older than the window is not selected', stale.term === undefined
     && same(stale.course?.terms, cs3500.terms) && nextStep('course', stale) === 'term');

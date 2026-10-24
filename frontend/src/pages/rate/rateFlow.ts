@@ -144,9 +144,13 @@ export function pickCourse(a: Answers, c: RateCourse, ratedCourses: RatedCourse[
   const base = a.updating ? leaveUpdate(a) : a;
   const rated = ratedCourses.find((r) => r.code === c.code);
   if (!rated) return answer(base, { course: c });
-  const keep = rated.term === null || inTermWindow(rated.term, now);
+  // The earlier term stays only where the term step can show it picked: as a tile, or on the different-term screen.
+  const keep = rated.term === null
+    || (c.terms.length > 0 ? inTermWindow(rated.term, now) : splitTerm(rated.term, now) !== null);
   const addTerm = keep && rated.term !== null && c.terms.length > 0 && !c.terms.includes(rated.term);
-  const course = addTerm ? { ...c, terms: [...c.terms, rated.term as string] } : c;
+  const course = addTerm
+    ? { ...c, terms: [...c.terms, rated.term as string].sort((x, y) => termOrder(y) - termOrder(x)) }
+    : c;
   return answer(base, {
     course, term: keep ? rated.term : undefined, rating: rated.rating, hours: rated.hours,
     grade: rated.grade, comment: rated.comment, updating: rated,
@@ -186,6 +190,17 @@ export function termYears(now: Date): number[] {
   return Array.from({ length: TERM_YEARS }, (_, i) => y - i);
 }
 
+// Banner's term code, as label_code in backend/teaching_history.py builds it, so terms order newest-first like the course list.
+const SEASON_CODES: Record<string, [number, number]> = {
+  Fall: [1, 10], Winter: [0, 25], Spring: [0, 30], 'Summer 1': [0, 40], Summer: [0, 50], 'Summer 2': [0, 60],
+};
+
+function termOrder(label: string): number {
+  const m = label.match(/^(.+) (\d{4})$/);
+  const code = m && SEASON_CODES[m[1]];
+  return code ? (Number(m[2]) + code[0]) * 100 + code[1] : 0;
+}
+
 export function inTermWindow(label: string, now: Date): boolean {
   const year = Number(label.match(/(\d{4})$/)?.[1]);
   return termYears(now).includes(year);
@@ -215,10 +230,11 @@ export function contextTags(a: Answers): string[] {
   return parts;
 }
 
-export function prefillCourse(courses: ProfessorCourse[], code: string | null, now: Date): RateCourse | undefined {
+// A rated course the professor's list no longer carries comes from the context, as on the course step.
+export function prefillCourse(courses: ProfessorCourse[], rated: RatedCourse[], code: string | null, now: Date): RateCourse | undefined {
   if (!code) return undefined;
   const c = courses.find((x) => x.code === code);
-  return c && toRateCourse(c, now);
+  return c ? toRateCourse(c, now) : courseGroups([], rated).rated.find((x) => x.code === code);
 }
 
 export function buildSubmission(a: Answers, start: RateStart, turnstileToken: string, honeypot: string): RateSubmission {
