@@ -22,6 +22,7 @@ def test_hold_reasons_in_order():
 
 def test_quick_edit_of_an_accepted_rating_is_not_too_fast():
     assert rc.assess(3, "campus", [], False, None, edit=True) == ("accepted", [])
+    assert rc.assess(2, "campus", [], False, None, edit=True) == ("held", ["too_fast"])
     assert rc.assess(None, "campus", [], False, None, edit=True) == ("held", ["no_timer"])
 
 

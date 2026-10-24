@@ -12,6 +12,8 @@ from teaching_history import label_code
 HOURS = ("0-2", "3-4", "5-7", "8-10", "10+")
 GRADES = ("A", "A-", "B+", "B", "B-", "C+", "C", "C- or below")
 MIN_FILL_SECONDS = 8
+# An edit opens on the earlier answers, so it gets a lower floor, not none.
+EDIT_MIN_FILL_SECONDS = 3
 MAX_FILL_SECONDS = 7200
 MAX_COMMENT = 2000
 MIN_DUPLICATE_CHARS = 20
@@ -158,14 +160,14 @@ def assess(fill_seconds, network_type, bursts, duplicate_comment, moderation_act
     """("rejected", [...]) | ("held", reasons) | ("accepted", []).
 
     edit: this replaces an accepted rating. The form prefills the earlier answers,
-    so a quick update is normal and isn't held as too_fast.
+    so a quick update is normal and only has to clear EDIT_MIN_FILL_SECONDS.
     """
     if moderation_action == "block":
         return "rejected", ["moderation_block"]
     reasons = []
     if fill_seconds is None:
         reasons.append("no_timer")
-    elif fill_seconds < MIN_FILL_SECONDS and not edit:
+    elif fill_seconds < (EDIT_MIN_FILL_SECONDS if edit else MIN_FILL_SECONDS):
         reasons.append("too_fast")
     elif fill_seconds > MAX_FILL_SECONDS:
         reasons.append("stale")

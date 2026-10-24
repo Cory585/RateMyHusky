@@ -179,7 +179,7 @@ def test_moderation_timeout_holds(rate):
 
 def test_quick_update_keeps_an_accepted_rating_accepted(rate):
     server, client, state, ri = rate
-    quick = {"opened": ri.sign_opened(SECRET, int(time.time()) - 2, ri.keyed_hash(SECRET, "device", DEVICE), False)}
+    quick = {"opened": ri.sign_opened(SECRET, int(time.time()) - 4, ri.keyed_hash(SECRET, "device", DEVICE), False)}
     post(client, ri, quick)
     state["existing"] = {"id": "r1", "status": "accepted", "hold_reasons": None}
     post(client, ri, quick)

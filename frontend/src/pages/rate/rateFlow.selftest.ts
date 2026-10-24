@@ -185,7 +185,9 @@ function selftest(): number {
   const backToDraft = pickCourse(pickCourse(misTap, cs4973, [prior, priorB], now), cs2500, [prior, priorB], now);
   check('update: leaving restores the fresh draft', backToDraft.updating === undefined && backToDraft.rating === 3
     && backToDraft.hours === '3-4' && backToDraft.grade === 'B' && backToDraft.comment === 'Half-written draft.'
-    && backToDraft.term === undefined && backToDraft.course?.code === 'CS2500');
+    && backToDraft.term === 'Fall 2025' && backToDraft.course?.code === 'CS2500');
+  const elsewhere = pickCourse(misTap, cs4973, [prior], now);
+  check('update: leaving for another course drops the draft term', elsewhere.term === undefined && elsewhere.rating === 3);
   const swappedDraft = answer(misTap, { professor: { slug: 'sam-lee', name: 'Sam Lee', department: null } });
   check('update: professor change restores the fresh draft', swappedDraft.updating === undefined
     && swappedDraft.rating === 3 && swappedDraft.comment === 'Half-written draft.' && swappedDraft.course === undefined);

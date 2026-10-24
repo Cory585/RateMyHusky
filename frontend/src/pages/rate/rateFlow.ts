@@ -18,7 +18,7 @@ export interface Answers {
   comment: string;
   updating?: RatedCourse;
   // The fresh answers set aside while update mode shows the earlier ones.
-  draft?: Pick<Answers, 'rating' | 'hours' | 'grade' | 'comment'>;
+  draft?: Pick<Answers, 'course' | 'term' | 'rating' | 'hours' | 'grade' | 'comment'>;
 }
 
 export const OVERALL: { value: number; label: string }[] = [
@@ -150,7 +150,7 @@ export function pickCourse(a: Answers, c: RateCourse, ratedCourses: RatedCourse[
   return answer(base, {
     course, term: keep ? rated.term : undefined, rating: rated.rating, hours: rated.hours,
     grade: rated.grade, comment: rated.comment, updating: rated,
-    draft: { rating: base.rating, hours: base.hours, grade: base.grade, comment: base.comment },
+    draft: { course: base.course, term: base.term, rating: base.rating, hours: base.hours, grade: base.grade, comment: base.comment },
   });
 }
 

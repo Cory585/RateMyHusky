@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { fetchProfessorFull, fetchRateContext, startRating, submitRating } from '../api/api';
+import { fetchRateContext, fetchRateProfessor, startRating, submitRating } from '../api/api';
 import type { ProfessorPage, RatedCourse, RateStart, RateSubmission } from '../api/api';
 import { useTurnstile } from './rate/useTurnstile';
 import { WhoStep, NewProfessorStep } from './rate/WhoStep';
@@ -117,7 +117,7 @@ export default function Rate() {
       let prefetched: RatedCourse[] | null = null;
       let s: RateStart | null = null;
       if (profSlug) {
-        const res = await fetchProfessorFull(profSlug);
+        const res = await fetchRateProfessor(profSlug);
         if (res.ok) {
           const { identity } = res.data;
           const professor: RateProfessor = { slug: identity.slug, name: identity.name, department: identity.department };
@@ -126,7 +126,8 @@ export default function Rate() {
           if (course) {
             // A prefilled rated course opens in update mode, so wait for the context before the first screen.
             s = await visit;
-            if (s) prefetched = (await fetchRateContext(identity.slug, s.deviceToken).catch(() => null))?.ratedCourses ?? [];
+            // A failed call stays null, so the context effect fetches it again rather than keep an empty list.
+            if (s) prefetched = await fetchRateContext(identity.slug, s.deviceToken).then((c) => c?.ratedCourses ?? [], () => null);
             initial = pickCourse(initial, course, prefetched ?? [], new Date());
           }
         }
@@ -148,7 +149,7 @@ export default function Rate() {
   useEffect(() => {
     if (!slug) return;
     let cancelled = false;
-    fetchProfessorFull(slug)
+    fetchRateProfessor(slug)
       .then((res) => { if (!cancelled) setLoaded({ slug, list: res.ok ? toRateCourses(res.data) : [] }); })
       .catch(() => { if (!cancelled) setLoaded({ slug, list: [] }); });
     return () => { cancelled = true; };
