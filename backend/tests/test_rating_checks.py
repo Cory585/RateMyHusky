@@ -20,6 +20,12 @@ def test_hold_reasons_in_order():
     assert rc.assess(7201, "relay", [], False, "allow") == ("held", ["stale"])
 
 
+def test_quick_edit_of_an_accepted_rating_is_not_too_fast():
+    assert rc.assess(3, "campus", [], False, None, edit=True) == ("accepted", [])
+    assert rc.assess(2, "campus", [], False, None, edit=True) == ("held", ["too_fast"])
+    assert rc.assess(None, "campus", [], False, None, edit=True) == ("held", ["no_timer"])
+
+
 def test_campus_relay_mobile_unknown_never_hold_on_their_own():
     for n in ("campus", "relay", "mobile", "other", "unknown"):
         assert rc.assess(30, n, [], False, None)[0] == "accepted"
@@ -60,6 +66,7 @@ def _body(**over):
     _body(hours="15+"),
     _body(grade="D"),
     _body(term="Fall 2015"),
+    _body(term="Fall 2021"),
     _body(term="Autumn 2025"),
     _body(term="Summer Full 2025"),
     _body(term="Fall 2025\n"),
@@ -142,3 +149,11 @@ def test_validate_accepts_banner_labels():
     for term in ("Winter 2026", "Summer 1 2025", "Fall 2025"):
         clean, err = rc.validate_submission(_body(term=term), 2026)
         assert err is None and clean["term_label"] == term
+
+
+def test_validate_term_window_is_four_years_plus_a_year_each_side():
+    # The form's four years, plus one each side for a browser whose year differs from UTC's.
+    for term in ("Fall 2022", "Fall 2023", "Spring 2026", "Fall 2027"):
+        assert rc.validate_submission(_body(term=term), 2026)[1] is None
+    for term in ("Summer 2 2021", "Spring 2028"):
+        assert rc.validate_submission(_body(term=term), 2026)[1] == "Invalid term"

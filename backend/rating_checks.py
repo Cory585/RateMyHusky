@@ -12,12 +12,18 @@ from teaching_history import label_code
 HOURS = ("0-2", "3-4", "5-7", "8-10", "10+")
 GRADES = ("A", "A-", "B+", "B", "B-", "C+", "C", "C- or below")
 MIN_FILL_SECONDS = 8
+# An edit opens on the earlier answers, so it gets a lower floor, not none.
+EDIT_MIN_FILL_SECONDS = 3
 MAX_FILL_SECONDS = 7200
 MAX_COMMENT = 2000
 MIN_DUPLICATE_CHARS = 20
 COURSE_CODE_RE = re.compile(r"^[A-Z]{2,5}\d{4}[A-Z]?$", re.ASCII)
 # label_code alone would also accept "Summer Full", which is never a valid label.
 TERM_RE = re.compile(r"^(Fall|Spring|Summer 1|Summer 2|Summer|Winter) (\d{4})$", re.ASCII)
+# The form offers the last TERM_YEARS years by the browser's clock (TERM_YEARS in
+# frontend/src/pages/rate/rateFlow.ts). this_year is UTC's, so one more year on
+# each side covers a browser whose year has already or not yet turned over.
+TERM_YEARS = 4
 
 
 def _text(value):
@@ -98,7 +104,7 @@ def validate_submission(body, this_year):
     term = body.get("term")
     if term is not None:
         m = TERM_RE.fullmatch(term) if isinstance(term, str) else None
-        if not m or label_code(term) is None or not this_year - 6 <= int(m.group(2)) <= this_year + 1:
+        if not m or label_code(term) is None or not this_year - TERM_YEARS <= int(m.group(2)) <= this_year + 1:
             return None, "Invalid term"
 
     rating = body.get("rating")
@@ -150,14 +156,18 @@ def moderate(comment, score=moderation.score_texts):
         return "unavailable"
 
 
-def assess(fill_seconds, network_type, bursts, duplicate_comment, moderation_action):
-    """("rejected", [...]) | ("held", reasons) | ("accepted", [])."""
+def assess(fill_seconds, network_type, bursts, duplicate_comment, moderation_action, edit=False):
+    """("rejected", [...]) | ("held", reasons) | ("accepted", []).
+
+    edit: this replaces an accepted rating. The form prefills the earlier answers,
+    so a quick update is normal and only has to clear EDIT_MIN_FILL_SECONDS.
+    """
     if moderation_action == "block":
         return "rejected", ["moderation_block"]
     reasons = []
     if fill_seconds is None:
         reasons.append("no_timer")
-    elif fill_seconds < MIN_FILL_SECONDS:
+    elif fill_seconds < (EDIT_MIN_FILL_SECONDS if edit else MIN_FILL_SECONDS):
         reasons.append("too_fast")
     elif fill_seconds > MAX_FILL_SECONDS:
         reasons.append("stale")

@@ -9,7 +9,6 @@ timezone-aware UTC datetime.
 import uuid
 from datetime import datetime, timedelta, timezone
 
-import rmp
 from prof_aliases import rmp_link_key
 
 # The burst thresholds count prior ratings in the window: the route counts before it saves.
@@ -211,34 +210,29 @@ def save_rating(row, existing, write):
 
 
 def professor_context(slug, device_hash, query):
-    """The form's left panel: courses this device rated, and per-course blend stats."""
-    rated = []
-    if device_hash is not None:
-        rows = query(
-            "SELECT course_code FROM survey_ratings WHERE device_hash = %s "
-            "AND professor_slug = %s AND course_code IS NOT NULL ORDER BY course_code",
-            (device_hash, slug))
-        rated = [r["course_code"] for r in rows]
+    """The form's course step: this device's earlier answers per rated course.
+
+    A course still awaiting review comes back as `pending`, so the form resends it
+    as a new course and the submit reuses its pending row instead of adding a rating.
+
+    Accepted risk: the answers, comment included, go to whoever holds the device token,
+    so the next person on a shared browser sees them. That person could already
+    overwrite the rating, since the device is the identity.
+    """
+    if device_hash is None:
+        return {"ratedCourses": []}
     rows = query(
-        "SELECT course_code, source, rating, num_ratings, hours_per_week, grade_distribution "
-        "FROM source_summary WHERE professor_slug = %s AND course_code <> '' "
-        "AND source IN ('blend', 'survey')", (slug,))
-    survey_counts = {r["course_code"]: int(r["num_ratings"] or 0)
-                     for r in rows if r["source"] == "survey"}
-    summaries = {}
-    for r in rows:
-        if r["source"] != "blend":
-            continue
-        grades = r.get("grade_distribution") or {}
-        summaries[r["course_code"]] = {
-            "rating": rmp.stat(r["rating"], 2),
-            "numRatings": int(r["num_ratings"] or 0),
-            "hoursPerWeek": rmp.stat(r["hours_per_week"], 1),
-            "hoursCount": survey_counts.get(r["course_code"], 0),
-            "gradeDistribution": grades,
-            "gradeCount": sum(grades.values()),
-        }
-    return {"ratedCourses": rated, "summaries": summaries}
+        "SELECT COALESCE(r.course_code, pc.code) AS code, COALESCE(c.name, pc.name) AS name, "
+        "r.course_code IS NULL AS pending, r.term_label, r.rating, r.hours, r.grade, r.comment "
+        "FROM survey_ratings r LEFT JOIN course_catalog c ON c.code = r.course_code "
+        "LEFT JOIN survey_pending_courses pc ON pc.id = r.pending_course_id AND pc.status = 'pending' "
+        "WHERE r.device_hash = %s AND r.professor_slug = %s "
+        "AND (r.course_code IS NOT NULL OR pc.id IS NOT NULL) "
+        "ORDER BY code", (device_hash, slug))
+    return {"ratedCourses": [
+        {"code": r["code"], "name": r["name"], "pending": r["pending"], "term": r["term_label"],
+         "rating": r["rating"], "hours": r["hours"], "grade": r["grade"],
+         "comment": r["comment"] or ""} for r in rows]}
 
 
 def purge_ip_hashes(write, now):
