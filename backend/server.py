@@ -176,6 +176,19 @@ def _origin_host(value: str) -> str:
     return f"{p.scheme}://{p.netloc}".lower()
 
 
+# Vercel Preview deploys get a new hostname per build, so they can't be listed
+# like FRONTEND_URL. Set only where previews should reach this backend, e.g.
+# ^https://rate-my-husky-[a-z0-9-]+-grain-is-grainys-projects\.vercel\.app$
+# Unset = no preview origin is trusted.
+_preview_re = os.getenv("PREVIEW_ORIGIN_RE", "").strip()
+PREVIEW_ORIGIN_RE = re.compile(_preview_re) if _preview_re else None
+
+
+def _is_preview_origin(origin: str) -> bool:
+    """True for a normalized origin (from _origin_host) matching PREVIEW_ORIGIN_RE."""
+    return bool(origin and PREVIEW_ORIGIN_RE and PREVIEW_ORIGIN_RE.fullmatch(origin))
+
+
 # Compare against normalized origins so a stray trailing slash or path on either
 # side can't cause a lockout (or a startswith-style prefix bypass).
 ALLOWED_ORIGINS = {
@@ -219,7 +232,8 @@ def check_origin():
     raw = request.headers.get("Origin") or request.headers.get("Referer") or ""
     if not raw:
         return  # no Origin/Referer (e.g. same-origin GET) — nothing to check
-    if _origin_host(raw) not in ALLOWED_ORIGINS:
+    origin = _origin_host(raw)
+    if origin not in ALLOWED_ORIGINS and not _is_preview_origin(origin):
         return jsonify({"error": "Forbidden"}), 403
 
 
@@ -1533,18 +1547,33 @@ def course_profile(code):
 # ──────────────────────────────────────────────
 #  Google OAuth routes
 # ──────────────────────────────────────────────
-def _get_redirect_uri():
-    # Use FRONTEND_URL so OAuth callbacks go through the Vercel proxy, not direct to Railway
-    return f"{FRONTEND_URL}/api/auth/google/callback"
+def _login_frontend():
+    """The frontend a login started from: a preview origin from the Referer, else FRONTEND_URL."""
+    origin = _origin_host(request.headers.get("Referer", ""))
+    return origin if _is_preview_origin(origin) else FRONTEND_URL
+
+
+def _callback_frontend():
+    """The frontend the callback returns to; the cookie is client-held, so re-check it."""
+    origin = request.cookies.get("auth_origin", "")
+    return origin if _is_preview_origin(origin) else FRONTEND_URL
+
+
+def _get_redirect_uri(frontend):
+    # Go through the Vercel proxy, not direct to Railway. Google rejects any
+    # redirect_uri not registered on the client, so only registered previews
+    # (e.g. the dev branch's fixed URL) can sign in.
+    return f"{frontend}/api/auth/google/callback"
 
 
 @app.route("/api/auth/google")
 @limiter.limit("10 per minute")
 def auth_google():
     return_to = request.args.get("returnTo", "/")
+    frontend = _login_frontend()
     params = {
         "client_id": GOOGLE_CLIENT_ID,
-        "redirect_uri": _get_redirect_uri(),
+        "redirect_uri": _get_redirect_uri(frontend),
         "response_type": "code",
         "scope": "openid email profile",
         "hd": "husky.neu.edu",
@@ -1554,6 +1583,8 @@ def auth_google():
     resp.set_cookie("auth_return_to", return_to, max_age=600, httponly=True, samesite="None", secure=True)
     if is_popup:
         resp.set_cookie("auth_popup", "1", max_age=600, httponly=True, samesite="None", secure=True)
+    if frontend != FRONTEND_URL:
+        resp.set_cookie("auth_origin", frontend, max_age=600, httponly=True, samesite="None", secure=True)
     return resp
 
 
@@ -1561,19 +1592,20 @@ def auth_google():
 @limiter.limit("10 per minute")
 def auth_google_callback():
     code = request.args.get("code")
+    frontend = _callback_frontend()
     if not code:
-        return redirect(f"{FRONTEND_URL}?auth_error=no_code")
+        return redirect(f"{frontend}?auth_error=no_code")
 
     try:
         token_resp = http_requests.post(GOOGLE_TOKEN_URL, data={
             "code": code,
             "client_id": GOOGLE_CLIENT_ID,
             "client_secret": GOOGLE_CLIENT_SECRET,
-            "redirect_uri": _get_redirect_uri(),
+            "redirect_uri": _get_redirect_uri(frontend),
             "grant_type": "authorization_code",
         }, timeout=10)
         if token_resp.status_code != 200:
-            return redirect(f"{FRONTEND_URL}?auth_error=token_exchange_failed")
+            return redirect(f"{frontend}?auth_error=token_exchange_failed")
 
         access_token = token_resp.json().get("access_token")
 
@@ -1581,14 +1613,14 @@ def auth_google_callback():
             "Authorization": f"Bearer {access_token}",
         }, timeout=10)
         if user_resp.status_code != 200:
-            return redirect(f"{FRONTEND_URL}?auth_error=userinfo_failed")
+            return redirect(f"{frontend}?auth_error=userinfo_failed")
     except Exception:
-        return redirect(f"{FRONTEND_URL}?auth_error=timeout")
+        return redirect(f"{frontend}?auth_error=timeout")
 
     user_info = user_resp.json()
 
     if user_info.get("hd") != "husky.neu.edu":
-        return redirect(f"{FRONTEND_URL}?auth_error=invalid_domain")
+        return redirect(f"{frontend}?auth_error=invalid_domain")
 
     payload = {
         "sub": user_info["id"],
@@ -1605,7 +1637,7 @@ def auth_google_callback():
         # Desktop popup: post message to opener and close
         resp = make_response(f"""
         <html><body><script>
-          window.opener && window.opener.postMessage({{ type: "auth_complete", token: "{token}" }}, "{FRONTEND_URL}");
+          window.opener && window.opener.postMessage({{ type: "auth_complete", token: "{token}" }}, "{frontend}");
           window.close();
         </script></body></html>
         """)
@@ -1617,8 +1649,9 @@ def auth_google_callback():
         parsed = urlparse(return_to)
         if parsed.scheme or parsed.netloc or not return_to.startswith("/"):
             return_to = "/"
-        resp = make_response(redirect(f"{FRONTEND_URL}{return_to}#auth_token={token}"))
+        resp = make_response(redirect(f"{frontend}{return_to}#auth_token={token}"))
         resp.delete_cookie("auth_return_to")
+    resp.delete_cookie("auth_origin")
     return resp
 
 
