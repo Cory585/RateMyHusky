@@ -330,8 +330,6 @@ const Professor = () => {
   const reviews = useMemo(() => profile?.sources.rmp.reviews ?? [], [profile]);
   const redditMentions = useMemo(() => profile?.redditMentions ?? [], [profile]);
   const courses = useMemo(() => profile?.courses ?? [], [profile]);
-  /* Banner-only rows (taught, never rated) have no reviews to filter to. */
-  const ratedCourses = useMemo(() => courses.filter(c => c.numRatings > 0), [courses]);
 
   /* ── Ask citation pins: switch to the cited source's tab and scroll to reviews ── */
   useEffect(() => {
@@ -519,17 +517,19 @@ const Professor = () => {
   };
 
   const courseOptions = useMemo(
-    () => [{ value: 'all', label: 'All courses' }, ...ratedCourses.map(c => ({ value: c.code, label: c.code }))],
-    [ratedCourses]);
+    () => [{ value: 'all', label: 'All courses' }, ...courses.map(c => ({ value: c.code, label: c.code }))],
+    [courses]);
 
   const toggleCourse = (code: string) => {
     setSelectedCourses(prev => {
       const next = new Set(prev);
       if (next.has(code)) next.delete(code);
       else next.add(code);
-      /* Picking the last unpicked course is the same as no filter: snap back to it so the
-         stats match "All courses" and the next click filters instead of removing. */
-      return next.size === ratedCourses.length ? new Set() : next;
+      /* Picking every course is the same as no filter when no review lacks a course code:
+         snap back to it so the stats match "All courses" and the next click filters instead
+         of removing. Uncoded reviews make it a real filter, so it stays. */
+      const coversAll = next.size === courses.length && reviews.every(r => r.courseCode !== null && next.has(r.courseCode));
+      return coversAll ? new Set() : next;
     });
   };
 
@@ -621,8 +621,8 @@ const Professor = () => {
     return (
     <div
       key={c.code}
-      className={`prof-course-row ${unrated ? 'prof-course-row-unrated' : selectedCourses.has(c.code) ? 'selected' : ''}`}
-      onClick={unrated ? undefined : () => toggleCourse(c.code)}
+      className={`prof-course-row ${selectedCourses.has(c.code) ? 'selected' : ''}`}
+      onClick={() => toggleCourse(c.code)}
     >
       <div className="prof-course-row-main">
         <span className="prof-course-code">{c.code}</span>
@@ -922,7 +922,7 @@ const Professor = () => {
             <h2 className="prof-section-title">Courses Taught</h2>
             <div className="prof-section-actions">
               {unfiltered
-                ? (ratedCourses.length > 1 && <span className="prof-section-hint">Click a course to filter reviews</span>)
+                ? (courses.length > 1 && <span className="prof-section-hint">Click a course to filter reviews</span>)
                 : <button className="prof-action-link" onClick={() => setSelectedCourses(new Set())}>Show all courses</button>}
             </div>
           </div>
@@ -973,7 +973,7 @@ const Professor = () => {
         {reviewTab === 'rmp' && (
           <>
             <div className="prof-reviews-filters">
-              {ratedCourses.length > 1 && (
+              {courses.length > 1 && (
                 <Dropdown
                   className="feedback-dropdown"
                   options={courseOptions}
@@ -992,7 +992,7 @@ const Professor = () => {
             )}
             <div className="prof-reviews-list">
               {sortedReviews.length === 0 ? (
-                <p className="prof-no-reviews">{reviews.length === 0 ? 'No reviews yet.' : 'No reviews match current filters.'}</p>
+                <p className="prof-no-reviews">{reviews.length === 0 ? 'No reviews yet.' : unfiltered ? 'No reviews match current filters.' : `No reviews for ${selectedLabel} yet.`}</p>
               ) : (
                 sortedReviews.slice(0, visibleReviews).map((r, i) => (
                   <div key={i} className={`prof-review-card ${isPinned(r.comment || '', pinSnippets.rmp) ? 'is-ask-pinned' : ''}`} style={{ borderLeftColor: r.quality >= 4 ? '#27ae60' : r.quality >= 3 ? '#f39c12' : '#e74c3c' }}>
