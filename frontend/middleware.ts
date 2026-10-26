@@ -236,13 +236,15 @@ export default async function middleware(request: Request): Promise<Response | u
   // Both handoff routes run before the maintenance gate so they work while
   // the site is down too.
   const key = process.env.MAINT_SIGNING_KEY;
+  const isPreview = process.env.VERCEL_ENV === 'preview';
 
   // A preview's gate page sends the browser here (on ratemyhusky.com) with
   // ?to=<preview origin>. If it already holds a valid bypass cookie, bounce
   // back to that preview's /bypass-redeem with a short-lived code bound to
   // it (passing ?next= along); otherwise bounce back to its gate page with
-  // handoff=none.
-  if (url.pathname === '/bypass-handoff') {
+  // handoff=none. Not served on previews: there validBypass also accepts a
+  // preview-scoped cookie, which would let it mint codes for other previews.
+  if (url.pathname === '/bypass-handoff' && !isPreview) {
     const to = url.searchParams.get('to') || '';
     if (!PREVIEW_ORIGIN_RE.test(to)) {
       return new Response('Invalid handoff target', { status: 400 });
@@ -272,8 +274,6 @@ export default async function middleware(request: Request): Promise<Response | u
     }
     return new Response(null, { status: 302, headers });
   }
-
-  const isPreview = process.env.VERCEL_ENV === 'preview';
 
   // Feedback stays open during maintenance (the page has its own form);
   // it's Turnstile-verified and rate-limited server-side. Previews keep it
