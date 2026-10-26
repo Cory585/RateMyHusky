@@ -44,6 +44,7 @@ import ip_networks
 import rating_identity
 import rating_checks
 import ratings
+import survey_reviews
 import usage_alert
 
 load_dotenv()
@@ -178,11 +179,7 @@ def _origin_host(value: str) -> str:
 
 # Vercel Preview deploys get a new hostname per build, so they can't be listed
 # like FRONTEND_URL. Set only where previews should reach this backend, e.g.
-# ^https://rate-my-husky-(?:git-[a-z0-9-]+|[a-z0-9]+)-grain-is-grainys-projects\.vercel\.app$
-# (matches PREVIEW_ORIGIN_RE in middleware.ts). The hyphen-free hash segment
-# keeps another team's hash URLs out, but not a git-<branch> alias under a
-# team slug ending in "-grain-is-grainys-projects" (or a claimed *.vercel.app
-# alias), so treat a match as a likely preview, not a proven one.
+# ^https://rate-my-husky-[a-z0-9-]+-grain-is-grainys-projects\.vercel\.app$
 # Unset = no preview origin is trusted.
 _preview_re = os.getenv("PREVIEW_ORIGIN_RE", "").strip()
 PREVIEW_ORIGIN_RE = re.compile(_preview_re) if _preview_re else None
@@ -338,6 +335,7 @@ _FEEDBACK_TYPE_LABELS = {
     "incorrectdata": "Wrong or Missing Data",
     "missing": "Missing Data",
     "general": "Idea or General Feedback",
+    "reviewreport": "Review Report",   # the Report link on a RateMyHusky review
     "feature": "Feature Request",
     "professor": "Professor Request",
     "datadeletion": "Data Deletion Request",
@@ -415,6 +413,11 @@ def cache_set(key, data):
         _cache[key] = {"data": data, "ts": time.time()}
         while len(_cache) > CACHE_MAX_SIZE:
             del _cache[next(iter(_cache))]
+
+
+def cache_delete(key):
+    with _cache_lock:
+        _cache.pop(f"v{data_version()}:{key}", None)
 
 
 def _acquire_fresh_conn():
@@ -1032,14 +1035,19 @@ def professor_payload(slug):
     cache_key = f"prof_full:{slug}"
     data = cache_get(cache_key)
     if data is None:
-        data = build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions)
+        data = build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions,
+                             review_id=_review_id if _rating_enabled() else None)
         if data is None:
             return None
-        if data.pop("_historyFailed", False):
-            g.history_failed = True   # a failed Banner read is not cached: see history_cache_control
+        if data.pop("_partial", False):
+            g.history_failed = True   # a failed Banner or survey read is not cached: see history_cache_control
         else:
             cache_set(cache_key, data)
     return data
+
+
+def _review_id(rating_uuid):
+    return survey_reviews.public_id(RATING_SECRET, rating_uuid)
 
 
 def history_cache_control(resp):
@@ -2096,6 +2104,10 @@ def rate_submit():
         "fill_seconds": fill_seconds, "collection": "turnstile+device",
     }
     ratings.save_rating(row, existing, _write)
+    if key.get("professor_slug"):
+        # The page shows student reviews live. Any save can change it: a new review, an edit,
+        # or an accepted review edited into a held one, whose old comment must come down.
+        cache_delete(f"prof_full:{key['professor_slug']}")
     if bursts:
         ratings.hold_burst(bursts, key, ip_hash, prefix_hash, _write, now)
     for subject, text in emails:

@@ -311,3 +311,40 @@ def test_limit_key_uses_the_body_token_when_there_is_no_cookie(rate):
     for body in ({"deviceToken": "nope"}, {}, [1], None):
         with server.app.test_request_context("/api/rate", method="POST", json=body):
             assert "|" not in server._rating_limit_key()
+
+
+def test_accepted_save_drops_the_professor_page_cache(rate, monkeypatch):
+    server, client, state, ri = rate
+    dropped = []
+    monkeypatch.setattr(server, "cache_delete", dropped.append)
+    post(client, ri)
+    assert dropped == ["prof_full:alice-smith"]
+
+
+def test_a_save_for_a_pending_professor_drops_no_page_cache(rate, monkeypatch):
+    server, client, state, ri = rate
+    dropped = []
+    monkeypatch.setattr(server, "cache_delete", dropped.append)
+    post(client, ri, {"professor": {"name": "New Person", "department": "Math"}})
+    assert len(rating_writes(state)) == 1 and dropped == []
+
+
+def test_cache_delete_removes_one_entry(monkeypatch):
+    import server
+    monkeypatch.setattr(server, "data_version", lambda: 7)
+    server.cache_set("prof_full:a", {"x": 1})
+    server.cache_set("prof_full:b", {"x": 2})
+    server.cache_delete("prof_full:a")
+    assert server.cache_get("prof_full:a") is None and server.cache_get("prof_full:b") == {"x": 2}
+
+
+def test_an_accepted_review_edited_into_a_held_one_drops_the_page_cache(rate, monkeypatch):
+    server, client, state, ri = rate
+    dropped = []
+    monkeypatch.setattr(server, "cache_delete", dropped.append)
+    state["existing"] = {"id": "r1", "status": "accepted", "hold_reasons": None}
+    state["network"] = "datacenter"   # a VPN edit holds the whole rating, so the old comment must leave the page
+    post(client, ri)
+    (sql, params), = rating_writes(state)
+    assert "held" in params
+    assert dropped == ["prof_full:alice-smith"]

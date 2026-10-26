@@ -44,6 +44,8 @@ def client(monkeypatch):
             return [dict(r) for r in SUMMARY_ROWS]
         if "FROM reddit_mentions" in s:
             return []
+        if "FROM survey_ratings" in s:
+            return []
         if "FROM banner_course_instructors" in s:
             return []
         raise AssertionError(f"unexpected query: {s}")
@@ -72,9 +74,9 @@ def test_full_is_identical_for_anonymous_and_signed_in(client):
     assert authed.headers["Cache-Control"] == "private, max-age=3600"
 
 
-def test_full_makes_at_most_five_round_trips(client):
+def test_full_makes_at_most_six_round_trips(client):
     client.get("/api/professors/olin-guha/full")
-    assert len(client.calls) <= 5
+    assert len(client.calls) <= 6
 
 
 def test_unknown_professor_is_a_json_404(client):
@@ -119,10 +121,10 @@ def _spy_cache(monkeypatch, payload):
 
 
 def test_failed_history_payload_is_served_but_not_cached(client, monkeypatch):
-    sets = _spy_cache(monkeypatch, {"version": 2, "_historyFailed": True})
+    sets = _spy_cache(monkeypatch, {"version": 2, "_partial": True})
     resp = client.get("/api/professors/olin-guha/full")
     assert resp.status_code == 200
-    assert "_historyFailed" not in resp.get_json()
+    assert "_partial" not in resp.get_json()
     assert sets == []
     assert resp.headers["Cache-Control"] == "no-store"   # nor by the CDN or browser
 
