@@ -153,7 +153,10 @@ Deploy order:
    after a partial failure.
 2. Confirm `PROXY_SECRET`, `TURNSTILE_SECRET_KEY` and `OPENAI_API_KEY` are set on
    Railway. Without `PROXY_SECRET` every student shares Vercel's edge address, so
-   the IP bursts add up across everyone and ratings get held.
+   the IP bursts add up across everyone and ratings get held. `OPENAI_API_KEY`
+   runs on OpenAI's free tier, which in practice allows about 3,300 tokens a day
+   (see the top of `backend/moderation.py`). Don't bulk-test against it: while it's empty,
+   every rating with a comment is held as `moderation_unavailable`.
 3. Set `IPINFO_TOKEN`.
 4. Set `RATING_SECRET` last. Until it's set, the rating routes return 503.
 
