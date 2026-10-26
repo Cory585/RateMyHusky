@@ -5,7 +5,7 @@ import re
 import pytest
 
 PREVIEW = "https://rate-my-husky-abc123-grain-is-grainys-projects.vercel.app"
-PATTERN = r"^https://rate-my-husky-[a-z0-9-]+-grain-is-grainys-projects\.vercel\.app$"
+PATTERN = r"^https://rate-my-husky-(?:git-[a-z0-9-]+|[a-z0-9]+)-grain-is-grainys-projects\.vercel\.app$"
 
 
 @pytest.fixture
@@ -17,7 +17,11 @@ def server_mod(monkeypatch):
     return server
 
 
-@pytest.mark.parametrize("referer", [PREVIEW + "/professors", "http://localhost:5173/"])
+@pytest.mark.parametrize("referer", [
+    PREVIEW + "/professors",
+    "https://rate-my-husky-git-preview-gate-grain-is-grainys-projects.vercel.app/",
+    "http://localhost:5173/",
+])
 def test_allowed_origins_pass(server_mod, referer):
     with server_mod.app.test_request_context("/api/professors", headers={"Referer": referer}):
         assert server_mod.check_origin() is None
@@ -25,6 +29,9 @@ def test_allowed_origins_pass(server_mod, referer):
 
 @pytest.mark.parametrize("referer", [
     "https://rate-my-husky-abc123-someone-else.vercel.app/",
+    # Hash URL under another team whose slug ends in "-grain-is-grainys-projects"
+    # (its git-<branch> alias still matches; see the server.py comment)
+    "https://rate-my-husky-abc123-x-grain-is-grainys-projects.vercel.app/",
     "https://evil.example/" + PREVIEW,
     PREVIEW + ".evil.example/",
     "http://rate-my-husky-abc123-grain-is-grainys-projects.vercel.app/",
