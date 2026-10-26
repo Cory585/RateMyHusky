@@ -153,7 +153,7 @@ const _profPageCache = new Map<string, ProfessorPage>();
    send this tab to the maintenance page and report true so callers bail. */
 export function maintenanceGuard(res: Response): boolean {
   if (res.redirected && new URL(res.url).pathname === '/maintenance.html') {
-    window.location.replace('/maintenance.html');
+    window.location.replace(res.url); // keeps ?mode=preview on previews
     return true;
   }
   return false;

@@ -16,9 +16,9 @@
     // ─────────────────────────────────────────────────────────
 
     // Picks which copy block the CSS shows, before first paint. Preview
-    // deploys (*.vercel.app) are always gated by middleware.ts, so they get
-    // the dev-preview copy instead.
-    var PAGE_MODE = location.hostname.endsWith('.vercel.app') ? 'preview' : MAINTENANCE_MODE;
+    // deploys are always gated by middleware.ts, which sends them here with
+    // ?mode=preview so they get the dev-preview copy instead.
+    var PAGE_MODE = /[?&]mode=preview(&|$)/.test(location.search) ? 'preview' : MAINTENANCE_MODE;
     document.documentElement.setAttribute('data-mode', PAGE_MODE);
     if (PAGE_MODE === 'closed') document.title = 'Closed for now — RateMyHusky';
     if (PAGE_MODE === 'preview') document.title = 'Dev preview — RateMyHusky';
@@ -43,13 +43,18 @@
     // no valid bypass either. A redeemed cookie the preview then rejects
     // would loop, so that path tries once per tab session; handoff=none
     // never loops, so it clears the flag and a later visit tries again.
-    if (/[?&]handoff=none/.test(location.search)) sessionStorage.removeItem('rmh_handoff');
-    if (PAGE_MODE === 'preview' && !/[?&](bypass|handoff)=/.test(location.search) &&
-        !sessionStorage.getItem('rmh_handoff')) {
-      sessionStorage.setItem('rmh_handoff', '1');
-      location.replace('https://ratemyhusky.com/bypass-handoff?to=' +
-        encodeURIComponent(location.origin));
-    }
+    // Without sessionStorage the loop guard can't work, so skip the handoff.
+    try {
+      if (/[?&]handoff=none/.test(location.search)) sessionStorage.removeItem('rmh_handoff');
+      if (PAGE_MODE === 'preview' && !/[?&](bypass|handoff)=/.test(location.search) &&
+          !sessionStorage.getItem('rmh_handoff')) {
+        sessionStorage.setItem('rmh_handoff', '1');
+        // next (already encoded by middleware.ts) is the page that was gated.
+        var next = location.search.match(/[?&]next=([^&]*)/);
+        location.replace('https://ratemyhusky.com/bypass-handoff?to=' +
+          encodeURIComponent(location.origin) + (next ? '&next=' + next[1] : ''));
+      }
+    } catch (e) { /* storage blocked: stay on the gate page */ }
 
     // Same theme mechanism as the main site (.dark class + localStorage),
     // applied before first paint.
@@ -212,7 +217,8 @@
     [data-mode="closed"] .mode-preview,
     [data-mode="preview"] .mode-maintenance,
     [data-mode="preview"] .mode-closed,
-    [data-mode="preview"] .eta { display: none; }
+    [data-mode="preview"] .eta,
+    [data-mode="preview"] .feedback-tab { display: none; }
 
     .kicker {
       display: inline-flex;
@@ -841,8 +847,9 @@
 
       // Auto-recovery: while maintenance is on, '/' 307-redirects back to
       // this page, so res.redirected is true. The moment maintenance is
-      // turned off, '/' serves the real site and we reload into it.
-      setInterval(function () {
+      // turned off, '/' serves the real site and we reload into it. A
+      // preview stays gated until /bypass-redeem, so there's nothing to poll.
+      if (PAGE_MODE !== 'preview') setInterval(function () {
         fetch('/', { cache: 'no-store' }).then(function (res) {
           if (res.ok && !res.redirected) location.replace('/');
         }).catch(function () { /* offline / backend down: keep waiting */ });

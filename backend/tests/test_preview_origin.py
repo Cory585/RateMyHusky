@@ -29,7 +29,8 @@ def test_allowed_origins_pass(server_mod, referer):
 
 @pytest.mark.parametrize("referer", [
     "https://rate-my-husky-abc123-someone-else.vercel.app/",
-    # Another team whose slug ends in "-grain-is-grainys-projects"
+    # Hash URL under another team whose slug ends in "-grain-is-grainys-projects"
+    # (its git-<branch> alias still matches; see the server.py comment)
     "https://rate-my-husky-abc123-x-grain-is-grainys-projects.vercel.app/",
     "https://evil.example/" + PREVIEW,
     PREVIEW + ".evil.example/",

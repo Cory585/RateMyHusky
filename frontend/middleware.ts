@@ -57,6 +57,8 @@ function isFuture(epochSeconds: string): boolean {
 }
 
 // Bypass token: "<name>.<expiry-epoch-seconds>.<hex hmac-sha256 of "name.expiry">"
+// A preview also accepts the token /bypass-redeem sets there, which signs
+// "preview|<origin>|name.expiry" so it only works on that one preview.
 // Returns [name, expiry] when the request carries a valid one.
 async function validBypass(request: Request): Promise<[string, string] | null> {
   const key = process.env.MAINT_SIGNING_KEY;
@@ -71,25 +73,41 @@ async function validBypass(request: Request): Promise<[string, string] | null> {
   const [name, expStr, sig] = parts;
   if (!isFuture(expStr)) return null;
 
-  return safeEqual(await hmacHex(key, `${name}.${expStr}`), sig) ? [name, expStr] : null;
+  if (safeEqual(await hmacHex(key, `${name}.${expStr}`), sig)) return [name, expStr];
+  if (process.env.VERCEL_ENV === 'preview' &&
+      safeEqual(await hmacHex(key, `preview|${new URL(request.url).origin}|${name}.${expStr}`), sig)) {
+    return [name, expStr];
+  }
+  return null;
 }
 
 // Handoff code: "<name>.<expiry>.<code-expiry>.<hmac of handoff|origin|name.expiry|code-expiry>".
-// Carries no usable bypass signature, so leaking one leaks nothing.
+// Reusable until it expires, so a leaked one (e.g. from request logs) opens
+// only its own preview for up to HANDOFF_TTL_SECONDS, never the live site.
 async function mintHandoffCode(key: string, origin: string, name: string, exp: string): Promise<string> {
   const codeExp = String(Math.floor(Date.now() / 1000) + HANDOFF_TTL_SECONDS);
   const sig = await hmacHex(key, `handoff|${origin}|${name}.${exp}|${codeExp}`);
   return `${name}.${exp}.${codeExp}.${sig}`;
 }
 
-// Returns the bypass token to set as this origin's cookie, or null.
+// Returns the origin-scoped bypass token to set as this origin's cookie, or null.
 async function redeemHandoffCode(key: string, origin: string, code: string): Promise<string | null> {
   const parts = code.split('.');
   if (parts.length !== 4) return null;
   const [name, exp, codeExp, sig] = parts;
   if (!isFuture(exp) || !isFuture(codeExp)) return null;
   if (!safeEqual(await hmacHex(key, `handoff|${origin}|${name}.${exp}|${codeExp}`), sig)) return null;
-  return `${name}.${exp}.${await hmacHex(key, `${name}.${exp}`)}`;
+  return `${name}.${exp}.${await hmacHex(key, `preview|${origin}|${name}.${exp}`)}`;
+}
+
+// Where /bypass-redeem lands: ?next= if it stays on this origin, else /.
+// Returns an absolute URL, since a bare path like "//evil.com" would leave.
+function sameOriginNext(next: string | null, origin: string): string {
+  try {
+    const dest = new URL(next || '/', origin);
+    if (dest.origin === origin) return dest.href;
+  } catch { /* malformed next */ }
+  return `${origin}/`;
 }
 
 async function proxyToBackend(request: Request, url: URL): Promise<Response> {
@@ -222,16 +240,19 @@ export default async function middleware(request: Request): Promise<Response | u
   // A preview's gate page sends the browser here (on ratemyhusky.com) with
   // ?to=<preview origin>. If it already holds a valid bypass cookie, bounce
   // back to that preview's /bypass-redeem with a short-lived code bound to
-  // it; otherwise bounce back to its gate page with handoff=none.
+  // it (passing ?next= along); otherwise bounce back to its gate page with
+  // handoff=none.
   if (url.pathname === '/bypass-handoff') {
     const to = url.searchParams.get('to') || '';
     if (!PREVIEW_ORIGIN_RE.test(to)) {
       return new Response('Invalid handoff target', { status: 400 });
     }
     const bypass = await validBypass(request);
+    const next = url.searchParams.get('next');
     const location = key && bypass
-      ? `${to}/bypass-redeem?code=${await mintHandoffCode(key, to, ...bypass)}`
-      : `${to}/maintenance.html?handoff=none`;
+      ? `${to}/bypass-redeem?code=${await mintHandoffCode(key, to, ...bypass)}` +
+        (next ? `&next=${encodeURIComponent(next)}` : '')
+      : `${to}/maintenance.html?mode=preview&handoff=none`;
     return new Response(null, {
       status: 302,
       headers: { Location: location, 'cache-control': 'no-store' },
@@ -239,29 +260,39 @@ export default async function middleware(request: Request): Promise<Response | u
   }
 
   // On the preview: trade a handoff code minted for this origin for this
-  // origin's own bypass cookie.
+  // origin's own bypass cookie, then land on the page that was gated.
   if (url.pathname === '/bypass-redeem') {
     const token = key && await redeemHandoffCode(key, url.origin, url.searchParams.get('code') || '');
     const headers = new Headers({ 'cache-control': 'no-store' });
     if (token) {
-      headers.set('Location', '/');
+      headers.set('Location', sameOriginNext(url.searchParams.get('next'), url.origin));
       headers.set('Set-Cookie', `rmh_dev=${token}; Path=/; Max-Age=2592000; SameSite=Lax; Secure`);
     } else {
-      headers.set('Location', '/maintenance.html?handoff=none');
+      headers.set('Location', '/maintenance.html?mode=preview&handoff=none');
     }
     return new Response(null, { status: 302, headers });
   }
 
+  const isPreview = process.env.VERCEL_ENV === 'preview';
+
   // Feedback stays open during maintenance (the page has its own form);
-  // it's Turnstile-verified and rate-limited server-side.
-  const isFeedback = url.pathname === '/api/feedback';
+  // it's Turnstile-verified and rate-limited server-side. Previews keep it
+  // gated (their page hides the form).
+  const isFeedback = url.pathname === '/api/feedback' && !isPreview;
 
-  const gated = maintenance.on || process.env.VERCEL_ENV === 'preview';
+  const gated = maintenance.on || isPreview;
 
+  // ?mode=preview tells the page to show the dev-preview copy and handoff;
+  // it can't tell a preview from production's own *.vercel.app hosts.
+  // ?next= carries the gated page through the handoff (not for /api/
+  // fetches, which would land the tab on JSON).
   if (gated && !isFeedback && !(await validBypass(request))) {
+    const gatePage = !isPreview ? '/maintenance.html'
+      : url.pathname.startsWith('/api/') ? '/maintenance.html?mode=preview'
+      : `/maintenance.html?mode=preview&next=${encodeURIComponent(url.pathname + url.search)}`;
     return new Response(null, {
       status: 307,
-      headers: { Location: new URL('/maintenance.html', request.url).toString() },
+      headers: { Location: new URL(gatePage, request.url).toString() },
     });
   }
 
