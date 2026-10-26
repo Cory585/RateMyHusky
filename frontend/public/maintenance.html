@@ -15,9 +15,13 @@
     var MAINTENANCE_ENDS_AT = null;
     // ─────────────────────────────────────────────────────────
 
-    // Picks which copy block the CSS shows, before first paint.
-    document.documentElement.setAttribute('data-mode', MAINTENANCE_MODE);
-    if (MAINTENANCE_MODE === 'closed') document.title = 'Closed for now — RateMyHusky';
+    // Picks which copy block the CSS shows, before first paint. Preview
+    // deploys (*.vercel.app) are always gated by middleware.ts, so they get
+    // the dev-preview copy instead.
+    var PAGE_MODE = location.hostname.endsWith('.vercel.app') ? 'preview' : MAINTENANCE_MODE;
+    document.documentElement.setAttribute('data-mode', PAGE_MODE);
+    if (PAGE_MODE === 'closed') document.title = 'Closed for now — RateMyHusky';
+    if (PAGE_MODE === 'preview') document.title = 'Dev preview — RateMyHusky';
 
     // Dev bypass: /maintenance.html?bypass=<signed-token> sets the cookie
     // that middleware.ts verifies, then drops you into the real site. An
@@ -31,6 +35,18 @@
         location.replace('/');
       }
     })();
+
+    // Preview deploys can't see the rmh_dev cookie people already set on
+    // ratemyhusky.com, so bounce through its /bypass-handoff (middleware.ts)
+    // to copy it here. It comes back via /bypass-redeem (which sets the
+    // cookie and lands on /), or with ?handoff=none to show the paste box. Tried once per tab session so a token the
+    // preview rejects can't loop.
+    if (PAGE_MODE === 'preview' && !/[?&](bypass|handoff)=/.test(location.search) &&
+        !sessionStorage.getItem('rmh_handoff')) {
+      sessionStorage.setItem('rmh_handoff', '1');
+      location.replace('https://ratemyhusky.com/bypass-handoff?to=' +
+        encodeURIComponent(location.origin));
+    }
 
     // Same theme mechanism as the main site (.dark class + localStorage),
     // applied before first paint.
@@ -188,7 +204,48 @@
     .copy { max-width: 580px; min-width: 0; }
 
     [data-mode="maintenance"] .mode-closed,
-    [data-mode="closed"] .mode-maintenance { display: none; }
+    [data-mode="maintenance"] .mode-preview,
+    [data-mode="closed"] .mode-maintenance,
+    [data-mode="closed"] .mode-preview,
+    [data-mode="preview"] .mode-maintenance,
+    [data-mode="preview"] .mode-closed,
+    [data-mode="preview"] .eta { display: none; }
+
+    .bypass-form {
+      display: flex;
+      gap: 10px;
+      margin-top: 28px;
+      max-width: 48ch;
+    }
+
+    .bypass-form input {
+      flex: 1;
+      min-width: 0;
+      border: 1.5px solid var(--card-border);
+      border-radius: 14px;
+      padding: 12px 16px;
+      font-family: 'Nunito', sans-serif;
+      font-size: 0.9rem;
+      color: var(--h1);
+      background: var(--card-bg);
+      outline: none;
+    }
+
+    .bypass-form input:focus { border-color: var(--red); }
+
+    .bypass-form button {
+      border: none;
+      border-radius: 14px;
+      padding: 12px 20px;
+      background: var(--red);
+      color: #fff;
+      font-family: 'Nunito', sans-serif;
+      font-size: 0.9rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .bypass-form button:hover { background: var(--red-dark); }
 
     .kicker {
       display: inline-flex;
@@ -643,6 +700,21 @@
 
               <p>— RateMyHusky Team</p>
             </div>
+
+            <div class="mode-preview">
+              <span class="kicker">Dev Preview</span>
+              <h1>Sorry, this is a dev-only preview.</h1>
+              <p>
+                This link is a work-in-progress build of RateMyHusky for the team.
+                Paste your bypass link or key below to get in.
+              </p>
+              <form class="bypass-form" id="bypass-form">
+                <input id="bypass-input" type="text" placeholder="Bypass link or key"
+                  aria-label="Bypass link or key" autocomplete="off" required />
+                <button type="submit">Enter</button>
+              </form>
+            </div>
+
             <div class="eta" id="eta-badge">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <circle cx="12" cy="12" r="10"/>
@@ -831,6 +903,15 @@
       });
       render();
     })();
+
+    // ── Preview bypass form: accepts the full invite link (any host) or the
+    //    bare token, and hands it to the ?bypass= handler in <head> ──
+    document.getElementById('bypass-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var value = document.getElementById('bypass-input').value.trim();
+      var match = value.match(/[?&]bypass=([^&\s]+)/);
+      location.search = '?bypass=' + encodeURIComponent(match ? match[1] : value);
+    });
 
     // ── Feedback modal (mirrors FeedbackTab.tsx; /api/feedback stays
     //    open during maintenance via middleware.ts) ──

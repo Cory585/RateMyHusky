@@ -4,6 +4,11 @@
 //   every request without a valid signed bypass cookie is 307'd to
 //   /maintenance.html — same semantics the page's auto-recovery poll and the
 //   SPA's maintenanceGuard() rely on.
+// - Preview deploys (VERCEL_ENV=preview) are always gated the same way, so
+//   only bypass holders can see them; the page shows dev-preview copy there.
+// - /bypass-handoff + /bypass-redeem copy a ratemyhusky.com bypass cookie
+//   over to a preview deploy, which can't read it across domains (see the
+//   handlers below).
 // - /api/* is proxied to Railway with the x-proxy-key header so the backend
 //   can reject traffic that didn't come through Vercel.
 //
@@ -22,33 +27,69 @@ export const config = {
     '/((?!maintenance\\.html|logo\\.jpg|neu-husky-icon\\.png|robots\\.txt|ads\\.txt|sitemap\\.xml|llms\\.txt|2c426a030622417e4b03f2011ae5959e\\.txt|_vercel|photos/).*)',
 };
 
-// Bypass token: "<name>.<expiry-epoch-seconds>.<hex hmac-sha256 of "name.expiry">"
-async function hasValidBypass(request: Request): Promise<boolean> {
-  const key = process.env.MAINT_SIGNING_KEY;
-  if (!key) return false;
+// Preview hosts /bypass-handoff will redirect to. Not the security boundary
+// (anyone can claim a free *.vercel.app alias): handoff codes are bound to
+// their target origin and only redeemable there, so a code sent to a
+// look-alike host is useless.
+const PREVIEW_ORIGIN_RE = /^https:\/\/rate-my-husky-(?:git-[a-z0-9-]+|[a-z0-9]+)-grain-is-grainys-projects\.vercel\.app$/;
+const HANDOFF_TTL_SECONDS = 60;
 
-  const cookies = request.headers.get('cookie') || '';
-  const match = cookies.match(/(?:^|;\s*)rmh_dev=([^;]+)/);
-  if (!match) return false;
-
-  const parts = match[1].split('.');
-  if (parts.length !== 3) return false;
-  const [name, expStr, sig] = parts;
-  if (!/^\d+$/.test(expStr) || Number(expStr) < Date.now() / 1000) return false;
-
+async function hmacHex(key: string, message: string): Promise<string> {
   const enc = new TextEncoder();
   const cryptoKey = await crypto.subtle.importKey(
     'raw', enc.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
   );
-  const mac = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(`${name}.${expStr}`));
-  const expected = Array.from(new Uint8Array(mac), b => b.toString(16).padStart(2, '0')).join('');
+  const mac = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(message));
+  return Array.from(new Uint8Array(mac), b => b.toString(16).padStart(2, '0')).join('');
+}
 
-  if (expected.length !== sig.length) return false;
+function safeEqual(expected: string, actual: string): boolean {
+  if (expected.length !== actual.length) return false;
   let diff = 0;
   for (let i = 0; i < expected.length; i++) {
-    diff |= expected.charCodeAt(i) ^ sig.charCodeAt(i);
+    diff |= expected.charCodeAt(i) ^ actual.charCodeAt(i);
   }
   return diff === 0;
+}
+
+function isFuture(epochSeconds: string): boolean {
+  return /^\d+$/.test(epochSeconds) && Number(epochSeconds) >= Date.now() / 1000;
+}
+
+// Bypass token: "<name>.<expiry-epoch-seconds>.<hex hmac-sha256 of "name.expiry">"
+// Returns [name, expiry] when the request carries a valid one.
+async function validBypass(request: Request): Promise<[string, string] | null> {
+  const key = process.env.MAINT_SIGNING_KEY;
+  if (!key) return null;
+
+  const cookies = request.headers.get('cookie') || '';
+  const match = cookies.match(/(?:^|;\s*)rmh_dev=([^;]+)/);
+  if (!match) return null;
+
+  const parts = match[1].split('.');
+  if (parts.length !== 3) return null;
+  const [name, expStr, sig] = parts;
+  if (!isFuture(expStr)) return null;
+
+  return safeEqual(await hmacHex(key, `${name}.${expStr}`), sig) ? [name, expStr] : null;
+}
+
+// Handoff code: "<name>.<expiry>.<code-expiry>.<hmac of handoff|origin|name.expiry|code-expiry>".
+// Carries no usable bypass signature, so leaking one leaks nothing.
+async function mintHandoffCode(key: string, origin: string, name: string, exp: string): Promise<string> {
+  const codeExp = String(Math.floor(Date.now() / 1000) + HANDOFF_TTL_SECONDS);
+  const sig = await hmacHex(key, `handoff|${origin}|${name}.${exp}|${codeExp}`);
+  return `${name}.${exp}.${codeExp}.${sig}`;
+}
+
+// Returns the bypass token to set as this origin's cookie, or null.
+async function redeemHandoffCode(key: string, origin: string, code: string): Promise<string | null> {
+  const parts = code.split('.');
+  if (parts.length !== 4) return null;
+  const [name, exp, codeExp, sig] = parts;
+  if (!isFuture(exp) || !isFuture(codeExp)) return null;
+  if (!safeEqual(await hmacHex(key, `handoff|${origin}|${name}.${exp}|${codeExp}`), sig)) return null;
+  return `${name}.${exp}.${await hmacHex(key, `${name}.${exp}`)}`;
 }
 
 async function proxyToBackend(request: Request, url: URL): Promise<Response> {
@@ -174,11 +215,50 @@ async function fetchSnapshot(pathname: string): Promise<Response | undefined> {
 export default async function middleware(request: Request): Promise<Response | undefined> {
   const url = new URL(request.url);
 
+  // Both handoff routes run before the maintenance gate so they work while
+  // the site is down too.
+  const key = process.env.MAINT_SIGNING_KEY;
+
+  // A preview's gate page sends the browser here (on ratemyhusky.com) with
+  // ?to=<preview origin>. If it already holds a valid bypass cookie, bounce
+  // back to that preview's /bypass-redeem with a short-lived code bound to
+  // it; otherwise bounce back with handoff=none so it shows its paste box.
+  if (url.pathname === '/bypass-handoff') {
+    const to = url.searchParams.get('to') || '';
+    if (!PREVIEW_ORIGIN_RE.test(to)) {
+      return new Response('Invalid handoff target', { status: 400 });
+    }
+    const bypass = await validBypass(request);
+    const location = key && bypass
+      ? `${to}/bypass-redeem?code=${await mintHandoffCode(key, to, ...bypass)}`
+      : `${to}/maintenance.html?handoff=none`;
+    return new Response(null, {
+      status: 302,
+      headers: { Location: location, 'cache-control': 'no-store' },
+    });
+  }
+
+  // On the preview: trade a handoff code minted for this origin for this
+  // origin's own bypass cookie.
+  if (url.pathname === '/bypass-redeem') {
+    const token = key && await redeemHandoffCode(key, url.origin, url.searchParams.get('code') || '');
+    const headers = new Headers({ 'cache-control': 'no-store' });
+    if (token) {
+      headers.set('Location', '/');
+      headers.set('Set-Cookie', `rmh_dev=${token}; Path=/; Max-Age=2592000; SameSite=Lax; Secure`);
+    } else {
+      headers.set('Location', '/maintenance.html?handoff=none');
+    }
+    return new Response(null, { status: 302, headers });
+  }
+
   // Feedback stays open during maintenance (the page has its own form);
   // it's Turnstile-verified and rate-limited server-side.
   const isFeedback = url.pathname === '/api/feedback';
 
-  if (maintenance.on && !isFeedback && !(await hasValidBypass(request))) {
+  const gated = maintenance.on || process.env.VERCEL_ENV === 'preview';
+
+  if (gated && !isFeedback && !(await validBypass(request))) {
     return new Response(null, {
       status: 307,
       headers: { Location: new URL('/maintenance.html', request.url).toString() },
