@@ -222,7 +222,7 @@ export default async function middleware(request: Request): Promise<Response | u
   // A preview's gate page sends the browser here (on ratemyhusky.com) with
   // ?to=<preview origin>. If it already holds a valid bypass cookie, bounce
   // back to that preview's /bypass-redeem with a short-lived code bound to
-  // it; otherwise bounce back with handoff=none so it shows its paste box.
+  // it; otherwise bounce back to its gate page with handoff=none.
   if (url.pathname === '/bypass-handoff') {
     const to = url.searchParams.get('to') || '';
     if (!PREVIEW_ORIGIN_RE.test(to)) {

@@ -39,8 +39,11 @@
     // Preview deploys can't see the rmh_dev cookie people already set on
     // ratemyhusky.com, so bounce through its /bypass-handoff (middleware.ts)
     // to copy it here. It comes back via /bypass-redeem (which sets the
-    // cookie and lands on /), or with ?handoff=none to show the paste box. Tried once per tab session so a token the
-    // preview rejects can't loop.
+    // cookie and lands on /), or with ?handoff=none when ratemyhusky.com has
+    // no valid bypass either. A redeemed cookie the preview then rejects
+    // would loop, so that path tries once per tab session; handoff=none
+    // never loops, so it clears the flag and a later visit tries again.
+    if (/[?&]handoff=none/.test(location.search)) sessionStorage.removeItem('rmh_handoff');
     if (PAGE_MODE === 'preview' && !/[?&](bypass|handoff)=/.test(location.search) &&
         !sessionStorage.getItem('rmh_handoff')) {
       sessionStorage.setItem('rmh_handoff', '1');
@@ -210,42 +213,6 @@
     [data-mode="preview"] .mode-maintenance,
     [data-mode="preview"] .mode-closed,
     [data-mode="preview"] .eta { display: none; }
-
-    .bypass-form {
-      display: flex;
-      gap: 10px;
-      margin-top: 28px;
-      max-width: 48ch;
-    }
-
-    .bypass-form input {
-      flex: 1;
-      min-width: 0;
-      border: 1.5px solid var(--card-border);
-      border-radius: 14px;
-      padding: 12px 16px;
-      font-family: 'Nunito', sans-serif;
-      font-size: 0.9rem;
-      color: var(--h1);
-      background: var(--card-bg);
-      outline: none;
-    }
-
-    .bypass-form input:focus { border-color: var(--red); }
-
-    .bypass-form button {
-      border: none;
-      border-radius: 14px;
-      padding: 12px 20px;
-      background: var(--red);
-      color: #fff;
-      font-family: 'Nunito', sans-serif;
-      font-size: 0.9rem;
-      font-weight: 700;
-      cursor: pointer;
-    }
-
-    .bypass-form button:hover { background: var(--red-dark); }
 
     .kicker {
       display: inline-flex;
@@ -706,13 +673,9 @@
               <h1>Sorry, this is a dev-only preview.</h1>
               <p>
                 This link is a work-in-progress build of RateMyHusky for the team.
-                Paste your bypass link or key below to get in.
+                To get in, open your bypass link on ratemyhusky.com first, then
+                come back to this link.
               </p>
-              <form class="bypass-form" id="bypass-form">
-                <input id="bypass-input" type="text" placeholder="Bypass link or key"
-                  aria-label="Bypass link or key" autocomplete="off" required />
-                <button type="submit">Enter</button>
-              </form>
             </div>
 
             <div class="eta" id="eta-badge">
@@ -903,15 +866,6 @@
       });
       render();
     })();
-
-    // ── Preview bypass form: accepts the full invite link (any host) or the
-    //    bare token, and hands it to the ?bypass= handler in <head> ──
-    document.getElementById('bypass-form').addEventListener('submit', function (e) {
-      e.preventDefault();
-      var value = document.getElementById('bypass-input').value.trim();
-      var match = value.match(/[?&]bypass=([^&\s]+)/);
-      location.search = '?bypass=' + encodeURIComponent(match ? match[1] : value);
-    });
 
     // ── Feedback modal (mirrors FeedbackTab.tsx; /api/feedback stays
     //    open during maintenance via middleware.ts) ──
