@@ -39,18 +39,21 @@
     // Preview deploys can't see the rmh_dev cookie people already set on
     // ratemyhusky.com, so bounce through its /bypass-handoff (middleware.ts)
     // to copy it here. It comes back via /bypass-redeem (which sets the
-    // cookie and lands on /), or with ?handoff=none when ratemyhusky.com has
-    // no valid bypass either. A redeemed cookie the preview then rejects
+    // cookie and lands on ?next=), or with ?handoff=none when ratemyhusky.com
+    // has no valid bypass either. A redeemed cookie the preview then rejects
     // would loop, so that path tries once per tab session; handoff=none
-    // never loops, so it clears the flag and a later visit tries again.
+    // never loops, so it clears the flag and drops itself from the URL, and
+    // reloading after opening the bypass link tries again.
     // Without sessionStorage the loop guard can't work, so skip the handoff.
     try {
-      if (/[?&]handoff=none/.test(location.search)) sessionStorage.removeItem('rmh_handoff');
-      if (PAGE_MODE === 'preview' && !/[?&](bypass|handoff)=/.test(location.search) &&
+      // next (already encoded by middleware.ts) is the page that was gated.
+      var next = location.search.match(/[?&]next=([^&]*)/);
+      if (/[?&]handoff=none/.test(location.search)) {
+        sessionStorage.removeItem('rmh_handoff');
+        history.replaceState(null, '', '?mode=preview' + (next ? '&next=' + next[1] : ''));
+      } else if (PAGE_MODE === 'preview' && !/[?&]bypass=/.test(location.search) &&
           !sessionStorage.getItem('rmh_handoff')) {
         sessionStorage.setItem('rmh_handoff', '1');
-        // next (already encoded by middleware.ts) is the page that was gated.
-        var next = location.search.match(/[?&]next=([^&]*)/);
         location.replace('https://ratemyhusky.com/bypass-handoff?to=' +
           encodeURIComponent(location.origin) + (next ? '&next=' + next[1] : ''));
       }

@@ -14,7 +14,9 @@
 //
 // Env vars (set in Vercel project settings):
 //   RAILWAY_ORIGIN    — backend origin, e.g. https://xyz.up.railway.app
-//   MAINT_SIGNING_KEY — HMAC key for bypass tokens (mint: maintenance.py -invite)
+//   MAINT_SIGNING_KEY — HMAC key for bypass tokens (mint: maintenance.py -invite).
+//                       Preview must use the same value as Production, or
+//                       every handoff fails to redeem and lands on handoff=none.
 //   PROXY_SECRET      — shared secret the backend checks; also set on Railway
 
 import maintenance from './maintenance.config.json';
@@ -30,7 +32,8 @@ export const config = {
 // Preview hosts /bypass-handoff will redirect to. Not the security boundary
 // (anyone can claim a free *.vercel.app alias): handoff codes are bound to
 // their target origin and only redeemable there, so a code sent to a
-// look-alike host is useless.
+// look-alike host is useless. That host does still see the bypass name and
+// expiry inside the code.
 const PREVIEW_ORIGIN_RE = /^https:\/\/rate-my-husky-(?:git-[a-z0-9-]+|[a-z0-9]+)-grain-is-grainys-projects\.vercel\.app$/;
 const HANDOFF_TTL_SECONDS = 60;
 
@@ -251,10 +254,10 @@ export default async function middleware(request: Request): Promise<Response | u
     }
     const bypass = await validBypass(request);
     const next = url.searchParams.get('next');
+    const nextParam = next ? `&next=${encodeURIComponent(next)}` : '';
     const location = key && bypass
-      ? `${to}/bypass-redeem?code=${await mintHandoffCode(key, to, ...bypass)}` +
-        (next ? `&next=${encodeURIComponent(next)}` : '')
-      : `${to}/maintenance.html?mode=preview&handoff=none`;
+      ? `${to}/bypass-redeem?code=${await mintHandoffCode(key, to, ...bypass)}${nextParam}`
+      : `${to}/maintenance.html?mode=preview&handoff=none${nextParam}`;
     return new Response(null, {
       status: 302,
       headers: { Location: location, 'cache-control': 'no-store' },
@@ -265,12 +268,14 @@ export default async function middleware(request: Request): Promise<Response | u
   // origin's own bypass cookie, then land on the page that was gated.
   if (url.pathname === '/bypass-redeem') {
     const token = key && await redeemHandoffCode(key, url.origin, url.searchParams.get('code') || '');
+    const next = url.searchParams.get('next');
     const headers = new Headers({ 'cache-control': 'no-store' });
     if (token) {
-      headers.set('Location', sameOriginNext(url.searchParams.get('next'), url.origin));
+      headers.set('Location', sameOriginNext(next, url.origin));
       headers.set('Set-Cookie', `rmh_dev=${token}; Path=/; Max-Age=2592000; SameSite=Lax; Secure`);
     } else {
-      headers.set('Location', '/maintenance.html?mode=preview&handoff=none');
+      headers.set('Location', '/maintenance.html?mode=preview&handoff=none' +
+        (next ? `&next=${encodeURIComponent(next)}` : ''));
     }
     return new Response(null, { status: 302, headers });
   }
