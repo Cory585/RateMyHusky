@@ -1,3 +1,4 @@
+import pytest
 import server
 
 
@@ -44,6 +45,36 @@ def test_filtered_whole_catalog_pages_are_not_cached(monkeypatch):
     client = server.app.test_client()
     client.get("/api/professors-catalog?limit=10000&minRating=1.5")
     assert not server._cache
-    client.get("/api/professors-catalog?limit=10000&page=1&sort=alpha")   # Compare's request
+    client.get("/api/professors-catalog?limit=10000&page=1&sort=alpha")
     assert len(server._cache) == 1
+    server._cache.clear()
+
+
+@pytest.mark.parametrize("endpoint", ["professors-catalog", "courses-catalog"])
+def test_only_the_sitemaps_whole_catalog_page_is_cached(monkeypatch, endpoint):
+    monkeypatch.setattr(server, "query_one", lambda *a, **k: {"cnt": 0})
+    monkeypatch.setattr(server, "query", lambda *a, **k: [])
+    monkeypatch.setattr(server, "data_version", lambda: 0)
+    server._cache.clear()
+    client = server.app.test_client()
+    for qs in ("limit=10000&sort=rating", "limit=101", "limit=9999"):
+        client.get(f"/api/{endpoint}?{qs}")
+    assert not server._cache
+    # Made-up sorts fall back to alpha, so they all land on the sitemap's one entry.
+    for qs in ("limit=10000&page=1", "limit=10000&sort=x1", "limit=10000&sort=x2"):
+        client.get(f"/api/{endpoint}?{qs}")
+    assert len(server._cache) == 1
+    server._cache.clear()
+
+
+def test_unknown_sorts_share_alphas_cache_entry(monkeypatch):
+    monkeypatch.setattr(server, "query_one", lambda *a, **k: {"cnt": 0})
+    monkeypatch.setattr(server, "query", lambda *a, **k: [])
+    monkeypatch.setattr(server, "data_version", lambda: 0)
+    server._cache.clear()
+    client = server.app.test_client()
+    for sort in ("alpha", "x1", "x2"):
+        client.get(f"/api/professors-catalog?sort={sort}")
+        client.get(f"/api/courses-catalog?sort={sort}")
+    assert len(server._cache) == 2
     server._cache.clear()

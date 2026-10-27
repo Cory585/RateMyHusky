@@ -114,6 +114,18 @@ SEARCH_MAX_WORDS = 6
 # for the whole catalog, and caching every filter combination at that size is
 # how the cache gets filled with multi-MB entries.
 CACHEABLE_PAGE_LIMIT = 100
+# The sitemap fetches the whole catalog in one page of this size
+# (frontend/scripts/generate-sitemap.mjs); it is the one big page that is cached.
+CATALOG_FULL_LIMIT = 10000
+# Sorts each catalog knows; anything else is alpha, so made-up sort values all
+# share alpha's cache entry instead of each minting one.
+PROFESSOR_SORTS = {"alpha", "alpha_desc", "rating", "rating_asc", "comments"}
+COURSE_SORTS = {"alpha", "alpha_desc", "rating", "rating_asc", "recent"}
+
+
+def sort_arg(known):
+    sort = request.args.get("sort", "alpha")
+    return sort if sort in known else "alpha"
 
 
 def like_safe(text):
@@ -1408,10 +1420,9 @@ def professors_catalog():
     q = search_text(request.args.get("q", ""))
     college = request.args.get("college", "")
     dept = request.args.get("dept", "")
-    sort = request.args.get("sort", "alpha")
+    sort = sort_arg(PROFESSOR_SORTS)
     page = int_arg("page", 1, 1, 100000)
-    # The sitemap fetches the whole catalog in one page, hence 10000.
-    limit = int_arg("limit", 20, 1, 10000)
+    limit = int_arg("limit", 20, 1, CATALOG_FULL_LIMIT)
 
     min_rating = float_arg("minRating", 0.0, 0.0, 5.0)
     max_rating = float_arg("maxRating", 5.0, 0.0, 5.0)
@@ -1420,8 +1431,9 @@ def professors_catalog():
     max_reviews = None if max_reviews < 0 else max_reviews
 
     cache_key = f"profcat:{q}:{college}:{dept}:{sort}:{page}:{limit}:{min_rating}:{max_rating}:{min_reviews}:{max_reviews}"
-    # A whole-catalog page is cached only unfiltered (what the sitemap asks for).
-    cacheable = limit <= CACHEABLE_PAGE_LIMIT or cache_key == f"profcat::::{sort}:1:{limit}:0.0:5.0:1:None"
+    # A big page is cached only when it is exactly the sitemap's request.
+    cacheable = (limit <= CACHEABLE_PAGE_LIMIT
+                 or cache_key == f"profcat::::alpha:1:{CATALOG_FULL_LIMIT}:0.0:5.0:1:None")
     cached = cache_get(cache_key) if cacheable else None
     if cached:
         return jsonify(cached)
@@ -1573,10 +1585,9 @@ def course_departments():
 def courses_catalog():
     q = search_text(request.args.get("q", ""))
     dept = request.args.get("dept", "")
-    sort = request.args.get("sort", "alpha")
+    sort = sort_arg(COURSE_SORTS)
     page = int_arg("page", 1, 1, 100000)
-    # The sitemap fetches the whole catalog in one page, hence 10000.
-    limit = int_arg("limit", 20, 1, 10000)
+    limit = int_arg("limit", 20, 1, CATALOG_FULL_LIMIT)
 
     min_rating = float_arg("minRating", 0.0, 0.0, 5.0)
     max_rating = float_arg("maxRating", 5.0, 0.0, 5.0)
@@ -1585,9 +1596,9 @@ def courses_catalog():
     rated_only = request.args.get("rated") == "1"
 
     cache_key = f"coursecat:{q}:{dept}:{sort}:{page}:{limit}:{min_rating}:{max_rating}:{rated_only}"
-    # A whole-catalog page is cached only unfiltered (what the sitemap asks for).
+    # A big page is cached only when it is exactly the sitemap's request.
     cacheable = (limit <= CACHEABLE_PAGE_LIMIT
-                 or cache_key == f"coursecat:::{sort}:1:{limit}:0.0:5.0:False")
+                 or cache_key == f"coursecat:::alpha:1:{CATALOG_FULL_LIMIT}:0.0:5.0:False")
     cached = cache_get(cache_key) if cacheable else None
     if cached:
         return jsonify(cached)
