@@ -101,9 +101,10 @@ export function OtherCourseStep({ own, rated, onPick, onBack }: OtherCourseStepP
 
   // The professor's own matches lead, since the catalog search misses Banner-only codes.
   const mine = ownMatches(own, term);
-  const settled = found !== null && found.q === term
-    ? [...mine, ...found.items.filter((c) => !mine.some((m) => m.code === c.code))].slice(0, 5)
-    : null;
+  const catalog = found !== null && found.q === term ? found.items : null;
+  const settled = catalog === null && mine.length === 0
+    ? null
+    : [...mine, ...(catalog ?? []).filter((c) => !mine.some((m) => m.code === c.code))].slice(0, 5);
   const code = typed.replace(/\s+/g, '').toUpperCase();
   const canAdd = settled !== null && settled.length === 0 && NEW_CODE.test(code);
 

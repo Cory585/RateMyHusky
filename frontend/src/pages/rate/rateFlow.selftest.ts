@@ -216,7 +216,7 @@ function selftest(): number {
   check('ownMatches finds by code or name, any case', same(ownMatches([cs2500, cs3500, noShortcuts], 'cs3500').map((c) => c.code), ['CS3500'])
     && same(ownMatches([cs2500, cs3500, noShortcuts], 'algo').map((c) => c.code), ['CS3000'])
     && ownMatches([cs2500], 'c').length === 0);
-  const pendingPrior: RatedCourse ={ ...prior, code: 'CS4999', name: 'Applied ML', pending: true };
+  const pendingPrior: RatedCourse = { ...prior, code: 'CS4999', name: 'Applied ML', pending: true };
   const [pendingTile] = courseGroups([], [pendingPrior]).rated;
   const subPending = buildSubmission(pickCourse({ comment: '', professor: alex }, pendingTile, [pendingPrior], now), start, 't', '');
   check('a rated course awaiting review resends as a new course', same(subPending.course, { code: 'CS4999', name: 'Applied ML' }));

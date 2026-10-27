@@ -509,10 +509,11 @@ function OfferingPanel({ history }: { history: CourseHistory }) {
 								<div key={k} className={`course-offering-tile${ran === 0 ? ' course-offering-tile--off' : ''}`}>
 									<span className="course-offering-tile-label">{label}</span>
 									{/* Color and hover titles alone don't reach touch or screen readers. Short year
-									    in each segment so five tiles fit a row; the titles carry the full year. */}
+									    in each segment so five tiles fit a row; the titles carry the full year.
+									    Fall is the calendar year before the school year's end year. */}
 									<span className="course-offering-bar" role="img" aria-label={`${label}: ${segs.map((s) => s.desc).join(', ')}`}>
 										{segs.map((s) => (
-											<span key={s.y} className={`course-offering-seg course-offering-seg--${s.state}`} title={s.desc}>’{String(s.y).slice(2)}</span>
+											<span key={s.y} className={`course-offering-seg course-offering-seg--${s.state}`} title={s.desc}>’{String(k === 'fall' ? s.y - 1 : s.y).slice(2)}</span>
 										))}
 									</span>
 									<span className="course-offering-count">

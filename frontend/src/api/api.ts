@@ -394,7 +394,6 @@ export interface CourseHistory {
   offeredNow: string[];
   creditHours: string | null;
   typicalClassSize: number | null;
-  instructorCount: number | null;
   /** Taught it in the 12 months up to the newest term, newest first, at most 10. */
   recentInstructors: RecentInstructor[];
   replacedBy: HistoryCourseLink | null;

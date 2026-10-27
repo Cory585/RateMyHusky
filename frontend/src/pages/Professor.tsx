@@ -530,10 +530,13 @@ const Professor = () => {
       const next = new Set(prev);
       if (next.has(code)) next.delete(code);
       else next.add(code);
-      /* Picking every course is the same as no filter when no review lacks a course code:
+      /* Picking every rated course is the same as no filter when no review lacks a course code:
          snap back to it so the stats match "All courses" and the next click filters instead
-         of removing. Uncoded reviews make it a real filter, so it stays. */
-      const coversAll = next.size === courses.length && reviews.every(r => r.courseCode !== null && next.has(r.courseCode));
+         of removing. Uncoded reviews make it a real filter, so it stays. Banner-only rows
+         (taught, never rated) add nothing, so they don't count. */
+      const rated = courses.filter(c => c.numRatings > 0);
+      const coversAll = rated.length > 0 && rated.every(c => next.has(c.code))
+        && reviews.every(r => r.courseCode !== null && next.has(r.courseCode));
       return coversAll ? new Set() : next;
     });
   };
@@ -997,7 +1000,7 @@ const Professor = () => {
             )}
             <div className="prof-reviews-list">
               {sortedReviews.length === 0 ? (
-                <p className="prof-no-reviews">{reviews.length === 0 ? 'No reviews yet.' : unfiltered ? 'No reviews match current filters.' : `No reviews for ${selectedLabel} yet.`}</p>
+                <p className="prof-no-reviews">{reviews.length === 0 ? 'No reviews yet.' : unfiltered ? 'No reviews match current filters.' : `No written reviews for ${selectedLabel} yet.`}</p>
               ) : (
                 sortedReviews.slice(0, visibleReviews).map((r, i) => (
                   <div key={i} className={`prof-review-card ${isPinned(r.comment || '', pinSnippets.rmp) ? 'is-ask-pinned' : ''}`} style={{ borderLeftColor: r.quality >= 4 ? '#27ae60' : r.quality >= 3 ? '#f39c12' : '#e74c3c' }}>
@@ -1028,7 +1031,7 @@ const Professor = () => {
                         </div>
                       )}
                       <div className="prof-review-pills">
-                        {r.grade && r.grade !== 'N/A' && <span className="prof-review-pill">Grade: {r.grade}</span>}
+                        {r.grade && r.grade !== 'N/A' && <span className="prof-review-pill">Grade: {r.grade === 'A+' ? 'A' : r.grade}</span>}
                         {r.attendance && r.attendance !== 'N/A' && <span className="prof-review-pill">Attendance: {r.attendance === 'true' || r.attendance === 'Mandatory' ? 'Mandatory' : 'Not Mandatory'}</span>}
                         {r.textbook && r.textbook !== 'N/A' && <span className="prof-review-pill">Textbook: {r.textbook === 'true' || r.textbook === 'Yes' ? 'Yes' : 'No'}</span>}
                         {r.online_class && r.online_class !== 'N/A' && <span className="prof-review-pill">{r.online_class === 'true' || r.online_class === 'Yes' ? 'Online' : 'In-Person'}</span>}
