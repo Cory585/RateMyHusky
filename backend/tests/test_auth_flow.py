@@ -65,6 +65,18 @@ def test_return_to_cannot_point_off_site(monkeypatch):
     assert resp.headers["Location"].startswith(server.FRONTEND_URL + "/#auth_token=")
 
 
+def test_return_to_only_keeps_paths_on_this_site():
+    keep = ["/", "/compare?a=1&b=2", "/professor/jane-doe", "/catalog?q=a%20b"]
+    for value in keep:
+        assert server._safe_return_to(value) == value
+    for value in ["//evil.com", "///evil.com", "/\evil.com", "\evil.com", "https://evil.com",
+                  "javascript:alert(1)", "evil.com", "", None, 5]:
+        assert server._safe_return_to(value) == "/", value
+    # a long URL keeps its page, losing only the query, so the cookie stays under 4KB
+    assert server._safe_return_to("/catalog?q=" + "x" * 5000) == "/catalog"
+    assert server._safe_return_to("/" + "x" * 5000) == "/"
+
+
 def _token(**claims):
     base = {"sub": "u1", "email": "t@husky.neu.edu", "name": "T",
             "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1)}
