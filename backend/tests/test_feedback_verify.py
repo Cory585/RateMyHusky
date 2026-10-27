@@ -146,6 +146,19 @@ def test_rejected_posts_do_not_use_up_the_daily_limit(monkeypatch):
         assert resp.status_code == 400
 
 
+def test_rejected_posts_still_hit_the_looser_limit(monkeypatch):
+    # Junk tokens each cost a siteverify call, so a second limit counts every post.
+    import server
+    monkeypatch.delenv("TURNSTILE_SECRET_KEY", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    server.limiter.reset()
+    client = server.app.test_client()
+    codes = [client.post("/api/feedback", json={"feedbackType": "nope", "description": "hi"}).status_code
+             for _ in range(51)]
+    assert codes[:50] == [400] * 50 and codes[50] == 429
+    server.limiter.reset()
+
+
 def test_turnstile_token_from_another_hostname_is_rejected(monkeypatch):
     import server
 

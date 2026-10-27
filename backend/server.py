@@ -1998,6 +1998,9 @@ def bookmarks_remove():
 # Only sent feedback counts toward the per-IP limit, so junk posts that fail the
 # CAPTCHA or validation can't use up a real user's 10 a day.
 @limiter.limit("10 per day", deduct_when=lambda response: response.status_code == 200)
+# Every post counts here, so junk tokens can't make unlimited siteverify calls
+# (each holds a worker for up to 5 s).
+@limiter.limit("50 per day")
 def submit_feedback():
     global _feedback_count, _feedback_date
 
