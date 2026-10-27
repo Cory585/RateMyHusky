@@ -287,7 +287,9 @@ def _has_proxy_key():
     """True when the request carries the Vercel proxy's shared secret."""
     if not PROXY_SECRET:
         return False
-    return hmac.compare_digest(request.headers.get("X-Proxy-Key", ""), PROXY_SECRET)
+    # Bytes, not str: compare_digest raises on non-ASCII strings, and WSGI hands a
+    # header over as latin-1, so `X-Proxy-Key: ÿ` was a 500 instead of a 403.
+    return hmac.compare_digest(request.headers.get("X-Proxy-Key", "").encode(), PROXY_SECRET.encode())
 
 
 @app.before_request
