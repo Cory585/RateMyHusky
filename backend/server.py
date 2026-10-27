@@ -6,7 +6,7 @@ Install deps:  pip install flask flask-cors flask-limiter psycopg2-binary pyjwt 
 Run:           python server.py
 """
 
-import os, re, unicodedata, json, hashlib, random
+import os, re, unicodedata, json, hashlib, hmac, random
 import html as _html
 import psycopg2
 from psycopg2.pool import ThreadedConnectionPool
@@ -140,7 +140,7 @@ def get_real_ip():
     # Only the Vercel middleware can send the key, so only then is the client
     # IP header it sets trustworthy. Checked here, not assumed from
     # require_proxy_key: the limiter's hook runs before that one.
-    if PROXY_SECRET and request.headers.get("X-Proxy-Key") == PROXY_SECRET:
+    if _has_proxy_key():
         client_ip = request.headers.get("X-RMH-Client-IP", "").strip()
         if client_ip:
             return client_ip
@@ -213,16 +213,25 @@ def block_bots():
 
 
 # Shared secret added by the Vercel middleware proxy (frontend/middleware.ts).
-# Unset = open (local dev / pre-rollout); set on Railway to lock the backend
-# to Vercel-proxied traffic only.
+# Unset = open, which is only allowed off Railway (local dev): on Railway an unset
+# secret would leave the backend reachable directly, bypassing the proxy.
 PROXY_SECRET = os.getenv("PROXY_SECRET")
+if not PROXY_SECRET and os.getenv("RAILWAY_ENVIRONMENT"):
+    raise RuntimeError("PROXY_SECRET must be set on Railway")
+
+
+def _has_proxy_key():
+    """True when the request carries the Vercel proxy's shared secret."""
+    if not PROXY_SECRET:
+        return False
+    return hmac.compare_digest(request.headers.get("X-Proxy-Key", ""), PROXY_SECRET)
 
 
 @app.before_request
 def require_proxy_key():
     if not PROXY_SECRET:
         return
-    if request.headers.get("X-Proxy-Key") != PROXY_SECRET:
+    if not _has_proxy_key():
         return jsonify({"error": "Forbidden"}), 403
 
 
@@ -990,7 +999,7 @@ def chat():
     session_token = _claims.get("sub")  # verified account id — unspoofable, never None
     if not session_token:
         return jsonify({"mode": "error", "message": "Sign in to use Ask mode."}), 401
-    ip_hash = _hash_ip(request.headers.get("CF-Connecting-IP", request.remote_addr))
+    ip_hash = _hash_ip(get_real_ip())
     payload, code = handle_question(q, session_token, ip_hash, deps)
     return jsonify(payload), code
 
