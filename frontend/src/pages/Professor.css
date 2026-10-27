@@ -281,6 +281,7 @@
 .prof-course-row:last-child { border-bottom: none; }
 .prof-course-row:hover { background: #fef8f8; }
 .prof-course-row.selected { background: #fff5f5; border-left: 4px solid #d6394c; padding-left: 24px; }
+.prof-course-row-static { cursor: default; }
 .prof-course-row-main { display: flex; align-items: center; gap: 12px; }
 .prof-course-code { font-weight: 800; font-size: 0.95rem; color: #d6394c; min-width: 100px; flex-shrink: 0; }
 .prof-course-title { flex: 1; font-size: 0.95rem; font-weight: 600; color: #444; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

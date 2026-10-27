@@ -62,7 +62,8 @@ export default function Rate() {
   const [step, setStep] = useState<StepId>('who');
   const [start, setStart] = useState<RateStart | null>(null);
   const [startFailed, setStartFailed] = useState(false);
-  const [loaded, setLoaded] = useState<{ slug: string; list: RateCourse[] } | null>(null);
+  // recent: the list is Banner's newest-first order; without Banner history it is most-rated first.
+  const [loaded, setLoaded] = useState<{ slug: string; list: RateCourse[]; recent: boolean } | null>(null);
   const [context, setContext] = useState<{ slug: string; rated: RatedCourse[] } | null>(null);
   const [typedName, setTypedName] = useState('');
   const [counter, setCounter] = useState<number | null>(null);
@@ -151,8 +152,8 @@ export default function Rate() {
     if (!slug) return;
     let cancelled = false;
     fetchRateProfessor(slug)
-      .then((res) => { if (!cancelled) setLoaded({ slug, list: res.ok ? toRateCourses(res.data) : [] }); })
-      .catch(() => { if (!cancelled) setLoaded({ slug, list: [] }); });
+      .then((res) => { if (!cancelled) setLoaded({ slug, list: res.ok ? toRateCourses(res.data) : [], recent: res.ok && res.data.lastTaught !== null }); })
+      .catch(() => { if (!cancelled) setLoaded({ slug, list: [], recent: false }); });
     return () => { cancelled = true; };
   }, [slug]);
 
@@ -331,6 +332,7 @@ export default function Rate() {
               fresh={groups.fresh}
               rated={groups.rated}
               more={groups.more}
+              recent={loaded?.recent ?? false}
               selected={answers.course?.code}
               onPick={(c) => choose(pickCourse(answers, c, rated, new Date()), 'course')}
               onOther={() => open('otherCourse')}

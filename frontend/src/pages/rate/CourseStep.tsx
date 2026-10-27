@@ -14,6 +14,8 @@ interface CourseStepProps {
   rated: RateCourse[];
   // Some of the professor's courses aren't tiles, so search finds them.
   more: boolean;
+  // The courses are newest-first, so the tiles are the most recent ones.
+  recent: boolean;
   selected?: string;
   onPick: (c: RateCourse) => void;
   onOther: () => void;
@@ -34,7 +36,7 @@ export function Pencil() {
 const courseAria = (c: RateCourse, isRated: boolean) =>
   `${formatCode(c.code)}${c.name ? `, ${c.name}` : ''}${isRated ? ', update your rating' : ''}`;
 
-export function CourseStep({ professor, fresh, rated, more, selected, onPick, onOther }: CourseStepProps) {
+export function CourseStep({ professor, fresh, rated, more, recent, selected, onPick, onOther }: CourseStepProps) {
   const option = (c: RateCourse, isRated: boolean): ChoiceOption<string> => ({
     value: c.code,
     aria: courseAria(c, isRated),
@@ -57,7 +59,7 @@ export function CourseStep({ professor, fresh, rated, more, selected, onPick, on
     <ChoiceGroup
       legend="Which course?"
       subtitle={more
-        ? `Prof. ${lastName(professor.name)}'s most recent courses.`
+        ? `Prof. ${lastName(professor.name)}'s most ${recent ? 'recent' : 'rated'} courses.`
         : `Courses we know Prof. ${lastName(professor.name)} has taught.`}
       options={options}
       value={selected}

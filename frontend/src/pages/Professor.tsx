@@ -330,6 +330,8 @@ const Professor = () => {
   const reviews = useMemo(() => profile?.sources.rmp.reviews ?? [], [profile]);
   const redditMentions = useMemo(() => profile?.redditMentions ?? [], [profile]);
   const courses = useMemo(() => profile?.courses ?? [], [profile]);
+  /* With no reviews, every course filter ends at "No reviews yet", so courses aren't clickable. */
+  const canFilter = reviews.length > 0;
 
   /* ── Ask citation pins: switch to the cited source's tab and scroll to reviews ── */
   useEffect(() => {
@@ -574,7 +576,8 @@ const Professor = () => {
   const identity = profile.identity;
   const summary = profile.summary;
   const rmp = profile.sources.rmp;
-  const noRatings = summary.numRatings === 0;
+  // A selection of courses no one has rated has nothing to chart either.
+  const noRatings = stats.numRatings === 0;
   // `?? []`: a payload cached before awards shipped has no key.
   const awards = profile.awards ?? [];
 
@@ -629,8 +632,8 @@ const Professor = () => {
     return (
     <div
       key={c.code}
-      className={`prof-course-row ${selectedCourses.has(c.code) ? 'selected' : ''}`}
-      onClick={() => toggleCourse(c.code)}
+      className={`prof-course-row ${!canFilter ? 'prof-course-row-static' : selectedCourses.has(c.code) ? 'selected' : ''}`}
+      onClick={canFilter ? () => toggleCourse(c.code) : undefined}
     >
       <div className="prof-course-row-main">
         <span className="prof-course-code">{c.code}</span>
@@ -930,7 +933,7 @@ const Professor = () => {
             <h2 className="prof-section-title">Courses Taught</h2>
             <div className="prof-section-actions">
               {unfiltered
-                ? (courses.length > 1 && <span className="prof-section-hint">Click a course to filter reviews</span>)
+                ? (canFilter && courses.length > 1 && <span className="prof-section-hint">Click a course to filter reviews</span>)
                 : <button className="prof-action-link" onClick={() => setSelectedCourses(new Set())}>Show all courses</button>}
             </div>
           </div>
@@ -981,7 +984,7 @@ const Professor = () => {
         {reviewTab === 'rmp' && (
           <>
             <div className="prof-reviews-filters">
-              {courses.length > 1 && (
+              {canFilter && courses.length > 1 && (
                 <Dropdown
                   className="feedback-dropdown"
                   options={courseOptions}
