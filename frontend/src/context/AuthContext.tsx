@@ -4,6 +4,7 @@ import { maintenanceGuard } from '../api/api';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const TOKEN_KEY = 'auth_token';
+const ME_RETRY_MS = 5000;
 
 interface User {
   email: string;
@@ -67,12 +68,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const popupRef = useRef<Window | null>(null);
 
-  const fetchUser = useCallback(() => {
+  const fetchUser = useCallback(function check(retry = true): Promise<void> {
     const token = getStoredToken();
     if (!token) {
       setUser(null);
       return Promise.resolve();
     }
+    // A 429 (campus NAT shares one IP's limit), a 5xx or a dropped request says
+    // nothing about the token: keep it and the current user, and try once more.
+    const transient = () => {
+      if (retry) setTimeout(() => check(false), ME_RETRY_MS);
+    };
     return fetch(`${API_BASE}/api/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -80,22 +86,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Maintenance redirect: tab is navigating away, keep the token.
         if (maintenanceGuard(res)) return undefined;
         if (res.status === 401) return null;
-        // A 429 (campus NAT shares one IP's limit), a 5xx or a dropped request says
-        // nothing about the token, so keep it and the current user as they are.
-        return res.ok ? res.json() : undefined;
+        if (!res.ok) {
+          transient();
+          return undefined;
+        }
+        return res.json();
       })
       .then(data => {
-        if (data === undefined) return;
+        // Another tab changed the token while this was in flight; the check that
+        // change started will answer for the new one.
+        if (data === undefined || getStoredToken() !== token) return;
         if (data) {
           setUser(data);
         } else {
-          // Clearing fires a storage event that signs out every tab, so only do it
-          // for a rejected token, and only if no other tab has replaced it meanwhile.
-          if (getStoredToken() === token) clearToken();
+          // Clearing fires a storage event that signs out every tab: only for a rejected token.
+          clearToken();
           setUser(null);
         }
       })
-      .catch(() => {});
+      .catch(transient);
   }, []);
 
   // Check for token in URL fragment (mobile redirect flow)
