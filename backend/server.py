@@ -2056,7 +2056,8 @@ CSP_REPORT_URL_FIELDS = {"document-uri", "blocked-uri", "source-file"}
 @limiter.limit("60 per hour")
 def csp_report():
     """Logs the browser reports for frontend/vercel.json's Content-Security-Policy-Report-Only,
-    so we can see what the policy would block before enforcing it. Nothing is stored."""
+    so we can see what the policy would block before enforcing it. Nothing is stored.
+    frontend/middleware.ts forwards only a sample (CSP_REPORT_SAMPLE) of them."""
     data = request.get_json(force=True, silent=True)   # sent as application/csp-report
     report = data.get("csp-report") if isinstance(data, dict) else None
     if isinstance(report, dict):
@@ -2066,7 +2067,7 @@ def csp_report():
             if name in CSP_REPORT_URL_FIELDS:
                 value = value.split("?", 1)[0].split("#", 1)[0]
             fields[name] = value[:300]
-        print("[csp] " + json.dumps(fields))
+        print("[csp] " + json.dumps(fields), flush=True)
     return "", 204
 
 

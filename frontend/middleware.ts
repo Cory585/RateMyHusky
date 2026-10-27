@@ -21,6 +21,9 @@
 
 import maintenance from './maintenance.config.json';
 
+// Share of CSP violation reports forwarded to the backend's /api/csp-report.
+const CSP_REPORT_SAMPLE = 0.1;
+
 // Skip the maintenance page itself, the assets it needs, crawler/AdSense
 // files, Vercel internals (analytics beacons, etc.), and professor photo
 // thumbnails (a catalog page loads dozens; each would be a middleware call).
@@ -286,6 +289,12 @@ export default async function middleware(request: Request): Promise<Response | u
         (next ? `&next=${encodeURIComponent(next)}` : ''));
     }
     return new Response(null, { status: 302, headers });
+  }
+
+  // Report-only CSP violations (vercel.json's report-uri): a pageview with ads can
+  // send several, so only a sample reaches Railway; the rest end here.
+  if (url.pathname === '/api/csp-report' && Math.random() >= CSP_REPORT_SAMPLE) {
+    return new Response(null, { status: 204 });
   }
 
   // Feedback stays open during maintenance (the page has its own form);
