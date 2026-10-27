@@ -15,6 +15,9 @@ from prof_aliases import rmp_link_key
 PAIR_BURST = 5  # prior new-device ratings for one professor + course in an hour
 PAIR_PACE_FACTOR = 3  # ...and this many times the pair's 30-day mean hourly count
 PROF_BURST = 10  # prior ratings for one professor in an hour, any device or course; same pace factor
+COURSE_BURST = 20  # prior ratings for one course in an hour, any professor or device; same pace factor
+PROF_DAY_BURST = 30  # prior ratings for one professor in a day, no pace factor: a steady drip can't raise it
+BURST_PAUSE_HOURS = 72  # a burst still awaiting review holds every new rating in its scope this long
 IP_BURST = 10  # prior ratings from one IP hash in an hour
 PREFIX_BURST = 25  # prior ratings from one /24 or /64 hash in an hour
 COUNTER_MIN = 25  # the "huskies this term" counter is hidden below this
@@ -32,8 +35,16 @@ RATING_COLUMNS = (
 _KEY_COLUMNS = ("professor_slug", "pending_professor_id", "course_code", "pending_course_id")
 _KEY_MATCH = " AND ".join(f"{c} IS NOT DISTINCT FROM %s" for c in _KEY_COLUMNS)
 _PROF_MATCH = " AND ".join(f"{c} IS NOT DISTINCT FROM %s" for c in _KEY_COLUMNS[:2])
+_COURSE_MATCH = " AND ".join(f"{c} IS NOT DISTINCT FROM %s" for c in _KEY_COLUMNS[2:])
 _NO_NETWORK_BURST = ("campus", "relay")
-_BURST_REASONS = ("burst_pair", "burst_prof", "burst_ip", "burst_prefix")
+_BURST_REASONS = ("burst_pair", "burst_prof", "burst_prof_day", "burst_course", "burst_ip", "burst_prefix")
+# A held row from a pair burst pauses that pair; a professor or course burst, all of it.
+_PAUSE_SQL = (
+    "SELECT 1 FROM survey_ratings WHERE status = 'held' AND created_at >= %s AND ("
+    f"(string_to_array(hold_reasons, ',') && ARRAY['burst_pair'] AND {_KEY_MATCH}) OR "
+    f"(string_to_array(hold_reasons, ',') && ARRAY['burst_prof', 'burst_prof_day'] AND {_PROF_MATCH}) OR "
+    f"(string_to_array(hold_reasons, ',') && ARRAY['burst_course'] AND {_COURSE_MATCH})) LIMIT 1"
+)
 
 
 def term_start(now):
@@ -60,6 +71,15 @@ def course_exists(code, query_one):
                 "SELECT 1 FROM banner_course_offerings WHERE subject_course = %s",
                 "SELECT 1 FROM survey_pending_courses WHERE code = %s AND status = 'approved'"):
         if query_one(sql, (code,)) is not None:
+            return True
+    return False
+
+
+def pair_taught(slug, code, query_one):
+    """True when Banner has the professor teaching the course, or RMP has reviews of them in it."""
+    for sql in ("SELECT 1 FROM banner_course_instructors WHERE subject_course = %s AND professor_slug = %s",
+                "SELECT 1 FROM source_summary WHERE course_code = %s AND professor_slug = %s AND source = 'rmp'"):
+        if query_one(sql, (code, slug)) is not None:
             return True
     return False
 
@@ -125,10 +145,12 @@ def duplicate_comment(comment_hash, exclude_id, query_one):
 
 
 def burst_reasons(key, ip_hash, prefix_hash, network_type, query_one, now):
-    """Which of burst_pair / burst_prof / burst_ip / burst_prefix this submission trips.
+    """Which of the burst triggers, or burst_pause, this submission trips.
 
-    burst_prof counts every device and course on every network: devices that rated
-    something else first, and invented course codes, both get past the pair count.
+    burst_prof and burst_course count every device on every network: devices that
+    rated something else first, invented course codes, and one course spread over
+    many professors all get past the pair count. burst_prof_day has no pace factor,
+    so a drip just under the hourly limit can't raise its own ceiling.
     """
     hour_ago = now - timedelta(hours=1)
     reasons = []
@@ -140,14 +162,25 @@ def burst_reasons(key, ip_hash, prefix_hash, network_type, query_one, now):
         pace = row["month"] / 720
         if row["hour"] >= PAIR_BURST and row["hour"] >= PAIR_PACE_FACTOR * pace:
             reasons.append("burst_pair")
-    row = query_one(
-        "SELECT count(*) FILTER (WHERE created_at >= %s) AS hour, count(*) AS month "
-        f"FROM survey_ratings WHERE created_at >= %s AND {_PROF_MATCH}",
-        (hour_ago, now - timedelta(days=30), *_key_params(key)[:2]))
-    if row:
-        pace = row["month"] / 720
-        if row["hour"] >= PROF_BURST and row["hour"] >= PAIR_PACE_FACTOR * pace:
-            reasons.append("burst_prof")
+    for reason, match, params, limit in (
+        ("burst_prof", _PROF_MATCH, _key_params(key)[:2], PROF_BURST),
+        ("burst_course", _COURSE_MATCH, _key_params(key)[2:], COURSE_BURST),
+    ):
+        row = query_one(
+            "SELECT count(*) FILTER (WHERE created_at >= %s) AS hour, count(*) AS month "
+            f"FROM survey_ratings WHERE created_at >= %s AND {match}",
+            (hour_ago, now - timedelta(days=30), *params))
+        if row:
+            pace = row["month"] / 720
+            if row["hour"] >= limit and row["hour"] >= PAIR_PACE_FACTOR * pace:
+                reasons.append(reason)
+    row = query_one(f"SELECT count(*) AS day FROM survey_ratings WHERE {_PROF_MATCH} AND created_at >= %s",
+                    (*_key_params(key)[:2], now - timedelta(days=1)))
+    if row and row["day"] >= PROF_DAY_BURST:
+        reasons.append("burst_prof_day")
+    kp = _key_params(key)
+    if query_one(_PAUSE_SQL, (now - timedelta(hours=BURST_PAUSE_HOURS), *kp, *kp[:2], *kp[2:])):
+        reasons.append("burst_pause")
     if network_type not in _NO_NETWORK_BURST:
         for reason, column, value, limit in (
             ("burst_ip", "ip_hash", ip_hash, IP_BURST),
@@ -164,16 +197,18 @@ def burst_reasons(key, ip_hash, prefix_hash, network_type, query_one, now):
 
 
 def hold_burst(reasons, key, ip_hash, prefix_hash, write, now):
-    """Hold the accepted rows from the last hour that match each tripped trigger.
+    """Hold the accepted rows in each tripped trigger's window (a day for
+    burst_prof_day, else the last hour) that match it.
 
     burst_pair holds only new-device rows, the ones burst_reasons counts. A row a
     reviewer approved keeps its hold_reasons, so `hold_reasons IS NULL` leaves
-    approvals alone.
+    approvals alone. burst_pause holds only the new rating, so it isn't listed here.
     """
-    hour_ago = now - timedelta(hours=1)
     where = {
         "burst_pair": (f"new_device = true AND {_KEY_MATCH}", _key_params(key)),
         "burst_prof": (_PROF_MATCH, _key_params(key)[:2]),
+        "burst_prof_day": (_PROF_MATCH, _key_params(key)[:2]),
+        "burst_course": (_COURSE_MATCH, _key_params(key)[2:]),
         "burst_ip": ("ip_hash = %s", (ip_hash,)),
         "burst_prefix": ("ip_prefix_hash = %s", (prefix_hash,)),
     }
@@ -181,11 +216,12 @@ def hold_burst(reasons, key, ip_hash, prefix_hash, write, now):
         if reason not in reasons:
             continue
         condition, params = where[reason]
+        since = now - (timedelta(days=1) if reason == "burst_prof_day" else timedelta(hours=1))
         write(
             "UPDATE survey_ratings SET status = 'held', hold_reasons = %s "
             "WHERE status = 'accepted' AND hold_reasons IS NULL AND created_at >= %s "
             f"AND {condition}",
-            (reason, hour_ago, *params))
+            (reason, since, *params))
 
 
 # The conflict target (device_hash + the four key columns) is never updated;

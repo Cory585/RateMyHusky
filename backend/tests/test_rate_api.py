@@ -48,7 +48,9 @@ def rate(monkeypatch):
         if "FROM professors_catalog" in sql:
             return {"x": 1} if params[0] == "alice-smith" else None
         if "FROM course_catalog" in sql:
-            return {"x": 1} if params[0] == "CS2500" else None
+            return {"x": 1} if params[0] in ("CS2500", "CS3500") else None
+        if "FROM banner_course_instructors" in sql:  # alice-smith taught CS2500, never CS3500
+            return {"x": 1} if params == ("CS2500", "alice-smith") else None
         if "count(*) AS cnt FROM survey_ratings WHERE created_at" in sql:
             return {"cnt": 3}
         if "AND status = 'pending'" in sql:  # the first insert wins, like the partial unique index
@@ -240,6 +242,36 @@ def test_new_course_needs_a_name_and_known_code_ignores_it(rate):
     assert resp.status_code == 200
     assert len([w for w in state["writes"] if "survey_pending_courses" in w[0]]) == 1
     assert state["posts"] == []
+
+
+def test_a_course_the_professor_never_taught_is_held_for_review(rate):
+    # Any professor could otherwise be rated under any real code, moving that course's
+    # rating and listing the professor on its page.
+    server, client, state, ri = rate
+    post(client, ri)
+    post(client, ri, {"course": {"code": "CS3500"}})
+    taught, untaught = (params for sql, params in rating_writes(state))
+    assert "accepted" in taught and "unverified_pair" not in taught
+    assert "held" in untaught and "unverified_pair" in untaught
+
+
+def test_pending_professor_or_course_skips_the_taught_check(rate):
+    # Neither counts anywhere until a reviewer approves it, so there's nothing to check.
+    server, client, state, ri = rate
+    post(client, ri, {"professor": {"name": "New Person"}})
+    post(client, ri, {"course": {"code": "ZZ9999", "name": "Brand New Course"}})
+    assert all("accepted" in params for sql, params in rating_writes(state))
+
+
+def test_rate_limit_response_does_not_say_which_limit_fired(rate):
+    # Naming the bucket ("20 per 1 hour" vs "300 per 1 hour") tells an attacker that
+    # a fresh device token gets around it.
+    server, client, state, ri = rate
+    for _ in range(20):
+        post(client, ri)
+    resp = post(client, ri)
+    assert resp.status_code == 429
+    assert resp.get_json() == {"error": "Rate limit reached. Please try again later."}
 
 
 def test_accepted_and_held_responses_are_identical(rate):

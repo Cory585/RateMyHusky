@@ -139,3 +139,43 @@ def test_hold_burst_skips_returning_devices_and_approved_rows(pg):
     ratings.hold_burst(["burst_pair"], key, None, None, pg_write(pg), datetime.now(timezone.utc))
     held = rows(pg, "SELECT device_hash FROM survey_ratings WHERE status = 'held'")
     assert [r["device_hash"] for r in held] == ["d1"]
+
+
+def test_burst_queries_run_and_a_held_burst_pauses_its_scope(pg):
+    import ratings
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    key = {"professor_slug": "jane-doe", "pending_professor_id": None,
+           "course_code": "CS2500", "pending_course_id": None}
+    query_one = pg_query_one(pg)
+    assert ratings.burst_reasons(key, "ip", "pre", "other", query_one, now) == []
+    # A pair burst on another course pauses only that pair.
+    insert(pg, "d1", "jane-doe", None, "CS3500", None, status="held")
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET hold_reasons = 'no_timer,burst_pair'")
+    pg.commit()
+    assert ratings.burst_reasons(key, "ip", "pre", "other", query_one, now) == []
+    # A professor burst pauses every course of theirs, until a reviewer clears it.
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET hold_reasons = 'no_timer,burst_prof'")
+    pg.commit()
+    assert ratings.burst_reasons(key, "ip", "pre", "other", query_one, now) == ["burst_pause"]
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET status = 'accepted'")
+    pg.commit()
+    assert ratings.burst_reasons(key, "ip", "pre", "other", query_one, now) == []
+
+
+def test_pair_taught_reads_the_real_banner_table(pg):
+    import ratings
+
+    truncate(pg, "banner_course_instructors")
+    with pg.cursor() as cur:
+        cur.execute(
+            "INSERT INTO banner_course_instructors (subject_course, instructor_key, professor_slug, "
+            "match_method, terms_taught, sections, first_term_code, last_term_code, last_term_label) "
+            "VALUES ('CS2500', 'k1', 'jane-doe', 'exact', 1, 1, '202510', '202510', 'Fall 2024')")
+    pg.commit()
+    assert ratings.pair_taught("jane-doe", "CS2500", pg_query_one(pg))
+    assert not ratings.pair_taught("jane-doe", "CS3500", pg_query_one(pg))

@@ -157,3 +157,9 @@ def test_validate_term_window_is_four_years_plus_a_year_each_side():
         assert rc.validate_submission(_body(term=term), 2026)[1] is None
     for term in ("Summer 2 2021", "Spring 2028"):
         assert rc.validate_submission(_body(term=term), 2026)[1] == "Invalid term"
+
+
+def test_a_pair_banner_and_rmp_never_saw_is_held_for_review():
+    assert rc.assess(30, "campus", [], False, None, unverified_pair=True) == ("held", ["unverified_pair"])
+    assert rc.assess(30, "other", ["burst_prof"], True, None, unverified_pair=True) == (
+        "held", ["burst_prof", "unverified_pair", "duplicate_comment"])

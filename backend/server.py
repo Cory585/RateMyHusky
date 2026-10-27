@@ -270,7 +270,12 @@ def _timing_log(response):
 
 @app.errorhandler(HTTPException)
 def _http_error(e):
-    """404/405/429 and every other HTTP error as JSON; the frontend reads the status."""
+    """404/405/429 and every other HTTP error as JSON; the frontend reads the status.
+
+    A limiter 429 never names its bucket ("20 per 1 hour"): that tells a client which
+    key it hit, and so whether a fresh device token gets around it."""
+    if e.code == 429:
+        return jsonify({"error": "Rate limit reached. Please try again later."}), 429
     return jsonify({"error": e.description}), e.code
 
 
@@ -2099,8 +2104,13 @@ def rate_submit():
     chash = rating_checks.comment_hash(clean["comment"])
     duplicate = ratings.duplicate_comment(chash, existing["id"] if existing else None, query_one)
     bursts = ratings.burst_reasons(key, ip_hash, prefix_hash, network_type, query_one, now)
+    # A pending professor or course counts nowhere until a reviewer approves it, so only
+    # a known pair is checked against who Banner and RMP have teaching the course.
+    unverified = (bool(key["professor_slug"]) and bool(key["course_code"])
+                  and not ratings.pair_taught(key["professor_slug"], key["course_code"], query_one))
     status, reasons = rating_checks.assess(fill_seconds, network_type, bursts, duplicate, moderation_action,
-                                           edit=bool(existing) and existing["status"] == "accepted")
+                                           edit=bool(existing) and existing["status"] == "accepted",
+                                           unverified_pair=unverified)
     row = {
         **key,
         "term_label": clean["term_label"], "rating": clean["rating"], "hours": clean["hours"],

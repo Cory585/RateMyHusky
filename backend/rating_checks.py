@@ -156,11 +156,13 @@ def moderate(comment, score=moderation.score_texts):
         return "unavailable"
 
 
-def assess(fill_seconds, network_type, bursts, duplicate_comment, moderation_action, edit=False):
+def assess(fill_seconds, network_type, bursts, duplicate_comment, moderation_action, edit=False,
+           unverified_pair=False):
     """("rejected", [...]) | ("held", reasons) | ("accepted", []).
 
     edit: this replaces an accepted rating. The form prefills the earlier answers,
     so a quick update is normal and only has to clear EDIT_MIN_FILL_SECONDS.
+    unverified_pair: neither Banner nor RMP has this professor teaching this course.
     """
     if moderation_action == "block":
         return "rejected", ["moderation_block"]
@@ -174,6 +176,8 @@ def assess(fill_seconds, network_type, bursts, duplicate_comment, moderation_act
     if network_type == "datacenter":
         reasons.append("datacenter")
     reasons.extend(bursts)
+    if unverified_pair:
+        reasons.append("unverified_pair")
     if duplicate_comment:
         reasons.append("duplicate_comment")
     if moderation_action == "review":
