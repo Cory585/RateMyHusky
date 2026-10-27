@@ -97,4 +97,5 @@ def test_ask_log_purge_starts_off_the_request_thread_on_railway(monkeypatch):
         assert started == []        # off Railway: never
         monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
         server.purge_ask_log_in_background()
+        server.purge_ask_log_in_background()   # claimed by the first: no second thread
     assert started == [server._purge_ask_log_job]

@@ -366,18 +366,25 @@ if not ORACLE_DATABASE_URL:
     raise RuntimeError("ORACLE_DATABASE_URL environment variable is required")
 
 _pool = None
+_pool_lock = Lock()
+
 
 def _get_pool():
     global _pool
-    if _pool is None:
-        _pool = ThreadedConnectionPool(5, 10, ORACLE_DATABASE_URL, sslmode="require",
-                                       connect_timeout=5,
-                                       # UTC: the Groq budget, throttle and usage-alert
-                                       # queries take "today" from the session, and the
-                                       # Python side counts days in UTC.
-                                       options="-c statement_timeout=5000 -c timezone=UTC",
-                                       keepalives=1, keepalives_idle=30,
-                                       keepalives_interval=10, keepalives_count=3)
+    if _pool is not None:
+        return _pool
+    # Locked: two threads creating it at once (the purge thread starts alongside the
+    # first request after a boot) would each open a pool and leak one.
+    with _pool_lock:
+        if _pool is None:
+            _pool = ThreadedConnectionPool(5, 10, ORACLE_DATABASE_URL, sslmode="require",
+                                           connect_timeout=5,
+                                           # UTC: the Groq budget, throttle and usage-alert
+                                           # queries take "today" from the session, and the
+                                           # Python side counts days in UTC.
+                                           options="-c statement_timeout=5000 -c timezone=UTC",
+                                           keepalives=1, keepalives_idle=30,
+                                           keepalives_interval=10, keepalives_count=3)
     return _pool
 
 # ──────────────────────────────────────────────
@@ -685,14 +692,19 @@ _ask_log_purge = {"last": 0.0}
 _ask_log_purge_lock = Lock()
 
 
-def purge_old_ask_log(write_fn=None, now=None):
-    """Delete ask_log rows past retention, at most once an hour per process;
-    best-effort, since _chat_write logs a failure and the next hour retries."""
+def _claim_ask_log_purge(now=None):
+    """True for the one caller per ASK_LOG_PURGE_EVERY that should run the purge."""
     now = time.time() if now is None else now
     with _ask_log_purge_lock:
         if now - _ask_log_purge["last"] < ASK_LOG_PURGE_EVERY:
-            return
+            return False
         _ask_log_purge["last"] = now
+        return True
+
+
+def delete_old_ask_log(write_fn=None):
+    """Delete a batch of ask_log rows past retention; best-effort, since _chat_write
+    logs a failure and the next hour retries."""
     # Postgres has no DELETE ... LIMIT, so the batch is picked in a subquery
     # (by created_at, which al_created indexes).
     (write_fn or _chat_write)(
@@ -701,18 +713,24 @@ def purge_old_ask_log(write_fn=None, now=None):
         (ASK_LOG_RETENTION_DAYS, ASK_LOG_PURGE_BATCH))
 
 
+def purge_old_ask_log(write_fn=None, now=None):
+    """delete_old_ask_log at most once an hour per process."""
+    if _claim_ask_log_purge(now):
+        delete_old_ask_log(write_fn)
+
+
 def _purge_ask_log_job():
     with app.app_context():   # get_db() keeps its connection on flask.g
-        purge_old_ask_log()
+        delete_old_ask_log()
 
 
 @app.before_request
 def purge_ask_log_in_background():
     """Start the hourly purge from whatever request comes in first, on its own
     thread: it runs whether or not Ask is on, and no user waits for the DELETE.
-    Railway only, so tests and local dev never delete from the database."""
-    if (os.getenv("RAILWAY_ENVIRONMENT")
-            and time.time() - _ask_log_purge["last"] >= ASK_LOG_PURGE_EVERY):
+    Railway only, so local dev never deletes from the database. Claimed here, before
+    the thread starts, so a burst of requests at the hour starts just one."""
+    if os.getenv("RAILWAY_ENVIRONMENT") and _claim_ask_log_purge():
         Thread(target=_purge_ask_log_job, daemon=True).start()
 
 
