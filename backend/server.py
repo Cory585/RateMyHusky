@@ -313,8 +313,13 @@ CACHE_MAX_SIZE = 5000
 
 _feedback_lock = Lock()
 _feedback_count = 0
+_account_feedback_count = 0
 _feedback_date = None   # "YYYY-MM-DD" UTC, resets counter each day
-FEEDBACK_DAILY_LIMIT = 300
+FEEDBACK_DAILY_LIMIT = 80
+# Requests with a verified account get their own allowance, so anonymous reports can't
+# use up the day and block a data-deletion request. 80 + 15 + 3 usage alerts fit
+# Resend's free 100/day.
+ACCOUNT_FEEDBACK_DAILY_LIMIT = 15
 # feedback types that require a reply email and carry the signed-in account's verified sub,
 # so support can act on the right ask_log rows (review an appeal, or erase the user's data)
 _ACCOUNT_FEEDBACK_TYPES = {"banappeal", "datadeletion"}
@@ -1771,7 +1776,7 @@ def bookmarks_remove():
 @app.route("/api/feedback", methods=["POST"])
 @limiter.limit("10 per day")
 def submit_feedback():
-    global _feedback_count, _feedback_date
+    global _feedback_count, _account_feedback_count, _feedback_date
 
     data = request.get_json(silent=True) or {}
     # Non-string values (123, null) count as missing instead of crashing .strip().
@@ -1838,10 +1843,15 @@ def submit_feedback():
     with _feedback_lock:
         if _feedback_date != today:
             _feedback_date = today
-            _feedback_count = 0
-        if _feedback_count >= FEEDBACK_DAILY_LIMIT:
-            return jsonify({"error": "Daily feedback limit reached. Please try again tomorrow."}), 429
-        _feedback_count += 1
+            _feedback_count = _account_feedback_count = 0
+        if appeal_account:
+            if _account_feedback_count >= ACCOUNT_FEEDBACK_DAILY_LIMIT:
+                return jsonify({"error": "Daily feedback limit reached. Please try again tomorrow."}), 429
+            _account_feedback_count += 1
+        else:
+            if _feedback_count >= FEEDBACK_DAILY_LIMIT:
+                return jsonify({"error": "Daily feedback limit reached. Please try again tomorrow."}), 429
+            _feedback_count += 1
 
     resend_api_key = os.getenv("RESEND_API_KEY")
     if not resend_api_key:

@@ -105,3 +105,45 @@ def test_overlong_email_is_rejected(monkeypatch):
     resp = _post(monkeypatch, feedbackType="bug", description="hi", email="a" * 250 + "@x.com")
     assert resp.status_code == 400
     assert "Invalid email" in resp.get_json()["error"]
+
+
+def test_daily_cap_leaves_resend_free_tier_headroom(monkeypatch):
+    # Resend's free tier sends 100 a day across feedback and usage alerts; stop feedback at 80.
+    import server
+    from datetime import datetime, timezone
+    monkeypatch.setattr(server, "_feedback_date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    monkeypatch.setattr(server, "_feedback_count", 79)
+    assert _post(monkeypatch, feedbackType="bug", description="hi").status_code == 500  # the 80th, not configured
+    resp = _post(monkeypatch, feedbackType="bug", description="hi")
+    assert resp.status_code == 429 and "Daily feedback limit" in resp.get_json()["error"]
+
+
+def test_signed_in_requests_get_past_a_full_anonymous_cap(monkeypatch):
+    # 80 anonymous reports cost an attacker about $0.12 in CAPTCHA solves; they mustn't
+    # block a data-deletion request. A ban appeal with no verified account shares the cap.
+    import server
+    from datetime import datetime, timezone
+    monkeypatch.setattr(server, "_feedback_date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    monkeypatch.setattr(server, "_feedback_count", 80)
+    monkeypatch.setattr(server, "_account_feedback_count", 0, raising=False)
+    for t in ("datadeletion", "banappeal"):
+        resp = _post(monkeypatch, feedbackType=t, description="hi", email="a@northeastern.edu",
+                     accountSub=_account_token())
+        assert resp.get_json()["error"] == "Email service not configured", t
+    resp = _post(monkeypatch, feedbackType="banappeal", description="hi", email="a@northeastern.edu")
+    assert resp.status_code == 429
+
+
+def test_signed_in_allowance_has_its_own_cap(monkeypatch):
+    import server
+    from datetime import datetime, timezone
+    monkeypatch.setattr(server, "_feedback_date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    monkeypatch.setattr(server, "_feedback_count", 0)
+    monkeypatch.setattr(server, "_account_feedback_count", server.ACCOUNT_FEEDBACK_DAILY_LIMIT - 1, raising=False)
+    body = dict(feedbackType="datadeletion", description="hi", email="a@northeastern.edu",
+                accountSub=_account_token())
+    assert _post(monkeypatch, **body).status_code == 500  # the last one, not configured
+    resp = _post(monkeypatch, **body)
+    assert resp.status_code == 429 and "Daily feedback limit" in resp.get_json()["error"]
+    # Resend's free 100/day also covers up to 3 usage alerts.
+    assert server.FEEDBACK_DAILY_LIMIT + server.ACCOUNT_FEEDBACK_DAILY_LIMIT + 3 <= 100
