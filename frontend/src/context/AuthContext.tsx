@@ -139,6 +139,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('message', handler);
   }, [fetchUser]);
 
+  // The token is shared by every tab, so a sign-in or sign-out in one tab updates
+  // the others instead of leaving them showing the old account.
+  useEffect(() => {
+    const handler = (e: StorageEvent) => {
+      if (e.key === TOKEN_KEY || e.key === null) fetchUser();
+    };
+    window.addEventListener('storage', handler);
+    return () => window.removeEventListener('storage', handler);
+  }, [fetchUser]);
+
   const login = useCallback(() => {
     const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
     const returnTo = window.location.pathname + window.location.search;
