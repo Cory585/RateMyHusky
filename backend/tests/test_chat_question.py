@@ -67,3 +67,17 @@ def test_kill_switch_logs_nothing():
     deps = types.SimpleNamespace(chat_enabled=False, log_fn=lambda sql, params: logged.append(params))
     _, code = handle_question("is guha hard", "user-123", "iphash", deps)
     assert code == 503 and logged == []
+
+def test_ask_log_purge_runs_at_most_hourly(monkeypatch):
+    import server
+    monkeypatch.setitem(server._ask_log_purge, "last", 0.0)
+    calls = []
+    write = lambda sql, params: calls.append((sql, params))
+    server.purge_old_ask_log(write, now=10_000)
+    server.purge_old_ask_log(write, now=10_000 + 60)
+    assert len(calls) == 1
+    sql, params = calls[0]
+    assert sql.startswith("DELETE FROM ask_log WHERE created_at <")
+    assert params[0] == server.ASK_LOG_RETENTION_DAYS
+    server.purge_old_ask_log(write, now=10_000 + server.ASK_LOG_PURGE_EVERY + 1)
+    assert len(calls) == 2

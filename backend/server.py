@@ -608,6 +608,33 @@ def _chat_write_rc(sql, params=None):
     conn.commit()
     return cur.rowcount
 
+# ask_log keeps each question with its account id and ip_hash; rows older than this
+# are deleted. The abuse ladder only reads the last STRIKE_WINDOW_DAYS (7) and the
+# budget only today's, so 30 days leaves room for appeals and debugging.
+ASK_LOG_RETENTION_DAYS = 30
+ASK_LOG_PURGE_EVERY = 3600          # seconds between purge attempts per process
+ASK_LOG_PURGE_BATCH = 5000          # bounded so one DELETE stays inside statement_timeout
+_ask_log_purge = {"last": 0.0}
+_ask_log_purge_lock = Lock()
+
+
+def purge_old_ask_log(write_fn=None, now=None):
+    """Delete ask_log rows past retention, at most once an hour per process. Runs on
+    the question path, so it only happens while Ask is in use; best-effort, a failure
+    is logged and retried an hour later."""
+    now = time.time() if now is None else now
+    with _ask_log_purge_lock:
+        if now - _ask_log_purge["last"] < ASK_LOG_PURGE_EVERY:
+            return
+        _ask_log_purge["last"] = now
+    try:
+        (write_fn or _chat_write)(
+            "DELETE FROM ask_log WHERE created_at < now() - %s * INTERVAL '1 day' LIMIT %s",
+            (ASK_LOG_RETENTION_DAYS, ASK_LOG_PURGE_BATCH))
+    except Exception as e:
+        print(f"purge_old_ask_log: failed, retrying in an hour: {e}")
+
+
 def _write(sql, params=None):
     """Write helper for user-facing mutations (bookmarks add/remove): execute +
     commit, retry once on a stale connection (mirrors query()). Unlike
@@ -1087,6 +1114,8 @@ def chat():
         return jsonify({"mode": "error", "message": "Sign in to use Ask mode."}), 401
     ip_hash = _hash_ip(get_real_ip())
     payload, code = handle_question(q, session_token, ip_hash, deps)
+    if CHAT_ENABLED:
+        purge_old_ask_log()
     return jsonify(payload), code
 
 
