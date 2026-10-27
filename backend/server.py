@@ -464,12 +464,13 @@ def _turnstile_accepts(verdict):
             or _is_preview_origin(_origin_host(f"https://{hostname}")))
 
 
-def _turnstile_gate(token, label):
+def _turnstile_gate(token, label, unavailable):
     """None when the CAPTCHA passes (or is off, in local dev), else the (status, error)
-    to answer with. Shared by feedback and ratings so the two fail the same way."""
+    to answer with. Shared by feedback and ratings so the two fail the same way;
+    `unavailable` is the form's own message for when the CAPTCHA isn't set up."""
     if _turnstile_unconfigured():
         print(f"[{label}] TURNSTILE_SECRET_KEY not configured")
-        return 503, "This form is temporarily unavailable"
+        return 503, unavailable
     if not os.getenv("TURNSTILE_SECRET_KEY"):
         return None
     if not token or not isinstance(token, str):
@@ -1803,8 +1804,8 @@ def _auth_flow(state):
 
 
 def _stale_auth_flows():
-    """Cookie names of this browser's sign-ins past the newest AUTH_FLOW_MAX - 1 (room
-    for the one starting now), oldest first by their start time; unreadable ones too."""
+    """Cookie names of this browser's sign-ins to drop so the one starting now fits:
+    all but the newest AUTH_FLOW_MAX - 1 by start time, unreadable ones counting oldest."""
     flows = []
     for name in request.cookies:
         if name.startswith(AUTH_FLOW_COOKIE):
@@ -2120,7 +2121,7 @@ def submit_feedback():
         return jsonify({"error": "Sign in required"}), 401
 
     # Verify Cloudflare Turnstile CAPTCHA
-    failed = _turnstile_gate(turnstile_token, "feedback")
+    failed = _turnstile_gate(turnstile_token, "feedback", "Feedback is temporarily unavailable")
     if failed:
         status, error = failed
         return jsonify({"error": error}), status
@@ -2236,8 +2237,11 @@ def _shared_network():
     return _network_type() in ("campus", "relay")
 
 
+RATINGS_UNAVAILABLE = "Ratings are not available right now"
+
+
 def _rating_unavailable():
-    return jsonify({"error": "Ratings are not available right now"}), 503
+    return jsonify({"error": RATINGS_UNAVAILABLE}), 503
 
 
 def _rating_response(body, status, token=None):
@@ -2306,7 +2310,7 @@ def rate_submit():
         return _rating_response({"error": err}, 400)
 
     # 4. Turnstile
-    failed = _turnstile_gate(body.get("turnstileToken"), "rate")
+    failed = _turnstile_gate(body.get("turnstileToken"), "rate", RATINGS_UNAVAILABLE)
     if failed:
         status, error = failed
         return _rating_response({"error": error}, status)
