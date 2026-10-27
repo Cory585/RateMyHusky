@@ -1677,10 +1677,29 @@ def _login_frontend():
     return origin if _is_preview_origin(origin) else FRONTEND_URL
 
 
-def _callback_frontend():
+def _callback_frontend(flow):
     """The frontend the callback returns to; the cookie is client-held, so re-check it."""
-    origin = request.cookies.get("auth_origin", "")
-    return origin if _is_preview_origin(origin) else FRONTEND_URL
+    origin = (flow or {}).get("origin")
+    return origin if isinstance(origin, str) and _is_preview_origin(origin) else FRONTEND_URL
+
+
+# Each sign-in keeps its own cookie, named after its state, holding where to return,
+# whether it is a popup and which frontend it started on. With shared cookies, a
+# second tab starting a sign-in overwrote the first's, which then failed the state check.
+AUTH_FLOW_COOKIE = "auth_flow_"
+_STATE_RE = re.compile(r"^[A-Za-z0-9_-]{20,64}$")   # secrets.token_urlsafe output
+
+
+def _auth_flow(state):
+    """The {"returnTo", "popup", "origin"} saved when this browser started sign-in
+    `state`, or None when it didn't start one (or it expired)."""
+    if not _STATE_RE.match(state or ""):
+        return None
+    try:
+        flow = json.loads(request.cookies.get(AUTH_FLOW_COOKIE + state, ""))
+    except ValueError:
+        return None
+    return flow if isinstance(flow, dict) else None
 
 
 def _get_redirect_uri(frontend):
@@ -1702,18 +1721,16 @@ def auth_google():
         "response_type": "code",
         "scope": "openid email profile",
         "hd": "husky.neu.edu",
-        # Bound to this browser by the auth_state cookie and checked on the callback,
+        # Bound to this browser by its auth_flow_ cookie and checked on the callback,
         # so nobody can complete a sign-in into their account in someone else's browser.
         "state": state,
     }
-    is_popup = request.args.get("popup") == "1"
-    resp = make_response(redirect(f"{GOOGLE_AUTH_URL}?{urlencode(params)}"))
-    resp.set_cookie("auth_state", state, max_age=600, httponly=True, samesite="None", secure=True)
-    resp.set_cookie("auth_return_to", return_to, max_age=600, httponly=True, samesite="None", secure=True)
-    if is_popup:
-        resp.set_cookie("auth_popup", "1", max_age=600, httponly=True, samesite="None", secure=True)
+    flow = {"returnTo": return_to, "popup": request.args.get("popup") == "1"}
     if frontend != FRONTEND_URL:
-        resp.set_cookie("auth_origin", frontend, max_age=600, httponly=True, samesite="None", secure=True)
+        flow["origin"] = frontend
+    resp = make_response(redirect(f"{GOOGLE_AUTH_URL}?{urlencode(params)}"))
+    resp.set_cookie(AUTH_FLOW_COOKIE + state, json.dumps(flow), max_age=600,
+                    httponly=True, samesite="None", secure=True)
     return resp
 
 
@@ -1721,11 +1738,12 @@ def auth_google():
 @limiter.limit("10 per minute")
 def auth_google_callback():
     code = request.args.get("code")
-    frontend = _callback_frontend()
+    state = request.args.get("state", "")
+    flow = _auth_flow(state)
+    frontend = _callback_frontend(flow)
     if not code:
         return redirect(f"{frontend}?auth_error=no_code")
-    expected_state = request.cookies.get("auth_state", "")
-    if not expected_state or not hmac.compare_digest(request.args.get("state", ""), expected_state):
+    if flow is None:
         return redirect(f"{frontend}?auth_error=state_mismatch")
 
     try:
@@ -1765,9 +1783,7 @@ def auth_google_callback():
     }
     token = pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
-    is_popup = request.cookies.get("auth_popup") == "1"
-
-    if is_popup:
+    if flow.get("popup") is True:
         # Desktop popup: post message to opener and close
         resp = make_response(f"""
         <html><body><script>
@@ -1775,18 +1791,15 @@ def auth_google_callback():
           window.close();
         </script></body></html>
         """)
-        resp.delete_cookie("auth_popup")
     else:
         # Mobile redirect: pass token via URL fragment (not querystring, so it's not logged)
-        return_to = request.cookies.get("auth_return_to", "/")
-        from urllib.parse import urlparse
+        return_to = flow.get("returnTo")
+        return_to = return_to if isinstance(return_to, str) else "/"
         parsed = urlparse(return_to)
         if parsed.scheme or parsed.netloc or not return_to.startswith("/"):
             return_to = "/"
         resp = make_response(redirect(f"{frontend}{return_to}#auth_token={token}"))
-        resp.delete_cookie("auth_return_to")
-    resp.delete_cookie("auth_origin")
-    resp.delete_cookie("auth_state")
+    resp.delete_cookie(AUTH_FLOW_COOKIE + state, httponly=True, samesite="None", secure=True)
     return resp
 
 

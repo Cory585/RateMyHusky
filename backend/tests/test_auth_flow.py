@@ -1,4 +1,5 @@
 import datetime
+from urllib.parse import parse_qs, urlparse
 
 import jwt
 import server
@@ -8,13 +9,27 @@ def _client():
     return server.app.test_client()
 
 
-def test_sign_in_sets_a_state_and_sends_it_to_google():
-    resp = _client().get("/api/auth/google")
+def _start(client, query=""):
+    """Start a sign-in; returns its state (as sent to Google)."""
+    resp = client.get("/api/auth/google" + query)
     assert resp.status_code == 302
-    state_cookie = [c for c in resp.headers.getlist("Set-Cookie") if c.startswith("auth_state=")]
-    assert state_cookie
-    state = state_cookie[0].split(";")[0].split("=", 1)[1]
-    assert f"state={state}" in resp.headers["Location"]
+    state = parse_qs(urlparse(resp.headers["Location"]).query)["state"][0]
+    cookies = [c for c in resp.headers.getlist("Set-Cookie") if c.startswith(server.AUTH_FLOW_COOKIE + state + "=")]
+    assert cookies, "each sign-in stores a cookie named after its state"
+    return state
+
+
+def _fake_google(monkeypatch):
+    class Resp:
+        def __init__(self, body):
+            self.status_code, self._body = 200, body
+
+        def json(self):
+            return self._body
+
+    monkeypatch.setattr(server.http_requests, "post", lambda *a, **k: Resp({"access_token": "at"}))
+    monkeypatch.setattr(server.http_requests, "get", lambda *a, **k: Resp(
+        {"id": "u1", "email": "t@husky.neu.edu", "name": "T", "hd": "husky.neu.edu"}))
 
 
 def test_callback_without_matching_state_is_refused(monkeypatch):
@@ -23,9 +38,31 @@ def test_callback_without_matching_state_is_refused(monkeypatch):
     client = _client()
     resp = client.get("/api/auth/google/callback?code=attacker-code&state=x")
     assert "auth_error=state_mismatch" in resp.headers["Location"]
-    client.set_cookie("auth_state", "real-state")
-    resp = client.get("/api/auth/google/callback?code=attacker-code&state=other")
+    _start(client)
+    resp = client.get("/api/auth/google/callback?code=attacker-code&state=" + "a" * 43)
     assert "auth_error=state_mismatch" in resp.headers["Location"]
+
+
+def test_two_tabs_signing_in_at_once_both_succeed(monkeypatch):
+    _fake_google(monkeypatch)
+    client = _client()
+    first = _start(client, "?returnTo=/compare")
+    second = _start(client, "?popup=1")
+    resp = client.get(f"/api/auth/google/callback?code=c&state={first}")
+    assert resp.status_code == 302 and "/compare#auth_token=" in resp.headers["Location"]
+    resp = client.get(f"/api/auth/google/callback?code=c&state={second}")
+    assert resp.status_code == 200 and b"auth_complete" in resp.data
+    # each state works once: its cookie is deleted when used
+    resp = client.get(f"/api/auth/google/callback?code=c&state={first}")
+    assert "auth_error=state_mismatch" in resp.headers["Location"]
+
+
+def test_return_to_cannot_point_off_site(monkeypatch):
+    _fake_google(monkeypatch)
+    client = _client()
+    state = _start(client, "?returnTo=//evil.example/")
+    resp = client.get(f"/api/auth/google/callback?code=c&state={state}")
+    assert resp.headers["Location"].startswith(server.FRONTEND_URL + "/#auth_token=")
 
 
 def _token(**claims):
