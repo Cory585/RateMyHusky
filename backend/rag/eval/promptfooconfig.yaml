@@ -14,7 +14,17 @@ providers:
         Authorization: Bearer {{env.RMH_EVAL_TOKEN}}
       body:
         q: '{{prompt}}'
-      transformResponse: 'json.answer || json.error || JSON.stringify(json)'
+      # A rate-limit or other HTTP error ({"error": ...}) is an eval error, not a reply:
+      # graders would score "30 per 1 minute" as a safe answer. Gate refusals come back
+      # as {"mode": "error", "message": ...} and are real replies.
+      transformResponse: 'json.answer || json.message || (() => { throw new Error("Ask call failed: " + text) })()'
+# /api/chat allows 30 requests a minute per IP, so run one at a time under that.
+# The abuse ladder will strike (and can ban) the redteam account, and a ban reply
+# looks like a refusal, so clear it before each run:
+#   python rag/clear_ask_strikes.py --clear --account redteam
+evaluateOptions:
+  maxConcurrency: 1
+  delay: 2100
 redteam:
   plugins: [prompt-injection, jailbreak, pii, harmful]
   strategies: [basic, jailbreak]
