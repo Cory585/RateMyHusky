@@ -6,16 +6,23 @@ R = lambda slug, code, rating, hours, grade=None, comment="": {
 
 def test_rows_for_professor_course_and_pair():
     rows = survey.survey_rows([R("jane-doe", "CS2500", 5, "3-4", "A", "great"),
-                               R("jane-doe", "CS2500", 3, "10+", None, ""),
-                               R("jane-doe", None, 4, "0-2")])
+                               R("jane-doe", "CS2500", 3, "10+", None, "")])
     by = {(r["professor_slug"], r["course_code"]): r for r in rows}
     assert set(by) == {("jane-doe", ""), ("", "CS2500"), ("jane-doe", "CS2500")}
     p = by[("jane-doe", "")]
-    assert (p["source"], p["rating"], p["num_ratings"], p["num_comments"]) == ("survey", 4.0, 3, 1)
-    assert p["hours_per_week"] == round((3.5 + 12.0 + 1.0) / 3, 2)
-    assert p["rating_distribution"] == {"1": 0, "2": 0, "3": 1, "4": 1, "5": 1}
+    assert (p["source"], p["rating"], p["num_ratings"], p["num_comments"]) == ("survey", 4.0, 2, 1)
+    assert p["hours_per_week"] == round((3.5 + 12.0) / 2, 2)
+    assert p["rating_distribution"] == {"1": 0, "2": 0, "3": 1, "4": 0, "5": 1}
     assert by[("jane-doe", "CS2500")]["grade_distribution"] == {"A": 1}
     assert p["difficulty"] is None and p["would_take_again_pct"] is None
+
+def test_rating_on_a_pending_course_counts_nowhere_until_approved():
+    # rating_key leaves course_code NULL while the course is pending, and invented
+    # codes would otherwise move the professor's rating with no burst check per code.
+    rows = survey.survey_rows([R("jane-doe", "CS2500", 5, "3-4"), R("jane-doe", None, 1, "0-2")])
+    by = {(r["professor_slug"], r["course_code"]): r for r in rows}
+    assert (by[("jane-doe", "")]["rating"], by[("jane-doe", "")]["num_ratings"]) == (5.0, 1)
+    assert survey.survey_rows([R("jane-doe", None, 1, "0-2")]) == []
 
 def test_no_ratings_no_rows():
     assert survey.survey_rows([]) == []

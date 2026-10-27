@@ -14,6 +14,7 @@ from prof_aliases import rmp_link_key
 # The burst thresholds count prior ratings in the window: the route counts before it saves.
 PAIR_BURST = 5  # prior new-device ratings for one professor + course in an hour
 PAIR_PACE_FACTOR = 3  # ...and this many times the pair's 30-day mean hourly count
+PROF_BURST = 10  # prior ratings for one professor in an hour, any device or course; same pace factor
 IP_BURST = 10  # prior ratings from one IP hash in an hour
 PREFIX_BURST = 25  # prior ratings from one /24 or /64 hash in an hour
 COUNTER_MIN = 25  # the "huskies this term" counter is hidden below this
@@ -30,8 +31,9 @@ RATING_COLUMNS = (
 
 _KEY_COLUMNS = ("professor_slug", "pending_professor_id", "course_code", "pending_course_id")
 _KEY_MATCH = " AND ".join(f"{c} IS NOT DISTINCT FROM %s" for c in _KEY_COLUMNS)
+_PROF_MATCH = " AND ".join(f"{c} IS NOT DISTINCT FROM %s" for c in _KEY_COLUMNS[:2])
 _NO_NETWORK_BURST = ("campus", "relay")
-_BURST_REASONS = ("burst_pair", "burst_ip", "burst_prefix")
+_BURST_REASONS = ("burst_pair", "burst_prof", "burst_ip", "burst_prefix")
 
 
 def term_start(now):
@@ -123,7 +125,11 @@ def duplicate_comment(comment_hash, exclude_id, query_one):
 
 
 def burst_reasons(key, ip_hash, prefix_hash, network_type, query_one, now):
-    """Which of burst_pair / burst_ip / burst_prefix this submission trips."""
+    """Which of burst_pair / burst_prof / burst_ip / burst_prefix this submission trips.
+
+    burst_prof counts every device and course on every network: devices that rated
+    something else first, and invented course codes, both get past the pair count.
+    """
     hour_ago = now - timedelta(hours=1)
     reasons = []
     row = query_one(
@@ -134,6 +140,14 @@ def burst_reasons(key, ip_hash, prefix_hash, network_type, query_one, now):
         pace = row["month"] / 720
         if row["hour"] >= PAIR_BURST and row["hour"] >= PAIR_PACE_FACTOR * pace:
             reasons.append("burst_pair")
+    row = query_one(
+        "SELECT count(*) FILTER (WHERE created_at >= %s) AS hour, count(*) AS month "
+        f"FROM survey_ratings WHERE created_at >= %s AND {_PROF_MATCH}",
+        (hour_ago, now - timedelta(days=30), *_key_params(key)[:2]))
+    if row:
+        pace = row["month"] / 720
+        if row["hour"] >= PROF_BURST and row["hour"] >= PAIR_PACE_FACTOR * pace:
+            reasons.append("burst_prof")
     if network_type not in _NO_NETWORK_BURST:
         for reason, column, value, limit in (
             ("burst_ip", "ip_hash", ip_hash, IP_BURST),
@@ -159,6 +173,7 @@ def hold_burst(reasons, key, ip_hash, prefix_hash, write, now):
     hour_ago = now - timedelta(hours=1)
     where = {
         "burst_pair": (f"new_device = true AND {_KEY_MATCH}", _key_params(key)),
+        "burst_prof": (_PROF_MATCH, _key_params(key)[:2]),
         "burst_ip": ("ip_hash = %s", (ip_hash,)),
         "burst_prefix": ("ip_prefix_hash = %s", (prefix_hash,)),
     }

@@ -39,7 +39,6 @@ from course_page import build_course
 from professor_full import build_payload
 import bookmarks
 import moderation
-import notify
 import ip_networks
 import rating_identity
 import rating_checks
@@ -1908,7 +1907,10 @@ _MIN_RATING_SECRET = 32
 
 
 def _rating_enabled():
-    """A RATING_SECRET shorter than 32 characters counts as unset."""
+    """A RATING_SECRET shorter than 32 characters counts as unset. Deployed (PROXY_SECRET
+    set), a missing Turnstile key turns the form off rather than letting it run without CAPTCHA."""
+    if PROXY_SECRET and not os.getenv("TURNSTILE_SECRET_KEY"):
+        return False
     return bool(RATING_SECRET) and len(RATING_SECRET) >= _MIN_RATING_SECRET
 
 
@@ -1936,10 +1938,18 @@ def _rating_moderation_score(texts):
     return moderation.score_texts(texts, client=_rating_moderation_client)
 
 
+def _rating_body():
+    """The JSON body, or None. silent=True covers malformed JSON but not JSON nested too deep to parse."""
+    try:
+        return request.get_json(silent=True)
+    except RecursionError:
+        return None
+
+
 def _rating_limit_key():
     token = request.cookies.get(rating_identity.DEVICE_COOKIE, "")
     if not rating_identity.valid_device_token(token):
-        body = request.get_json(silent=True)
+        body = _rating_body()
         token = body.get("deviceToken") if isinstance(body, dict) else None
     if _rating_enabled() and rating_identity.valid_device_token(token):
         return rating_identity.keyed_hash(RATING_SECRET, "device", token) + "|" + get_real_ip()
@@ -2015,7 +2025,7 @@ def rate_submit():
     # 1. Secret
     if not _rating_enabled():
         return _rating_unavailable()
-    body = request.get_json(silent=True)
+    body = _rating_body()
     now = datetime.now(timezone.utc)
 
     # 2. Honeypot: look accepted, verify and store nothing
@@ -2063,20 +2073,15 @@ def rate_submit():
     if moderation_action == "block":
         return _rating_response({"error": "comment_blocked"}, 422, device)
 
-    # 8. Pending professor / course; the team emails wait until the rating is saved
+    # 8. Pending professor / course. No team email: invented names cost nothing to
+    # submit, so one email each could flood the inbox and the Resend quota the
+    # feedback form shares. Reviewers find them with `review_ratings.py list`.
     pending_professor_id = pending_course_id = None
-    emails = []
     if clean["new_professor"]:
         name, dept = clean["new_professor"]["name"], clean["new_professor"]["department"]
-        pending_professor_id, created = ratings.pending_professor(name, dept, query_one, _write)
-        if created:
-            emails.append((f"[RateMyHusky] New professor to review: {name}",
-                           f"Name: {name}\nDepartment: {dept or '-'}\n\nReview with: python review_ratings.py list"))
+        pending_professor_id, _ = ratings.pending_professor(name, dept, query_one, _write)
     if new_course:
-        pending_course_id, created = ratings.pending_course(clean["course_code"], new_course, query_one, _write)
-        if created:
-            emails.append((f"[RateMyHusky] New course to review: {clean['course_code']}",
-                           f"Code: {clean['course_code']}\nName: {new_course}\n\nReview with: python review_ratings.py list"))
+        pending_course_id, _ = ratings.pending_course(clean["course_code"], new_course, query_one, _write)
 
     # 9. Replace-or-insert, holds and bursts
     key = ratings.rating_key(clean, pending_professor_id, pending_course_id)
@@ -2098,8 +2103,6 @@ def rate_submit():
     ratings.save_rating(row, existing, _write)
     if bursts:
         ratings.hold_burst(bursts, key, ip_hash, prefix_hash, _write, now)
-    for subject, text in emails:
-        notify.send_team_email(subject, text)
 
     # 10. Clear old IP hashes, at most hourly per process
     if time.time() - _last_ip_purge >= _IP_PURGE_INTERVAL:

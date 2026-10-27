@@ -4,8 +4,10 @@ Same three row kinds as summaries.py: professor (slug, ''), course ('', code),
 professor x course (slug, code). Rating and hours are means rounded to two
 places (hours from each bucket's midpoint); the rating distribution always has
 keys "1"-"5"; grades count only when given. Difficulty and would-take-again
-are not asked, so they stay None. A rating with no course counts toward the
-professor row only.
+are not asked, so they stay None. A rating with no course code is on a pending
+course and counts nowhere until a reviewer approves or merges the course: an
+invented code per rating would otherwise move the professor's rating without
+ever tripping the per-pair burst check.
 """
 
 import os
@@ -45,10 +47,11 @@ def survey_rows(ratings):
     """Summary rows for accepted ratings with a professor. Pure."""
     by_slug, by_code, by_pair = {}, {}, {}
     for r in ratings:
+        if not r["course_code"]:
+            continue
         by_slug.setdefault(r["professor_slug"], []).append(r)
-        if r["course_code"]:
-            by_code.setdefault(r["course_code"], []).append(r)
-            by_pair.setdefault((r["professor_slug"], r["course_code"]), []).append(r)
+        by_code.setdefault(r["course_code"], []).append(r)
+        by_pair.setdefault((r["professor_slug"], r["course_code"]), []).append(r)
     rows = [_row(slug, "", rs) for slug, rs in sorted(by_slug.items())]
     rows += [_row("", code, rs) for code, rs in sorted(by_code.items())]
     rows += [_row(slug, code, rs) for (slug, code), rs in sorted(by_pair.items())]

@@ -178,6 +178,36 @@ def test_pair_burst_needs_both_count_and_pace():
     assert reasons(4, 720) == []
 
 
+PROF_COUNT = "WHERE created_at >= %s AND professor_slug"
+
+
+def test_professor_burst_needs_both_count_and_pace_on_every_network():
+    def reasons(hour, month, net="campus"):
+        f = Fake(one={PROF_COUNT: {"hour": hour, "month": month}})
+        return ratings.burst_reasons(KEY, None, None, net, f.query_one, NOW)
+    assert reasons(10, 720) == ["burst_prof"]
+    assert reasons(10, 720, "relay") == ["burst_prof"]
+    assert reasons(10, 7200) == []
+    assert reasons(9, 720) == []
+
+
+def test_professor_burst_counts_every_device_and_course():
+    # Seasoned devices and invented course codes both dodge the pair count.
+    f = Fake()
+    ratings.burst_reasons(KEY, None, None, "other", f.query_one, NOW)
+    (sql, params), = [c for c in f.calls if PROF_COUNT in c[0]]
+    assert "new_device" not in sql and "course_code" not in sql
+    assert params[2:] == ("jane-doe", None)
+
+
+def test_hold_burst_holds_the_professors_recent_rows_from_every_device():
+    f = Fake()
+    ratings.hold_burst(["burst_prof"], KEY, "ip", "pre", f.write, NOW)
+    (sql, params), = f.writes
+    assert "status = 'accepted'" in sql and "new_device" not in sql and "course_code" not in sql
+    assert params == ("burst_prof", NOW - timedelta(hours=1), "jane-doe", None)
+
+
 def test_hold_burst_holds_recent_accepted_rows_per_tripped_trigger():
     f = Fake()
     ratings.hold_burst(["burst_pair", "burst_ip"], KEY, "ip", "pre", f.write, NOW)
