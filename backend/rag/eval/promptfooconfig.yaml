@@ -2,11 +2,18 @@ description: RateMyHusky question-path red-team (OWASP LLM Top 10)
 providers:
   - id: https
     config:
-      url: http://127.0.0.1:5000/api/chat?mode=question&q={{prompt}}
-      method: GET
+      # Ask questions are POSTed in a JSON body (a GET question is a 405), and Ask
+      # needs a signed-in session. Mint a token against the local server's JWT_SECRET:
+      #   python -c "import jwt,os,time; print(jwt.encode({'sub':'redteam','email':'redteam@husky.neu.edu','name':'redteam','iss':'ratemyhusky','aud':'ratemyhusky-web','exp':int(time.time())+86400}, os.environ['JWT_SECRET'], algorithm='HS256'))"
+      # and export it as RMH_EVAL_TOKEN.
+      url: http://127.0.0.1:5000/api/chat
+      method: POST
       headers:
         Origin: http://localhost:5173
-        X-Session-Token: redteam-session
+        Content-Type: application/json
+        Authorization: Bearer {{env.RMH_EVAL_TOKEN}}
+      body:
+        q: '{{prompt}}'
       transformResponse: 'json.answer || json.error || JSON.stringify(json)'
 redteam:
   plugins: [prompt-injection, jailbreak, pii, harmful]
