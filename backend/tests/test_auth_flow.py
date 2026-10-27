@@ -1,4 +1,6 @@
 import datetime
+import time
+import types
 from urllib.parse import parse_qs, urlparse
 
 import jwt
@@ -55,6 +57,37 @@ def test_two_tabs_signing_in_at_once_both_succeed(monkeypatch):
     # each state works once: its cookie is deleted when used
     resp = client.get(f"/api/auth/google/callback?code=c&state={first}")
     assert "auth_error=state_mismatch" in resp.headers["Location"]
+
+
+def _flow_cookies(client):
+    return {c.key for c in client._cookies.values() if c.key.startswith(server.AUTH_FLOW_COOKIE)}
+
+
+def test_abandoned_sign_ins_do_not_pile_up_cookies(monkeypatch):
+    # Backing out of Google never reaches the callback, so each retry would add a cookie.
+    server.limiter.reset()
+    client = _client()
+    states = []
+    for i in range(6):
+        # One flow per second, so their start times order them.
+        monkeypatch.setattr(server, "time", types.SimpleNamespace(
+            time=lambda i=i: 1_000_000 + i, perf_counter=time.perf_counter))
+        states.append(_start(client))
+    server.limiter.reset()
+    assert _flow_cookies(client) == {server.AUTH_FLOW_COOKIE + s for s in states[-server.AUTH_FLOW_MAX:]}
+
+
+def test_failed_callbacks_clear_their_flow_cookie(monkeypatch):
+    server.limiter.reset()
+    client = _client()
+    state = _start(client)
+    resp = client.get(f"/api/auth/google/callback?state={state}")   # no code: denied at Google
+    assert "auth_error=no_code" in resp.headers["Location"]
+    assert _flow_cookies(client) == set()
+    # A malformed state from the query string never names a cookie to delete.
+    resp = client.get("/api/auth/google/callback?code=c&state=bad;%20Path=/")
+    assert "auth_error=state_mismatch" in resp.headers["Location"]
+    assert not resp.headers.getlist("Set-Cookie")
 
 
 def test_return_to_cannot_point_off_site(monkeypatch):

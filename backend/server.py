@@ -1762,6 +1762,10 @@ def _callback_frontend(flow):
 # second tab starting a sign-in overwrote the first's, which then failed the state check.
 AUTH_FLOW_COOKIE = "auth_flow_"
 _STATE_RE = re.compile(r"^[A-Za-z0-9_-]{20,64}$")   # secrets.token_urlsafe output
+# Sign-ins one browser keeps open at once. A flow that fails at Google or is backed
+# out of never reaches the callback, so starting another drops the oldest past this;
+# unbounded, retries pile up cookies until the Cookie header is too big to send.
+AUTH_FLOW_MAX = 3
 
 
 def _auth_flow(state):
@@ -1774,6 +1778,26 @@ def _auth_flow(state):
     except ValueError:
         return None
     return flow if isinstance(flow, dict) else None
+
+
+def _stale_auth_flows():
+    """Cookie names of this browser's sign-ins past the newest AUTH_FLOW_MAX - 1 (room
+    for the one starting now), oldest first by their start time; unreadable ones too."""
+    flows = []
+    for name in request.cookies:
+        if name.startswith(AUTH_FLOW_COOKIE):
+            started = (_auth_flow(name[len(AUTH_FLOW_COOKIE):]) or {}).get("t")
+            flows.append((started if isinstance(started, (int, float)) else -1, name))
+    flows.sort(reverse=True)
+    return [name for _, name in flows[AUTH_FLOW_MAX - 1:]]
+
+
+def _end_auth_flow(resp, state):
+    """`resp` with sign-in `state`'s cookie deleted; every callback outcome ends the flow.
+    `state` comes from the query string, so only a well-formed one names a cookie."""
+    if _STATE_RE.match(state or ""):
+        resp.delete_cookie(AUTH_FLOW_COOKIE + state, httponly=True, samesite="None", secure=True)
+    return resp
 
 
 def _get_redirect_uri(frontend):
@@ -1817,10 +1841,12 @@ def auth_google():
         # so nobody can complete a sign-in into their account in someone else's browser.
         "state": state,
     }
-    flow = {"returnTo": return_to, "popup": request.args.get("popup") == "1"}
+    flow = {"returnTo": return_to, "popup": request.args.get("popup") == "1", "t": int(time.time())}
     if frontend != FRONTEND_URL:
         flow["origin"] = frontend
     resp = make_response(redirect(f"{GOOGLE_AUTH_URL}?{urlencode(params)}"))
+    for name in _stale_auth_flows():
+        resp.delete_cookie(name, httponly=True, samesite="None", secure=True)
     resp.set_cookie(AUTH_FLOW_COOKIE + state, json.dumps(flow), max_age=600,
                     httponly=True, samesite="None", secure=True)
     return resp
@@ -1833,10 +1859,14 @@ def auth_google_callback():
     state = request.args.get("state", "")
     flow = _auth_flow(state)
     frontend = _callback_frontend(flow)
+
+    def fail(reason):
+        return _end_auth_flow(redirect(f"{frontend}?auth_error={reason}"), state)
+
     if not code:
-        return redirect(f"{frontend}?auth_error=no_code")
+        return fail("no_code")
     if flow is None:
-        return redirect(f"{frontend}?auth_error=state_mismatch")
+        return fail("state_mismatch")
 
     try:
         token_resp = http_requests.post(GOOGLE_TOKEN_URL, data={
@@ -1847,7 +1877,7 @@ def auth_google_callback():
             "grant_type": "authorization_code",
         }, timeout=10)
         if token_resp.status_code != 200:
-            return redirect(f"{frontend}?auth_error=token_exchange_failed")
+            return fail("token_exchange_failed")
 
         access_token = token_resp.json().get("access_token")
 
@@ -1855,14 +1885,14 @@ def auth_google_callback():
             "Authorization": f"Bearer {access_token}",
         }, timeout=10)
         if user_resp.status_code != 200:
-            return redirect(f"{frontend}?auth_error=userinfo_failed")
+            return fail("userinfo_failed")
     except Exception:
-        return redirect(f"{frontend}?auth_error=timeout")
+        return fail("timeout")
 
     user_info = user_resp.json()
 
     if user_info.get("hd") != "husky.neu.edu":
-        return redirect(f"{frontend}?auth_error=invalid_domain")
+        return fail("invalid_domain")
 
     payload = {
         "sub": user_info["id"],
@@ -1887,8 +1917,7 @@ def auth_google_callback():
         # Mobile redirect: pass token via URL fragment (not querystring, so it's not logged)
         return_to = _safe_return_to(flow.get("returnTo"))
         resp = make_response(redirect(f"{frontend}{return_to}#auth_token={token}"))
-    resp.delete_cookie(AUTH_FLOW_COOKIE + state, httponly=True, samesite="None", secure=True)
-    return resp
+    return _end_auth_flow(resp, state)
 
 
 def _get_auth_token():
