@@ -51,12 +51,16 @@ load_dotenv()
 import types as _types
 
 CHAT_ENABLED = os.getenv("CHAT_ENABLED", "false").lower() == "true"
-_IP_SALT = os.getenv("ASK_IP_SALT", "rmh-default-salt")
+# The ip_hash in ask_log is only as private as this salt: with a known one, every
+# IPv4 hash can be reversed by trying all 2^32 addresses.
+_IP_SALT = os.getenv("ASK_IP_SALT", "")
+if CHAT_ENABLED and not _IP_SALT:
+    raise RuntimeError("ASK_IP_SALT must be set when CHAT_ENABLED is true")
 _chat_pool = KeyPool()
 _chat_adapter = GroqAdapter(_chat_pool)
 
 def _hash_ip(ip):
-    return hashlib.sha256((_IP_SALT + (ip or "")).encode()).hexdigest()[:16]
+    return hmac.new(_IP_SALT.encode(), (ip or "").encode(), hashlib.sha256).hexdigest()[:16]
 
 
 # ──────────────────────────────────────────────
@@ -1009,11 +1013,21 @@ def search():
 # ──────────────────────────────────────────────
 #  Reddit RAG chatbot
 # ──────────────────────────────────────────────
+@app.route("/api/chat", methods=["GET", "POST"])
 @limiter.limit("30 per minute")
-@app.route("/api/chat")
 def chat():
-    q = (request.args.get("q") or "").strip()
-    mode = request.args.get("mode", "keyword")
+    # Keyword search is a GET. Ask questions are POSTed in a JSON body so they stay
+    # out of the query string, and with it out of Vercel's and Railway's access logs.
+    if request.method == "POST":
+        body = request.get_json(silent=True)
+        q = body.get("q") if isinstance(body, dict) else None
+        q = q.strip() if isinstance(q, str) else ""
+        mode = "question"
+    else:
+        q = (request.args.get("q") or "").strip()
+        mode = request.args.get("mode", "keyword")
+        if mode != "keyword":
+            return jsonify({"mode": "error", "message": "Ask questions must be sent as a POST."}), 405
     if len(q) < 2:
         return jsonify({"mode": mode, "results": []})
     if mode == "keyword":

@@ -25,7 +25,7 @@ def test_chat_question_returns_answer(monkeypatch, q_client):
         seen["session_token"] = session_token  # capture what the route passed through
         return {"mode": "question", "answer": "Guha is fair.", "disclaimer": "AI-generated."}, 200
     monkeypatch.setattr(server, "handle_question", _fake)
-    resp = q_client.get("/api/chat?q=is+Guha+hard&mode=question", headers=_auth_headers())
+    resp = q_client.post("/api/chat", json={"q": "is Guha hard"}, headers=_auth_headers())
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["mode"] == "question"
@@ -35,12 +35,12 @@ def test_chat_question_returns_answer(monkeypatch, q_client):
 
 def test_chat_question_requires_account(q_client):
     # account-gated: no Authorization token -> 401, orchestrator never reached
-    resp = q_client.get("/api/chat?q=is+Guha+hard&mode=question",
+    resp = q_client.post("/api/chat", json={"q": "is Guha hard"},
                         headers={"Origin": "http://localhost:5173"})
     assert resp.status_code == 401
 
 def test_chat_question_rejects_invalid_token(q_client):
-    resp = q_client.get("/api/chat?q=is+Guha+hard&mode=question",
+    resp = q_client.post("/api/chat", json={"q": "is Guha hard"},
                         headers={"Origin": "http://localhost:5173", "Authorization": "Bearer not.a.jwt"})
     assert resp.status_code == 401
 
@@ -51,5 +51,18 @@ def test_chat_question_kill_switch(monkeypatch, q_client):
             {"mode": "error", "message": "The question feature is temporarily disabled."}, 503
         ))
     monkeypatch.setattr(server, "CHAT_ENABLED", False)
-    resp = q_client.get("/api/chat?q=is+Guha+hard&mode=question", headers=_auth_headers())
+    resp = q_client.post("/api/chat", json={"q": "is Guha hard"}, headers=_auth_headers())
     assert resp.status_code == 503
+
+def test_chat_question_over_get_is_refused(q_client):
+    # Questions must not travel in the query string (it lands in access logs).
+    resp = q_client.get("/api/chat?q=is+Guha+hard&mode=question", headers=_auth_headers())
+    assert resp.status_code == 405
+
+def test_kill_switch_logs_nothing():
+    import types
+    from rag.chat_question import handle_question
+    logged = []
+    deps = types.SimpleNamespace(chat_enabled=False, log_fn=lambda sql, params: logged.append(params))
+    _, code = handle_question("is guha hard", "user-123", "iphash", deps)
+    assert code == 503 and logged == []
