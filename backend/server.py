@@ -2088,7 +2088,8 @@ def rate_submit():
                                            edit=bool(existing) and existing["status"] == "accepted")
     row = {
         **key,
-        "term_label": clean["term_label"], "rating": clean["rating"], "hours": clean["hours"],
+        "term_label": clean["term_label"], "rating": clean["rating"], "difficulty": clean["difficulty"],
+        "hours": clean["hours"],
         "grade": clean["grade"], "comment": clean["comment"] or None, "comment_hash": chash,
         "status": status, "hold_reasons": ",".join(reasons) or None,
         "device_hash": device_hash, "new_device": new_device,

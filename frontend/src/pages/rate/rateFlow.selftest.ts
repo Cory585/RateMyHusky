@@ -36,7 +36,9 @@ function selftest(): number {
   s = nextStep(s, (a = answer(a, { term: 'Summer 1 2025' })));
   check('term -> overall', s === 'overall');
   s = nextStep(s, (a = answer(a, { rating: 5 })));
-  check('overall -> workload', s === 'workload');
+  check('overall -> difficulty', s === 'difficulty');
+  s = nextStep(s, (a = answer(a, { difficulty: 3 })));
+  check('difficulty -> workload', s === 'workload');
   s = nextStep(s, (a = answer(a, { hours: '5-7' })));
   check('workload -> grade', s === 'grade');
   s = nextStep(s, (a = answer(a, { grade: null })));
@@ -82,6 +84,7 @@ function selftest(): number {
   check('prevStep overall -> otherTerm when no shortcuts', prevStep('overall', ns) === 'otherTerm');
   check('prevStep who is null', prevStep('who', a) === null);
   check('prevStep comment -> grade', prevStep('comment', a) === 'grade');
+  check('prevStep workload -> difficulty', prevStep('workload', a) === 'difficulty');
 
   // firstStep with prefill
   check('firstStep with professor prefilled is course', firstStep({ comment: '', professor: alex }) === 'course');
@@ -97,7 +100,7 @@ function selftest(): number {
   check('prefillCourse null code is undefined', prefillCourse(courses, [], null, june26) === undefined);
   const pf = prefillCourse(courses, [], 'CS2500', june26);
   check('prefillCourse known code', pf?.code === 'CS2500' && pf.isNew === false && same(pf.terms, ['Fall 2024']));
-  const ratedOff: RatedCourse = { code: 'CS4973', name: 'Topics in HCI', pending: false, term: null, rating: 5, hours: '8-10', grade: null, comment: '' };
+  const ratedOff: RatedCourse = { code: 'CS4973', name: 'Topics in HCI', pending: false, term: null, rating: 5, difficulty: null, hours: '8-10', grade: null, comment: '' };
   const pfOff = prefillCourse(courses, [ratedOff], 'CS4973', june26);
   check('prefillCourse finds a rated course the list no longer carries', same(pfOff, { code: 'CS4973', name: 'Topics in HCI', isNew: false, terms: [] }));
 
@@ -129,45 +132,51 @@ function selftest(): number {
   // Misc formatting
   check('formatCode CS4973', formatCode('CS4973') === 'CS 4973');
   check('lastName', lastName('Lucia Nunez') === 'Nunez');
-  check('progressIndex', progressIndex('newProfessor') === 0 && progressIndex('who') === 0 && progressIndex('comment') === 6 && progressIndex('thanks') === 7);
+  check('progressIndex', progressIndex('newProfessor') === 0 && progressIndex('who') === 0 && progressIndex('difficulty') === 4 && progressIndex('comment') === 7 && progressIndex('thanks') === 8);
 
   // buildSubmission
   const start: RateStart = { opened: 'tok', deviceToken: 'dev', counter: 3 };
-  const sub = buildSubmission({ comment: 'ok', professor: newProf, course: newCourse, term: null, rating: 4, hours: '3-4', grade: null }, start, 'ts', 'hp');
+  const sub = buildSubmission({ comment: 'ok', professor: newProf, course: newCourse, term: null, rating: 4, difficulty: 2, hours: '3-4', grade: null }, start, 'ts', 'hp');
   check('buildSubmission new professor and course',
     same(sub.professor, { name: 'Sam Newhire', department: null }) && same(sub.course, { code: 'CS9999', name: 'Brand New' }));
   check('buildSubmission passthrough',
-    sub.term === null && sub.grade === null && sub.rating === 4 && sub.hours === '3-4' && sub.comment === 'ok' &&
+    sub.term === null && sub.grade === null && sub.rating === 4 && sub.difficulty === 2 && sub.hours === '3-4' && sub.comment === 'ok' &&
     sub.opened === 'tok' && sub.deviceToken === 'dev' && sub.website === 'hp' && sub.turnstileToken === 'ts');
   const sub2 = buildSubmission({ ...a, comment: 'x' }, start, 't', '');
   check('buildSubmission existing professor and course', same(sub2.professor, { slug: 'alex-rivera' }) && same(sub2.course, { code: 'CS2500' }));
   const throws = (x: Answers) => { try { buildSubmission(x, start, 't', ''); return false; } catch { return true; } };
   const noTerm: Answers = { ...a, term: undefined };
   const noGradeYet: Answers = { ...a, grade: undefined };
+  const noDifficulty: Answers = { ...a, difficulty: undefined };
+  check('buildSubmission throws on an unanswered difficulty', throws(noDifficulty) && firstStep(noDifficulty) === 'difficulty');
   check('buildSubmission throws on an unanswered term', throws(noTerm) && firstStep(noTerm) === 'term');
   check('buildSubmission throws on an unanswered grade', throws(noGradeYet) && firstStep(noGradeYet) === 'grade');
 
   // Update mode
   const now = new Date(2026, 9, 23);
-  const prior: RatedCourse = { code: 'CS3500', name: 'Object-Oriented Design', pending: false, term: 'Fall 2025', rating: 4, hours: '5-7', grade: 'A-', comment: 'Projects take time.' };
-  const priorB: RatedCourse = { code: 'CS4973', name: 'Topics in HCI', pending: false, term: null, rating: 5, hours: '8-10', grade: null, comment: 'Best course.' };
+  const prior: RatedCourse = { code: 'CS3500', name: 'Object-Oriented Design', pending: false, term: 'Fall 2025', rating: 4, difficulty: 4, hours: '5-7', grade: 'A-', comment: 'Projects take time.' };
+  const priorB: RatedCourse = { code: 'CS4973', name: 'Topics in HCI', pending: false, term: null, rating: 5, difficulty: 2, hours: '8-10', grade: null, comment: 'Best course.' };
   const cs3500: RateCourse = { code: 'CS3500', name: 'Object-Oriented Design', isNew: false, terms: ['Fall 2025', 'Spring 2025'] };
   const cs4973: RateCourse = { code: 'CS4973', name: 'Topics in HCI', isNew: false, terms: ['Spring 2025'] };
   const u = pickCourse({ comment: '', professor: alex }, cs3500, [prior], now);
-  check('update: pick fills the earlier answers', u.term === 'Fall 2025' && u.rating === 4 && u.hours === '5-7'
+  check('update: pick fills the earlier answers', u.term === 'Fall 2025' && u.rating === 4 && u.difficulty === 4 && u.hours === '5-7'
     && u.grade === 'A-' && u.comment === 'Projects take time.' && u.updating?.code === 'CS3500');
   check('update: every step follows in order', nextStep('course', u) === 'term' && nextStep('term', u) === 'overall'
-    && nextStep('overall', u) === 'workload' && nextStep('workload', u) === 'grade'
+    && nextStep('overall', u) === 'difficulty' && nextStep('difficulty', u) === 'workload' && nextStep('workload', u) === 'grade'
     && nextStep('grade', u) === 'comment' && nextStep('comment', u) === 'thanks');
   check('update: otherTerm -> overall, firstStep is term, edit overall -> workload',
-    nextStep('otherTerm', u) === 'overall' && firstStep(u) === 'term' && nextStep('overall', answer(u, { rating: 2 })) === 'workload');
+    nextStep('otherTerm', u) === 'overall' && firstStep(u) === 'term' && nextStep('overall', answer(u, { rating: 2 })) === 'difficulty');
+  const beforeDifficulty = pickCourse({ comment: '', professor: alex }, cs3500, [{ ...prior, difficulty: null }], now);
+  check('update: a rating from before the difficulty question asks it',
+    beforeDifficulty.difficulty === undefined && throws(beforeDifficulty)
+    && throws(answer(beforeDifficulty, { comment: 'x' })) && !throws(answer(beforeDifficulty, { difficulty: 5 })));
   check('update: re-picking the same course keeps edits', pickCourse(answer(u, { rating: 2 }), cs3500, [prior], now).rating === 2);
   const ub = pickCourse(u, cs4973, [prior, priorB], now);
   check('update: rated A -> rated B fills B only', ub.term === null && ub.rating === 5 && ub.grade === null
     && ub.comment === 'Best course.' && ub.updating?.code === 'CS4973');
   const toFresh = pickCourse(answer(u, { rating: 2 }), cs2500, [prior], now);
   check('update: rated -> unrated clears everything', toFresh.updating === undefined && toFresh.term === undefined
-    && toFresh.rating === undefined && toFresh.hours === undefined && toFresh.grade === undefined
+    && toFresh.rating === undefined && toFresh.difficulty === undefined && toFresh.hours === undefined && toFresh.grade === undefined
     && toFresh.comment === '' && toFresh.course?.code === 'CS2500' && nextStep('course', toFresh) === 'term');
   const plain = pickCourse(a, { ...cs2500, code: 'CS2510' }, [], now);
   check('unrated pick outside update mode behaves like answer', plain.rating === 5 && plain.term === undefined);
@@ -191,11 +200,12 @@ function selftest(): number {
   check('professor change leaves update mode', swapped.updating === undefined && swapped.course === undefined
     && swapped.term === undefined && swapped.rating === undefined && swapped.hours === undefined
     && swapped.grade === undefined && swapped.comment === '');
-  const drafted: Answers = { comment: 'Half-written draft.', professor: alex, course: cs2500, term: 'Fall 2025', rating: 3, hours: '3-4', grade: 'B' };
+  const drafted: Answers = { comment: 'Half-written draft.', professor: alex, course: cs2500, term: 'Fall 2025', rating: 3, difficulty: 1, hours: '3-4', grade: 'B' };
   const misTap = pickCourse(drafted, cs3500, [prior], now);
   check('update: entering keeps the fresh draft aside', misTap.rating === 4 && misTap.comment === 'Projects take time.');
   const backToDraft = pickCourse(pickCourse(misTap, cs4973, [prior, priorB], now), cs2500, [prior, priorB], now);
   check('update: leaving restores the fresh draft', backToDraft.updating === undefined && backToDraft.rating === 3
+    && backToDraft.difficulty === 1
     && backToDraft.hours === '3-4' && backToDraft.grade === 'B' && backToDraft.comment === 'Half-written draft.'
     && backToDraft.term === 'Fall 2025' && backToDraft.course?.code === 'CS2500');
   const elsewhere = pickCourse(misTap, cs4973, [prior], now);

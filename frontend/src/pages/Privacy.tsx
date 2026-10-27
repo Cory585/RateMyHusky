@@ -9,7 +9,7 @@ const Privacy = () => {
         <div className="terms-shell">
           <header className="terms-header">
             <h1>Privacy Policy</h1>
-            <p className="terms-meta">Effective October 21, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective October 27, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -89,7 +89,7 @@ const Privacy = () => {
                 {RATE_ENABLED && (
                 <li>
                   <strong>Ratings:</strong> you do not need to sign in to submit a rating. We
-                  store your answers (professor, course, term, overall rating, weekly hours,
+                  store your answers (professor, course, term, overall rating, difficulty, weekly hours,
                   grade, and an optional comment), a keyed hash of a random device ID that your
                   browser keeps, keyed hashes of your IP address and of its /24 (IPv4) or /64
                   (IPv6) network, the network type (campus, mobile carrier, Private Relay,

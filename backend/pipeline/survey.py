@@ -3,9 +3,9 @@
 Same three row kinds as summaries.py: professor (slug, ''), course ('', code),
 professor x course (slug, code). Rating and hours are means rounded to two
 places (hours from each bucket's midpoint); the rating distribution always has
-keys "1"-"5"; grades count only when given. Difficulty and would-take-again
-are not asked, so they stay None. A rating with no course counts toward the
-professor row only.
+keys "1"-"5"; grades count only when given. Difficulty is the mean of the
+ratings that answered it (older ones didn't); would-take-again is not asked,
+so it stays None. A rating with no course counts toward the professor row only.
 """
 
 import os
@@ -31,7 +31,7 @@ def _row(slug, code, ratings):
     return {
         "professor_slug": slug, "course_code": code, "source": "survey",
         "rating": _mean([r["rating"] for r in ratings]),
-        "difficulty": None,
+        "difficulty": _mean([r["difficulty"] for r in ratings if r["difficulty"] is not None]),
         "would_take_again_pct": None,
         "num_ratings": len(ratings),
         "num_comments": sum(1 for r in ratings if (r["comment"] or "").strip()),

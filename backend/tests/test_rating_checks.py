@@ -50,7 +50,7 @@ def test_comment_hash_ignores_case_and_punctuation_and_skips_short():
 
 def _body(**over):
     body = {"professor": {"slug": "jane-doe"}, "course": {"code": "CS2500"}, "term": "Fall 2025",
-            "rating": 4, "hours": "3-4", "grade": "A", "comment": "ok"}
+            "rating": 4, "difficulty": 3, "hours": "3-4", "grade": "A", "comment": "ok"}
     body.update(over)
     return body
 
@@ -64,6 +64,11 @@ def _body(**over):
     _body(rating=4.5),
     _body(rating=6),
     _body(hours="15+"),
+    _body(difficulty=None),
+    _body(difficulty=0),
+    _body(difficulty=6),
+    _body(difficulty=2.5),
+    _body(difficulty=True),
     _body(grade="D"),
     _body(term="Fall 2015"),
     _body(term="Fall 2021"),
@@ -110,12 +115,13 @@ def test_validate_never_raises(body):
 def test_validate_cleans():
     clean, err = rc.validate_submission(
         {"professor": {"slug": "jane-doe"}, "course": {"code": "cs 2500"}, "term": "Summer 2025",
-         "rating": 4, "hours": "3-4", "grade": None, "comment": "  ok  "}, 2026)
+         "rating": 4, "difficulty": 2, "hours": "3-4", "grade": None, "comment": "  ok  "}, 2026)
     assert err is None
     assert clean["professor_slug"] == "jane-doe" and clean["new_professor"] is None
     assert clean["course_code"] == "CS2500" and clean["new_course_name"] is None
     assert clean["term_label"] == "Summer 2025"
     assert clean["rating"] == 4 and clean["hours"] == "3-4" and clean["grade"] is None
+    assert clean["difficulty"] == 2
     assert clean["comment"] == "ok"
 
 

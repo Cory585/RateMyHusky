@@ -14,8 +14,8 @@ import { ProgressBar } from './rate/ProgressBar';
 import { useMediaQuery } from './rate/useMediaQuery';
 import type { ChoiceOption } from './rate/ChoiceGroup';
 import {
-  GRADES, HOURS, OVERALL, answer, buildSubmission, contextTags, courseGroups, firstStep, lastName, nextStep,
-  pickCourse, prefillCourse, prevStep, progressIndex, toRateCourse,
+  DIFFICULTY, GRADES, HOURS, OVERALL, answer, buildSubmission, contextTags, courseGroups, firstStep, formatCode,
+  lastName, nextStep, pickCourse, prefillCourse, prevStep, progressIndex, toRateCourse,
 } from './rate/rateFlow';
 import type { Answers, RateCourse, RateProfessor, StepId } from './rate/rateFlow';
 import './Rate.css';
@@ -389,6 +389,33 @@ export default function Rate() {
               onPick={(v) => choose(answer(answers, { rating: v }), 'overall')}
             />
             <StepFoot onBack={back}>{continueButton(answers.rating !== undefined)}</StepFoot>
+          </>
+        );
+      }
+      case 'difficulty': {
+        // Scored like the review pills, so Very hard shows red.
+        const options: ChoiceOption<number>[] = DIFFICULTY.map((d) => ({
+          value: d.value,
+          aria: `${d.value} out of 5, ${d.label}`,
+          digit: d.value,
+          label: (
+            <>
+              <span className="rate-n" data-score={6 - d.value}>{d.value}</span>
+              <span className="rate-n-label">{d.label}</span>
+            </>
+          ),
+        }));
+        return (
+          <>
+            <ChoiceGroup
+              legend={`How hard was ${formatCode(answers.course?.code ?? '')}?`}
+              subtitle="Exams, assignments, and how hard it was to do well."
+              options={options}
+              value={answers.difficulty}
+              layout="stack"
+              onPick={(v) => choose(answer(answers, { difficulty: v }), 'difficulty')}
+            />
+            <StepFoot onBack={back}>{continueButton(answers.difficulty !== undefined)}</StepFoot>
           </>
         );
       }

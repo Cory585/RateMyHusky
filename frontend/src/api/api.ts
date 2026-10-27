@@ -499,7 +499,8 @@ export interface RateStart { opened: string; deviceToken: string; counter: numbe
 export interface RatedCourse {
   /* pending: the course is still awaiting review, so the form resends it as a new course. */
   code: string; name: string | null; pending: boolean; term: string | null;
-  rating: number; hours: string; grade: string | null; comment: string;
+  /* difficulty: null for a rating from before the form asked it. */
+  rating: number; difficulty: number | null; hours: string; grade: string | null; comment: string;
 }
 export interface RateProfessorContext { ratedCourses: RatedCourse[] }
 export interface RateSubmission {
@@ -507,6 +508,7 @@ export interface RateSubmission {
   course: { code: string } | { code: string; name: string };
   term: string | null;
   rating: number;
+  difficulty: number;
   hours: string;
   grade: string | null;
   comment: string;

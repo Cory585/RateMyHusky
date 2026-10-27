@@ -447,6 +447,7 @@ CREATE TABLE public.survey_ratings (
     collection TEXT NOT NULL DEFAULT 'turnstile+device',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    difficulty BIGINT NULL,
     CONSTRAINT survey_ratings_pkey PRIMARY KEY (id)
 );
 

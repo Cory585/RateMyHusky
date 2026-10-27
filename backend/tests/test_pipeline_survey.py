@@ -1,8 +1,8 @@
 from pipeline import survey
 
-R = lambda slug, code, rating, hours, grade=None, comment="": {
+R = lambda slug, code, rating, hours, grade=None, comment="", difficulty=None: {
     "professor_slug": slug, "course_code": code, "rating": rating, "hours": hours,
-    "grade": grade, "comment": comment}
+    "grade": grade, "comment": comment, "difficulty": difficulty}
 
 def test_rows_for_professor_course_and_pair():
     rows = survey.survey_rows([R("jane-doe", "CS2500", 5, "3-4", "A", "great"),
@@ -16,6 +16,15 @@ def test_rows_for_professor_course_and_pair():
     assert p["rating_distribution"] == {"1": 0, "2": 0, "3": 1, "4": 1, "5": 1}
     assert by[("jane-doe", "CS2500")]["grade_distribution"] == {"A": 1}
     assert p["difficulty"] is None and p["would_take_again_pct"] is None
+
+def test_difficulty_is_the_mean_of_ratings_that_answered_it():
+    # Ratings from before the question was asked have no difficulty and don't count toward it.
+    rows = survey.survey_rows([R("jane-doe", "CS2500", 5, "3-4", difficulty=4),
+                               R("jane-doe", "CS2500", 3, "10+", difficulty=1),
+                               R("jane-doe", "CS2500", 4, "0-2")])
+    by = {(r["professor_slug"], r["course_code"]): r for r in rows}
+    assert by[("jane-doe", "CS2500")]["difficulty"] == 2.5
+    assert by[("jane-doe", "")]["difficulty"] == 2.5
 
 def test_no_ratings_no_rows():
     assert survey.survey_rows([]) == []
