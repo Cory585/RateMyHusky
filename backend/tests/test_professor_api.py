@@ -16,7 +16,7 @@ TEST_SECRET = "test-secret-0123456789abcdefghijklmnop"  # gitleaks:allow
 
 
 def _token():
-    return jwt.encode({"sub": "u1", "email": "t@husky.neu.edu",
+    return jwt.encode({"sub": "u1", "email": "t@husky.neu.edu", "iss": "ratemyhusky", "aud": "ratemyhusky-web",
                        "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1)},
                       TEST_SECRET, algorithm="HS256")
 

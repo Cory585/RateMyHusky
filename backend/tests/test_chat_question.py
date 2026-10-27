@@ -15,7 +15,8 @@ def q_client(monkeypatch):
 def _auth_headers():
     """A valid Bearer token for the account-gated question path (signed with the test secret)."""
     import jwt as pyjwt
-    token = pyjwt.encode({"sub": "user-123", "email": "t@northeastern.edu"}, _JWT_SECRET, algorithm="HS256")
+    token = pyjwt.encode({"sub": "user-123", "email": "t@northeastern.edu",
+                           "iss": "ratemyhusky", "aud": "ratemyhusky-web"}, _JWT_SECRET, algorithm="HS256")
     return {"Origin": "http://localhost:5173", "Authorization": "Bearer " + token}
 
 def test_chat_question_returns_answer(monkeypatch, q_client):

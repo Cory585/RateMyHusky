@@ -74,7 +74,8 @@ def test_every_accepted_type_passes_validation(monkeypatch):
 def _account_token():
     import jwt
     import server
-    return jwt.encode({"sub": "user-123"}, server.JWT_SECRET, algorithm="HS256")
+    return jwt.encode({"sub": "user-123", "iss": server.JWT_ISSUER, "aud": server.JWT_AUDIENCE},
+                      server.JWT_SECRET, algorithm="HS256")
 
 
 def test_data_deletion_requires_a_valid_account(monkeypatch):

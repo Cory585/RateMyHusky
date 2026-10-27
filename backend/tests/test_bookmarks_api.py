@@ -18,7 +18,7 @@ TEST_SECRET = "test-secret-0123456789abcdefghijklmnop"  # >=32 bytes for HS256  
 def make_token(sub="user-123", expired=False):
     delta = datetime.timedelta(days=-1 if expired else 7)
     return jwt.encode(
-        {"sub": sub, "email": "t@husky.neu.edu",
+        {"sub": sub, "email": "t@husky.neu.edu", "iss": "ratemyhusky", "aud": "ratemyhusky-web",
          "exp": datetime.datetime.now(datetime.timezone.utc) + delta},
         TEST_SECRET, algorithm="HS256",
     )

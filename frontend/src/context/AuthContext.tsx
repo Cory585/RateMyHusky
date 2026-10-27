@@ -37,6 +37,31 @@ function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+// The redirect sign-in returns its token in the URL fragment. Only accept one this
+// tab asked for: otherwise a link carrying someone else's token would silently sign
+// the visitor into that account (and their bookmarks and Ask questions would land in it).
+const PENDING_KEY = 'auth_redirect_started';
+const PENDING_MAX_AGE_MS = 15 * 60 * 1000;
+
+function startRedirectSignIn(returnTo: string) {
+  try {
+    sessionStorage.setItem(PENDING_KEY, String(Date.now()));
+  } catch {
+    // storage blocked: the returning token will be ignored and the user stays signed out
+  }
+  window.location.href = `${API_BASE}/api/auth/google?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
+function takeRedirectSignIn(): boolean {
+  try {
+    const started = Number(sessionStorage.getItem(PENDING_KEY));
+    sessionStorage.removeItem(PENDING_KEY);
+    return Number.isFinite(started) && started > 0 && Date.now() - started < PENDING_MAX_AGE_MS;
+  } catch {
+    return false;
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -76,10 +101,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const hash = window.location.hash;
     if (hash.includes('auth_token=')) {
       const token = hash.split('auth_token=')[1]?.split('&')[0];
-      if (token) {
-        storeToken(token);
-        window.history.replaceState(null, '', window.location.pathname + window.location.search);
-      }
+      if (token && takeRedirectSignIn()) storeToken(token);
+      // Strip the token from the URL either way so it isn't left in history.
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
     }
     // Handle auth errors from backend redirect
     const params = new URLSearchParams(window.location.search);
@@ -120,7 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const returnTo = window.location.pathname + window.location.search;
 
     if (isMobile) {
-      window.location.href = `${API_BASE}/api/auth/google?returnTo=${encodeURIComponent(returnTo)}`;
+      startRedirectSignIn(returnTo);
       return;
     }
 
@@ -146,7 +170,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }, 500);
     } else {
-      window.location.href = `${API_BASE}/api/auth/google?returnTo=${encodeURIComponent(returnTo)}`;
+      startRedirectSignIn(returnTo);
     }
   }, [fetchUser]);
 

@@ -6,7 +6,7 @@ Install deps:  pip install flask flask-cors flask-limiter psycopg2-binary pyjwt 
 Run:           python server.py
 """
 
-import os, re, unicodedata, json, hashlib, hmac, random
+import os, re, unicodedata, json, hashlib, hmac, random, secrets
 import html as _html
 import psycopg2
 from psycopg2.pool import ThreadedConnectionPool
@@ -642,6 +642,26 @@ GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 
+# Session tokens carry their own issuer and audience, so a token signed with the
+# same secret for some other purpose can't be replayed as a sign-in.
+JWT_ISSUER = "ratemyhusky"
+JWT_AUDIENCE = "ratemyhusky-web"
+# Tokens can't be revoked server-side (logout only drops the browser's copy), so a
+# stolen one is usable until it expires; keep that window short.
+SESSION_DAYS = 7
+
+
+def decode_session_token(token):
+    """The verified claims of a session token, or None when it is missing, expired,
+    forged or minted without our issuer/audience."""
+    if not token:
+        return None
+    try:
+        return pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"],
+                            audience=JWT_AUDIENCE, issuer=JWT_ISSUER)
+    except pyjwt.InvalidTokenError:   # ExpiredSignatureError is a subclass
+        return None
+
 
 # ──────────────────────────────────────────────
 #  Search helper
@@ -1040,12 +1060,8 @@ def chat():
         return jsonify({"mode": "keyword", "results": data["comments"], "professors": data["professors"]})
     # 'question' mode is account-gated: identity comes from the verified JWT (not a spoofable
     # header), so the abuse ladder keys on a server-trusted user id that can't be forged or omitted.
-    token = _get_auth_token()
-    if not token:
-        return jsonify({"mode": "error", "message": "Sign in to use Ask mode."}), 401
-    try:
-        _claims = pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-    except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+    _claims = decode_session_token(_get_auth_token())
+    if _claims is None:
         return jsonify({"mode": "error", "message": "Sign in to use Ask mode."}), 401
     deps = _types.SimpleNamespace(
         chat_enabled=CHAT_ENABLED,
@@ -1647,15 +1663,20 @@ def _get_redirect_uri(frontend):
 def auth_google():
     return_to = request.args.get("returnTo", "/")
     frontend = _login_frontend()
+    state = secrets.token_urlsafe(32)
     params = {
         "client_id": GOOGLE_CLIENT_ID,
         "redirect_uri": _get_redirect_uri(frontend),
         "response_type": "code",
         "scope": "openid email profile",
         "hd": "husky.neu.edu",
+        # Bound to this browser by the auth_state cookie and checked on the callback,
+        # so nobody can complete a sign-in into their account in someone else's browser.
+        "state": state,
     }
     is_popup = request.args.get("popup") == "1"
     resp = make_response(redirect(f"{GOOGLE_AUTH_URL}?{urlencode(params)}"))
+    resp.set_cookie("auth_state", state, max_age=600, httponly=True, samesite="None", secure=True)
     resp.set_cookie("auth_return_to", return_to, max_age=600, httponly=True, samesite="None", secure=True)
     if is_popup:
         resp.set_cookie("auth_popup", "1", max_age=600, httponly=True, samesite="None", secure=True)
@@ -1671,6 +1692,9 @@ def auth_google_callback():
     frontend = _callback_frontend()
     if not code:
         return redirect(f"{frontend}?auth_error=no_code")
+    expected_state = request.cookies.get("auth_state", "")
+    if not expected_state or not hmac.compare_digest(request.args.get("state", ""), expected_state):
+        return redirect(f"{frontend}?auth_error=state_mismatch")
 
     try:
         token_resp = http_requests.post(GOOGLE_TOKEN_URL, data={
@@ -1703,7 +1727,9 @@ def auth_google_callback():
         "email": user_info["email"],
         "name": user_info.get("name", ""),
         "picture": user_info.get("picture", ""),
-        "exp": datetime.now(timezone.utc) + timedelta(days=30),
+        "iss": JWT_ISSUER,
+        "aud": JWT_AUDIENCE,
+        "exp": datetime.now(timezone.utc) + timedelta(days=SESSION_DAYS),
     }
     token = pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
@@ -1728,6 +1754,7 @@ def auth_google_callback():
         resp = make_response(redirect(f"{frontend}{return_to}#auth_token={token}"))
         resp.delete_cookie("auth_return_to")
     resp.delete_cookie("auth_origin")
+    resp.delete_cookie("auth_state")
     return resp
 
 
@@ -1742,34 +1769,20 @@ def _get_auth_token():
 def _is_authed():
     """True when the request carries a valid session token. Pages serve the same
     payload either way; only the Cache-Control header differs."""
-    token = _get_auth_token()
-    if not token:
-        return False
-    try:
-        pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        return True
-    except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
-        return False
+    return decode_session_token(_get_auth_token()) is not None
 
 
 @app.route("/api/auth/me")
 @limiter.limit("30 per minute")
 def auth_me():
-    token = _get_auth_token()
-    if not token:
+    payload = decode_session_token(_get_auth_token())
+    if payload is None:
         return jsonify(None), 401
-
-    try:
-        payload = pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        return jsonify({
-            "email": payload["email"],
-            "name": payload["name"],
-            "picture": payload.get("picture", ""),
-        })
-    except pyjwt.ExpiredSignatureError:
-        return jsonify(None), 401
-    except pyjwt.InvalidTokenError:
-        return jsonify(None), 401
+    return jsonify({
+        "email": payload["email"],
+        "name": payload["name"],
+        "picture": payload.get("picture", ""),
+    })
 
 
 @app.route("/api/auth/logout", methods=["POST"])
@@ -1784,14 +1797,8 @@ def _require_bookmarks_auth():
     """Hard-401 auth gate shared by all three /api/bookmarks routes (same
     pattern as /api/chat's question mode). Returns the JWT `sub` claim, or
     None if a 401 JSON response has already been returned in its place."""
-    token = _get_auth_token()
-    if not token:
-        return None
-    try:
-        claims = pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-    except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
-        return None
-    return claims["sub"]
+    claims = decode_session_token(_get_auth_token())
+    return claims["sub"] if claims else None
 
 
 @app.route("/api/bookmarks")
@@ -1886,10 +1893,8 @@ def submit_feedback():
     # so we can locate/clear its ask_log rows by session_token (appeal review or data erasure).
     appeal_account = None
     if feedback_type in _ACCOUNT_FEEDBACK_TYPES and account_token:
-        try:
-            appeal_account = pyjwt.decode(account_token, JWT_SECRET, algorithms=["HS256"]).get("sub")
-        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
-            appeal_account = None
+        claims = decode_session_token(account_token)
+        appeal_account = claims.get("sub") if claims else None
 
     # Support can't erase data that isn't tied to an account, so don't send it on.
     if feedback_type == "datadeletion" and appeal_account is None:
