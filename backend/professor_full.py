@@ -68,12 +68,14 @@ def build_survey_section(row, reviews=()):
     }
 
 
-def build_summary(own_rows, reddit_mentions, survey_comments=0):
+def build_summary(own_rows, reddit_mentions, survey_comments=None):
     """`own_rows`: {source: professor-level source_summary row}. `survey_comments`,
     the live count, replaces the survey row's count from the last pipeline run so
-    the stat matches the RateMyHusky tab."""
+    the stat matches the RateMyHusky tab; None (reviews off) keeps the pipeline's."""
     b = own_rows.get("blend") or {}
     stale_survey = int((own_rows.get("survey") or {}).get("num_comments") or 0)
+    if survey_comments is None:
+        survey_comments = stale_survey
     return {
         "rating": rmp.stat(b.get("rating"), 2),
         "difficulty": rmp.stat(b.get("difficulty"), 2),
@@ -129,12 +131,15 @@ def _course_history(slug, query, course_history_for):
 
 def _survey(slug, query):
     """(rows, failed). A database without survey_ratings yet has no student
-    reviews and nothing went wrong; any other failure leaves them out and sets
-    failed so the page isn't cached."""
+    reviews and nothing went wrong; any other failure, a missing Banner table
+    included, leaves them out and sets failed so the page isn't cached."""
     try:
         return survey_reviews.fetch_rows(slug, query), False
-    except psycopg2.errors.UndefinedTable:
-        return [], False
+    except psycopg2.errors.UndefinedTable as e:
+        if '"survey_ratings"' in str(e):
+            return [], False
+        log.exception("student reviews failed for professor %s", slug)
+        return [], True
     except Exception:
         log.exception("student reviews failed for professor %s", slug)
         return [], True
@@ -149,7 +154,8 @@ def build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions,
     history and the student reviews last, so a failure there can't affect the
     reads before it. Awards come from the committed teaching_awards.json, not
     the database. `review_id(uuid)` gives a student review its public id; None
-    (no RATING_SECRET) shows no student reviews."""
+    (reviews off, or no RATING_SECRET) skips the survey read, so no review text
+    or live count goes out."""
     prof = _resolve_professor(slug, query_one)
     if not prof:
         return None
@@ -167,11 +173,11 @@ def build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions,
     for m in mentions:
         m["body"] = sanitize(m["body"]) if m["body"] else ""
     history, history_failed = _course_history(prof["slug"], query, course_history_for)
-    survey_rows, survey_failed = _survey(prof["slug"], query)
+    survey_rows, survey_failed = _survey(prof["slug"], query) if review_id else ([], False)
     payload = {
         "version": 2,
         "identity": build_identity(prof),
-        "summary": build_summary(own, mentions, survey_reviews.comment_count(survey_rows)),
+        "summary": build_summary(own, mentions, survey_reviews.comment_count(survey_rows) if review_id else None),
         "sources": {"rmp": rmp.build_section(own.get("rmp"), prof.get("professor_url"), reviews),
                     "survey": build_survey_section(
                         own.get("survey"), survey_reviews.shape_reviews(survey_rows, review_id, sanitize))},

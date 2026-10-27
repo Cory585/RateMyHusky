@@ -252,7 +252,8 @@ def test_remove_comment_finds_the_review_by_its_public_id(monkeypatch):
                       "UPDATE survey_ratings": [{"id": target}]})
     rr.remove_comment(cur, survey_reviews.public_id(SECRET, target))
     (sql, params), = cur.statements("UPDATE")
-    assert "comment = NULL" in sql and "comment_hash = NULL" in sql and params == (target,)
+    assert "comment = NULL" in sql and "comment_hash" not in sql and params == (target,)
+    assert "'comment_removed'" in sql   # marks the row, so an edit bringing the comment back is held
 
 
 def test_remove_comment_with_an_unknown_id_raises(monkeypatch):

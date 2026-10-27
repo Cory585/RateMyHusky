@@ -79,6 +79,21 @@ def test_full_makes_at_most_six_round_trips(client):
     assert len(client.calls) <= 6
 
 
+@pytest.mark.parametrize("shown, secret", [(False, TEST_SECRET), (True, None)])
+def test_full_reads_no_student_reviews_unless_shown_and_secret_set(client, monkeypatch, shown, secret):
+    monkeypatch.setattr(server, "SHOW_STUDENT_REVIEWS", shown)
+    monkeypatch.setattr(server, "RATING_SECRET", secret)
+    client.get("/api/professors/olin-guha/full")
+    assert not any("survey_ratings" in sql for sql in client.calls)
+
+
+def test_full_reads_student_reviews_when_shown(client, monkeypatch):
+    monkeypatch.setattr(server, "SHOW_STUDENT_REVIEWS", True)
+    monkeypatch.setattr(server, "RATING_SECRET", TEST_SECRET)
+    client.get("/api/professors/olin-guha/full")
+    assert any("survey_ratings" in sql for sql in client.calls)
+
+
 def test_unknown_professor_is_a_json_404(client):
     resp = client.get("/api/professors/nobody/full")
     assert resp.status_code == 404

@@ -58,7 +58,7 @@ def srow(**kw):
     """An accepted survey_ratings row as survey_reviews.fetch_rows returns it."""
     when = datetime(2026, 10, 20, tzinfo=timezone.utc)
     return {"id": uuid.uuid4(), "course_code": "CS3500", "term_label": "Fall 2025", "term_enrollment": 40,
-            "rating": 5, "comment": "Loved it", "created_at": when, "updated_at": when, **kw}
+            "terms_in_year": 1, "rating": 5, "comment": "Loved it", "created_at": when, "updated_at": when, **kw}
 
 
 class FakeDB:
@@ -341,6 +341,15 @@ def test_no_review_id_means_no_survey_cards():
     assert data["sources"]["survey"]["reviews"] == []
 
 
+def test_reviews_off_skips_the_survey_read_and_keeps_the_pipeline_count():
+    summaries = [{**r, "num_comments": 8} if r["source"] == "blend" and r["course_code"] == "" else r
+                 for r in SUMMARY_ROWS] + [{**SUMMARY_ROWS[0], "source": "survey", "num_comments": 5}]
+    db = FakeDB(summaries=summaries, survey=[srow(), srow()])
+    data, _, _ = _build(db=db)
+    assert not any("survey_ratings" in sql for sql, _ in db.calls)
+    assert data["summary"]["numComments"] == 8 + len(MENTIONS)
+
+
 def test_num_comments_counts_live_survey_comments_not_the_stale_survey_row():
     # own rows: blend num_comments 8 (rmp 3 + a stale survey 5), survey num_comments 5; live: 2 comments
     summaries = [{**r, "num_comments": 8} if r["source"] == "blend" and r["course_code"] == "" else r
@@ -351,10 +360,16 @@ def test_num_comments_counts_live_survey_comments_not_the_stale_survey_row():
 
 
 def test_missing_survey_table_is_no_reviews_and_stays_cacheable():
-    db = FakeDB(survey=psycopg2.errors.UndefinedTable("relation survey_ratings does not exist"))
+    db = FakeDB(survey=psycopg2.errors.UndefinedTable('relation "survey_ratings" does not exist'))
     data, _, _ = _build(db=db, review_id=lambda u: "abc")
     assert data["sources"]["survey"]["reviews"] == []
     assert "_partial" not in data
+
+
+def test_missing_banner_table_in_the_survey_read_is_a_failure_not_no_reviews():
+    db = FakeDB(survey=psycopg2.errors.UndefinedTable('relation "banner_terms" does not exist'))
+    data, _, _ = _build(db=db, review_id=lambda u: "abc")
+    assert data["_partial"] is True
 
 
 def test_survey_read_failure_flags_the_payload_so_it_is_not_cached(caplog):
@@ -429,7 +444,7 @@ def test_missing_professor_is_none():
 # ── round trips ──
 
 def test_at_most_six_statements_and_only_live_tables():
-    _, db, _ = _build()
+    _, db, _ = _build(review_id=lambda u: "abc")
     assert len(db.calls) <= 6
     tables = " ".join(sql.lower() for sql, _ in db.calls)
     for table in ("professors_catalog", "rmp_reviews", "source_summary", "banner_course_instructors",

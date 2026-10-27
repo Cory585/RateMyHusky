@@ -1031,7 +1031,7 @@ const Professor = () => {
                       </div>
                       <div className="prof-review-meta">
                         {r.course && <span className="prof-review-course">{courseCode(r.course)}</span>}
-                        <span className="prof-review-date">{r.when}</span>
+                        {r.when && <span className="prof-review-date">{r.when}</span>}
                       </div>
                     </div>
                     <p className="prof-review-comment">{r.comment}</p>

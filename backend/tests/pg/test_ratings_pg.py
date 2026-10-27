@@ -3,6 +3,7 @@
 import uuid
 
 import psycopg2
+from psycopg2.extras import RealDictCursor
 import pytest
 
 from tests.pg.pgutil import rows, scalar, truncate
@@ -72,10 +73,13 @@ def test_upsert_keeps_a_held_row_held(pg):
 
 
 def pg_write(pg):
+    """Like server._write: commits and returns the RETURNING rows as dicts."""
     def write(sql, params):
-        with pg.cursor() as cur:
+        with pg.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(sql, params)
+            found = cur.fetchall() if cur.description else None
         pg.commit()
+        return found
     return write
 
 
@@ -136,6 +140,7 @@ def test_hold_burst_skips_returning_devices_and_approved_rows(pg):
     pg.commit()
     key = {"professor_slug": "jane-doe", "pending_professor_id": None,
            "course_code": "CS2500", "pending_course_id": None}
-    ratings.hold_burst(["burst_pair"], key, None, None, pg_write(pg), datetime.now(timezone.utc))
+    assert ratings.hold_burst(["burst_pair"], key, None, None, pg_write(pg),
+                              datetime.now(timezone.utc)) == {"jane-doe"}
     held = rows(pg, "SELECT device_hash FROM survey_ratings WHERE status = 'held'")
     assert [r["device_hash"] for r in held] == ["d1"]

@@ -84,7 +84,8 @@ export interface SurveyReview {
   /** A keyed hash, not the row id: for anchors and reports. */
   id: string;
   course: string | null;
-  /** "Fall 2025" when the class was big enough to show the term, else just the year. */
+  /** "Fall 2025" when the class was big enough to show the term, else the year when the
+   *  professor taught the course in 2+ terms that year, else "" (no date shown). */
   when: string;
   rating: number;
   comment: string;
@@ -169,7 +170,7 @@ const _ratedProfPages = new Set<string>();
    send this tab to the maintenance page and report true so callers bail. */
 export function maintenanceGuard(res: Response): boolean {
   if (res.redirected && new URL(res.url).pathname === '/maintenance.html') {
-    window.location.replace('/maintenance.html');
+    window.location.replace(res.url); // keeps ?mode=preview on previews
     return true;
   }
   return false;

@@ -179,7 +179,11 @@ def _origin_host(value: str) -> str:
 
 # Vercel Preview deploys get a new hostname per build, so they can't be listed
 # like FRONTEND_URL. Set only where previews should reach this backend, e.g.
-# ^https://rate-my-husky-[a-z0-9-]+-grain-is-grainys-projects\.vercel\.app$
+# ^https://rate-my-husky-(?:git-[a-z0-9-]+|[a-z0-9]+)-grain-is-grainys-projects\.vercel\.app$
+# (matches PREVIEW_ORIGIN_RE in middleware.ts). The hyphen-free hash segment
+# keeps another team's hash URLs out, but not a git-<branch> alias under a
+# team slug ending in "-grain-is-grainys-projects" (or a claimed *.vercel.app
+# alias), so treat a match as a likely preview, not a proven one.
 # Unset = no preview origin is trusted.
 _preview_re = os.getenv("PREVIEW_ORIGIN_RE", "").strip()
 PREVIEW_ORIGIN_RE = re.compile(_preview_re) if _preview_re else None
@@ -415,9 +419,13 @@ def cache_set(key, data):
             del _cache[next(iter(_cache))]
 
 
-def cache_delete(key):
+def drop_professor_pages(slugs):
+    """Drop the cached /full of each professor in slugs, under every slug it was
+    opened by: the cache key is the URL's slug, which may be an alias."""
     with _cache_lock:
-        _cache.pop(f"v{data_version()}:{key}", None)
+        for k in [k for k, e in _cache.items()
+                  if ":prof_full:" in k and (e["data"].get("identity") or {}).get("slug") in slugs]:
+            del _cache[k]
 
 
 def _acquire_fresh_conn():
@@ -547,11 +555,13 @@ def _write(sql, params=None):
     """Write helper for user-facing mutations (bookmarks add/remove): execute +
     commit, retry once on a stale connection (mirrors query()). Unlike
     _chat_write, this does not swallow errors — a failed bookmark write must
-    surface to the caller, not be silently dropped like a best-effort log write."""
+    surface to the caller, not be silently dropped like a best-effort log write.
+    Returns the RETURNING rows as dicts, or None for a statement without one."""
     try:
         conn = get_db()
-        cur = conn.cursor()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute(sql, params or ())
+        rows = cur.fetchall() if cur.description else None
         conn.commit()
     except psycopg2.extensions.QueryCanceledError:
         _rollback_after_cancel(conn)
@@ -559,9 +569,11 @@ def _write(sql, params=None):
     except (psycopg2.InterfaceError, psycopg2.OperationalError):
         _discard_db_conn()
         conn = get_db()
-        cur = conn.cursor()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute(sql, params or ())
+        rows = cur.fetchall() if cur.description else None
         conn.commit()
+    return rows
 
 
 
@@ -1036,7 +1048,7 @@ def professor_payload(slug):
     data = cache_get(cache_key)
     if data is None:
         data = build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions,
-                             review_id=_review_id if _rating_enabled() else None)
+                             review_id=_review_id if _student_reviews_shown() else None)
         if data is None:
             return None
         if data.pop("_partial", False):
@@ -1044,6 +1056,12 @@ def professor_payload(slug):
         else:
             cache_set(cache_key, data)
     return data
+
+
+def _student_reviews_shown():
+    """/rate comments go out on professor pages only with SHOW_STUDENT_REVIEWS on:
+    the frontend's RATE_ENABLED only hides the tab, not what /full returns."""
+    return SHOW_STUDENT_REVIEWS and _rating_enabled()
 
 
 def _review_id(rating_uuid):
@@ -1907,6 +1925,8 @@ def submit_feedback():
 # ──────────────────────────────────────────────
 
 RATING_SECRET = os.getenv("RATING_SECRET")
+# Off until launch: turn it on with the frontend's RATE_ENABLED (see _student_reviews_shown).
+SHOW_STUDENT_REVIEWS = os.getenv("SHOW_STUDENT_REVIEWS", "false").lower() == "true"
 # Loaded at import so gunicorn --preload reads the data files once.
 _networks = ip_networks.load_index(os.getenv("IP_DATA_DIR", "/tmp/ipdata"))
 _rating_moderation_client = None
@@ -2092,8 +2112,14 @@ def rate_submit():
     chash = rating_checks.comment_hash(clean["comment"])
     duplicate = ratings.duplicate_comment(chash, existing["id"] if existing else None, query_one)
     bursts = ratings.burst_reasons(key, ip_hash, prefix_hash, network_type, query_one, now)
+    # A reviewer took this rating's comment down (review_ratings.py remove-comment): the mark
+    # stays on the row, and any comment it carries again waits for review.
+    removed = bool(existing) and "comment_removed" in (existing["hold_reasons"] or "").split(",")
     status, reasons = rating_checks.assess(fill_seconds, network_type, bursts, duplicate, moderation_action,
-                                           edit=bool(existing) and existing["status"] == "accepted")
+                                           edit=bool(existing) and existing["status"] == "accepted",
+                                           comment_removed=removed and bool(clean["comment"]))
+    if removed and "comment_removed" not in reasons:
+        reasons.append("comment_removed")
     row = {
         **key,
         "term_label": clean["term_label"], "rating": clean["rating"], "hours": clean["hours"],
@@ -2104,12 +2130,14 @@ def rate_submit():
         "fill_seconds": fill_seconds, "collection": "turnstile+device",
     }
     ratings.save_rating(row, existing, _write)
-    if key.get("professor_slug"):
-        # The page shows student reviews live. Any save can change it: a new review, an edit,
-        # or an accepted review edited into a held one, whose old comment must come down.
-        cache_delete(f"prof_full:{key['professor_slug']}")
-    if bursts:
-        ratings.hold_burst(bursts, key, ip_hash, prefix_hash, _write, now)
+    held = ratings.hold_burst(bursts, key, ip_hash, prefix_hash, _write, now) if bursts else set()
+    # The page shows student reviews live. Any save can change it: a new review, an edit,
+    # or an accepted review edited into a held one, whose old comment must come down. A burst
+    # also holds reviews on other professors. Dropped after the hold, so no request between
+    # the two writes re-caches rows that are about to be held.
+    pages = held | {key["professor_slug"]} if key.get("professor_slug") else held
+    if pages:
+        drop_professor_pages(pages)
     for subject, text in emails:
         notify.send_team_email(subject, text)
 

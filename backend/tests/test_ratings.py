@@ -191,6 +191,19 @@ def test_hold_burst_holds_recent_accepted_rows_per_tripped_trigger():
     assert "new_device = true" in f.writes[0][0] and "new_device" not in f.writes[1][0]
 
 
+def test_hold_burst_returns_the_professors_whose_rows_it_held():
+    returned = iter([[{"professor_slug": "alice-smith"}, {"professor_slug": None}],
+                     [{"professor_slug": "bob-jones"}, {"professor_slug": "alice-smith"}]])
+    held = ratings.hold_burst(["burst_ip", "burst_prefix"], KEY, "ip", "pre", lambda sql, params: next(returned), NOW)
+    assert held == {"alice-smith", "bob-jones"}   # a pending-professor row has no page to drop
+
+
+def test_hold_burst_with_nothing_held_returns_no_professors():
+    f = Fake()
+    assert ratings.hold_burst(["burst_ip"], KEY, "ip", "pre", f.write, NOW) == set()
+    assert "RETURNING professor_slug" in f.writes[0][0]
+
+
 def test_professor_context_returns_earlier_answers():
     many = {"FROM survey_ratings": [
         {"code": "CS3500", "name": "Object-Oriented Design", "pending": False, "term_label": "Fall 2025",

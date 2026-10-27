@@ -121,7 +121,11 @@ def reject_rating(cur, *ids):
 
 def remove_comment(cur, review_id):
     """Drop the comment of the review whose public id (the one on the page and in
-    a report) is review_id; the rating keeps counting. Needs RATING_SECRET."""
+    a report) is review_id; the rating keeps counting. Needs RATING_SECRET.
+
+    The comment_removed hold reason stays on the row, so an edit that brings a
+    comment back is held (server.rate_submit); comment_hash stays too, so the same
+    text from another device is held as a duplicate_comment."""
     secret = os.getenv("RATING_SECRET")
     if not secret:
         raise ReviewError("RATING_SECRET is needed to match a public review id")
@@ -129,7 +133,10 @@ def remove_comment(cur, review_id):
     matches = [str(r["id"]) for r in cur.fetchall() if survey_reviews.public_id(secret, r["id"]) == review_id]
     if len(matches) != 1:
         raise ReviewError(f"{review_id} is not exactly one shown review")
-    cur.execute("UPDATE survey_ratings SET comment = NULL, comment_hash = NULL "
+    cur.execute("UPDATE survey_ratings SET comment = NULL, hold_reasons = CASE "
+                "WHEN hold_reasons IS NULL THEN 'comment_removed' "
+                "WHEN ',' || hold_reasons || ',' LIKE '%%,comment_removed,%%' THEN hold_reasons "
+                "ELSE hold_reasons || ',comment_removed' END "
                 "WHERE id::text = %s RETURNING id", (matches[0],))
     return f"Removed the comment of {matches[0]}"
 

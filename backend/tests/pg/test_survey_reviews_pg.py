@@ -60,3 +60,24 @@ def test_fetch_rows_returns_accepted_rows_for_the_slug_with_their_term_enrollmen
     assert [r["comment"] for r in rows] == ["accepted"]
     assert rows[0]["term_enrollment"] == 17   # 9 + 8; the other instructor's 100 is not counted
     assert "grade" not in rows[0]
+    assert rows[0]["terms_in_year"] == 1
+
+
+def test_terms_in_year_counts_the_professors_terms_of_that_course_that_year(pg):
+    seed(pg)
+    with pg.cursor() as cur:
+        for code, label in (("202650", "Summer 1 2025"), ("202530", "Spring 2025"), ("202710", "Fall 2026")):
+            cur.execute(
+                "INSERT INTO banner_terms (term_code, term_label, season, season_group, year, view_only, "
+                "scraped_closed, section_count, attributed_sections, instructor_count, instructors_source) "
+                "VALUES (%s, %s, 'x', 'x', 2025, false, true, 1, 1, 1, 'banner')", (code, label))
+        # Summer 1 2025 by this professor counts; Spring 2025 by someone else and Fall 2026 don't.
+        for code, crn, key in (("202650", "20001", "guha, olin"), ("202530", "20002", "doe, jane"),
+                               ("202710", "20003", "guha, olin")):
+            cur.execute("INSERT INTO banner_sections (term_code, crn, subject_course, enrollment) "
+                        "VALUES (%s, %s, 'PHIL2325', 5)", (code, crn))
+            cur.execute("INSERT INTO banner_section_instructors (term_code, crn, instructor_key, instructor_name) "
+                        "VALUES (%s, %s, %s, %s)", (code, crn, key, key))
+    pg.commit()
+    (row,) = survey_reviews.fetch_rows(SLUG, query_fn(pg))
+    assert row["terms_in_year"] == 2
