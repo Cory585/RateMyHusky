@@ -120,6 +120,9 @@ def _name_to_slug(name: str) -> str:
 app = Flask(__name__)
 app.config["COMPRESS_MIMETYPES"] = ["application/json", "text/html"]
 app.config["COMPRESS_MIN_SIZE"] = 256
+# Every request body is a small JSON object (feedback, bookmarks, Ask); reject
+# anything bigger before it is read into memory.
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
 Compress(app)
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
@@ -357,6 +360,14 @@ _FEEDBACK_TYPE_LABELS = {
 # (maxlength attributes and the submit handler's regex). Change all three together.
 FEEDBACK_MAX_DESCRIPTION = 5000
 FEEDBACK_MAX_EMAIL = 254   # RFC 5321's limit on a full address
+
+def _turnstile_hostnames():
+    """Hostnames a Turnstile token may have been solved on: the frontend's, its www
+    variant, plus any extras in TURNSTILE_HOSTNAMES (comma-separated)."""
+    host = (urlparse(FRONTEND_URL).hostname or "").lower()
+    names = {host, f"www.{host}"} if host else set()
+    names |= {h.strip().lower() for h in os.getenv("TURNSTILE_HOSTNAMES", "").split(",") if h.strip()}
+    return names
 
 
 def _is_northeastern_address(email):
@@ -1779,11 +1790,15 @@ def bookmarks_remove():
 
 
 @app.route("/api/feedback", methods=["POST"])
-@limiter.limit("10 per day")
+# Only sent feedback counts toward the per-IP limit, so junk posts that fail the
+# CAPTCHA or validation can't use up a real user's 10 a day.
+@limiter.limit("10 per day", deduct_when=lambda response: response.status_code == 200)
 def submit_feedback():
     global _feedback_count, _feedback_date
 
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):   # a JSON list or string body
+        data = {}
     # Non-string values (123, null) count as missing instead of crashing .strip().
     def field(name):
         value = data.get(name)
@@ -1828,8 +1843,11 @@ def submit_feedback():
     if feedback_type == "datadeletion" and appeal_account is None:
         return jsonify({"error": "Sign in required"}), 401
 
-    # Verify Cloudflare Turnstile CAPTCHA
+    # Verify Cloudflare Turnstile CAPTCHA. Unset is only allowed off Railway (local dev).
     turnstile_secret = os.getenv("TURNSTILE_SECRET_KEY")
+    if not turnstile_secret and os.getenv("RAILWAY_ENVIRONMENT"):
+        print("[feedback] TURNSTILE_SECRET_KEY not configured")
+        return jsonify({"error": "Feedback is temporarily unavailable"}), 503
     if turnstile_secret:
         if not turnstile_token:
             return jsonify({"error": "CAPTCHA verification required"}), 400
@@ -1839,10 +1857,16 @@ def submit_feedback():
                 data={"secret": turnstile_secret, "response": turnstile_token, "remoteip": get_real_ip()},
                 timeout=5,
             )
-            if not verify_resp.ok or not verify_resp.json().get("success"):
-                return jsonify({"error": "CAPTCHA verification failed"}), 403
+            verdict = verify_resp.json() if verify_resp.ok else {}
         except Exception:
             return jsonify({"error": "CAPTCHA verification failed"}), 500
+        if not verdict.get("success"):
+            return jsonify({"error": "CAPTCHA verification failed"}), 403
+        # A token solved on another site that embeds our public site key must not count.
+        # Checked on Railway only: Turnstile's test keys report a placeholder hostname.
+        hostname = (verdict.get("hostname") or "").lower()
+        if os.getenv("RAILWAY_ENVIRONMENT") and hostname not in _turnstile_hostnames():
+            return jsonify({"error": "CAPTCHA verification failed"}), 403
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     with _feedback_lock:

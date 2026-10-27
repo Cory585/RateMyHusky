@@ -42,6 +42,18 @@ def _post(monkeypatch, **body):
     return server.app.test_client().post("/api/feedback", json=body)
 
 
+
+def _post_feedback(monkeypatch, body, env=None):
+    """Like _post, but with RAILWAY_ENVIRONMENT/TURNSTILE_SECRET_KEY set per test
+    and the real limiter (reset) instead of a disabled one."""
+    import server
+    monkeypatch.delenv("TURNSTILE_SECRET_KEY", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    for k, v in (env or {}).items():
+        monkeypatch.setenv(k, v)
+    server.limiter.reset()
+    return server.app.test_client().post("/api/feedback", json=body)
+
 def test_unknown_types_are_rejected(monkeypatch):
     resp = _post(monkeypatch, feedbackType="Buy cheap watches", description="hi")
     assert resp.status_code == 400
@@ -94,6 +106,14 @@ def test_non_string_fields_are_rejected_not_crashed(monkeypatch):
     assert resp.get_json()["error"] == "Email service not configured"
 
 
+def test_a_non_object_body_is_a_400_not_a_500(monkeypatch):
+    import server
+    monkeypatch.setattr(server.limiter, "enabled", False)
+    for body in ([1, 2], "text", 5):
+        resp = server.app.test_client().post("/api/feedback", json=body)
+        assert resp.status_code == 400, body
+
+
 def test_overlong_description_is_rejected(monkeypatch):
     import server
     resp = _post(monkeypatch, feedbackType="bug", description="x" * (server.FEEDBACK_MAX_DESCRIPTION + 1))
@@ -105,3 +125,35 @@ def test_overlong_email_is_rejected(monkeypatch):
     resp = _post(monkeypatch, feedbackType="bug", description="hi", email="a" * 250 + "@x.com")
     assert resp.status_code == 400
     assert "Invalid email" in resp.get_json()["error"]
+
+
+def test_missing_turnstile_secret_fails_closed_on_railway(monkeypatch):
+    resp = _post_feedback(monkeypatch, {"feedbackType": "bug", "description": "hi"},
+                          env={"RAILWAY_ENVIRONMENT": "production"})
+    assert resp.status_code == 503
+
+
+def test_rejected_posts_do_not_use_up_the_daily_limit(monkeypatch):
+    # The limit is 10 per day; only sent feedback (a 200) counts toward it.
+    import server
+    monkeypatch.delenv("TURNSTILE_SECRET_KEY", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    server.limiter.reset()
+    client = server.app.test_client()
+    for _ in range(12):
+        resp = client.post("/api/feedback", json={"feedbackType": "nope", "description": "hi"})
+        assert resp.status_code == 400
+
+
+def test_turnstile_token_from_another_hostname_is_rejected(monkeypatch):
+    import server
+
+    class FakeResp:
+        ok = True
+        def json(self):
+            return {"success": True, "hostname": "evil.example"}
+
+    monkeypatch.setattr(server.http_requests, "post", lambda *a, **k: FakeResp())
+    resp = _post_feedback(monkeypatch, {"feedbackType": "bug", "description": "hi", "turnstileToken": "t"},
+                          env={"TURNSTILE_SECRET_KEY": "k", "RAILWAY_ENVIRONMENT": "production"})
+    assert resp.status_code == 403
