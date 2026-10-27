@@ -145,5 +145,5 @@ def test_signed_in_allowance_has_its_own_cap(monkeypatch):
     assert _post(monkeypatch, **body).status_code == 500  # the last one, not configured
     resp = _post(monkeypatch, **body)
     assert resp.status_code == 429 and "Daily feedback limit" in resp.get_json()["error"]
-    # Resend's free 100/day also covers up to 3 usage alerts.
-    assert server.FEEDBACK_DAILY_LIMIT + server.ACCOUNT_FEEDBACK_DAILY_LIMIT + 3 <= 100
+    # Resend's free 100/day also covers up to 3 usage alerts and the daily review digest.
+    assert server.FEEDBACK_DAILY_LIMIT + server.ACCOUNT_FEEDBACK_DAILY_LIMIT + 3 + 1 <= 100

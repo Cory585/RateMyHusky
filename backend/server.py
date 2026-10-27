@@ -322,8 +322,8 @@ _account_feedback_count = 0
 _feedback_date = None   # "YYYY-MM-DD" UTC, resets counter each day
 FEEDBACK_DAILY_LIMIT = 80
 # Requests with a verified account get their own allowance, so anonymous reports can't
-# use up the day and block a data-deletion request. 80 + 15 + 3 usage alerts fit
-# Resend's free 100/day.
+# use up the day and block a data-deletion request. 80 + 15 + 3 usage alerts + 1
+# review digest (review_digest.py) fit Resend's free 100/day.
 ACCOUNT_FEEDBACK_DAILY_LIMIT = 15
 # feedback types that require a reply email and carry the signed-in account's verified sub,
 # so support can act on the right ask_log rows (review an appeal, or erase the user's data)
