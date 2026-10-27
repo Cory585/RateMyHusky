@@ -79,21 +79,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then(res => {
         // Maintenance redirect: tab is navigating away, keep the token.
         if (maintenanceGuard(res)) return undefined;
-        return res.ok ? res.json() : null;
+        if (res.status === 401) return null;
+        // A 429 (campus NAT shares one IP's limit), a 5xx or a dropped request says
+        // nothing about the token, so keep it and the current user as they are.
+        return res.ok ? res.json() : undefined;
       })
       .then(data => {
         if (data === undefined) return;
         if (data) {
           setUser(data);
         } else {
-          clearToken();
+          // Clearing fires a storage event that signs out every tab, so only do it
+          // for a rejected token, and only if no other tab has replaced it meanwhile.
+          if (getStoredToken() === token) clearToken();
           setUser(null);
         }
       })
-      .catch(() => {
-        clearToken();
-        setUser(null);
-      });
+      .catch(() => {});
   }, []);
 
   // Check for token in URL fragment (mobile redirect flow)
