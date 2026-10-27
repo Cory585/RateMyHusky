@@ -80,6 +80,50 @@ def split_filter(raw):
     return [v.strip() for v in (raw or "").split(FILTER_SEPARATOR) if v.strip()]
 
 
+def int_arg(name, default, lo, hi):
+    """request.args[name] as an int clamped to [lo, hi]; `default` when missing or
+    not a number. A bare int() turned limit=0 into a ZeroDivisionError (a 500)."""
+    try:
+        value = int(request.args.get(name, default))
+    except (TypeError, ValueError):
+        value = default
+    return max(lo, min(value, hi))
+
+
+def float_arg(name, default, lo, hi, ndigits=1):
+    """request.args[name] as a float clamped to [lo, hi] and rounded, so near-equal
+    values share one cache entry instead of each minting a new one."""
+    try:
+        value = float(request.args.get(name, default))
+    except (TypeError, ValueError):
+        value = default
+    if value != value:   # NaN
+        value = default
+    return round(max(lo, min(value, hi)), ndigits)
+
+
+# Search input caps: each word adds a LIKE clause, so an unbounded query is an
+# unbounded scan. No professor name or course title needs more than this.
+SEARCH_MAX_CHARS = 100
+SEARCH_MAX_WORDS = 6
+# Catalog pages above this size skip the cache: only the sitemap asks
+# for the whole catalog, and caching every filter combination at that size is
+# how the cache gets filled with multi-MB entries.
+CACHEABLE_PAGE_LIMIT = 100
+
+
+def like_safe(text):
+    """`text` with LIKE wildcards removed, so a typed % or _ can't match everything.
+    Names and course titles never contain them."""
+    return re.sub(r"[%_\\]", "", text)
+
+
+def search_text(raw):
+    """A user search string normalized for LIKE: lowercased, wildcard-free, capped."""
+    q = like_safe(normalize_name(raw or ""))[:SEARCH_MAX_CHARS]
+    return " ".join(q.split()[:SEARCH_MAX_WORDS])
+
+
 # Build a word-level mapping so partial/typeahead queries also resolve.
 # e.g. typing "virgiliu" (an RMP-only spelling) still finds "virgil".
 _WORD_ALIAS = {}
@@ -604,7 +648,7 @@ def _professor_search(q, limit=5, rated_only=False):
     # Normalize first: name_key is stored lowercase/ASCII, and LIKE is
     # case-sensitive. Callers like the chat/Ask path pass a raw gate hint ("Wu Chieh"),
     # so without this the LIKE filter (and the lowercase ALIAS_MAP) never match.
-    q = normalize_name(q)
+    q = search_text(q)
     # Resolve full-query alias first (e.g. "virgiliu pavlu" → "virgil pavlu")
     q_resolved = resolve_alias(q)
 
@@ -888,7 +932,8 @@ def goat_professors():
             "totalReviews": row["total_reviews"] or 0,
             "totalComments": row["total_comments"] or 0,
         })
-    cache_set(cache_key, result)
+    if result:   # an unknown college is empty; don't let made-up names fill the cache
+        cache_set(cache_key, result)
     return jsonify(result)
 
 
@@ -919,9 +964,9 @@ def _format_course_code(raw: str) -> str:
 
 @app.route("/api/search")
 def search():
-    q = normalize_name(request.args.get("q", ""))
+    q = search_text(request.args.get("q", ""))
     search_type = request.args.get("type", "Professor")
-    limit = min(int(request.args.get("limit", "5")), 20)
+    limit = int_arg("limit", 5, 1, 20)
 
     if len(q) < 2:
         return jsonify([])
@@ -1049,8 +1094,7 @@ def _department_colleagues(department, exclude_slug):
 def professor_payload(slug):
     """The §4.2 payload for `slug` (cached), or None when no professor matches.
     Shared by /full and render.py so the crawler page and the app agree."""
-    cache_key = f"prof_full:{slug}"
-    data = cache_get(cache_key)
+    data = cache_get(f"prof_full:{slug}")
     if data is None:
         data = build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions)
         if data is None:
@@ -1058,7 +1102,10 @@ def professor_payload(slug):
         if data.pop("_historyFailed", False):
             g.history_failed = True   # a failed Banner read is not cached: see history_cache_control
         else:
-            cache_set(cache_key, data)
+            # Cache under the professor's own slug only. The lookup also accepts case and
+            # hyphen variants of a name; caching each variant spelling kept another full
+            # copy of the payload per spelling.
+            cache_set(f"prof_full:{data['identity']['slug']}", data)
     return data
 
 
@@ -1154,7 +1201,8 @@ def departments():
         """)
     BAD_DEPTS = {"Computer amp Informational Tech.", "Computer  Informational Tech.", "Counseling amp Educational Psych", "Counseling  Educational Psych"}
     result = [r['department'] for r in rows if r['department'] and r['department'] not in BAD_DEPTS]
-    cache_set(cache_key, result)
+    if result:   # an unknown college is empty; don't let made-up names fill the cache
+        cache_set(cache_key, result)
     return jsonify(result)
 
 
@@ -1253,33 +1301,24 @@ def department_hub_detail(slug):
 
 @app.route("/api/professors-catalog")
 def professors_catalog():
-    q = normalize_name(request.args.get("q", ""))
+    q = search_text(request.args.get("q", ""))
     college = request.args.get("college", "")
     dept = request.args.get("dept", "")
     sort = request.args.get("sort", "alpha")
-    page = int(request.args.get("page", "1"))
-    limit = min(int(request.args.get("limit", "20")), 10000)
+    page = int_arg("page", 1, 1, 100000)
+    # The sitemap fetches the whole catalog in one page, hence 10000.
+    limit = int_arg("limit", 20, 1, 10000)
 
-    try:
-        min_rating = float(request.args.get("minRating", "0"))
-    except (ValueError, TypeError):
-        min_rating = 0.0
-    try:
-        max_rating = float(request.args.get("maxRating", "5"))
-    except (ValueError, TypeError):
-        max_rating = 5.0
-    try:
-        min_reviews = int(request.args.get("minReviews", "1"))
-    except (ValueError, TypeError):
-        min_reviews = 1
-    max_reviews_raw = request.args.get("maxReviews")
-    try:
-        max_reviews = int(max_reviews_raw) if max_reviews_raw is not None else None
-    except (ValueError, TypeError):
-        max_reviews = None
+    min_rating = float_arg("minRating", 0.0, 0.0, 5.0)
+    max_rating = float_arg("maxRating", 5.0, 0.0, 5.0)
+    min_reviews = int_arg("minReviews", 1, 1, 100000)
+    max_reviews = int_arg("maxReviews", -1, -1, 100000)
+    max_reviews = None if max_reviews < 0 else max_reviews
 
     cache_key = f"profcat:{q}:{college}:{dept}:{sort}:{page}:{limit}:{min_rating}:{max_rating}:{min_reviews}:{max_reviews}"
-    cached = cache_get(cache_key)
+    # A whole-catalog page is cached only unfiltered (what the sitemap asks for).
+    cacheable = limit <= CACHEABLE_PAGE_LIMIT or cache_key == f"profcat::::{sort}:1:{limit}:0.0:5.0:1:None"
+    cached = cache_get(cache_key) if cacheable else None
     if cached:
         return jsonify(cached)
 
@@ -1406,7 +1445,8 @@ def professors_catalog():
         "page": page,
         "totalPages": total_pages,
     }
-    cache_set(cache_key, result)
+    if cacheable:
+        cache_set(cache_key, result)
     return jsonify(result)
 
 
@@ -1427,27 +1467,24 @@ def course_departments():
 
 @app.route("/api/courses-catalog")
 def courses_catalog():
-    q = normalize_name(request.args.get("q", ""))
+    q = search_text(request.args.get("q", ""))
     dept = request.args.get("dept", "")
     sort = request.args.get("sort", "alpha")
-    page = int(request.args.get("page", "1"))
-    limit = min(int(request.args.get("limit", "20")), 10000)
+    page = int_arg("page", 1, 1, 100000)
+    # The sitemap fetches the whole catalog in one page, hence 10000.
+    limit = int_arg("limit", 20, 1, 10000)
 
-    try:
-        min_rating = float(request.args.get("minRating", "0"))
-    except (ValueError, TypeError):
-        min_rating = 0.0
-
-    try:
-        max_rating = float(request.args.get("maxRating", "5"))
-    except (ValueError, TypeError):
-        max_rating = 5.0
+    min_rating = float_arg("minRating", 0.0, 0.0, 5.0)
+    max_rating = float_arg("maxRating", 5.0, 0.0, 5.0)
 
     # The catalog page shows rated courses only; the sitemap and prerender need every course.
     rated_only = request.args.get("rated") == "1"
 
     cache_key = f"coursecat:{q}:{dept}:{sort}:{page}:{limit}:{min_rating}:{max_rating}:{rated_only}"
-    cached = cache_get(cache_key)
+    # A whole-catalog page is cached only unfiltered (what the sitemap asks for).
+    cacheable = (limit <= CACHEABLE_PAGE_LIMIT
+                 or cache_key == f"coursecat:::{sort}:1:{limit}:0.0:5.0:False")
+    cached = cache_get(cache_key) if cacheable else None
     if cached:
         return jsonify(cached)
 
@@ -1534,7 +1571,8 @@ def courses_catalog():
         "page": page,
         "totalPages": total_pages,
     }
-    cache_set(cache_key, result)
+    if cacheable:
+        cache_set(cache_key, result)
     return jsonify(result)
 
 

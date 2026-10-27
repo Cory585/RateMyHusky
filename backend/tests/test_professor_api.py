@@ -128,7 +128,7 @@ def test_failed_history_payload_is_served_but_not_cached(client, monkeypatch):
 
 
 def test_clean_payload_is_cached(client, monkeypatch):
-    sets = _spy_cache(monkeypatch, {"version": 2})
+    sets = _spy_cache(monkeypatch, {"version": 2, "identity": {"slug": "olin-guha"}})
     resp = client.get("/api/professors/olin-guha/full")
     assert resp.status_code == 200
     assert sets == ["prof_full:olin-guha"]
