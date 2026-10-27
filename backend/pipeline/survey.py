@@ -13,12 +13,18 @@ ever tripping the per-pair burst check.
 import os
 import re
 import sys
+from datetime import timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "scraper"))
 from load_catalog import normalize_text  # noqa: E402
 
 HOURS_MIDPOINTS = {"0-2": 1.0, "3-4": 3.5, "5-7": 6.0, "8-10": 9.0, "10+": 12.0}
+# Unreviewed ratings in the last 7 days above which a professor's or course's week is
+# held instead of published. A drip under the route's hourly and daily caps still
+# lands ~200 a week on one professor, or more on a course spread over its instructors.
+WEEKLY_SURGE_PROF = 40
+WEEKLY_SURGE_COURSE = 120
 
 
 def _mean(values):
@@ -56,6 +62,38 @@ def survey_rows(ratings):
     rows += [_row("", code, rs) for code, rs in sorted(by_code.items())]
     rows += [_row(slug, code, rs) for (slug, code), rs in sorted(by_pair.items())]
     return rows
+
+
+def surge_ids(ratings, now):
+    """Ids of this week's unreviewed ratings for any professor or course over its weekly limit. Pure.
+
+    A reviewer-approved rating keeps its hold_reasons, so it never counts again.
+    """
+    week = [r for r in ratings if r["course_code"] and r["hold_reasons"] is None
+            and r["created_at"] >= now - timedelta(days=7)]
+    by_slug, by_code = {}, {}
+    for r in week:
+        by_slug.setdefault(r["professor_slug"], []).append(r["id"])
+        by_code.setdefault(r["course_code"], []).append(r["id"])
+    ids = set()
+    for groups, limit in ((by_slug, WEEKLY_SURGE_PROF), (by_code, WEEKLY_SURGE_COURSE)):
+        for group in groups.values():
+            if len(group) > limit:
+                ids.update(group)
+    return ids
+
+
+def apply_surge_holds(conn, ids):
+    """Hold the surge ratings for review; return how many were held."""
+    if not ids:
+        return 0
+    with conn.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET status = 'held', hold_reasons = 'weekly_surge' "
+                    "WHERE id::text = ANY(%s) AND status = 'accepted' AND hold_reasons IS NULL",
+                    (sorted(ids),))
+        held = cur.rowcount
+    conn.commit()
+    return held
 
 
 def approved_courses(approved, catalog_courses):

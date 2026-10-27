@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from pipeline import run
@@ -38,8 +40,9 @@ TABLES = {
         {"instructor_key": "lucia nunez", "professor_slug": None, "track": "CPS Quarter", "sections": 1,
          "cps_subject": None, "cps_share": None},
     ],
-    "survey_ratings": [{"professor_slug": "olin-guha", "course_code": "CS2500", "rating": 5,
-                        "hours": "3-4", "grade": None, "comment": ""}],
+    "survey_ratings": [{"id": "r1", "professor_slug": "olin-guha", "course_code": "CS2500", "rating": 5,
+                        "hours": "3-4", "grade": None, "comment": "", "hold_reasons": None,
+                        "created_at": datetime.now(timezone.utc) - timedelta(days=1)}],
     "survey_pending_courses": [],
 }
 
@@ -171,6 +174,21 @@ def test_survey_rows_reach_the_read_models(captured):
     by = {(r["professor_slug"], r["course_code"], r["source"]): r for r in written["summary_rows"]}
     assert ("olin-guha", "", "survey") in by
     assert by[("olin-guha", "", "blend")]["num_ratings"] == 2      # 1 RMP + 1 survey
+
+
+def test_a_weekly_surge_is_left_out_and_held_only_after_verify(captured, monkeypatch, capsys):
+    _, written = captured
+    surge = [dict(TABLES["survey_ratings"][0], id=f"s{i}", rating=1)
+             for i in range(run.survey.WEEKLY_SURGE_PROF + 1)]
+    monkeypatch.setitem(TABLES, "survey_ratings", surge)
+    held = []
+    monkeypatch.setattr(run.survey, "apply_surge_holds", lambda conn, ids: held.append(ids) or len(ids))
+    assert run.main(["--dry-run"]) == 0
+    assert held == [] and "::warning::41 survey ratings" in capsys.readouterr().out
+    assert run.main([]) == 0
+    assert held == [{r["id"] for r in surge}]
+    sources = {r["source"] for r in written["summary_rows"] if r["professor_slug"] == "olin-guha"}
+    assert "survey" not in sources
 
 
 def test_only_accepted_ratings_with_a_professor_are_read(captured):

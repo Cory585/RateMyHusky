@@ -179,3 +179,20 @@ def test_pair_taught_reads_the_real_banner_table(pg):
     pg.commit()
     assert ratings.pair_taught("jane-doe", "CS2500", pg_query_one(pg))
     assert not ratings.pair_taught("jane-doe", "CS3500", pg_query_one(pg))
+
+
+def test_apply_surge_holds_holds_only_unreviewed_accepted_rows(pg):
+    from pipeline import survey
+
+    insert(pg, "d1", "jane-doe", None, "CS2500", None)
+    insert(pg, "d2", "jane-doe", None, "CS3500", None)
+    insert(pg, "d3", "jane-doe", None, "CS4500", None)
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET hold_reasons = 'burst_prof' WHERE device_hash = 'd2'")  # approved
+    pg.commit()
+    ids = [r["id"] for r in rows(pg, "SELECT id::text AS id FROM survey_ratings ORDER BY device_hash")]
+    assert survey.apply_surge_holds(pg, set(ids)) == 2
+    held = rows(pg, "SELECT device_hash, hold_reasons FROM survey_ratings WHERE status = 'held' ORDER BY device_hash")
+    assert held == [{"device_hash": "d1", "hold_reasons": "weekly_surge"},
+                    {"device_hash": "d3", "hold_reasons": "weekly_surge"}]
+    assert survey.apply_surge_holds(pg, set()) == 0

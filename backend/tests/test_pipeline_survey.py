@@ -39,3 +39,36 @@ def test_approved_course_already_in_catalog_is_not_added_twice():
 def test_two_approvals_of_the_same_code_add_one_course():
     added = survey.approved_courses([{"code": "CS4974", "name": "A"}, {"code": "CS4974", "name": "B"}], [])
     assert [c["code"] for c in added] == ["CS4974"]
+
+
+from datetime import datetime, timedelta, timezone
+
+NOW = datetime(2026, 11, 8, 10, 0, tzinfo=timezone.utc)
+
+
+def S(i, slug="jane-doe", code="CS2500", days_ago=1, hold_reasons=None):
+    return {"id": f"r{i}", "professor_slug": slug, "course_code": code,
+            "created_at": NOW - timedelta(days=days_ago), "hold_reasons": hold_reasons}
+
+
+def test_a_professors_week_over_the_limit_is_a_surge():
+    # Under the daily cap a drip still lands ~200 a week; the pipeline is the last check before publish.
+    week = [S(i, code=("CS2500", "CS3500")[i % 2]) for i in range(survey.WEEKLY_SURGE_PROF + 1)]
+    assert survey.surge_ids(week, NOW) == {r["id"] for r in week}
+    assert survey.surge_ids(week[:-1], NOW) == set()
+
+
+def test_a_courses_week_spread_over_professors_is_a_surge():
+    week = [S(i, slug=f"prof-{i % 10}") for i in range(survey.WEEKLY_SURGE_COURSE + 1)]
+    assert survey.surge_ids(week, NOW) == {r["id"] for r in week}
+    assert survey.surge_ids(week[:-1], NOW) == set()
+
+
+def test_surge_counts_only_this_weeks_unreviewed_known_course_ratings():
+    week = [S(i) for i in range(survey.WEEKLY_SURGE_PROF)]
+    older = [S(100 + i, days_ago=8) for i in range(5)]
+    approved = [S(200 + i, hold_reasons="weekly_surge") for i in range(5)]  # a reviewer cleared these
+    pending = [S(300 + i, code=None) for i in range(5)]  # counts nowhere until approved
+    assert survey.surge_ids(week + older + approved + pending, NOW) == set()
+    extra = S(999)
+    assert survey.surge_ids(week + older + approved + pending + [extra], NOW) == {r["id"] for r in week + [extra]}
