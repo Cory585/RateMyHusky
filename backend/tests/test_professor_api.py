@@ -119,7 +119,7 @@ def _spy_cache(monkeypatch, payload):
 
 
 def test_failed_history_payload_is_served_but_not_cached(client, monkeypatch):
-    sets = _spy_cache(monkeypatch, {"version": 2, "_historyFailed": True})
+    sets = _spy_cache(monkeypatch, {"version": 2, "identity": {"slug": "olin-guha"}, "_historyFailed": True})
     resp = client.get("/api/professors/olin-guha/full")
     assert resp.status_code == 200
     assert "_historyFailed" not in resp.get_json()

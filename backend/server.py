@@ -1153,7 +1153,11 @@ def _department_colleagues(department, exclude_slug):
 def professor_payload(slug):
     """The §4.2 payload for `slug` (cached), or None when no professor matches.
     Shared by /full and render.py so the crawler page and the app agree."""
-    data = cache_get(f"prof_full:{slug}")
+    # The lookup also accepts case, hyphen and alias variants of a name. A variant
+    # caches only a pointer to the professor's own slug, so old or mis-cased links
+    # hit the one cached payload instead of each keeping a full copy (or rebuilding).
+    canonical = cache_get(f"prof_slug:{slug}") or slug
+    data = cache_get(f"prof_full:{canonical}")
     if data is None:
         data = build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions)
         if data is None:
@@ -1161,10 +1165,9 @@ def professor_payload(slug):
         if data.pop("_historyFailed", False):
             g.history_failed = True   # a failed Banner read is not cached: see history_cache_control
         else:
-            # Cache under the professor's own slug only. The lookup also accepts case and
-            # hyphen variants of a name; caching each variant spelling kept another full
-            # copy of the payload per spelling.
             cache_set(f"prof_full:{data['identity']['slug']}", data)
+            if data["identity"]["slug"] != slug:
+                cache_set(f"prof_slug:{slug}", data["identity"]["slug"])
     return data
 
 

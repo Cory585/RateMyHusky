@@ -126,3 +126,21 @@ def test_a_failed_rollback_discards_the_connection(monkeypatch):
     with pytest.raises(psycopg2.extensions.QueryCanceledError):
         server.query("SELECT 1")
     assert executed == ["SELECT 1", "discard"]
+
+
+def test_a_variant_slug_reuses_the_canonical_payload(monkeypatch):
+    monkeypatch.setattr(server, "data_version", lambda: 1)
+    server._cache.clear()
+    builds = []
+
+    def fake_build(slug, *args):
+        builds.append(slug)
+        return {"identity": {"slug": "jane-doe"}}
+
+    monkeypatch.setattr(server, "build_payload", fake_build)
+    first = server.professor_payload("Jane-Doe")
+    assert server.professor_payload("Jane-Doe") is first
+    assert server.professor_payload("jane-doe") is first
+    assert builds == ["Jane-Doe"]
+    # the variant stores a slug, not another copy of the payload
+    assert server.cache_get("prof_slug:Jane-Doe") == "jane-doe"
