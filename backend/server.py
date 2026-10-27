@@ -1869,6 +1869,19 @@ def bookmarks_get():
     return jsonify(bookmarks.list_bookmarks(user_sub, query))
 
 
+def _json_object():
+    """The request's JSON body when it is an object, else {} (a list, a string,
+    or no JSON at all), so handlers can call .get on it."""
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else {}
+
+
+def _json_str(data, name):
+    """A stripped string field; "" when missing or not a string (123, null)."""
+    value = data.get(name)
+    return value.strip() if isinstance(value, str) else ""
+
+
 @app.route("/api/bookmarks", methods=["POST"])
 @limiter.limit("20 per minute")
 def bookmarks_add():
@@ -1876,9 +1889,9 @@ def bookmarks_add():
     if not user_sub:
         return jsonify({"error": "Sign in required"}), 401
 
-    data = request.get_json(silent=True) or {}
-    item_type = (data.get("itemType") or "").strip()
-    item_key = (data.get("itemKey") or "").strip()
+    data = _json_object()
+    item_type = _json_str(data, "itemType")
+    item_key = _json_str(data, "itemKey")
     if item_type not in ("professor", "course") or not item_key:
         return jsonify({"error": "itemType must be 'professor' or 'course', itemKey is required"}), 400
 
@@ -1897,9 +1910,9 @@ def bookmarks_remove():
     if not user_sub:
         return jsonify({"error": "Sign in required"}), 401
 
-    data = request.get_json(silent=True) or {}
-    item_type = (data.get("itemType") or "").strip()
-    item_key = (data.get("itemKey") or "").strip()
+    data = _json_object()
+    item_type = _json_str(data, "itemType")
+    item_key = _json_str(data, "itemKey")
     if item_type not in ("professor", "course") or not item_key:
         return jsonify({"error": "itemType must be 'professor' or 'course', itemKey is required"}), 400
 
@@ -1914,19 +1927,12 @@ def bookmarks_remove():
 def submit_feedback():
     global _feedback_count, _feedback_date
 
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):   # a JSON list or string body
-        data = {}
-    # Non-string values (123, null) count as missing instead of crashing .strip().
-    def field(name):
-        value = data.get(name)
-        return value.strip() if isinstance(value, str) else ""
-
-    feedback_type = field("feedbackType")
-    description = field("description")
-    reply_email = field("email")
-    turnstile_token = field("turnstileToken")
-    account_token = field("accountSub")
+    data = _json_object()
+    feedback_type = _json_str(data, "feedbackType")
+    description = _json_str(data, "description")
+    reply_email = _json_str(data, "email")
+    turnstile_token = _json_str(data, "turnstileToken")
+    account_token = _json_str(data, "accountSub")
 
     # Validate before Turnstile: a bad request shouldn't cost a siteverify call
     # or use up the user's one-time CAPTCHA token.
