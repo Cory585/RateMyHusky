@@ -178,16 +178,24 @@ const STATIC_RENDER: Record<string, string> = {
   '/departments': '/render/departments',
 };
 
-async function fetchSnapshot(pathname: string): Promise<Response | undefined> {
+// Headers for a snapshot fetch: the proxy key, and the crawler's IP so the backend
+// rate-limits each crawler on its own rather than all of them as Vercel's address.
+function snapshotHeaders(clientIp: string | null): Headers {
+  const headers = new Headers();
+  const proxyKey = process.env.PROXY_SECRET;
+  if (proxyKey) headers.set('x-proxy-key', proxyKey);
+  if (clientIp) headers.set('x-rmh-client-ip', clientIp);
+  return headers;
+}
+
+async function fetchSnapshot(pathname: string, clientIp: string | null): Promise<Response | undefined> {
   const origin = process.env.RAILWAY_ORIGIN;
   if (!origin) return undefined;
 
   // Exact-match home/listing routes (no slug → no SSRF decoding needed).
   const staticTarget = STATIC_RENDER[pathname];
   if (staticTarget) {
-    const headers = new Headers();
-    const proxyKey = process.env.PROXY_SECRET;
-    if (proxyKey) headers.set('x-proxy-key', proxyKey);
+    const headers = snapshotHeaders(clientIp);
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 4000);
@@ -220,9 +228,7 @@ async function fetchSnapshot(pathname: string): Promise<Response | undefined> {
   }
   const kind = m[1] === 'professors' ? 'professors' : m[1] === 'courses' ? 'courses' : 'departments';
   const target = new URL(`/render/${kind}/${slug}`, origin);
-  const headers = new Headers();
-  const proxyKey = process.env.PROXY_SECRET;
-  if (proxyKey) headers.set('x-proxy-key', proxyKey);
+  const headers = snapshotHeaders(clientIp);
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 4000);
@@ -312,7 +318,7 @@ export default async function middleware(request: Request): Promise<Response | u
     isCrawler(request.headers.get('user-agent') || '') &&
     (DETAIL_RE.test(url.pathname) || url.pathname in STATIC_RENDER)
   ) {
-    const snapshot = await fetchSnapshot(url.pathname);
+    const snapshot = await fetchSnapshot(url.pathname, request.headers.get('x-real-ip'));
     if (snapshot) {
       return new Response(snapshot.body, {
         status: snapshot.status,
