@@ -64,7 +64,6 @@ def _body(**over):
     _body(rating=4.5),
     _body(rating=6),
     _body(hours="15+"),
-    _body(difficulty=None),
     _body(difficulty=0),
     _body(difficulty=6),
     _body(difficulty=2.5),
@@ -123,6 +122,14 @@ def test_validate_cleans():
     assert clean["rating"] == 4 and clean["hours"] == "3-4" and clean["grade"] is None
     assert clean["difficulty"] == 2
     assert clean["comment"] == "ok"
+
+
+def test_validate_accepts_a_missing_difficulty():
+    # A page still running the form from before the question sends none.
+    body = _body()
+    del body["difficulty"]
+    clean, err = rc.validate_submission(body, 2026)
+    assert err is None and clean["difficulty"] is None
 
 
 def test_new_professor_name_needs_two_latin_words():

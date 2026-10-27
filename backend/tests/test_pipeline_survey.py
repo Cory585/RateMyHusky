@@ -25,6 +25,7 @@ def test_difficulty_is_the_mean_of_ratings_that_answered_it():
     by = {(r["professor_slug"], r["course_code"]): r for r in rows}
     assert by[("jane-doe", "CS2500")]["difficulty"] == 2.5
     assert by[("jane-doe", "")]["difficulty"] == 2.5
+    assert by[("jane-doe", "CS2500")]["num_difficulty"] == 2 and by[("jane-doe", "CS2500")]["num_ratings"] == 3
 
 def test_no_ratings_no_rows():
     assert survey.survey_rows([]) == []

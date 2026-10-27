@@ -110,8 +110,8 @@ def validate_submission(body, this_year):
     rating = body.get("rating")
     if type(rating) is not int or not 1 <= rating <= 5:
         return None, "Rating must be a whole number from 1 to 5"
-    difficulty = body.get("difficulty")
-    if type(difficulty) is not int or not 1 <= difficulty <= 5:
+    difficulty = body.get("difficulty")  # None from a page still on the form from before the question
+    if difficulty is not None and (type(difficulty) is not int or not 1 <= difficulty <= 5):
         return None, "Difficulty must be a whole number from 1 to 5"
     hours = body.get("hours")
     if not isinstance(hours, str) or hours not in HOURS:

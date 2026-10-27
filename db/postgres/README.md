@@ -245,10 +245,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS survey_pending_courses_one_pending ON public.s
 The form's difficulty question added one nullable column. Run this before
 deploying the backend that asks it, or every rating fails on the missing
 column. Ratings from before stay NULL and don't count toward the average.
+Both are rerunnable:
 
 ```sql
 ALTER TABLE public.survey_ratings ADD COLUMN IF NOT EXISTS difficulty BIGINT NULL;
-ALTER TABLE public.survey_ratings ADD CONSTRAINT check_survey_difficulty CHECK (difficulty BETWEEN 1 AND 5);
+DO $$ BEGIN
+    ALTER TABLE public.survey_ratings ADD CONSTRAINT check_survey_difficulty CHECK (difficulty BETWEEN 1 AND 5);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 ```
 
 ### Optional cleanup (destructive; take a backup first)

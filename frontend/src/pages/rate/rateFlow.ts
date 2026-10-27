@@ -4,8 +4,6 @@ import type { ProfessorCourse, RateStart, RateSubmission, RatedCourse } from '..
 export type StepId = 'who' | 'newProfessor' | 'course' | 'otherCourse' | 'term' | 'otherTerm'
   | 'overall' | 'difficulty' | 'workload' | 'grade' | 'comment' | 'thanks';
 
-export const QUESTION_COUNT = 8;
-
 export interface RateProfessor { slug: string | null; name: string; department: string | null }
 export interface RateCourse { code: string; name: string | null; isNew: boolean; terms: string[] }
 export interface Answers {
@@ -60,6 +58,8 @@ export const SEASONS: { value: string; label: string }[] = [
 
 const MAIN_ORDER = ['who', 'course', 'term', 'overall', 'difficulty', 'workload', 'grade', 'comment'] as const;
 type MainStep = typeof MAIN_ORDER[number];
+
+export const QUESTION_COUNT = MAIN_ORDER.length;
 
 function mainOf(step: StepId): MainStep | null {
   switch (step) {

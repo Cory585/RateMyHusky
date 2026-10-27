@@ -4,8 +4,9 @@ Same three row kinds as summaries.py: professor (slug, ''), course ('', code),
 professor x course (slug, code). Rating and hours are means rounded to two
 places (hours from each bucket's midpoint); the rating distribution always has
 keys "1"-"5"; grades count only when given. Difficulty is the mean of the
-ratings that answered it (older ones didn't); would-take-again is not asked,
-so it stays None. A rating with no course counts toward the professor row only.
+ratings that answered it (older ones didn't), and num_difficulty counts them
+so the blend weights it by those alone; would-take-again is not asked, so it
+stays None. A rating with no course counts toward the professor row only.
 """
 
 import os
@@ -25,15 +26,17 @@ def _mean(values):
 
 def _row(slug, code, ratings):
     grades = {}
+    difficulties = [r["difficulty"] for r in ratings if r["difficulty"] is not None]
     for r in ratings:
         if r["grade"]:
             grades[r["grade"]] = grades.get(r["grade"], 0) + 1
     return {
         "professor_slug": slug, "course_code": code, "source": "survey",
         "rating": _mean([r["rating"] for r in ratings]),
-        "difficulty": _mean([r["difficulty"] for r in ratings if r["difficulty"] is not None]),
+        "difficulty": _mean(difficulties),
         "would_take_again_pct": None,
         "num_ratings": len(ratings),
+        "num_difficulty": len(difficulties),
         "num_comments": sum(1 for r in ratings if (r["comment"] or "").strip()),
         "hours_per_week": _mean([HOURS_MIDPOINTS[r["hours"]] for r in ratings if r["hours"] in HOURS_MIDPOINTS]),
         "rating_distribution": {str(s): sum(1 for r in ratings if r["rating"] == s) for s in range(1, 6)},

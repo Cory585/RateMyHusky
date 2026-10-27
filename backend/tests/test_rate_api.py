@@ -296,7 +296,7 @@ def test_new_device_follows_the_opened_token_and_cookie_is_set(rate):
 def test_difficulty_is_saved(rate):
     server, client, state, ri = rate
     post(client, ri)
-    assert rating_writes(state)[0][1][-1] == 3  # difficulty column
+    assert rating_writes(state)[0][1][1 + server.ratings._INSERT_COLUMNS.index("difficulty")] == 3
 
 
 def test_forged_token_without_prior_rows_is_a_new_device(rate):
