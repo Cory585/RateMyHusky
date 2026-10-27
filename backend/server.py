@@ -305,6 +305,8 @@ def check_origin():
     """Block API requests that don't originate from the frontend."""
     if request.path.startswith("/api/auth/google"):
         return  # allow OAuth redirects
+    if request.path == "/api/csp-report":
+        return  # browsers send violation reports without a usable Origin; it only logs
     if request.method == "OPTIONS":
         return  # allow CORS preflight
     raw = request.headers.get("Origin") or request.headers.get("Referer") or ""
@@ -2023,6 +2025,31 @@ def bookmarks_remove():
 
     bookmarks.remove_bookmark(user_sub, item_type, item_key, _write)
     return jsonify({"ok": True})
+
+
+# What a CSP report logs, each value capped. URLs lose their query string, which
+# can carry search terms or tokens.
+CSP_REPORT_FIELDS = ("document-uri", "effective-directive", "violated-directive",
+                     "blocked-uri", "source-file", "line-number")
+CSP_REPORT_URL_FIELDS = {"document-uri", "blocked-uri", "source-file"}
+
+
+@app.route("/api/csp-report", methods=["POST"])
+@limiter.limit("60 per hour")
+def csp_report():
+    """Logs the browser reports for frontend/vercel.json's Content-Security-Policy-Report-Only,
+    so we can see what the policy would block before enforcing it. Nothing is stored."""
+    data = request.get_json(force=True, silent=True)   # sent as application/csp-report
+    report = data.get("csp-report") if isinstance(data, dict) else None
+    if isinstance(report, dict):
+        fields = {}
+        for name in CSP_REPORT_FIELDS:
+            value = str(report.get(name, ""))
+            if name in CSP_REPORT_URL_FIELDS:
+                value = value.split("?", 1)[0].split("#", 1)[0]
+            fields[name] = value[:300]
+        print("[csp] " + json.dumps(fields))
+    return "", 204
 
 
 @app.route("/api/feedback", methods=["POST"])
