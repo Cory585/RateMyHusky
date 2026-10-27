@@ -158,16 +158,30 @@ export function pickCourse(a: Answers, c: RateCourse, ratedCourses: RatedCourse[
   });
 }
 
+const COURSE_TILES = 6;
+
 // Rated courses are the professor's listed ones, then any the term list no longer carries.
-export function courseGroups(courses: RateCourse[], rated: RatedCourse[]): { fresh: RateCourse[]; rated: RateCourse[] } {
+// Fresh courses stop at the most recent COURSE_TILES (more: the rest are found through search),
+// plus the selected one, so going back to the step still shows it picked.
+export function courseGroups(courses: RateCourse[], rated: RatedCourse[], selected?: string): { fresh: RateCourse[]; rated: RateCourse[]; more: boolean } {
   const codes = new Set(rated.map((r) => r.code));
   const listed = new Set(courses.map((c) => c.code));
   const off = rated.filter((r) => !listed.has(r.code))
     .map((r): RateCourse => ({ code: r.code, name: r.name, isNew: r.pending, terms: [] }));
+  const unrated = courses.filter((c) => !codes.has(c.code));
+  const fresh = unrated.filter((c, i) => i < COURSE_TILES || c.code === selected);
   return {
-    fresh: courses.filter((c) => !codes.has(c.code)),
+    fresh,
     rated: [...courses.filter((c) => codes.has(c.code)), ...off],
+    more: fresh.length < unrated.length,
   };
+}
+
+// The professor's courses a search matches, for the ones the catalog search can't find (Banner-only codes).
+export function ownMatches(courses: RateCourse[], q: string): RateCourse[] {
+  const s = q.toLowerCase();
+  if (s.length < 2) return [];
+  return courses.filter((c) => c.code.toLowerCase().includes(s) || !!c.name?.toLowerCase().includes(s));
 }
 
 export function splitTerm(label: string | null | undefined, now: Date): { season: string; year: number } | null {

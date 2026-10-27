@@ -323,13 +323,14 @@ export default function Rate() {
             </>
           );
         }
-        const groups = courseGroups(courses, rated);
+        const groups = courseGroups(courses, rated, answers.course?.code);
         return (
           <>
             <CourseStep
               professor={answers.professor}
               fresh={groups.fresh}
               rated={groups.rated}
+              more={groups.more}
               selected={answers.course?.code}
               onPick={(c) => choose(pickCourse(answers, c, rated, new Date()), 'course')}
               onOther={() => open('otherCourse')}
@@ -341,6 +342,7 @@ export default function Rate() {
       case 'otherCourse':
         return (
           <OtherCourseStep
+            own={courses ?? []}
             rated={(rated ?? []).map((r) => r.code)}
             // A hit on the professor's list takes the listed course, so its terms show.
             onPick={(c) => go(pickCourse(answers, courses?.find((x) => x.code === c.code) ?? c, rated ?? [], new Date()), 'otherCourse')}

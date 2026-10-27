@@ -5,7 +5,7 @@ import { argv } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import {
   answer, buildSubmission, contextTags, courseGroups, displayTerm, firstStep, formatCode,
-  inTermWindow, lastName, nextStep, pickCourse, prefillCourse, prevStep, progressIndex, replacedLine,
+  inTermWindow, lastName, nextStep, ownMatches, pickCourse, prefillCourse, prevStep, progressIndex, replacedLine,
   splitTerm, termYears, toRateCourse,
   SEASONS,
   type Answers, type RateCourse, type RateProfessor,
@@ -207,7 +207,16 @@ function selftest(): number {
   check('courseGroups splits fresh and rated', same(groups.fresh.map((c) => c.code), ['CS2500'])
     && same(groups.rated.map((c) => c.code), ['CS3500', 'CS4973'])
     && same(groups.rated[0].terms, cs3500.terms) && same(groups.rated[1].terms, []) && groups.rated[1].name === 'Topics in HCI');
-  const pendingPrior: RatedCourse = { ...prior, code: 'CS4999', name: 'Applied ML', pending: true };
+  const many: RateCourse[] = Array.from({ length: 9 }, (_, i) => ({ code: `CS${3600 + i}`, name: null, isNew: false, terms: [] }));
+  const capped = courseGroups([...many, cs3500], [prior, priorB]);
+  check('courseGroups shows the six most recent fresh courses', same(capped.fresh.map((c) => c.code), many.slice(0, 6).map((c) => c.code))
+    && capped.more && same(capped.rated.map((c) => c.code), ['CS3500', 'CS4973']));
+  check('courseGroups keeps a picked hidden course', same(courseGroups(many, [], 'CS3608').fresh.map((c) => c.code).slice(-1), ['CS3608']));
+  check('courseGroups has no more at six', !courseGroups(many.slice(0, 6), []).more && !groups.more);
+  check('ownMatches finds by code or name, any case', same(ownMatches([cs2500, cs3500, noShortcuts], 'cs3500').map((c) => c.code), ['CS3500'])
+    && same(ownMatches([cs2500, cs3500, noShortcuts], 'algo').map((c) => c.code), ['CS3000'])
+    && ownMatches([cs2500], 'c').length === 0);
+  const pendingPrior: RatedCourse ={ ...prior, code: 'CS4999', name: 'Applied ML', pending: true };
   const [pendingTile] = courseGroups([], [pendingPrior]).rated;
   const subPending = buildSubmission(pickCourse({ comment: '', professor: alex }, pendingTile, [pendingPrior], now), start, 't', '');
   check('a rated course awaiting review resends as a new course', same(subPending.course, { code: 'CS4999', name: 'Applied ML' }));

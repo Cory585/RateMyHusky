@@ -154,9 +154,9 @@ const formatReviewDate = (dateStr: string) => {
   });
 };
 
-const GRADE_ORDER = ['A+','A','A-','B+','B','B-','C+','C','C-','D+','D','D-','F','W','WF','P','NP','I'];
+const GRADE_ORDER = ['A','A-','B+','B','B-','C+','C','C-','D+','D','D-','F','W','WF','P','NP','I'];
 const GRADE_COLORS: Record<string, string> = {
-  'A+':'#1a9850','A':'#27ae60','A-':'#66bd63',
+  'A':'#27ae60','A-':'#66bd63',
   'B+':'#a6d96a','B':'#d4e858','B-':'#fee08b',
   'C+':'#fdae61','C':'#f39c12','C-':'#e67e22',
   'D+':'#e74c3c','D':'#d73027','D-':'#c0392b',
@@ -442,6 +442,11 @@ const Professor = () => {
           counts[g] = (counts[g] || 0) + 1;
         }
       });
+    }
+    // Northeastern has no A+, so fold any into A
+    if (counts['A+']) {
+      counts['A'] = (counts['A'] || 0) + counts['A+'];
+      delete counts['A+'];
     }
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
     if (total === 0) return [];
