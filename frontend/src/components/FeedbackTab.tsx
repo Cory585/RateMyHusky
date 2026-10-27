@@ -21,14 +21,15 @@ if (!TURNSTILE_SITE_KEY && import.meta.env.PROD) {
   throw new Error('VITE_TURNSTILE_SITE_KEY environment variable is required in production');
 }
 
-// "incorrectdata" and "general" also stand for the merged "missing" and "feature",
-// which server.py still accepts from cached bundles.
+// "incorrectdata", "general" and "mydata" also stand for the merged "missing", "feature",
+// "professor" and "datadeletion", which server.py still accepts from cached bundles.
+// "mydata" covers a professor's page and a student's account data, so it sends the
+// account when signed in but never requires it.
 const feedbackOptions = [
   { value: 'bug', label: 'Bug Report' },
   { value: 'incorrectdata', label: 'Wrong or Missing Data' },
   { value: 'general', label: 'Idea or General Feedback' },
-  { value: 'professor', label: 'Professor: Correct or Remove My Page' },
-  { value: 'datadeletion', label: 'Data Deletion Request' },
+  { value: 'mydata', label: 'Correct or Remove My Data' },
   { value: 'banappeal', label: 'Ask Ban Appeal' },
 ].filter((o) => ASK_ENABLED || o.value !== 'banappeal');
 
@@ -39,13 +40,9 @@ const MAX_EMAIL = 254;
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 // types where an email is required and (when signed in) the verified account id is sent,
-// so we can respond and act on the right account
-const ACCOUNT_TYPES = ['banappeal', 'datadeletion'];
-// also require an email, but carry no account id: a professor is confirmed at their
+// so we can respond and act on the right account; a professor is confirmed at their
 // Northeastern address, which the FAQ, Privacy Policy and Terms say we need
-const EMAIL_REQUIRED_TYPES = [...ACCOUNT_TYPES, 'professor'];
-
-const SIGN_IN_FOR_DELETION = "Please sign in first so we know which account's data to delete.";
+const ACCOUNT_TYPES = ['banappeal', 'mydata'];
 
 const FeedbackTab = () => {
   const { user, loading: authLoading } = useAuth();
@@ -105,11 +102,7 @@ const FeedbackTab = () => {
       setError('Please select a feedback type and enter a description.');
       return;
     }
-    if (feedbackType === 'datadeletion' && !user) {
-      setError(SIGN_IN_FOR_DELETION);
-      return;
-    }
-    if (EMAIL_REQUIRED_TYPES.includes(feedbackType) && !email.trim()) {
+    if (ACCOUNT_TYPES.includes(feedbackType) && !email.trim()) {
       setError('Email is required for this request so we can respond.');
       return;
     }
@@ -124,7 +117,7 @@ const FeedbackTab = () => {
     setError('');
     setLoading(true);
     try {
-      // For ban-appeal / data-deletion, include the signed-in account id so we can locate
+      // For ban-appeal / my-data, include the signed-in account id so we can locate
       // the ask_log rows; null when not logged in (the email body notes that case).
       const accountSub = ACCOUNT_TYPES.includes(feedbackType)
         ? (localStorage.getItem('auth_token') ?? undefined)
@@ -133,10 +126,7 @@ const FeedbackTab = () => {
       setSubmitted(true);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '';
-      if (msg.includes('Sign in required')) {
-        // the token expired after the page loaded, or there never was one
-        setError(SIGN_IN_FOR_DELETION);
-      } else if (msg.includes('429') || msg.includes('limit')) {
+      if (msg.includes('429') || msg.includes('limit')) {
         setError('Daily feedback limit reached. Please try again tomorrow.');
       } else if (msg.includes('Invalid email')) {
         setError('Please enter a valid email address.');
@@ -177,10 +167,8 @@ const FeedbackTab = () => {
         return "What's wrong or missing? Include the professor or course, a link to the page, and what it should say.";
       case 'banappeal':
         return "Explain why your access to Ask should be restored. Include any context about the questions you asked.";
-      case 'datadeletion':
-        return "Request deletion of your Ask data and bookmarks. We'll delete all Ask logs and bookmarks tied to your signed-in account.";
-      case 'professor':
-        return "Which page is yours, and what should we correct or remove? Use your Northeastern email below; we confirm every request there before acting.";
+      case 'mydata':
+        return "Professors: which page, and what to fix or remove? We confirm at your Northeastern email. Students: we can delete your Ask logs and bookmarks.";
       case 'general':
         return "Share an idea for a feature, a suggestion, or anything else on your mind.";
       default:
@@ -243,9 +231,9 @@ const FeedbackTab = () => {
                   onChange={setFeedbackType}
                   placeholder="Select Feedback Type"
                 />
-                {feedbackType === 'datadeletion' && !authLoading && !user && (
+                {feedbackType === 'mydata' && !authLoading && !user && (
                   <p className="feedback-note">
-                    You're not signed in, so we can't tell which account's data to delete. Sign in first, then send this request.
+                    Deleting your Ask logs and bookmarks? Sign in first so we know which account is yours.
                   </p>
                 )}
 
@@ -262,7 +250,7 @@ const FeedbackTab = () => {
                 />
 
                 <label className="feedback-label">
-                  Email {EMAIL_REQUIRED_TYPES.includes(feedbackType)
+                  Email {ACCOUNT_TYPES.includes(feedbackType)
                     ? <span className="feedback-required">*</span>
                     : '(Optional)'}
                 </label>
@@ -277,7 +265,7 @@ const FeedbackTab = () => {
 
                 <div ref={turnstileRef} className="feedback-turnstile" />
 
-                <button className="feedback-submit" onClick={handleSubmit} disabled={loading || !turnstileToken || (feedbackType === 'datadeletion' && authLoading)}>
+                <button className="feedback-submit" onClick={handleSubmit} disabled={loading || !turnstileToken}>
                   {loading ? 'Sending...' : 'Submit'}
                 </button>
               </>

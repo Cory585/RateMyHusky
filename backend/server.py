@@ -318,27 +318,30 @@ _feedback_date = None   # "YYYY-MM-DD" UTC, resets counter each day
 FEEDBACK_DAILY_LIMIT = 300
 # feedback types that require a reply email and carry the signed-in account's verified sub,
 # so support can act on the right ask_log rows (review an appeal, or erase the user's data)
-_ACCOUNT_FEEDBACK_TYPES = {"banappeal", "datadeletion"}
+_ACCOUNT_FEEDBACK_TYPES = {"banappeal", "datadeletion", "mydata"}
 # A professor asking to correct or remove their page: the FAQ, Privacy Policy and
 # Terms say these can't be verified or answered without an email, so it's required.
+# "mydata" is both that and a student's account deletion, so it carries the account
+# when signed in but never requires it: a professor has no account.
 _EMAIL_REQUIRED_FEEDBACK_TYPES = _ACCOUNT_FEEDBACK_TYPES | {"professor"}
 
 # Types that can change or remove what a professor's page shows. The FAQ and the
 # Privacy Policy promise professors we confirm these at their Northeastern
 # address before acting, so the support email says up front whether that is possible.
-_PAGE_CHANGE_FEEDBACK_TYPES = {"missing", "incorrectdata", "professor"}
+_PAGE_CHANGE_FEEDBACK_TYPES = {"missing", "incorrectdata", "professor", "mydata"}
 
 # Every type the endpoint accepts, with its email subject label. "missing" and
-# "feature" were merged into "incorrectdata" and "general" on the form but stay
-# accepted for cached bundles; "banappeal" is hidden while Ask is off. Drop the two
-# old keys once no tab can still be running a pre-merge bundle (a couple of weeks
-# after the merge ships).
+# "feature" were merged into "incorrectdata" and "general" on the form, and
+# "professor" and "datadeletion" into "mydata", but stay accepted for cached
+# bundles; "banappeal" is hidden while Ask is off. Drop the old keys once no tab can
+# still be running a pre-merge bundle (a couple of weeks after the merge ships).
 _FEEDBACK_TYPE_LABELS = {
     "bug": "Bug Report",
     "incorrectdata": "Wrong or Missing Data",
     "missing": "Missing Data",
     "general": "Idea or General Feedback",
     "feature": "Feature Request",
+    "mydata": "Correct or Remove My Data",
     "professor": "Professor Request",
     "datadeletion": "Data Deletion Request",
     "banappeal": "Ask Ban Appeal",
@@ -1797,7 +1800,7 @@ def submit_feedback():
     if len(description) > FEEDBACK_MAX_DESCRIPTION:
         return jsonify({"error": f"Description is too long (max {FEEDBACK_MAX_DESCRIPTION} characters)"}), 400
 
-    # Ask ban appeals, data-deletion and professor requests are useless without a reply
+    # Ask ban appeals, data and professor requests are useless without a reply
     # address — require it (other types stay optional).
     if feedback_type in _EMAIL_REQUIRED_FEEDBACK_TYPES and not reply_email:
         return jsonify({"error": "Email is required for this request"}), 400

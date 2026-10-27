@@ -73,6 +73,43 @@ def test_data_deletion_requires_a_valid_account(monkeypatch):
         assert resp.get_json()["error"] == "Sign in required"
 
 
+def _sent_email(monkeypatch, **body):
+    import server
+    monkeypatch.delenv("TURNSTILE_SECRET_KEY", raising=False)
+    monkeypatch.setenv("RESEND_API_KEY", "key")
+    monkeypatch.setattr(server.limiter, "enabled", False)
+    sent = {}
+    class Ok:
+        ok = True
+    def capture(url, **kw):
+        sent.update(kw["json"])
+        return Ok()
+    monkeypatch.setattr(server.http_requests, "post", capture)
+    resp = server.app.test_client().post("/api/feedback", json=body)
+    assert resp.get_json() == {"ok": True}
+    return sent["text"]
+
+
+def test_my_data_requires_an_email(monkeypatch):
+    resp = _post(monkeypatch, feedbackType="mydata", description="remove my page")
+    assert resp.status_code == 400
+    assert "Email is required" in resp.get_json()["error"]
+
+
+def test_my_data_from_a_professor_needs_no_sign_in(monkeypatch):
+    text = _sent_email(monkeypatch, feedbackType="mydata", description="remove my page",
+                       email="j.smith@northeastern.edu")
+    assert "Correct or Remove My Data" in text
+    assert "reply to confirm" in text
+    assert "Account:     not signed in" in text
+
+
+def test_my_data_carries_the_signed_in_account(monkeypatch):
+    text = _sent_email(monkeypatch, feedbackType="mydata", description="delete my Ask data",
+                       email="a@gmail.com", accountSub=_account_token())
+    assert "Account:     user-123" in text
+
+
 def test_invalid_requests_are_rejected_before_captcha(monkeypatch):
     import server
     monkeypatch.setattr(server.limiter, "enabled", False)
