@@ -311,3 +311,23 @@ def test_limit_key_uses_the_body_token_when_there_is_no_cookie(rate):
     for body in ({"deviceToken": "nope"}, {}, [1], None):
         with server.app.test_request_context("/api/rate", method="POST", json=body):
             assert "|" not in server._rating_limit_key()
+
+
+def test_missing_turnstile_secret_fails_closed_on_railway(rate, monkeypatch):
+    server, client, state, ri = rate
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    resp = post(client, ri, {"turnstileToken": "t"})
+    assert resp.status_code == 503
+    assert state["writes"] == [] and state["turnstile_calls"] == 0
+
+
+def test_turnstile_token_from_another_hostname_is_403(rate, monkeypatch):
+    server, client, state, ri = rate
+    monkeypatch.setenv("TURNSTILE_SECRET_KEY", "ts-secret")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    monkeypatch.setattr(server, "FRONTEND_URL", "https://ratemyhusky.com")
+    for host, code in (("evil.example", 403), ("ratemyhusky.com", 200)):
+        monkeypatch.setattr(server.http_requests, "post", lambda *a, _h=host, **k: SimpleNamespace(
+            ok=True, json=lambda: {"success": True, "hostname": _h}))
+        resp = post(client, ri, {"turnstileToken": "t"})
+        assert resp.status_code == code, host

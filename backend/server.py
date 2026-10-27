@@ -409,6 +409,36 @@ _FEEDBACK_TYPE_LABELS = {
 FEEDBACK_MAX_DESCRIPTION = 5000
 FEEDBACK_MAX_EMAIL = 254   # RFC 5321's limit on a full address
 
+def _turnstile_unconfigured():
+    """True on Railway without TURNSTILE_SECRET_KEY: forms then fail closed, since
+    skipping the CAPTCHA is only meant for local dev."""
+    return not os.getenv("TURNSTILE_SECRET_KEY") and bool(os.getenv("RAILWAY_ENVIRONMENT"))
+
+
+def _turnstile_verdict(token):
+    """Cloudflare's siteverify answer for `token`, or None when it can't be reached."""
+    try:
+        resp = http_requests.post(
+            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+            data={"secret": os.getenv("TURNSTILE_SECRET_KEY"), "response": token, "remoteip": get_real_ip()},
+            timeout=5,
+        )
+        verdict = resp.json() if resp.ok else {}
+    except Exception:
+        return None
+    return verdict if isinstance(verdict, dict) else {}
+
+
+def _turnstile_accepts(verdict):
+    """A passed challenge, solved on our own site. A token solved on another site that
+    embeds our public site key must not count; checked on Railway only, because
+    Turnstile's test keys report a placeholder hostname."""
+    if not verdict.get("success"):
+        return False
+    hostname = (verdict.get("hostname") or "").lower()
+    return not os.getenv("RAILWAY_ENVIRONMENT") or hostname in _turnstile_hostnames()
+
+
 def _turnstile_hostnames():
     """Hostnames a Turnstile token may have been solved on: the frontend's, its www
     variant, plus any extras in TURNSTILE_HOSTNAMES (comma-separated)."""
@@ -1965,29 +1995,17 @@ def submit_feedback():
     if feedback_type == "datadeletion" and appeal_account is None:
         return jsonify({"error": "Sign in required"}), 401
 
-    # Verify Cloudflare Turnstile CAPTCHA. Unset is only allowed off Railway (local dev).
-    turnstile_secret = os.getenv("TURNSTILE_SECRET_KEY")
-    if not turnstile_secret and os.getenv("RAILWAY_ENVIRONMENT"):
+    # Verify Cloudflare Turnstile CAPTCHA
+    if _turnstile_unconfigured():
         print("[feedback] TURNSTILE_SECRET_KEY not configured")
         return jsonify({"error": "Feedback is temporarily unavailable"}), 503
-    if turnstile_secret:
+    if os.getenv("TURNSTILE_SECRET_KEY"):
         if not turnstile_token:
             return jsonify({"error": "CAPTCHA verification required"}), 400
-        try:
-            verify_resp = http_requests.post(
-                "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-                data={"secret": turnstile_secret, "response": turnstile_token, "remoteip": get_real_ip()},
-                timeout=5,
-            )
-            verdict = verify_resp.json() if verify_resp.ok else {}
-        except Exception:
+        verdict = _turnstile_verdict(turnstile_token)
+        if verdict is None:
             return jsonify({"error": "CAPTCHA verification failed"}), 500
-        if not verdict.get("success"):
-            return jsonify({"error": "CAPTCHA verification failed"}), 403
-        # A token solved on another site that embeds our public site key must not count.
-        # Checked on Railway only: Turnstile's test keys report a placeholder hostname.
-        hostname = (verdict.get("hostname") or "").lower()
-        if os.getenv("RAILWAY_ENVIRONMENT") and hostname not in _turnstile_hostnames():
+        if not _turnstile_accepts(verdict):
             return jsonify({"error": "CAPTCHA verification failed"}), 403
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -2068,15 +2086,8 @@ def _rating_enabled():
 
 
 def _turnstile_passes(token):
-    try:
-        resp = http_requests.post(
-            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-            data={"secret": os.getenv("TURNSTILE_SECRET_KEY"), "response": token, "remoteip": get_real_ip()},
-            timeout=5,
-        )
-        return bool(resp.ok and resp.json().get("success"))
-    except Exception:
-        return False
+    verdict = _turnstile_verdict(token)
+    return verdict is not None and _turnstile_accepts(verdict)
 
 
 def _rating_moderation_score(texts):
@@ -2183,6 +2194,9 @@ def rate_submit():
         return _rating_response({"error": err}, 400)
 
     # 4. Turnstile
+    if _turnstile_unconfigured():
+        print("[rate] TURNSTILE_SECRET_KEY not configured")
+        return _rating_unavailable()
     if os.getenv("TURNSTILE_SECRET_KEY"):
         token = body.get("turnstileToken")
         if not token:
