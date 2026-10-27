@@ -158,3 +158,17 @@ def test_turnstile_token_from_another_hostname_is_rejected(monkeypatch):
     resp = _post_feedback(monkeypatch, {"feedbackType": "bug", "description": "hi", "turnstileToken": "t"},
                           env={"TURNSTILE_SECRET_KEY": "k", "RAILWAY_ENVIRONMENT": "production"})
     assert resp.status_code == 403
+
+
+def test_turnstile_token_from_a_vercel_preview_is_accepted(monkeypatch):
+    import re
+    import server
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    monkeypatch.setattr(server, "PREVIEW_ORIGIN_RE", re.compile(
+        r"^https://rate-my-husky-git-[a-z0-9-]+-team\.vercel\.app$"))
+    preview = {"success": True, "hostname": "rate-my-husky-git-fix-1-team.vercel.app"}
+    assert server._turnstile_accepts(preview)
+    # Only a bare hostname counts: anything that changes the origin around it is refused.
+    for hostname in ("rate-my-husky-git-fix-1-team.vercel.app.evil.example",
+                     "evil.example/rate-my-husky-git-fix-1-team.vercel.app", ""):
+        assert not server._turnstile_accepts({"success": True, "hostname": hostname})

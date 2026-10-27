@@ -444,11 +444,13 @@ def _turnstile_verdict(token):
 def _turnstile_accepts(verdict):
     """A passed challenge, solved on our own site. A token solved on another site that
     embeds our public site key must not count; checked on Railway only, because
-    Turnstile's test keys report a placeholder hostname."""
+    Turnstile's test keys report a placeholder hostname. Vercel previews share this
+    backend under a new hostname per branch, so PREVIEW_ORIGIN_RE vouches for those."""
     if not verdict.get("success"):
         return False
     hostname = (verdict.get("hostname") or "").lower()
-    return not os.getenv("RAILWAY_ENVIRONMENT") or hostname in _turnstile_hostnames()
+    return (not os.getenv("RAILWAY_ENVIRONMENT") or hostname in _turnstile_hostnames()
+            or _is_preview_origin(_origin_host(f"https://{hostname}")))
 
 
 def _turnstile_hostnames():
