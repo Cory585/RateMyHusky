@@ -453,6 +453,25 @@ def _turnstile_accepts(verdict):
             or _is_preview_origin(_origin_host(f"https://{hostname}")))
 
 
+def _turnstile_gate(token, label):
+    """None when the CAPTCHA passes (or is off, in local dev), else the (status, error)
+    to answer with. Shared by feedback and ratings so the two fail the same way."""
+    if _turnstile_unconfigured():
+        print(f"[{label}] TURNSTILE_SECRET_KEY not configured")
+        return 503, "This form is temporarily unavailable"
+    if not os.getenv("TURNSTILE_SECRET_KEY"):
+        return None
+    if not token or not isinstance(token, str):
+        return 400, "CAPTCHA verification required"
+    verdict = _turnstile_verdict(token)
+    if verdict is None:
+        # Cloudflare unreachable is our outage, not a failed human check: retry later.
+        return 503, "CAPTCHA verification is unavailable, try again shortly"
+    if not _turnstile_accepts(verdict):
+        return 403, "CAPTCHA verification failed"
+    return None
+
+
 def _turnstile_hostnames():
     """Hostnames a Turnstile token may have been solved on: the frontend's, its www
     variant, plus any extras in TURNSTILE_HOSTNAMES (comma-separated)."""
@@ -2021,17 +2040,10 @@ def submit_feedback():
         return jsonify({"error": "Sign in required"}), 401
 
     # Verify Cloudflare Turnstile CAPTCHA
-    if _turnstile_unconfigured():
-        print("[feedback] TURNSTILE_SECRET_KEY not configured")
-        return jsonify({"error": "Feedback is temporarily unavailable"}), 503
-    if os.getenv("TURNSTILE_SECRET_KEY"):
-        if not turnstile_token:
-            return jsonify({"error": "CAPTCHA verification required"}), 400
-        verdict = _turnstile_verdict(turnstile_token)
-        if verdict is None:
-            return jsonify({"error": "CAPTCHA verification failed"}), 500
-        if not _turnstile_accepts(verdict):
-            return jsonify({"error": "CAPTCHA verification failed"}), 403
+    failed = _turnstile_gate(turnstile_token, "feedback")
+    if failed:
+        status, error = failed
+        return jsonify({"error": error}), status
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     with _feedback_lock:
@@ -2108,11 +2120,6 @@ _MIN_RATING_SECRET = 32
 def _rating_enabled():
     """A RATING_SECRET shorter than 32 characters counts as unset."""
     return bool(RATING_SECRET) and len(RATING_SECRET) >= _MIN_RATING_SECRET
-
-
-def _turnstile_passes(token):
-    verdict = _turnstile_verdict(token)
-    return verdict is not None and _turnstile_accepts(verdict)
 
 
 def _rating_moderation_score(texts):
@@ -2219,15 +2226,10 @@ def rate_submit():
         return _rating_response({"error": err}, 400)
 
     # 4. Turnstile
-    if _turnstile_unconfigured():
-        print("[rate] TURNSTILE_SECRET_KEY not configured")
-        return _rating_unavailable()
-    if os.getenv("TURNSTILE_SECRET_KEY"):
-        token = body.get("turnstileToken")
-        if not token:
-            return _rating_response({"error": "CAPTCHA verification required"}, 400)
-        if not _turnstile_passes(token):
-            return _rating_response({"error": "CAPTCHA verification failed"}, 403)
+    failed = _turnstile_gate(body.get("turnstileToken"), "rate")
+    if failed:
+        status, error = failed
+        return _rating_response({"error": error}, status)
 
     # 5. Existence
     if clean["professor_slug"] and not ratings.professor_exists(clean["professor_slug"], query_one):
