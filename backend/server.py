@@ -25,7 +25,7 @@ import jwt as pyjwt
 import requests as http_requests
 from urllib.parse import urlencode, urlparse
 from datetime import datetime, timedelta, timezone
-from threading import Lock
+from threading import Lock, Thread
 import time
 from rag.chat_search import keyword_search
 from rag.chat_question import handle_question
@@ -649,20 +649,34 @@ _ask_log_purge_lock = Lock()
 
 
 def purge_old_ask_log(write_fn=None, now=None):
-    """Delete ask_log rows past retention, at most once an hour per process. Runs on
-    the question path, so it only happens while Ask is in use; best-effort, a failure
-    is logged and retried an hour later."""
+    """Delete ask_log rows past retention, at most once an hour per process;
+    best-effort, since _chat_write logs a failure and the next hour retries."""
     now = time.time() if now is None else now
     with _ask_log_purge_lock:
         if now - _ask_log_purge["last"] < ASK_LOG_PURGE_EVERY:
             return
         _ask_log_purge["last"] = now
-    try:
-        (write_fn or _chat_write)(
-            "DELETE FROM ask_log WHERE created_at < now() - %s * INTERVAL '1 day' LIMIT %s",
-            (ASK_LOG_RETENTION_DAYS, ASK_LOG_PURGE_BATCH))
-    except Exception as e:
-        print(f"purge_old_ask_log: failed, retrying in an hour: {e}")
+    # Postgres has no DELETE ... LIMIT, so the batch is picked in a subquery
+    # (by created_at, which al_created indexes).
+    (write_fn or _chat_write)(
+        "DELETE FROM ask_log WHERE id IN (SELECT id FROM ask_log "
+        "WHERE created_at < now() - %s * INTERVAL '1 day' LIMIT %s)",
+        (ASK_LOG_RETENTION_DAYS, ASK_LOG_PURGE_BATCH))
+
+
+def _purge_ask_log_job():
+    with app.app_context():   # get_db() keeps its connection on flask.g
+        purge_old_ask_log()
+
+
+@app.before_request
+def purge_ask_log_in_background():
+    """Start the hourly purge from whatever request comes in first, on its own
+    thread: it runs whether or not Ask is on, and no user waits for the DELETE.
+    Railway only, so tests and local dev never delete from the database."""
+    if (os.getenv("RAILWAY_ENVIRONMENT")
+            and time.time() - _ask_log_purge["last"] >= ASK_LOG_PURGE_EVERY):
+        Thread(target=_purge_ask_log_job, daemon=True).start()
 
 
 def _write(sql, params=None):
@@ -1144,8 +1158,6 @@ def chat():
         return jsonify({"mode": "error", "message": "Sign in to use Ask mode."}), 401
     ip_hash = _hash_ip(get_real_ip())
     payload, code = handle_question(q, session_token, ip_hash, deps)
-    if CHAT_ENABLED:
-        purge_old_ask_log()
     return jsonify(payload), code
 
 

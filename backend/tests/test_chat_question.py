@@ -77,7 +77,24 @@ def test_ask_log_purge_runs_at_most_hourly(monkeypatch):
     server.purge_old_ask_log(write, now=10_000 + 60)
     assert len(calls) == 1
     sql, params = calls[0]
-    assert sql.startswith("DELETE FROM ask_log WHERE created_at <")
+    # Postgres has no DELETE ... LIMIT; the batch has to come from a subquery.
+    assert sql.startswith("DELETE FROM ask_log WHERE id IN (SELECT id FROM ask_log")
     assert params[0] == server.ASK_LOG_RETENTION_DAYS
     server.purge_old_ask_log(write, now=10_000 + server.ASK_LOG_PURGE_EVERY + 1)
     assert len(calls) == 2
+
+
+def test_ask_log_purge_starts_off_the_request_thread_on_railway(monkeypatch):
+    import types
+    import server
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    started = []
+    monkeypatch.setattr(server, "Thread", lambda target, daemon: types.SimpleNamespace(
+        start=lambda: started.append(target)))
+    monkeypatch.setitem(server._ask_log_purge, "last", 0.0)
+    with server.app.test_request_context("/api/stats"):
+        server.purge_ask_log_in_background()
+        assert started == []        # off Railway: never
+        monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+        server.purge_ask_log_in_background()
+    assert started == [server._purge_ask_log_job]
