@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from prof_aliases import ALIAS_MAP
 from pipeline.names import COLLEGE_MAP
 from flask import Flask, g, jsonify, request, redirect, make_response
+from flask.json.provider import DefaultJSONProvider
 from flask_cors import CORS
 from flask_compress import Compress
 from flask_limiter import Limiter
@@ -118,7 +119,19 @@ def _name_to_slug(name: str) -> str:
 # ──────────────────────────────────────────────
 #  App setup
 # ──────────────────────────────────────────────
+class _JSONProvider(DefaultJSONProvider):
+    """JSON nested too deep to parse raises RecursionError, which get_json lets through
+    as a 500. As a ValueError it's bad JSON like any other: None with silent=True, else a 400."""
+
+    def loads(self, s, **kwargs):
+        try:
+            return super().loads(s, **kwargs)
+        except RecursionError as e:
+            raise ValueError("JSON nested too deep") from e
+
+
 app = Flask(__name__)
+app.json = _JSONProvider(app)
 app.config["COMPRESS_MIMETYPES"] = ["application/json", "text/html"]
 app.config["COMPRESS_MIN_SIZE"] = 256
 Compress(app)
@@ -272,7 +285,12 @@ def _timing_log(response):
 
 @app.errorhandler(HTTPException)
 def _http_error(e):
-    """404/405/429 and every other HTTP error as JSON; the frontend reads the status."""
+    """404/405/429 and every other HTTP error as JSON; the frontend reads the status.
+
+    A limiter 429 never names its bucket ("20 per 1 hour"): that tells a client which
+    key it hit, and so whether a fresh device token gets around it."""
+    if e.code == 429:
+        return jsonify({"error": "Rate limit reached. Please try again later."}), 429
     return jsonify({"error": e.description}), e.code
 
 
@@ -315,8 +333,17 @@ CACHE_MAX_SIZE = 5000
 
 _feedback_lock = Lock()
 _feedback_count = 0
+_account_feedback_count = 0
+_feedback_by_account = {}
 _feedback_date = None   # "YYYY-MM-DD" UTC, resets counter each day
-FEEDBACK_DAILY_LIMIT = 300
+FEEDBACK_DAILY_LIMIT = 80
+# Requests with a verified account get their own allowance, so anonymous reports can't
+# use up the day and block a data-deletion request. 80 + 15 + 3 usage alerts + 1
+# review digest (review_digest.py) fit Resend's free 100/day.
+ACCOUNT_FEEDBACK_DAILY_LIMIT = 15
+# One account's share of that allowance, so one user sending from several IPs can't
+# use up the day and block another user's data-deletion request.
+FEEDBACK_PER_ACCOUNT_DAILY_LIMIT = 3
 # feedback types that require a reply email and carry the signed-in account's verified sub,
 # so support can act on the right ask_log rows (review an appeal, or erase the user's data)
 _ACCOUNT_FEEDBACK_TYPES = {"banappeal", "datadeletion"}
@@ -1798,7 +1825,7 @@ def bookmarks_remove():
 @app.route("/api/feedback", methods=["POST"])
 @limiter.limit("10 per day")
 def submit_feedback():
-    global _feedback_count, _feedback_date
+    global _feedback_count, _account_feedback_count, _feedback_date
 
     data = request.get_json(silent=True) or {}
     # Non-string values (123, null) count as missing instead of crashing .strip().
@@ -1865,13 +1892,20 @@ def submit_feedback():
     with _feedback_lock:
         if _feedback_date != today:
             _feedback_date = today
-            _feedback_count = 0
-        if _feedback_count >= FEEDBACK_DAILY_LIMIT:
-            return jsonify({"error": "Daily feedback limit reached. Please try again tomorrow."}), 429
-        _feedback_count += 1
+            _feedback_count = _account_feedback_count = 0
+            _feedback_by_account.clear()
+        if appeal_account:
+            if (_account_feedback_count >= ACCOUNT_FEEDBACK_DAILY_LIMIT
+                    or _feedback_by_account.get(appeal_account, 0) >= FEEDBACK_PER_ACCOUNT_DAILY_LIMIT):
+                return jsonify({"error": "Daily feedback limit reached. Please try again tomorrow."}), 429
+            _account_feedback_count += 1
+            _feedback_by_account[appeal_account] = _feedback_by_account.get(appeal_account, 0) + 1
+        else:
+            if _feedback_count >= FEEDBACK_DAILY_LIMIT:
+                return jsonify({"error": "Daily feedback limit reached. Please try again tomorrow."}), 429
+            _feedback_count += 1
 
-    resend_api_key = os.getenv("RESEND_API_KEY")
-    if not resend_api_key:
+    if not os.getenv("RESEND_API_KEY"):
         print("[feedback] RESEND_API_KEY not configured")
         return jsonify({"error": "Email service not configured"}), 500
 
@@ -1894,27 +1928,7 @@ def submit_feedback():
     lines += ["", "Description:", description]
     body = "\n".join(lines)
 
-    payload = {
-        "from": "RateMyHusky <feedback@ratemyhusky.com>",
-        "to": ["feedback@ratemyhusky.com"],
-        "subject": f"[RateMyHusky] {type_label}",
-        "text": body,
-    }
-    if reply_email:
-        payload["reply_to"] = reply_email
-
-    try:
-        resp = http_requests.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {resend_api_key}", "Content-Type": "application/json"},
-            json=payload,
-            timeout=10,
-        )
-        if not resp.ok:
-            print(f"[feedback] Resend error {resp.status_code}: {resp.text}")
-            return jsonify({"error": "Failed to send email"}), 500
-    except Exception as e:
-        print(f"[feedback] Resend request error: {e}")
+    if not notify.send_team_email(f"[RateMyHusky] {type_label}", body, reply_to=reply_email or None):
         return jsonify({"error": "Failed to send email"}), 500
 
     return jsonify({"ok": True})
@@ -1936,7 +1950,10 @@ _MIN_RATING_SECRET = 32
 
 
 def _rating_enabled():
-    """A RATING_SECRET shorter than 32 characters counts as unset."""
+    """A RATING_SECRET shorter than 32 characters counts as unset. Deployed (PROXY_SECRET
+    set), a missing Turnstile key turns the form off rather than letting it run without CAPTCHA."""
+    if PROXY_SECRET and not os.getenv("TURNSTILE_SECRET_KEY"):
+        return False
     return bool(RATING_SECRET) and len(RATING_SECRET) >= _MIN_RATING_SECRET
 
 
@@ -2091,20 +2108,15 @@ def rate_submit():
     if moderation_action == "block":
         return _rating_response({"error": "comment_blocked"}, 422, device)
 
-    # 8. Pending professor / course; the team emails wait until the rating is saved
+    # 8. Pending professor / course. No team email: invented names cost nothing to
+    # submit, so one email each could flood the inbox and the Resend quota the
+    # feedback form shares. Reviewers find them with `review_ratings.py list`.
     pending_professor_id = pending_course_id = None
-    emails = []
     if clean["new_professor"]:
         name, dept = clean["new_professor"]["name"], clean["new_professor"]["department"]
-        pending_professor_id, created = ratings.pending_professor(name, dept, query_one, _write)
-        if created:
-            emails.append((f"[RateMyHusky] New professor to review: {name}",
-                           f"Name: {name}\nDepartment: {dept or '-'}\n\nReview with: python review_ratings.py list"))
+        pending_professor_id, _ = ratings.pending_professor(name, dept, query_one, _write)
     if new_course:
-        pending_course_id, created = ratings.pending_course(clean["course_code"], new_course, query_one, _write)
-        if created:
-            emails.append((f"[RateMyHusky] New course to review: {clean['course_code']}",
-                           f"Code: {clean['course_code']}\nName: {new_course}\n\nReview with: python review_ratings.py list"))
+        pending_course_id, _ = ratings.pending_course(clean["course_code"], new_course, query_one, _write)
 
     # 9. Replace-or-insert, holds and bursts
     key = ratings.rating_key(clean, pending_professor_id, pending_course_id)
@@ -2112,11 +2124,16 @@ def rate_submit():
     chash = rating_checks.comment_hash(clean["comment"])
     duplicate = ratings.duplicate_comment(chash, existing["id"] if existing else None, query_one)
     bursts = ratings.burst_reasons(key, ip_hash, prefix_hash, network_type, query_one, now)
+    # A pending professor or course counts nowhere until a reviewer approves it, so only
+    # a known pair is checked against who Banner and RMP have teaching the course.
+    unverified = (bool(key["professor_slug"]) and bool(key["course_code"])
+                  and not ratings.pair_taught(key["professor_slug"], key["course_code"], query_one))
     # A reviewer took this rating's comment down (review_ratings.py remove-comment): the mark
     # stays on the row, and any comment it carries again waits for review.
     removed = bool(existing) and "comment_removed" in (existing["hold_reasons"] or "").split(",")
     status, reasons = rating_checks.assess(fill_seconds, network_type, bursts, duplicate, moderation_action,
                                            edit=bool(existing) and existing["status"] == "accepted",
+                                           unverified_pair=unverified,
                                            comment_removed=removed and bool(clean["comment"]))
     if removed and "comment_removed" not in reasons:
         reasons.append("comment_removed")
@@ -2139,8 +2156,6 @@ def rate_submit():
     pages = held | {key["professor_slug"]} if key.get("professor_slug") else held
     if pages:
         drop_professor_pages(pages)
-    for subject, text in emails:
-        notify.send_team_email(subject, text)
 
     # 10. Clear old IP hashes, at most hourly per process
     if time.time() - _last_ip_purge >= _IP_PURGE_INTERVAL:

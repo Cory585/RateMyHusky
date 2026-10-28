@@ -17,7 +17,9 @@ commits at the end, and rolls back and exits 1 on a bad id or a non-pending
 entry. Reads ORACLE_DATABASE_URL. `list` prints no hashes or network data.
 Approved and merged ratings reach the site on the next pipeline run; a
 professor page's student reviews change within minutes, since every command but
-list and purge-ip bumps data_version.
+list and purge-ip bumps data_version. Approving a rating held as unverified_pair
+vouches for that professor teaching that course, so later ratings of the pair
+aren't held for it.
 """
 
 import argparse
@@ -64,9 +66,13 @@ def load_pending(cur, kind, entry_id):
 
 
 def move_ratings(cur, kind, entry_id, value):
-    """Point the entry's ratings at `value`. A device that already rated `value`
-    under the same remaining key keeps only its newer rating: the loser is deleted
-    first, so the one-per-device index never sees two rows."""
+    """Point the entry's ratings at `value`; return (moved, held). A device that
+    already rated `value` under the same remaining key keeps only its newer rating:
+    the loser is deleted first, so the one-per-device index never sees two rows.
+
+    The form skips the pair check while either side is pending, and approving or
+    merging an entry is a judgment about it, not about who taught the course. So a
+    moved rating on a pair ratings.TAUGHT_SQL doesn't know is held as unverified_pair."""
     a, b = kind["rest"]
     cur.execute(
         f"DELETE FROM survey_ratings d USING survey_ratings o "
@@ -77,8 +83,19 @@ def move_ratings(cur, kind, entry_id, value):
         f"AND (d.updated_at, d.id) < (o.updated_at, o.id)",
         (entry_id, value, value, entry_id))
     cur.execute(f"UPDATE survey_ratings SET {kind['final']} = %s, {kind['pending']} = NULL "
-                f"WHERE {kind['pending']} = %s", (value, entry_id))
-    return cur.rowcount
+                f"WHERE {kind['pending']} = %s RETURNING id::text AS id", (value, entry_id))
+    ids = [r["id"] for r in cur.fetchall()]
+    taught = ratings.TAUGHT_SQL.format(code="r.course_code", slug="r.professor_slug")
+    cur.execute("UPDATE survey_ratings r SET status = 'held', "
+                "hold_reasons = concat_ws(',', r.hold_reasons, 'unverified_pair') "
+                "WHERE r.id::text = ANY(%s) AND r.professor_slug IS NOT NULL AND r.course_code IS NOT NULL "
+                "AND NOT COALESCE(string_to_array(r.hold_reasons, ',') @> ARRAY['unverified_pair'], false) "
+                f"AND NOT {taught}", (ids,))
+    return len(ids), cur.rowcount
+
+
+def _moved(moved, held):
+    return f"moved {moved} rating(s), held {held} on a pair Banner and RMP never saw (see list)"
 
 
 def resolve(cur, kind, entry_id, status, value):
@@ -160,9 +177,9 @@ def approve_professor(cur, entry_id, slug=None):
                 "VALUES (%s, %s, %s, %s, %s, 'survey')",
                 (slug, row["name"], row["name_key"], row["department"],
                  get_college(row["department"])))
-    moved = move_ratings(cur, PROFESSOR, entry_id, slug)
+    moved, held = move_ratings(cur, PROFESSOR, entry_id, slug)
     resolve(cur, PROFESSOR, entry_id, "approved", slug)
-    return f"Approved professor {clean(row['name'])} as {slug}: moved {moved} rating(s)"
+    return f"Approved professor {clean(row['name'])} as {slug}: {_moved(moved, held)}"
 
 
 def merge_professor(cur, entry_id, slug):
@@ -170,9 +187,9 @@ def merge_professor(cur, entry_id, slug):
     cur.execute("SELECT 1 FROM professors WHERE slug = %s", (slug,))
     if cur.fetchone() is None:
         raise ReviewError(f"No professor with slug {slug}")
-    moved = move_ratings(cur, PROFESSOR, entry_id, slug)
+    moved, held = move_ratings(cur, PROFESSOR, entry_id, slug)
     resolve(cur, PROFESSOR, entry_id, "merged", slug)
-    return f"Merged professor {entry_id} into {slug}: moved {moved} rating(s)"
+    return f"Merged professor {entry_id} into {slug}: {_moved(moved, held)}"
 
 
 def reject_professor(cur, entry_id):
@@ -181,9 +198,9 @@ def reject_professor(cur, entry_id):
 
 def approve_course(cur, entry_id):
     row = load_pending(cur, COURSE, entry_id)
-    moved = move_ratings(cur, COURSE, entry_id, row["code"])
+    moved, held = move_ratings(cur, COURSE, entry_id, row["code"])
     resolve(cur, COURSE, entry_id, "approved", row["code"])
-    return f"Approved course {clean(row['code'])}: moved {moved} rating(s)"
+    return f"Approved course {clean(row['code'])}: {_moved(moved, held)}"
 
 
 def merge_course(cur, entry_id, code):
@@ -194,9 +211,9 @@ def merge_course(cur, entry_id, code):
     # The same codes the rating form accepts, including Banner-only ones.
     if not ratings.course_exists(code, query_one):
         raise ReviewError(f"No course with code {code}")
-    moved = move_ratings(cur, COURSE, entry_id, code)
+    moved, held = move_ratings(cur, COURSE, entry_id, code)
     resolve(cur, COURSE, entry_id, "merged", code)
-    return f"Merged course {entry_id} into {code}: moved {moved} rating(s)"
+    return f"Merged course {entry_id} into {code}: {_moved(moved, held)}"
 
 
 def reject_course(cur, entry_id):

@@ -11,7 +11,7 @@ from tests.pg.pgutil import rows, truncate
 
 @pytest.fixture(autouse=True)
 def clean(pg):
-    truncate(pg, "survey_ratings", "survey_pending_professors", "professors")
+    truncate(pg, "survey_ratings", "survey_pending_professors", "professors", "banner_course_instructors")
 
 
 def insert(pg, slug, pending, updated_at, rating):
@@ -86,3 +86,34 @@ def test_remove_comment_marks_the_row_and_keeps_its_hash(pg, monkeypatch, before
 
     assert rows(pg, "SELECT comment, comment_hash, status, hold_reasons FROM survey_ratings") == [
         {"comment": None, "comment_hash": "h1", "status": "accepted", "hold_reasons": after}]
+
+
+def test_merge_holds_moved_ratings_on_a_pair_banner_never_saw(pg):
+    # Merging a name variant is a judgment about the person, not about who taught the course.
+    pending = str(uuid.uuid4())
+    with pg.cursor() as cur:
+        cur.execute("INSERT INTO professors (slug, name, name_key) "
+                    "VALUES ('jane-doe', 'Jane Doe', 'jane doe')")
+        cur.execute("INSERT INTO survey_pending_professors (id, name, name_key) "
+                    "VALUES (%s, 'J Doe', 'j doe')", (pending,))
+        cur.execute(
+            "INSERT INTO banner_course_instructors (subject_course, instructor_key, professor_slug, "
+            "match_method, terms_taught, sections, first_term_code, last_term_code, last_term_label) "
+            "VALUES ('CS2500', 'k1', 'jane-doe', 'exact', 1, 1, '202510', '202510', 'Fall 2024')")
+    insert(pg, None, pending, "2026-10-10T00:00:00Z", 5)
+    with pg.cursor() as cur:
+        cur.execute(
+            "INSERT INTO survey_ratings (id, pending_professor_id, course_code, rating, hours, status, "
+            "hold_reasons, device_hash, new_device, network_type) "
+            "VALUES (%s, %s, 'CS3500', 1, '3-4', 'held', 'too_fast', 'd2', true, 'unknown')",
+            (str(uuid.uuid4()), pending))
+    pg.commit()
+
+    with pg.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        summary = review_ratings.merge_professor(cur, pending, "jane-doe")
+    pg.commit()
+
+    assert "moved 2 rating(s), held 1" in summary
+    left = rows(pg, "SELECT course_code, status, hold_reasons FROM survey_ratings ORDER BY course_code")
+    assert left == [{"course_code": "CS2500", "status": "accepted", "hold_reasons": None},
+                    {"course_code": "CS3500", "status": "held", "hold_reasons": "too_fast,unverified_pair"}]

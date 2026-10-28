@@ -144,3 +144,110 @@ def test_hold_burst_skips_returning_devices_and_approved_rows(pg):
                               datetime.now(timezone.utc)) == {"jane-doe"}
     held = rows(pg, "SELECT device_hash FROM survey_ratings WHERE status = 'held'")
     assert [r["device_hash"] for r in held] == ["d1"]
+
+
+def test_burst_queries_run_and_a_held_burst_pauses_its_scope(pg):
+    import ratings
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    key = {"professor_slug": "jane-doe", "pending_professor_id": None,
+           "course_code": "CS2500", "pending_course_id": None}
+    query_one = pg_query_one(pg)
+    assert ratings.burst_reasons(key, "ip", "pre", "other", query_one, now) == []
+    # A pair burst on another course pauses only that pair.
+    insert(pg, "d1", "jane-doe", None, "CS3500", None, status="held")
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET hold_reasons = 'no_timer,burst_pair'")
+    pg.commit()
+    assert ratings.burst_reasons(key, "ip", "pre", "other", query_one, now) == []
+    # A professor burst pauses every course of theirs, until a reviewer clears it.
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET hold_reasons = 'no_timer,burst_prof'")
+    pg.commit()
+    assert ratings.burst_reasons(key, "ip", "pre", "other", query_one, now) == ["burst_pause"]
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET status = 'accepted'")
+    pg.commit()
+    assert ratings.burst_reasons(key, "ip", "pre", "other", query_one, now) == []
+
+
+def test_pair_taught_reads_the_real_banner_table(pg):
+    import ratings
+
+    truncate(pg, "banner_course_instructors")
+    with pg.cursor() as cur:
+        cur.execute(
+            "INSERT INTO banner_course_instructors (subject_course, instructor_key, professor_slug, "
+            "match_method, terms_taught, sections, first_term_code, last_term_code, last_term_label) "
+            "VALUES ('CS2500', 'k1', 'jane-doe', 'exact', 1, 1, '202510', '202510', 'Fall 2024')")
+    pg.commit()
+    assert ratings.pair_taught("jane-doe", "CS2500", pg_query_one(pg))
+    assert not ratings.pair_taught("jane-doe", "CS3500", pg_query_one(pg))
+
+
+def test_an_approved_unverified_pair_rating_makes_the_pair_taught(pg):
+    # A professor or course approved from the form is in neither Banner nor RMP.
+    import ratings
+
+    truncate(pg, "banner_course_instructors", "source_summary")
+    insert(pg, "d1", "new-prof", None, "CS3500", None, status="held")
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET hold_reasons = 'too_fast,unverified_pair'")
+    pg.commit()
+    assert not ratings.pair_taught("new-prof", "CS3500", pg_query_one(pg))
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET status = 'accepted'")  # review_ratings approve-rating
+    pg.commit()
+    assert ratings.pair_taught("new-prof", "CS3500", pg_query_one(pg))
+    assert not ratings.pair_taught("new-prof", "CS2500", pg_query_one(pg))
+
+
+def test_a_clean_edit_of_an_approved_rating_keeps_its_hold_reasons(pg):
+    import ratings
+
+    insert(pg, "d1", "jane-doe", None, "CS2500", None)
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET hold_reasons = 'weekly_surge'")  # approved by a reviewer
+    pg.commit()
+    row = {c: None for c in ratings.RATING_COLUMNS if c != "id"}
+    row.update(professor_slug="jane-doe", course_code="CS2500", rating=1, hours="3-4",
+               status="accepted", device_hash="d1", new_device=False,
+               network_type="unknown", collection="turnstile+device")
+    existing = ratings.existing_rating("d1", ratings.rating_key(row, None, None), pg_query_one(pg))
+    ratings.save_rating(row, existing, pg_write(pg))
+    (saved,) = rows(pg, "SELECT status, rating, hold_reasons FROM survey_ratings")
+    assert saved == {"status": "accepted", "rating": 1, "hold_reasons": "weekly_surge"}
+
+
+def test_a_wave_of_edits_to_old_ratings_trips_the_bursts(pg):
+    # An edit keeps created_at and bumps updated_at, which every burst window reads.
+    import ratings
+    from datetime import datetime, timezone
+
+    for i in range(ratings.PROF_BURST):
+        insert(pg, f"d{i}", "jane-doe", None, "CS2500", None)
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET created_at = now() - interval '40 days'")
+    pg.commit()
+    key = {"professor_slug": "jane-doe", "pending_professor_id": None,
+           "course_code": "CS2500", "pending_course_id": None}
+    assert ratings.burst_reasons(key, "ip", "pre", "other", pg_query_one(pg),
+                                 datetime.now(timezone.utc)) == ["burst_pair", "burst_prof"]
+
+
+def test_apply_surge_holds_holds_only_unreviewed_accepted_rows(pg):
+    from pipeline import survey
+
+    insert(pg, "d1", "jane-doe", None, "CS2500", None)
+    insert(pg, "d2", "jane-doe", None, "CS3500", None)
+    insert(pg, "d3", "jane-doe", None, "CS4500", None)
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET hold_reasons = 'burst_prof' WHERE device_hash = 'd2'")  # approved
+    pg.commit()
+    ids = [r["id"] for r in rows(pg, "SELECT id::text AS id FROM survey_ratings ORDER BY device_hash")]
+    assert survey.apply_surge_holds(pg, set(ids)) == 2
+    held = rows(pg, "SELECT device_hash, hold_reasons FROM survey_ratings WHERE status = 'held' ORDER BY device_hash")
+    assert held == [{"device_hash": "d1", "hold_reasons": "weekly_surge"},
+                    {"device_hash": "d3", "hold_reasons": "weekly_surge"}]
+    assert survey.apply_surge_holds(pg, set()) == 0

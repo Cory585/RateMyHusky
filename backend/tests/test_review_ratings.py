@@ -43,7 +43,7 @@ def test_approve_professor_inserts_survey_origin_and_moves_ratings():
     (sql, params), = cur.statements("INSERT INTO professors")
     assert "'survey'" in sql
     assert params[:4] == ("jane-doe", "Jane Doe", "jane doe", "Computer Science")
-    (sql, params), = cur.statements("UPDATE survey_ratings")
+    (sql, params), _ = cur.statements("UPDATE survey_ratings")
     assert "professor_slug = %s" in sql and "pending_professor_id = NULL" in sql
     assert params == ("jane-doe", "p1")
     (sql, params), = cur.statements("UPDATE survey_pending_professors")
@@ -125,9 +125,24 @@ def test_approve_course_moves_ratings_onto_the_pending_code():
     cur = FakeCursor({"FROM survey_pending_courses": [course]})
     rr.approve_course(cur, "c1")
     assert index_of(cur, "DELETE FROM survey_ratings") < index_of(cur, "UPDATE survey_ratings")
-    (sql, params), = cur.statements("UPDATE survey_ratings")
+    (sql, params), _ = cur.statements("UPDATE survey_ratings")
     assert "course_code = %s" in sql and "pending_course_id = NULL" in sql
     assert params == ("CS9999", "c1")
+
+
+def test_moved_ratings_on_an_untaught_pair_are_held():
+    # A merge is a judgment about the person, not about who taught the course, and the form
+    # skipped the pair check while the entry was pending.
+    cur = FakeCursor({"FROM survey_pending_professors": [PENDING],
+                      "SELECT 1 FROM professors": [{"?column?": 1}],
+                      "RETURNING id::text": [{"id": "r1"}, {"id": "r2"}]})
+    summary = rr.merge_professor(cur, "p1", "jane-doe")
+    _, (sql, params) = cur.statements("UPDATE survey_ratings")
+    assert "status = 'held'" in sql and "concat_ws(',', r.hold_reasons, 'unverified_pair')" in sql
+    assert "AND NOT (EXISTS (SELECT 1 FROM banner_course_instructors" in sql
+    assert "course_code = r.course_code AND professor_slug = r.professor_slug" in sql
+    assert params == (["r1", "r2"],)
+    assert "moved 2 rating(s)" in summary
 
 
 def test_merge_course_accepts_a_banner_only_code():
