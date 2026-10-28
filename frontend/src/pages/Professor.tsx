@@ -155,9 +155,9 @@ const formatReviewDate = (dateStr: string) => {
   });
 };
 
-const GRADE_ORDER = ['A+','A','A-','B+','B','B-','C+','C','C-','D+','D','D-','F','W','WF','P','NP','I'];
+const GRADE_ORDER = ['A','A-','B+','B','B-','C+','C','C-','D+','D','D-','F','W','WF','P','NP','I'];
 const GRADE_COLORS: Record<string, string> = {
-  'A+':'#1a9850','A':'#27ae60','A-':'#66bd63',
+  'A':'#27ae60','A-':'#66bd63',
   'B+':'#a6d96a','B':'#d4e858','B-':'#fee08b',
   'C+':'#fdae61','C':'#f39c12','C-':'#e67e22',
   'D+':'#e74c3c','D':'#d73027','D-':'#c0392b',
@@ -345,8 +345,8 @@ const Professor = () => {
   const redditMentions = useMemo(() => profile?.redditMentions ?? [], [profile]);
   const studentReviews = useMemo(() => profile?.sources.survey.reviews ?? [], [profile]);
   const courses = useMemo(() => profile?.courses ?? [], [profile]);
-  /* Banner-only rows (taught, never rated) have no reviews to filter to. */
-  const ratedCourses = useMemo(() => courses.filter(c => c.numRatings > 0), [courses]);
+  /* With no reviews, every course filter ends at "No reviews yet", so courses aren't clickable. */
+  const canFilter = reviews.length > 0 || studentReviews.length > 0;
 
   /* ── Ask citation pins: switch to the cited source's tab and scroll to reviews ── */
   useEffect(() => {
@@ -463,6 +463,11 @@ const Professor = () => {
         }
       });
     }
+    // Northeastern has no A+, so fold any into A
+    if (counts['A+']) {
+      counts['A'] = (counts['A'] || 0) + counts['A+'];
+      delete counts['A+'];
+    }
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
     if (total === 0) return [];
     // Find the range of grades that appear and include all in-between
@@ -537,17 +542,22 @@ const Professor = () => {
   };
 
   const courseOptions = useMemo(
-    () => [{ value: 'all', label: 'All courses' }, ...ratedCourses.map(c => ({ value: c.code, label: c.code }))],
-    [ratedCourses]);
+    () => [{ value: 'all', label: 'All courses' }, ...courses.map(c => ({ value: c.code, label: c.code }))],
+    [courses]);
 
   const toggleCourse = (code: string) => {
     setSelectedCourses(prev => {
       const next = new Set(prev);
       if (next.has(code)) next.delete(code);
       else next.add(code);
-      /* Picking the last unpicked course is the same as no filter: snap back to it so the
-         stats match "All courses" and the next click filters instead of removing. */
-      return next.size === ratedCourses.length ? new Set() : next;
+      /* Picking every rated course is the same as no filter when no review lacks a course code:
+         snap back to it so the stats match "All courses" and the next click filters instead
+         of removing. Uncoded reviews make it a real filter, so it stays. Banner-only rows
+         (taught, never rated) add nothing, so they don't count. */
+      const rated = courses.filter(c => c.numRatings > 0);
+      const coversAll = rated.length > 0 && rated.every(c => next.has(c.code))
+        && reviews.every(r => r.courseCode !== null && next.has(r.courseCode));
+      return coversAll ? new Set() : next;
     });
   };
 
@@ -585,7 +595,8 @@ const Professor = () => {
   const identity = profile.identity;
   const summary = profile.summary;
   const rmp = profile.sources.rmp;
-  const noRatings = summary.numRatings === 0;
+  // A selection of courses no one has rated has nothing to chart either.
+  const noRatings = stats.numRatings === 0;
   // `?? []`: a payload cached before awards shipped has no key.
   const awards = profile.awards ?? [];
 
@@ -640,8 +651,8 @@ const Professor = () => {
     return (
     <div
       key={c.code}
-      className={`prof-course-row ${unrated ? 'prof-course-row-unrated' : selectedCourses.has(c.code) ? 'selected' : ''}`}
-      onClick={unrated ? undefined : () => toggleCourse(c.code)}
+      className={`prof-course-row ${!canFilter ? 'prof-course-row-static' : selectedCourses.has(c.code) ? 'selected' : ''}`}
+      onClick={canFilter ? () => toggleCourse(c.code) : undefined}
     >
       <div className="prof-course-row-main">
         <span className="prof-course-code">{c.code}</span>
@@ -941,7 +952,7 @@ const Professor = () => {
             <h2 className="prof-section-title">Courses Taught</h2>
             <div className="prof-section-actions">
               {unfiltered
-                ? (ratedCourses.length > 1 && <span className="prof-section-hint">Click a course to filter reviews</span>)
+                ? (canFilter && courses.length > 1 && <span className="prof-section-hint">Click a course to filter reviews</span>)
                 : <button className="prof-action-link" onClick={() => setSelectedCourses(new Set())}>Show all courses</button>}
             </div>
           </div>
@@ -997,7 +1008,7 @@ const Professor = () => {
 
         {reviewTab === 'students' && (
           <>
-            {ratedCourses.length > 1 && (
+            {canFilter && courses.length > 1 && (
               <div className="prof-reviews-filters">
                 <Dropdown
                   className="feedback-dropdown"
@@ -1062,7 +1073,7 @@ const Professor = () => {
         {reviewTab === 'rmp' && (
           <>
             <div className="prof-reviews-filters">
-              {ratedCourses.length > 1 && (
+              {canFilter && courses.length > 1 && (
                 <Dropdown
                   className="feedback-dropdown"
                   options={courseOptions}
@@ -1081,7 +1092,7 @@ const Professor = () => {
             )}
             <div className="prof-reviews-list">
               {sortedReviews.length === 0 ? (
-                <p className="prof-no-reviews">{reviews.length === 0 ? 'No reviews yet.' : 'No reviews match current filters.'}</p>
+                <p className="prof-no-reviews">{reviews.length === 0 ? 'No reviews yet.' : unfiltered ? 'No reviews match current filters.' : `No written reviews for ${selectedLabel} yet.`}</p>
               ) : (
                 sortedReviews.slice(0, visibleReviews).map((r, i) => (
                   <div key={i} className={`prof-review-card ${isPinned(r.comment || '', pinSnippets.rmp) ? 'is-ask-pinned' : ''}`} style={{ borderLeftColor: r.quality >= 4 ? '#27ae60' : r.quality >= 3 ? '#f39c12' : '#e74c3c' }}>
@@ -1112,7 +1123,7 @@ const Professor = () => {
                         </div>
                       )}
                       <div className="prof-review-pills">
-                        {r.grade && r.grade !== 'N/A' && <span className="prof-review-pill">Grade: {r.grade}</span>}
+                        {r.grade && r.grade !== 'N/A' && <span className="prof-review-pill">Grade: {r.grade === 'A+' ? 'A' : r.grade}</span>}
                         {r.attendance && r.attendance !== 'N/A' && <span className="prof-review-pill">Attendance: {r.attendance === 'true' || r.attendance === 'Mandatory' ? 'Mandatory' : 'Not Mandatory'}</span>}
                         {r.textbook && r.textbook !== 'N/A' && <span className="prof-review-pill">Textbook: {r.textbook === 'true' || r.textbook === 'Yes' ? 'Yes' : 'No'}</span>}
                         {r.online_class && r.online_class !== 'N/A' && <span className="prof-review-pill">{r.online_class === 'true' || r.online_class === 'Yes' ? 'Online' : 'In-Person'}</span>}

@@ -14,7 +14,7 @@ SECRET = "rating-secret-0123456789abcdefghijklmnop"  # gitleaks:allow
 DEVICE = "a" * 32
 BODY = {
     "professor": {"slug": "alice-smith"}, "course": {"code": "CS2500"},
-    "term": "Fall 2025", "rating": 4, "hours": "5-7", "grade": "A",
+    "term": "Fall 2025", "rating": 4, "difficulty": 3, "hours": "5-7", "grade": "A",
     "comment": "Clear lectures and fair exams, would take again.",
     "website": "",
 }
@@ -277,7 +277,7 @@ def test_professor_context_reads_the_mirror_header_without_a_cookie(rate, monkey
     device_hash = ri.keyed_hash(SECRET, "device", DEVICE)
     monkeypatch.setattr(server, "query", lambda sql, params=None: (
         [{"code": "CS2500", "name": "Fundamentals of CS 1", "pending": False, "term_label": "Fall 2025",
-          "rating": 4, "hours": "5-7", "grade": "A-", "comment": "Fine."}] if "FROM survey_ratings" in sql and params[0] == device_hash else []))
+          "rating": 4, "difficulty": 3, "hours": "5-7", "grade": "A-", "comment": "Fine."}] if "FROM survey_ratings" in sql and params[0] == device_hash else []))
     assert client.get("/api/rate/professors/alice-smith").get_json()["ratedCourses"] == []
     resp = client.get("/api/rate/professors/alice-smith", headers={"X-Rmh-Device": DEVICE})
     assert [c["code"] for c in resp.get_json()["ratedCourses"]] == ["CS2500"]
@@ -291,6 +291,12 @@ def test_new_device_follows_the_opened_token_and_cookie_is_set(rate):
     assert rating_writes(state)[0][1][14] is False  # new_device column
     post(client, ri, device="c" * 32, minted=True)
     assert rating_writes(state)[1][1][14] is True
+
+
+def test_difficulty_is_saved(rate):
+    server, client, state, ri = rate
+    post(client, ri)
+    assert rating_writes(state)[0][1][1 + server.ratings._INSERT_COLUMNS.index("difficulty")] == 3
 
 
 def test_forged_token_without_prior_rows_is_a_new_device(rate):

@@ -25,7 +25,7 @@ RATING_COLUMNS = (
     "id", "professor_slug", "pending_professor_id", "course_code",
     "pending_course_id", "term_label", "rating", "hours", "grade", "comment",
     "comment_hash", "status", "hold_reasons", "device_hash", "new_device",
-    "ip_hash", "ip_prefix_hash", "network_type", "fill_seconds", "collection",
+    "ip_hash", "ip_prefix_hash", "network_type", "fill_seconds", "collection", "difficulty",
 )
 
 _KEY_COLUMNS = ("professor_slug", "pending_professor_id", "course_code", "pending_course_id")
@@ -227,7 +227,7 @@ def professor_context(slug, device_hash, query):
         return {"ratedCourses": []}
     rows = query(
         "SELECT COALESCE(r.course_code, pc.code) AS code, COALESCE(c.name, pc.name) AS name, "
-        "r.course_code IS NULL AS pending, r.term_label, r.rating, r.hours, r.grade, r.comment "
+        "r.course_code IS NULL AS pending, r.term_label, r.rating, r.difficulty, r.hours, r.grade, r.comment "
         "FROM survey_ratings r LEFT JOIN course_catalog c ON c.code = r.course_code "
         "LEFT JOIN survey_pending_courses pc ON pc.id = r.pending_course_id AND pc.status = 'pending' "
         "WHERE r.device_hash = %s AND r.professor_slug = %s "
@@ -235,7 +235,7 @@ def professor_context(slug, device_hash, query):
         "ORDER BY code", (device_hash, slug))
     return {"ratedCourses": [
         {"code": r["code"], "name": r["name"], "pending": r["pending"], "term": r["term_label"],
-         "rating": r["rating"], "hours": r["hours"], "grade": r["grade"],
+         "rating": r["rating"], "difficulty": r["difficulty"], "hours": r["hours"], "grade": r["grade"],
          "comment": r["comment"] or ""} for r in rows]}
 
 

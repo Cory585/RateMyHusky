@@ -14,8 +14,8 @@ import { ProgressBar } from './rate/ProgressBar';
 import { useMediaQuery } from './rate/useMediaQuery';
 import type { ChoiceOption } from './rate/ChoiceGroup';
 import {
-  GRADES, HOURS, OVERALL, answer, buildSubmission, contextTags, courseGroups, firstStep, lastName, nextStep,
-  pickCourse, prefillCourse, prevStep, progressIndex, toRateCourse,
+  DIFFICULTY, GRADES, HOURS, OVERALL, answer, buildSubmission, contextTags, courseGroups, firstStep, formatCode,
+  lastName, nextStep, pickCourse, prefillCourse, prevStep, progressIndex, toRateCourse,
 } from './rate/rateFlow';
 import type { Answers, RateCourse, RateProfessor, StepId } from './rate/rateFlow';
 import './Rate.css';
@@ -62,7 +62,8 @@ export default function Rate() {
   const [step, setStep] = useState<StepId>('who');
   const [start, setStart] = useState<RateStart | null>(null);
   const [startFailed, setStartFailed] = useState(false);
-  const [loaded, setLoaded] = useState<{ slug: string; list: RateCourse[] } | null>(null);
+  // recent: the list is Banner's newest-first order; without Banner history it is most-rated first.
+  const [loaded, setLoaded] = useState<{ slug: string; list: RateCourse[]; recent: boolean } | null>(null);
   const [context, setContext] = useState<{ slug: string; rated: RatedCourse[] } | null>(null);
   const [typedName, setTypedName] = useState('');
   const [counter, setCounter] = useState<number | null>(null);
@@ -151,8 +152,8 @@ export default function Rate() {
     if (!slug) return;
     let cancelled = false;
     fetchRateProfessor(slug)
-      .then((res) => { if (!cancelled) setLoaded({ slug, list: res.ok ? toRateCourses(res.data) : [] }); })
-      .catch(() => { if (!cancelled) setLoaded({ slug, list: [] }); });
+      .then((res) => { if (!cancelled) setLoaded({ slug, list: res.ok ? toRateCourses(res.data) : [], recent: res.ok && res.data.lastTaught !== null }); })
+      .catch(() => { if (!cancelled) setLoaded({ slug, list: [], recent: false }); });
     return () => { cancelled = true; };
   }, [slug]);
 
@@ -323,13 +324,15 @@ export default function Rate() {
             </>
           );
         }
-        const groups = courseGroups(courses, rated);
+        const groups = courseGroups(courses, rated, answers.course?.code);
         return (
           <>
             <CourseStep
               professor={answers.professor}
               fresh={groups.fresh}
               rated={groups.rated}
+              more={groups.more}
+              recent={loaded?.recent ?? false}
               selected={answers.course?.code}
               onPick={(c) => choose(pickCourse(answers, c, rated, new Date()), 'course')}
               onOther={() => open('otherCourse')}
@@ -341,6 +344,7 @@ export default function Rate() {
       case 'otherCourse':
         return (
           <OtherCourseStep
+            own={courses ?? []}
             rated={(rated ?? []).map((r) => r.code)}
             // A hit on the professor's list takes the listed course, so its terms show.
             onPick={(c) => go(pickCourse(answers, courses?.find((x) => x.code === c.code) ?? c, rated ?? [], new Date()), 'otherCourse')}
@@ -385,6 +389,33 @@ export default function Rate() {
               onPick={(v) => choose(answer(answers, { rating: v }), 'overall')}
             />
             <StepFoot onBack={back}>{continueButton(answers.rating !== undefined)}</StepFoot>
+          </>
+        );
+      }
+      case 'difficulty': {
+        // Scored like the review pills, so Very hard shows red.
+        const options: ChoiceOption<number>[] = DIFFICULTY.map((d) => ({
+          value: d.value,
+          aria: `${d.value} out of 5, ${d.label}`,
+          digit: d.value,
+          label: (
+            <>
+              <span className="rate-n" data-score={6 - d.value}>{d.value}</span>
+              <span className="rate-n-label">{d.label}</span>
+            </>
+          ),
+        }));
+        return (
+          <>
+            <ChoiceGroup
+              legend={`How hard was ${formatCode(answers.course?.code ?? '')}?`}
+              subtitle="Exams, assignments, and how hard it was to do well."
+              options={options}
+              value={answers.difficulty}
+              layout="stack"
+              onPick={(v) => choose(answer(answers, { difficulty: v }), 'difficulty')}
+            />
+            <StepFoot onBack={back}>{continueButton(answers.difficulty !== undefined)}</StepFoot>
           </>
         );
       }

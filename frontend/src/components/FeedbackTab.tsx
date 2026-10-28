@@ -28,8 +28,8 @@ const feedbackOptions = [
   { value: 'incorrectdata', label: 'Wrong or Missing Data' },
   { value: 'general', label: 'Idea or General Feedback' },
   { value: 'reviewreport', label: 'Report a Review' },
-  { value: 'professor', label: 'Professor: Correct or Remove My Page' },
-  { value: 'datadeletion', label: 'Data Deletion Request' },
+  { value: 'professor', label: 'Data Deletion' },
+  { value: 'datadeletion', label: 'Account Deletion' },
   { value: 'banappeal', label: 'Ask Ban Appeal' },
 ].filter((o) => ASK_ENABLED || o.value !== 'banappeal');
 

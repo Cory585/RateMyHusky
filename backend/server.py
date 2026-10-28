@@ -342,7 +342,7 @@ _FEEDBACK_TYPE_LABELS = {
     "reviewreport": "Review Report",   # the Report link on a RateMyHusky review
     "feature": "Feature Request",
     "professor": "Professor Request",
-    "datadeletion": "Data Deletion Request",
+    "datadeletion": "Account Deletion Request",
     "banappeal": "Ask Ban Appeal",
 }
 # These limits and the email pattern in submit_feedback are copied in
@@ -2122,7 +2122,8 @@ def rate_submit():
         reasons.append("comment_removed")
     row = {
         **key,
-        "term_label": clean["term_label"], "rating": clean["rating"], "hours": clean["hours"],
+        "term_label": clean["term_label"], "rating": clean["rating"], "difficulty": clean["difficulty"],
+        "hours": clean["hours"],
         "grade": clean["grade"], "comment": clean["comment"] or None, "comment_hash": chash,
         "status": status, "hold_reasons": ",".join(reasons) or None,
         "device_hash": device_hash, "new_device": new_device,
