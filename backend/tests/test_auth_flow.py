@@ -110,6 +110,19 @@ def test_return_to_only_keeps_paths_on_this_site():
     assert server._safe_return_to("/" + "x" * 5000) == "/"
 
 
+def test_a_return_path_that_escapes_long_still_fits_the_cookie():
+    # é is one character but six in the cookie's JSON, so the cap counts what the cookie holds.
+    assert server._safe_return_to("/" + "é" * 1499) == "/"
+    assert server._safe_return_to("/catalog?q=" + "é" * 1499) == "/catalog"
+    for ch in ("é", '"', "\x01"):
+        longest = "/" + ch * 3000
+        while server._safe_return_to(longest) == "/":
+            longest = longest[:-1]
+        resp = _client().get("/api/auth/google", query_string={"returnTo": longest})
+        cookie, = [c for c in resp.headers.getlist("Set-Cookie") if c.startswith(server.AUTH_FLOW_COOKIE)]
+        assert len(cookie.split(";", 1)[0].encode()) < 4096, repr(ch)
+
+
 def _token(**claims):
     base = {"sub": "u1", "email": "t@husky.neu.edu", "name": "T",
             "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1)}

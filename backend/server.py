@@ -1899,19 +1899,27 @@ def _get_redirect_uri(frontend):
     return f"{frontend}/api/auth/google/callback"
 
 
-# Browsers drop a cookie over 4KB, which failed the sign-in; JSON escaping roughly
-# doubles the worst case, so this leaves room.
+# Browsers drop a cookie over 4KB, which failed the sign-in. The cap counts the path
+# as JSON writes it into the flow cookie (é takes six characters), and the cookie's
+# own quoting at most doubles that, so this leaves room.
 RETURN_TO_MAX = 1500
+
+
+def _json_len(value):
+    """Characters `value` takes inside the flow cookie's JSON, not counting its quotes."""
+    return len(json.dumps(value)) - 2
 
 
 def _safe_return_to(value):
     """`value` if it is a path on this site, else "/". Over RETURN_TO_MAX the query
     string is dropped first. "//host" and "/\\host" are refused: they are paths to
     the server but links to another site once the frontend reuses them."""
-    if not isinstance(value, str) or len(value) > RETURN_TO_MAX:
-        value = value.split("?", 1)[0] if isinstance(value, str) else "/"
+    if not isinstance(value, str):
+        return "/"
+    if _json_len(value) > RETURN_TO_MAX:
+        value = value.split("?", 1)[0]
     parsed = urlparse(value)
-    if (len(value) > RETURN_TO_MAX or parsed.scheme or parsed.netloc
+    if (_json_len(value) > RETURN_TO_MAX or parsed.scheme or parsed.netloc
             or not value.startswith("/") or value.startswith("//") or "\\" in value):
         return "/"
     return value
