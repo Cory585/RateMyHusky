@@ -16,6 +16,7 @@ import { isPinned, pinnedFirst } from '../utils/askPinMatch';
 import { photoThumb, thumbOnError } from '../utils/photoThumb';
 import BookmarkButton from '../components/BookmarkButton';
 import FitText from '../components/FitText';
+import { defaultTab, filterByCourses, reportDescription, type ReviewTab } from './professor/studentReviews';
 import neuIcon from '../assets/neu-circle-icon.png';
 import './Professor.css';
 
@@ -243,9 +244,10 @@ const Professor = () => {
   const [redditSentiment, setRedditSentiment] = useState('all');
   const [redditSearch, setRedditSearch] = useState('');
   const [visibleRedditMentions, setVisibleRedditMentions] = useState(10);
-  const [reviewTab, setReviewTab] = useState<'rmp' | 'reddit'>('rmp');
+  const [reviewTab, setReviewTab] = useState<ReviewTab>('rmp');
   const [sortBy, setSortBy] = useState('newest');
   const [visibleReviews, setVisibleReviews] = useState(10);
+  const [visibleStudentReviews, setVisibleStudentReviews] = useState(10);
   const [selectedCourses, setSelectedCourses] = useState<Set<string>>(new Set());
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [gradesAnimated, setGradesAnimated] = useState(false);
@@ -320,18 +322,31 @@ const Professor = () => {
     setLoadError(null);
     fetchProfessorFull(slug).then((res) => {
       if (cancelled) return;
-      if (res.ok) { setProfile(res.data); setSelectedCourses(new Set()); }
+      if (res.ok) {
+        setProfile(res.data);
+        setSelectedCourses(new Set());
+        // An Ask citation picks its own tab (the pins effect); otherwise open on the first with entries.
+        if (!(location.state as { askPins?: unknown } | null)?.askPins) {
+          setReviewTab(defaultTab({
+            students: RATE_ENABLED ? (res.data.sources.survey.reviews ?? []).length : 0,
+            rmp: res.data.sources.rmp.reviews.filter(r => r.comment?.trim()).length,
+            reddit: res.data.redditMentions.length,
+          }));
+        }
+      }
       else setLoadError(res.status === 404 ? 'not_found' : 'failed');
       setLoading(false);
     });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- location.state is read once per load, like the pins effect
   }, [slug]);
 
   const reviews = useMemo(() => profile?.sources.rmp.reviews ?? [], [profile]);
   const redditMentions = useMemo(() => profile?.redditMentions ?? [], [profile]);
+  const studentReviews = useMemo(() => profile?.sources.survey.reviews ?? [], [profile]);
   const courses = useMemo(() => profile?.courses ?? [], [profile]);
   /* With no reviews, every course filter ends at "No reviews yet", so courses aren't clickable. */
-  const canFilter = reviews.length > 0;
+  const canFilter = reviews.length > 0 || studentReviews.length > 0;
 
   /* ── Ask citation pins: switch to the cited source's tab and scroll to reviews ── */
   useEffect(() => {
@@ -358,7 +373,7 @@ const Professor = () => {
     if (pins.askedAt !== pinnedAskedAt.current) {
       pinnedAskedAt.current = pins.askedAt;
       setPinnedSources(pins.sources);
-      const tab: 'rmp' | 'reddit' = pins.clicked.source === 'rmp' ? 'rmp' : 'reddit';
+      const tab: ReviewTab = pins.clicked.source === 'rmp' ? 'rmp' : 'reddit';
       setReviewTab(tab);
     }
 
@@ -392,6 +407,9 @@ const Professor = () => {
   const filteredRmpReviews = useMemo(
     () => deduplicateByText(rmpRatingsInSelection.filter(r => r.comment?.trim()), r => r.comment),
     [rmpRatingsInSelection]);
+
+  const filteredStudentReviews = useMemo(
+    () => filterByCourses(studentReviews, selectedCourses), [studentReviews, selectedCourses]);
 
   /* The cards. Unfiltered: the backend's summary. Filtered: the selected courses[] rows
      combined, weighted by rating count, distributions summed. The per-source hover only
@@ -544,6 +562,7 @@ const Professor = () => {
   };
 
   useEffect(() => { setVisibleReviews(10); }, [sortBy, reviewTab]);
+  useEffect(() => { setVisibleStudentReviews(10); }, [reviewTab, selectedCourses]);
   // Reset visible reviews when course filter changes, but only if the filtered list got smaller
   useEffect(() => { setVisibleReviews(v => Math.min(v, Math.max(10, filteredRmpReviews.length))); }, [selectedCourses.size, filteredRmpReviews.length]);
 
@@ -970,6 +989,12 @@ const Professor = () => {
                 visibility: reviewPillStyle.opacity === 0 ? 'hidden' : 'visible' 
               }} 
             />
+            {RATE_ENABLED && (
+              <button className={`prof-review-tab ${reviewTab === 'students' ? 'active' : ''}`} onClick={() => setReviewTab('students')}>
+                <span className="prof-review-tab-full">RateMyHusky ({filteredStudentReviews.length})</span>
+                <span className="prof-review-tab-short">RateMyHusky ({filteredStudentReviews.length})</span>
+              </button>
+            )}
             <button className={`prof-review-tab ${reviewTab === 'rmp' ? 'active' : ''}`} onClick={() => setReviewTab('rmp')}>
               <span className="prof-review-tab-full">RMP reviews ({filteredRmpReviews.length})</span>
               <span className="prof-review-tab-short">RMP ({filteredRmpReviews.length})</span>
@@ -980,6 +1005,70 @@ const Professor = () => {
             </button>
           </div>
         </div>
+
+        {reviewTab === 'students' && (
+          <>
+            {canFilter && courses.length > 1 && (
+              <div className="prof-reviews-filters">
+                <Dropdown
+                  className="feedback-dropdown"
+                  options={courseOptions}
+                  value={unfiltered ? 'all' : selectedCourses.size === 1 ? [...selectedCourses][0] : ''}
+                  onChange={v => setSelectedCourses(v === 'all' ? new Set() : new Set([v]))}
+                  placeholder={`${selectedCourses.size} courses`}
+                />
+              </div>
+            )}
+            {!unfiltered && (
+              <div className="prof-active-filter">
+                Showing {filteredStudentReviews.length} review{filteredStudentReviews.length === 1 ? '' : 's'} for <strong>{selectedLabel}</strong>
+                <button className="prof-action-link" onClick={() => setSelectedCourses(new Set())}>Show all</button>
+              </div>
+            )}
+            <div className="prof-reviews-list">
+              {filteredStudentReviews.length === 0 ? (
+                <p className="prof-no-reviews">
+                  {studentReviews.length === 0 ? 'No RateMyHusky reviews yet.' : 'No reviews match current filters.'}
+                </p>
+              ) : (
+                filteredStudentReviews.slice(0, visibleStudentReviews).map(r => (
+                  <div key={r.id} id={`review-${r.id}`} className="prof-review-card" style={{ borderLeftColor: r.rating >= 4 ? '#27ae60' : r.rating >= 3 ? '#f39c12' : '#e74c3c' }}>
+                    <div className="prof-review-top">
+                      <div className="prof-review-ratings">
+                        <div className="prof-review-rating-item">
+                          <span className="prof-review-rating-label">Quality</span>
+                          <span className="prof-review-rating-value" data-score={String(r.rating)}>{r.rating}</span>
+                        </div>
+                      </div>
+                      <div className="prof-review-meta">
+                        {r.course && <span className="prof-review-course">{courseCode(r.course)}</span>}
+                        {r.when && <span className="prof-review-date">{r.when}</span>}
+                      </div>
+                    </div>
+                    <p className="prof-review-comment">{r.comment}</p>
+                    <div className="prof-review-bottom">
+                      <div className="prof-review-pills">
+                        <button
+                          className="prof-action-link prof-review-report"
+                          onClick={() => window.dispatchEvent(new CustomEvent('open-feedback', {
+                            detail: { type: 'reviewreport', description: reportDescription(identity.slug, r.id) },
+                          }))}
+                        >
+                          Report
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            {visibleStudentReviews < filteredStudentReviews.length && (
+              <button className="prof-load-more" onClick={() => setVisibleStudentReviews(v => v + 10)}>
+                Load More
+              </button>
+            )}
+          </>
+        )}
 
         {reviewTab === 'rmp' && (
           <>

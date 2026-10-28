@@ -150,11 +150,12 @@ def burst_reasons(key, ip_hash, prefix_hash, network_type, query_one, now):
 
 
 def hold_burst(reasons, key, ip_hash, prefix_hash, write, now):
-    """Hold the accepted rows from the last hour that match each tripped trigger.
+    """Hold the accepted rows from the last hour that match each tripped trigger;
+    return the professor slugs of the rows it held, whose pages must drop them.
 
     burst_pair holds only new-device rows, the ones burst_reasons counts. A row a
     reviewer approved keeps its hold_reasons, so `hold_reasons IS NULL` leaves
-    approvals alone.
+    approvals alone. burst_ip and burst_prefix hold rows for any professor.
     """
     hour_ago = now - timedelta(hours=1)
     where = {
@@ -162,15 +163,18 @@ def hold_burst(reasons, key, ip_hash, prefix_hash, write, now):
         "burst_ip": ("ip_hash = %s", (ip_hash,)),
         "burst_prefix": ("ip_prefix_hash = %s", (prefix_hash,)),
     }
+    held = set()
     for reason in _BURST_REASONS:
         if reason not in reasons:
             continue
         condition, params = where[reason]
-        write(
+        rows = write(
             "UPDATE survey_ratings SET status = 'held', hold_reasons = %s "
             "WHERE status = 'accepted' AND hold_reasons IS NULL AND created_at >= %s "
-            f"AND {condition}",
+            f"AND {condition} RETURNING professor_slug",
             (reason, hour_ago, *params))
+        held.update(r["professor_slug"] for r in rows or () if r["professor_slug"])
+    return held
 
 
 # The conflict target (device_hash + the four key columns) is never updated;

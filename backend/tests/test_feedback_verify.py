@@ -50,7 +50,7 @@ def test_unknown_types_are_rejected(monkeypatch):
 
 def test_every_accepted_type_passes_validation(monkeypatch):
     # Includes the merged "missing"/"feature" keys that cached bundles can still send.
-    for t in ("bug", "feature", "missing", "incorrectdata", "general"):
+    for t in ("bug", "feature", "missing", "incorrectdata", "general", "reviewreport"):
         resp = _post(monkeypatch, feedbackType=t, description="hi")
         assert resp.get_json()["error"] == "Email service not configured", t
     for t in ("banappeal", "datadeletion", "professor"):

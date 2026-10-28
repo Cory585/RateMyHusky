@@ -196,3 +196,75 @@ def test_list_strips_control_characters(capsys):
                                                        "n": 1, "in_catalog": False}]})
     rr.list_pending(cur)
     assert "" not in capsys.readouterr().out
+
+
+SECRET = "s" * 32
+
+
+class FakeConn:
+    def __init__(self, cur):
+        self.cur, self.commits = cur, 0
+
+    def cursor(self, cursor_factory=None):
+        cur = self.cur
+
+        class Ctx:
+            def __enter__(self):
+                return cur
+
+            def __exit__(self, *a):
+                return False
+        return Ctx()
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
+@pytest.mark.parametrize("argv", [["approve-rating", "beef5678"], ["reject-rating", "beef5678"],
+                                  ["remove-comment", "abcdef123456"], ["approve-professor", "beef5678"]])
+def test_commands_that_change_pages_bump_data_version(argv, monkeypatch):
+    cur = FakeCursor()
+    monkeypatch.setattr(rr, "run", lambda c, args: "ok")
+    monkeypatch.setattr(rr, "connect", lambda: FakeConn(cur))
+    assert rr.main(argv) == 0
+    assert any("'data_version'" in sql for sql, _ in cur.calls)
+
+
+@pytest.mark.parametrize("argv", [["list"], ["purge-ip"]])
+def test_read_only_commands_do_not_bump_data_version(argv, monkeypatch):
+    cur = FakeCursor()
+    monkeypatch.setattr(rr, "run", lambda c, args: "ok")
+    monkeypatch.setattr(rr, "connect", lambda: FakeConn(cur))
+    assert rr.main(argv) == 0
+    assert not any("'data_version'" in sql for sql, _ in cur.calls)
+
+
+def test_remove_comment_finds_the_review_by_its_public_id(monkeypatch):
+    import survey_reviews
+    monkeypatch.setenv("RATING_SECRET", SECRET)
+    target, other = "11111111-0000-0000-0000-000000000000", "22222222-0000-0000-0000-000000000000"
+    cur = FakeCursor({"SELECT id FROM survey_ratings": [{"id": other}, {"id": target}],
+                      "UPDATE survey_ratings": [{"id": target}]})
+    rr.remove_comment(cur, survey_reviews.public_id(SECRET, target))
+    (sql, params), = cur.statements("UPDATE")
+    assert "comment = NULL" in sql and "comment_hash" not in sql and params == (target,)
+    assert "'comment_removed'" in sql   # marks the row, so an edit bringing the comment back is held
+
+
+def test_remove_comment_with_an_unknown_id_raises(monkeypatch):
+    monkeypatch.setenv("RATING_SECRET", SECRET)
+    cur = FakeCursor({"SELECT id FROM survey_ratings": [{"id": "11111111-0000-0000-0000-000000000000"}]})
+    with pytest.raises(rr.ReviewError):
+        rr.remove_comment(cur, "abcdef123456")
+
+
+def test_remove_comment_needs_the_rating_secret(monkeypatch):
+    monkeypatch.delenv("RATING_SECRET", raising=False)
+    with pytest.raises(rr.ReviewError):
+        rr.remove_comment(FakeCursor(), "abcdef123456")
