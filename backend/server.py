@@ -1527,16 +1527,15 @@ def professors_catalog():
     max_reviews = int_arg("maxReviews", -1, -1, 100000)
     max_reviews = None if max_reviews < 0 else max_reviews
 
-    def key(rows):
-        return (f"profcat:{q}:{college}:{dept}:{sort}:{page}:{rows}:"
+    def key(pg, rows):
+        return (f"profcat:{q}:{college}:{dept}:{sort}:{pg}:{rows}:"
                 f"{min_rating}:{max_rating}:{min_reviews}:{max_reviews}")
 
     # Only the sitemap's exact request gets the whole catalog; any other big page gets
     # CACHEABLE_PAGE_LIMIT rows. So every page served is small or that one, and cached.
-    if limit > CACHEABLE_PAGE_LIMIT and key(limit) != f"profcat::::alpha:1:{CATALOG_FULL_LIMIT}:0.0:5.0:1:None":
+    if limit > CACHEABLE_PAGE_LIMIT and key(page, limit) != f"profcat::::alpha:1:{CATALOG_FULL_LIMIT}:0.0:5.0:1:None":
         limit = CACHEABLE_PAGE_LIMIT
-    cache_key = key(limit)
-    cached = cache_get(cache_key)
+    cached = cache_get(key(page, limit))
     if cached:
         return jsonify(cached)
 
@@ -1663,7 +1662,9 @@ def professors_catalog():
         "page": page,
         "totalPages": total_pages,
     }
-    cache_set(cache_key, result)
+    # Under the page served, which a page past the end was clamped to: page=2..100000
+    # past a 1-page result are one entry, not one each.
+    cache_set(key(page, limit), result)
     return jsonify(result)
 
 
@@ -1696,14 +1697,13 @@ def courses_catalog():
     # The catalog page shows rated courses only; the sitemap and prerender need every course.
     rated_only = request.args.get("rated") == "1"
 
-    def key(rows):
-        return f"coursecat:{q}:{dept}:{sort}:{page}:{rows}:{min_rating}:{max_rating}:{rated_only}"
+    def key(pg, rows):
+        return f"coursecat:{q}:{dept}:{sort}:{pg}:{rows}:{min_rating}:{max_rating}:{rated_only}"
 
     # Same cap as professors_catalog: only the sitemap's exact request gets the whole catalog.
-    if limit > CACHEABLE_PAGE_LIMIT and key(limit) != f"coursecat:::alpha:1:{CATALOG_FULL_LIMIT}:0.0:5.0:False":
+    if limit > CACHEABLE_PAGE_LIMIT and key(page, limit) != f"coursecat:::alpha:1:{CATALOG_FULL_LIMIT}:0.0:5.0:False":
         limit = CACHEABLE_PAGE_LIMIT
-    cache_key = key(limit)
-    cached = cache_get(cache_key)
+    cached = cache_get(key(page, limit))
     if cached:
         return jsonify(cached)
 
@@ -1790,7 +1790,9 @@ def courses_catalog():
         "page": page,
         "totalPages": total_pages,
     }
-    cache_set(cache_key, result)
+    # Under the page served, which a page past the end was clamped to: page=2..100000
+    # past a 1-page result are one entry, not one each.
+    cache_set(key(page, limit), result)
     return jsonify(result)
 
 

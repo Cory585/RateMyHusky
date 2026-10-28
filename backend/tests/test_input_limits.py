@@ -37,10 +37,10 @@ def test_catalog_limit_zero_is_not_a_500(monkeypatch):
         assert client.get(path).status_code == 200
 
 
-def _served_limits(monkeypatch):
-    """The LIMIT each catalog page query ran with."""
+def _served_limits(monkeypatch, rows=0):
+    """The LIMIT each catalog page query ran with, for a catalog of `rows` rows."""
     limits = []
-    monkeypatch.setattr(server, "query_one", lambda *a, **k: {"cnt": 0})
+    monkeypatch.setattr(server, "query_one", lambda *a, **k: {"cnt": rows})
     monkeypatch.setattr(server, "query", lambda sql, params=(), **k: limits.append(params[-2]) or [])
     monkeypatch.setattr(server, "data_version", lambda: 0)
     server._cache.clear()
@@ -49,7 +49,7 @@ def _served_limits(monkeypatch):
 
 @pytest.mark.parametrize("endpoint", ["professors-catalog", "courses-catalog"])
 def test_only_the_sitemaps_request_gets_the_whole_catalog(monkeypatch, endpoint):
-    limits = _served_limits(monkeypatch)
+    limits = _served_limits(monkeypatch, rows=20000)
     client = server.app.test_client()
     # Filtered, sorted, later pages and in-between sizes are each built from scratch, so they're capped.
     for qs in ("limit=10000&sort=rating", "limit=10000&minRating=1.5", "limit=10000&page=2",
@@ -72,6 +72,16 @@ def test_every_catalog_page_served_is_cached(monkeypatch, endpoint):
         client.get(f"/api/{endpoint}?limit=10000&sort=rating")
         client.get(f"/api/{endpoint}?limit=10000")
     assert len(limits) == 2 and len(server._cache) == 2
+    server._cache.clear()
+
+
+@pytest.mark.parametrize("endpoint", ["professors-catalog", "courses-catalog"])
+def test_pages_past_the_end_share_the_last_pages_cache_entry(monkeypatch, endpoint):
+    _served_limits(monkeypatch)
+    client = server.app.test_client()
+    for page in (1, 2, 50, 100000):
+        assert client.get(f"/api/{endpoint}?page={page}").get_json()["page"] == 1
+    assert len(server._cache) == 1
     server._cache.clear()
 
 
