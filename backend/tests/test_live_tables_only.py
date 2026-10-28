@@ -25,6 +25,8 @@ LIVE_TABLES = {
     "professors", "rmp_links", "source_summary", "catalog_courses", "catalog_nupath",
     "professor_tags",
 }
+# survey_ratings stays out on purpose: the professor page reads it live, and a
+# database without it yet must still serve the page (professor_full._survey).
 _TABLE_REF = re.compile(r"\b(?:FROM|JOIN)\s+([a-z_][a-z0-9_]*)", re.IGNORECASE)
 
 ROW = {

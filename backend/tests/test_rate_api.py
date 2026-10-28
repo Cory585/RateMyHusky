@@ -311,3 +311,71 @@ def test_limit_key_uses_the_body_token_when_there_is_no_cookie(rate):
     for body in ({"deviceToken": "nope"}, {}, [1], None):
         with server.app.test_request_context("/api/rate", method="POST", json=body):
             assert "|" not in server._rating_limit_key()
+
+
+def test_accepted_save_drops_the_professor_page_cache(rate, monkeypatch):
+    server, client, state, ri = rate
+    dropped = []
+    monkeypatch.setattr(server, "drop_professor_pages", dropped.append)
+    post(client, ri)
+    assert dropped == [{"alice-smith"}]
+
+
+def test_a_save_for_a_pending_professor_drops_no_page_cache(rate, monkeypatch):
+    server, client, state, ri = rate
+    dropped = []
+    monkeypatch.setattr(server, "drop_professor_pages", dropped.append)
+    post(client, ri, {"professor": {"name": "New Person", "department": "Math"}})
+    assert len(rating_writes(state)) == 1 and dropped == []
+
+
+def test_drop_professor_pages_drops_alias_keys_and_leaves_other_professors(monkeypatch):
+    import server
+    monkeypatch.setattr(server, "data_version", lambda: 7)
+    server.cache_set("prof_full:a", {"identity": {"slug": "a"}})
+    server.cache_set("prof_full:a-alias", {"identity": {"slug": "a"}})
+    server.cache_set("prof_full:b", {"identity": {"slug": "b"}})
+    server.cache_set("stats", {"x": 1})
+    server.drop_professor_pages({"a"})
+    assert server.cache_get("prof_full:a") is None and server.cache_get("prof_full:a-alias") is None
+    assert server.cache_get("prof_full:b") == {"identity": {"slug": "b"}} and server.cache_get("stats") == {"x": 1}
+
+
+def test_a_burst_drops_the_pages_of_every_professor_it_held_after_the_hold(rate, monkeypatch):
+    server, client, state, ri = rate
+    events = []
+    monkeypatch.setattr(server.ratings, "burst_reasons", lambda *a: ["burst_ip"])
+    monkeypatch.setattr(server.ratings, "hold_burst", lambda *a: events.append("hold") or {"bob-jones"})
+    monkeypatch.setattr(server, "drop_professor_pages", lambda slugs: events.append(slugs))
+    post(client, ri)
+    # After the hold, so no request between the writes re-caches rows about to be held.
+    assert events == ["hold", {"alice-smith", "bob-jones"}]
+
+
+def test_an_accepted_review_edited_into_a_held_one_drops_the_page_cache(rate, monkeypatch):
+    server, client, state, ri = rate
+    dropped = []
+    monkeypatch.setattr(server, "drop_professor_pages", dropped.append)
+    state["existing"] = {"id": "r1", "status": "accepted", "hold_reasons": None}
+    state["network"] = "datacenter"   # a VPN edit holds the whole rating, so the old comment must leave the page
+    post(client, ri)
+    (sql, params), = rating_writes(state)
+    assert "held" in params
+    assert dropped == [{"alice-smith"}]
+
+
+def test_an_edit_bringing_back_a_removed_comment_is_held(rate):
+    server, client, state, ri = rate
+    state["existing"] = {"id": "r1", "status": "accepted", "hold_reasons": "comment_removed"}
+    post(client, ri)
+    (sql, params), = rating_writes(state)
+    assert "held" in params and "comment_removed" in params
+
+
+def test_an_edit_without_a_comment_keeps_the_removed_mark(rate):
+    server, client, state, ri = rate
+    state["existing"] = {"id": "r1", "status": "accepted", "hold_reasons": "comment_removed"}
+    post(client, ri, {"comment": ""})
+    (sql, params), = rating_writes(state)
+    # Accepted, but the next edit that adds a comment is still held.
+    assert "accepted" in params and "comment_removed" in params

@@ -3,6 +3,7 @@
     python review_ratings.py list                       # held ratings, pending professors, pending courses
     python review_ratings.py approve-rating ID [ID...]  # held -> accepted
     python review_ratings.py reject-rating ID [ID...]   # delete the rating
+    python review_ratings.py remove-comment PUBLIC_ID   # take down a shown comment by the id a report carries
     python review_ratings.py approve-professor ID [--slug SLUG]
     python review_ratings.py merge-professor ID SLUG
     python review_ratings.py reject-professor ID
@@ -14,10 +15,13 @@
 Rating ids may be the short id `list` prints. Each run is one transaction: it
 commits at the end, and rolls back and exits 1 on a bad id or a non-pending
 entry. Reads ORACLE_DATABASE_URL. `list` prints no hashes or network data.
-Approved and merged ratings reach the site on the next pipeline run.
+Approved and merged ratings reach the site on the next pipeline run; a
+professor page's student reviews change within minutes, since every command but
+list and purge-ip bumps data_version.
 """
 
 import argparse
+import os
 import re
 import sys
 from datetime import datetime, timezone
@@ -26,6 +30,8 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 import ratings
+import survey_reviews
+from pipeline.read_models import DATA_VERSION_SQL
 from pipeline.db import connect
 from pipeline.names import get_college, name_to_slug
 from pipeline.roster import unique_slug
@@ -111,6 +117,28 @@ def reject_rating(cur, *ids):
         if len(cur.fetchall()) != 1:
             raise ReviewError(f"{rating_id} is not exactly one held rating")
     return f"Rejected {len(ids)} rating(s)"
+
+
+def remove_comment(cur, review_id):
+    """Drop the comment of the review whose public id (the one on the page and in
+    a report) is review_id; the rating keeps counting. Needs RATING_SECRET.
+
+    The comment_removed hold reason stays on the row, so an edit that brings a
+    comment back is held (server.rate_submit); comment_hash stays too, so the same
+    text from another device is held as a duplicate_comment."""
+    secret = os.getenv("RATING_SECRET")
+    if not secret:
+        raise ReviewError("RATING_SECRET is needed to match a public review id")
+    cur.execute("SELECT id FROM survey_ratings WHERE comment IS NOT NULL")
+    matches = [str(r["id"]) for r in cur.fetchall() if survey_reviews.public_id(secret, r["id"]) == review_id]
+    if len(matches) != 1:
+        raise ReviewError(f"{review_id} is not exactly one shown review")
+    cur.execute("UPDATE survey_ratings SET comment = NULL, hold_reasons = CASE "
+                "WHEN hold_reasons IS NULL THEN 'comment_removed' "
+                "WHEN ',' || hold_reasons || ',' LIKE '%%,comment_removed,%%' THEN hold_reasons "
+                "ELSE hold_reasons || ',comment_removed' END "
+                "WHERE id::text = %s RETURNING id", (matches[0],))
+    return f"Removed the comment of {matches[0]}"
 
 
 def approve_professor(cur, entry_id, slug=None):
@@ -246,7 +274,7 @@ def parse_args(argv):
         merge = sub.add_parser(name)
         merge.add_argument("id")
         merge.add_argument("target")
-    for name in ("reject-professor", "approve-course", "reject-course"):
+    for name in ("reject-professor", "approve-course", "reject-course", "remove-comment"):
         sub.add_parser(name).add_argument("id")
     return parser.parse_args(argv)
 
@@ -270,8 +298,11 @@ COMMANDS = {
     "approve-rating": approve_rating, "reject-rating": reject_rating,
     "reject-professor": reject_professor, "merge-professor": merge_professor,
     "approve-course": approve_course, "merge-course": merge_course,
-    "reject-course": reject_course,
+    "reject-course": reject_course, "remove-comment": remove_comment,
 }
+# Commands that can't change what a page shows; every other one bumps data_version
+# so the site's caches drop pages that show (or no longer show) student reviews.
+READ_ONLY_COMMANDS = ("list", "purge-ip")
 
 
 def main(argv=None):
@@ -280,6 +311,8 @@ def main(argv=None):
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             summary = run(cur, args)
+            if args.command not in READ_ONLY_COMMANDS:
+                cur.execute(DATA_VERSION_SQL)
         conn.commit()
     except (ReviewError, psycopg2.DataError) as e:
         conn.rollback()
