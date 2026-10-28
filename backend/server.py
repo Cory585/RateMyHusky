@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from prof_aliases import ALIAS_MAP
 from pipeline.names import COLLEGE_MAP
 from flask import Flask, g, jsonify, request, redirect, make_response
+from flask.json.provider import DefaultJSONProvider
 from flask_cors import CORS
 from flask_compress import Compress
 from flask_limiter import Limiter
@@ -44,6 +45,7 @@ import ip_networks
 import rating_identity
 import rating_checks
 import ratings
+import survey_reviews
 import usage_alert
 
 load_dotenv()
@@ -177,7 +179,19 @@ def _name_to_slug(name: str) -> str:
 # ──────────────────────────────────────────────
 #  App setup
 # ──────────────────────────────────────────────
+class _JSONProvider(DefaultJSONProvider):
+    """JSON nested too deep to parse raises RecursionError, which get_json lets through
+    as a 500. As a ValueError it's bad JSON like any other: None with silent=True, else a 400."""
+
+    def loads(self, s, **kwargs):
+        try:
+            return super().loads(s, **kwargs)
+        except RecursionError as e:
+            raise ValueError("JSON nested too deep") from e
+
+
 app = Flask(__name__)
+app.json = _JSONProvider(app)
 app.config["COMPRESS_MIMETYPES"] = ["application/json", "text/html"]
 app.config["COMPRESS_MIN_SIZE"] = 256
 # Every request body is a small JSON object (feedback, bookmarks, Ask); reject
@@ -347,7 +361,12 @@ def _timing_log(response):
 
 @app.errorhandler(HTTPException)
 def _http_error(e):
-    """404/405/429 and every other HTTP error as JSON; the frontend reads the status."""
+    """404/405/429 and every other HTTP error as JSON; the frontend reads the status.
+
+    A limiter 429 never names its bucket ("20 per 1 hour"): that tells a client which
+    key it hit, and so whether a fresh device token gets around it."""
+    if e.code == 429:
+        return jsonify({"error": "Rate limit reached. Please try again later."}), 429
     return jsonify({"error": e.description}), e.code
 
 
@@ -397,8 +416,17 @@ CACHE_MAX_SIZE = 5000
 
 _feedback_lock = Lock()
 _feedback_count = 0
+_account_feedback_count = 0
+_feedback_by_account = {}
 _feedback_date = None   # "YYYY-MM-DD" UTC, resets counter each day
-FEEDBACK_DAILY_LIMIT = 300
+FEEDBACK_DAILY_LIMIT = 80
+# Requests with a verified account get their own allowance, so anonymous reports can't
+# use up the day and block a data-deletion request. 80 + 15 + 3 usage alerts + 1
+# review digest (review_digest.py) fit Resend's free 100/day.
+ACCOUNT_FEEDBACK_DAILY_LIMIT = 15
+# One account's share of that allowance, so one user sending from several IPs can't
+# use up the day and block another user's data-deletion request.
+FEEDBACK_PER_ACCOUNT_DAILY_LIMIT = 3
 # feedback types that require a reply email and carry the signed-in account's verified sub,
 # so support can act on the right ask_log rows (review an appeal, or erase the user's data)
 _ACCOUNT_FEEDBACK_TYPES = {"banappeal", "datadeletion"}
@@ -421,9 +449,10 @@ _FEEDBACK_TYPE_LABELS = {
     "incorrectdata": "Wrong or Missing Data",
     "missing": "Missing Data",
     "general": "Idea or General Feedback",
+    "reviewreport": "Review Report",   # the Report link on a RateMyHusky review
     "feature": "Feature Request",
     "professor": "Professor Request",
-    "datadeletion": "Data Deletion Request",
+    "datadeletion": "Account Deletion Request",
     "banappeal": "Ask Ban Appeal",
 }
 # These limits and the email pattern in submit_feedback are copied in
@@ -558,6 +587,15 @@ def cache_set(key, data):
         _cache[key] = {"data": data, "ts": time.time()}
         while len(_cache) > CACHE_MAX_SIZE:
             del _cache[next(iter(_cache))]
+
+
+def drop_professor_pages(slugs):
+    """Drop the cached /full of each professor in slugs, under every slug it was
+    opened by: the cache key is the URL's slug, which may be an alias."""
+    with _cache_lock:
+        for k in [k for k, e in _cache.items()
+                  if ":prof_full:" in k and (e["data"].get("identity") or {}).get("slug") in slugs]:
+            del _cache[k]
 
 
 def _acquire_fresh_conn():
@@ -739,11 +777,13 @@ def _write(sql, params=None):
     """Write helper for user-facing mutations (bookmarks add/remove): execute +
     commit, retry once on a stale connection (mirrors query()). Unlike
     _chat_write, this does not swallow errors — a failed bookmark write must
-    surface to the caller, not be silently dropped like a best-effort log write."""
+    surface to the caller, not be silently dropped like a best-effort log write.
+    Returns the RETURNING rows as dicts, or None for a statement without one."""
     try:
         conn = get_db()
-        cur = conn.cursor()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute(sql, params or ())
+        rows = cur.fetchall() if cur.description else None
         conn.commit()
     except psycopg2.extensions.QueryCanceledError:
         _rollback_after_cancel(conn)
@@ -751,9 +791,11 @@ def _write(sql, params=None):
     except (psycopg2.InterfaceError, psycopg2.OperationalError):
         _discard_db_conn()
         conn = get_db()
-        cur = conn.cursor()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute(sql, params or ())
+        rows = cur.fetchall() if cur.description else None
         conn.commit()
+    return rows
 
 
 
@@ -1257,16 +1299,27 @@ def professor_payload(slug):
     canonical = cache_get(f"prof_slug:{slug}") or slug
     data = cache_get(f"prof_full:{canonical}")
     if data is None:
-        data = build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions)
+        data = build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions,
+                             review_id=_review_id if _student_reviews_shown() else None)
         if data is None:
             return None
-        if data.pop("_historyFailed", False):
-            g.history_failed = True   # a failed Banner read is not cached: see history_cache_control
+        if data.pop("_partial", False):
+            g.history_failed = True   # a failed Banner or survey read is not cached: see history_cache_control
         else:
             cache_set(f"prof_full:{data['identity']['slug']}", data)
             if data["identity"]["slug"] != slug:
                 cache_set(f"prof_slug:{slug}", data["identity"]["slug"])
     return data
+
+
+def _student_reviews_shown():
+    """/rate comments go out on professor pages only with SHOW_STUDENT_REVIEWS on:
+    the frontend's RATE_ENABLED only hides the tab, not what /full returns."""
+    return SHOW_STUDENT_REVIEWS and _rating_enabled()
+
+
+def _review_id(rating_uuid):
+    return survey_reviews.public_id(RATING_SECRET, rating_uuid)
 
 
 def history_cache_control(resp):
@@ -2080,7 +2133,7 @@ def csp_report():
 # (each holds a worker for up to 5 s).
 @limiter.limit("50 per day")
 def submit_feedback():
-    global _feedback_count, _feedback_date
+    global _feedback_count, _account_feedback_count, _feedback_date
 
     data = _json_object()
     feedback_type = _json_str(data, "feedbackType")
@@ -2130,13 +2183,20 @@ def submit_feedback():
     with _feedback_lock:
         if _feedback_date != today:
             _feedback_date = today
-            _feedback_count = 0
-        if _feedback_count >= FEEDBACK_DAILY_LIMIT:
-            return jsonify({"error": "Daily feedback limit reached. Please try again tomorrow."}), 429
-        _feedback_count += 1
+            _feedback_count = _account_feedback_count = 0
+            _feedback_by_account.clear()
+        if appeal_account:
+            if (_account_feedback_count >= ACCOUNT_FEEDBACK_DAILY_LIMIT
+                    or _feedback_by_account.get(appeal_account, 0) >= FEEDBACK_PER_ACCOUNT_DAILY_LIMIT):
+                return jsonify({"error": "Daily feedback limit reached. Please try again tomorrow."}), 429
+            _account_feedback_count += 1
+            _feedback_by_account[appeal_account] = _feedback_by_account.get(appeal_account, 0) + 1
+        else:
+            if _feedback_count >= FEEDBACK_DAILY_LIMIT:
+                return jsonify({"error": "Daily feedback limit reached. Please try again tomorrow."}), 429
+            _feedback_count += 1
 
-    resend_api_key = os.getenv("RESEND_API_KEY")
-    if not resend_api_key:
+    if not os.getenv("RESEND_API_KEY"):
         print("[feedback] RESEND_API_KEY not configured")
         return jsonify({"error": "Email service not configured"}), 500
 
@@ -2159,27 +2219,7 @@ def submit_feedback():
     lines += ["", "Description:", description]
     body = "\n".join(lines)
 
-    payload = {
-        "from": "RateMyHusky <feedback@ratemyhusky.com>",
-        "to": ["feedback@ratemyhusky.com"],
-        "subject": f"[RateMyHusky] {type_label}",
-        "text": body,
-    }
-    if reply_email:
-        payload["reply_to"] = reply_email
-
-    try:
-        resp = http_requests.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {resend_api_key}", "Content-Type": "application/json"},
-            json=payload,
-            timeout=10,
-        )
-        if not resp.ok:
-            print(f"[feedback] Resend error {resp.status_code}: {resp.text}")
-            return jsonify({"error": "Failed to send email"}), 500
-    except Exception as e:
-        print(f"[feedback] Resend request error: {e}")
+    if not notify.send_team_email(f"[RateMyHusky] {type_label}", body, reply_to=reply_email or None):
         return jsonify({"error": "Failed to send email"}), 500
 
     return jsonify({"ok": True})
@@ -2190,6 +2230,8 @@ def submit_feedback():
 # ──────────────────────────────────────────────
 
 RATING_SECRET = os.getenv("RATING_SECRET")
+# Off until launch: turn it on with the frontend's RATE_ENABLED (see _student_reviews_shown).
+SHOW_STUDENT_REVIEWS = os.getenv("SHOW_STUDENT_REVIEWS", "false").lower() == "true"
 # Loaded at import so gunicorn --preload reads the data files once.
 _networks = ip_networks.load_index(os.getenv("IP_DATA_DIR", "/tmp/ipdata"))
 _rating_moderation_client = None
@@ -2199,7 +2241,10 @@ _MIN_RATING_SECRET = 32
 
 
 def _rating_enabled():
-    """A RATING_SECRET shorter than 32 characters counts as unset."""
+    """A RATING_SECRET shorter than 32 characters counts as unset. Deployed (PROXY_SECRET
+    set), a missing Turnstile key turns the form off rather than letting it run without CAPTCHA."""
+    if PROXY_SECRET and not os.getenv("TURNSTILE_SECRET_KEY"):
+        return False
     return bool(RATING_SECRET) and len(RATING_SECRET) >= _MIN_RATING_SECRET
 
 
@@ -2343,20 +2388,15 @@ def rate_submit():
     if moderation_action == "block":
         return _rating_response({"error": "comment_blocked"}, 422, device)
 
-    # 8. Pending professor / course; the team emails wait until the rating is saved
+    # 8. Pending professor / course. No team email: invented names cost nothing to
+    # submit, so one email each could flood the inbox and the Resend quota the
+    # feedback form shares. Reviewers find them with `review_ratings.py list`.
     pending_professor_id = pending_course_id = None
-    emails = []
     if clean["new_professor"]:
         name, dept = clean["new_professor"]["name"], clean["new_professor"]["department"]
-        pending_professor_id, created = ratings.pending_professor(name, dept, query_one, _write)
-        if created:
-            emails.append((f"[RateMyHusky] New professor to review: {name}",
-                           f"Name: {name}\nDepartment: {dept or '-'}\n\nReview with: python review_ratings.py list"))
+        pending_professor_id, _ = ratings.pending_professor(name, dept, query_one, _write)
     if new_course:
-        pending_course_id, created = ratings.pending_course(clean["course_code"], new_course, query_one, _write)
-        if created:
-            emails.append((f"[RateMyHusky] New course to review: {clean['course_code']}",
-                           f"Code: {clean['course_code']}\nName: {new_course}\n\nReview with: python review_ratings.py list"))
+        pending_course_id, _ = ratings.pending_course(clean["course_code"], new_course, query_one, _write)
 
     # 9. Replace-or-insert, holds and bursts
     key = ratings.rating_key(clean, pending_professor_id, pending_course_id)
@@ -2364,11 +2404,23 @@ def rate_submit():
     chash = rating_checks.comment_hash(clean["comment"])
     duplicate = ratings.duplicate_comment(chash, existing["id"] if existing else None, query_one)
     bursts = ratings.burst_reasons(key, ip_hash, prefix_hash, network_type, query_one, now)
+    # A pending professor or course counts nowhere until a reviewer approves it, so only
+    # a known pair is checked against who Banner and RMP have teaching the course.
+    unverified = (bool(key["professor_slug"]) and bool(key["course_code"])
+                  and not ratings.pair_taught(key["professor_slug"], key["course_code"], query_one))
+    # A reviewer took this rating's comment down (review_ratings.py remove-comment): the mark
+    # stays on the row, and any comment it carries again waits for review.
+    removed = bool(existing) and "comment_removed" in (existing["hold_reasons"] or "").split(",")
     status, reasons = rating_checks.assess(fill_seconds, network_type, bursts, duplicate, moderation_action,
-                                           edit=bool(existing) and existing["status"] == "accepted")
+                                           edit=bool(existing) and existing["status"] == "accepted",
+                                           unverified_pair=unverified,
+                                           comment_removed=removed and bool(clean["comment"]))
+    if removed and "comment_removed" not in reasons:
+        reasons.append("comment_removed")
     row = {
         **key,
-        "term_label": clean["term_label"], "rating": clean["rating"], "hours": clean["hours"],
+        "term_label": clean["term_label"], "rating": clean["rating"], "difficulty": clean["difficulty"],
+        "hours": clean["hours"],
         "grade": clean["grade"], "comment": clean["comment"] or None, "comment_hash": chash,
         "status": status, "hold_reasons": ",".join(reasons) or None,
         "device_hash": device_hash, "new_device": new_device,
@@ -2376,10 +2428,14 @@ def rate_submit():
         "fill_seconds": fill_seconds, "collection": "turnstile+device",
     }
     ratings.save_rating(row, existing, _write)
-    if bursts:
-        ratings.hold_burst(bursts, key, ip_hash, prefix_hash, _write, now)
-    for subject, text in emails:
-        notify.send_team_email(subject, text)
+    held = ratings.hold_burst(bursts, key, ip_hash, prefix_hash, _write, now) if bursts else set()
+    # The page shows student reviews live. Any save can change it: a new review, an edit,
+    # or an accepted review edited into a held one, whose old comment must come down. A burst
+    # also holds reviews on other professors. Dropped after the hold, so no request between
+    # the two writes re-caches rows that are about to be held.
+    pages = held | {key["professor_slug"]} if key.get("professor_slug") else held
+    if pages:
+        drop_professor_pages(pages)
 
     # 10. Clear old IP hashes, at most hourly per process
     if time.time() - _last_ip_purge >= _IP_PURGE_INTERVAL:

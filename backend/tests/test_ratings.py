@@ -158,8 +158,17 @@ def test_resubmitting_a_held_row_keeps_its_old_hold_reasons():
     held = {"id": "r1", "status": "held", "hold_reasons": "burst_ip,duplicate_comment"}
     assert saved(held, "too_fast,duplicate_comment") == "burst_ip,duplicate_comment,too_fast"
     assert saved(held, None) is None  # the upsert keeps the old reasons itself
-    assert saved({**held, "status": "accepted"}, "too_fast") == "too_fast"
+    # An approved row keeps its reasons too, so an edit doesn't bring it back into the counts.
+    approved = {**held, "status": "accepted"}
+    assert saved(approved, "too_fast") == "burst_ip,duplicate_comment,too_fast"
+    assert saved({**approved, "hold_reasons": None}, "too_fast") == "too_fast"
     assert saved(None, "too_fast") == "too_fast"
+
+
+def test_a_clean_edit_keeps_the_rows_hold_reasons():
+    # A reviewer approved a held rating (accepted, reasons kept); a clean edit mustn't clear them.
+    sql = ratings._UPSERT_SQL
+    assert "hold_reasons = COALESCE(EXCLUDED.hold_reasons, survey_ratings.hold_reasons)" in sql
 
 
 def test_burst_ip_skipped_on_campus_and_relay():
@@ -169,13 +178,121 @@ def test_burst_ip_skipped_on_campus_and_relay():
     assert ratings.burst_reasons(KEY, "ip", "pre", "other", f.query_one, NOW) == ["burst_ip"]
 
 
+PROF_COUNT = "AS pair_month FROM survey_ratings"
+
+
+def prof_row(**counts):
+    return {"hour": 0, "month": 0, "day": 0, "pair_hour": 0, "pair_month": 0, **counts}
+
+
 def test_pair_burst_needs_both_count_and_pace():
     def reasons(hour, month):
-        f = Fake(one={"new_device = true": {"hour": hour, "month": month}})
+        f = Fake(one={PROF_COUNT: prof_row(pair_hour=hour, pair_month=month)})
         return ratings.burst_reasons(KEY, None, None, "other", f.query_one, NOW)
     assert reasons(5, 720) == ["burst_pair"]
     assert reasons(5, 7200) == []
     assert reasons(4, 720) == []
+
+
+def test_professor_burst_needs_both_count_and_pace_on_every_network():
+    def reasons(hour, month, net="campus"):
+        f = Fake(one={PROF_COUNT: prof_row(hour=hour, month=month)})
+        return ratings.burst_reasons(KEY, None, None, net, f.query_one, NOW)
+    assert reasons(10, 720) == ["burst_prof"]
+    assert reasons(10, 720, "relay") == ["burst_prof"]
+    assert reasons(10, 7200) == []
+    assert reasons(9, 720) == []
+
+
+def test_professor_burst_counts_every_device_and_course():
+    # Seasoned devices and invented course codes both dodge the pair count.
+    f = Fake()
+    ratings.burst_reasons(KEY, None, None, "other", f.query_one, NOW)
+    (sql, params), = [c for c in f.calls if PROF_COUNT in c[0]]
+    where = sql.split(" FROM survey_ratings WHERE ")[1]
+    assert "new_device" not in where and "course_code" not in where
+    assert params == (NOW - timedelta(hours=1), NOW - timedelta(days=1), NOW - timedelta(hours=1),
+                      "CS2500", None, "CS2500", None, NOW - timedelta(days=30), "jane-doe", None)
+
+
+def test_every_burst_window_reads_updated_at():
+    # An edit keeps created_at, so a wave of edits to old ratings would count nowhere.
+    f = Fake()
+    ratings.burst_reasons(KEY, "ip", "pre", "other", f.query_one, NOW)
+    ratings.hold_burst(list(ratings._BURST_REASONS), KEY, "ip", "pre", f.write, NOW)
+    for sql, _ in f.calls + f.writes:
+        assert "created_at" not in sql and "updated_at >= %s" in sql
+
+
+def test_hold_burst_holds_the_professors_recent_rows_from_every_device():
+    f = Fake()
+    ratings.hold_burst(["burst_prof"], KEY, "ip", "pre", f.write, NOW)
+    (sql, params), = f.writes
+    assert "status = 'accepted'" in sql and "new_device" not in sql and "course_code" not in sql
+    assert params == ("burst_prof", NOW - timedelta(hours=1), "jane-doe", None)
+
+
+def test_pair_taught_is_one_query_over_banner_rmp_and_approved_ratings():
+    f = Fake(one={"AS taught": {"taught": True}})
+    assert ratings.pair_taught("jane-doe", "CS2500", f.query_one)
+    (sql, params), = f.calls
+    assert "banner_course_instructors" in sql and "source = 'rmp'" in sql
+    # A reviewer approving an unverified_pair hold vouches for the pair: approval keeps the reason.
+    assert "status = 'accepted'" in sql and "ARRAY['unverified_pair']" in sql
+    assert params == ("CS2500", "jane-doe") * 3
+    assert not ratings.pair_taught("jane-doe", "CS2500", Fake(one={"AS taught": {"taught": False}}).query_one)
+
+
+COURSE_COUNT = "WHERE updated_at >= %s AND course_code"
+
+
+def test_course_burst_needs_both_count_and_pace_on_every_network():
+    def reasons(hour, month, net="campus"):
+        f = Fake(one={COURSE_COUNT: {"hour": hour, "month": month}})
+        return ratings.burst_reasons(KEY, None, None, net, f.query_one, NOW)
+    assert reasons(20, 720) == ["burst_course"]
+    assert reasons(20, 720, "relay") == ["burst_course"]
+    assert reasons(20, 7200) == []
+    assert reasons(19, 720) == []
+
+
+def test_course_burst_counts_every_professor_and_device():
+    # Spreading one course's ratings over many professors dodges the pair and professor counts.
+    f = Fake()
+    ratings.burst_reasons(KEY, None, None, "other", f.query_one, NOW)
+    (sql, params), = [c for c in f.calls if COURSE_COUNT in c[0]]
+    assert "new_device" not in sql and "professor_slug" not in sql
+    assert params[2:] == ("CS2500", None)
+
+
+def test_professor_daily_cap_ignores_pace():
+    # A steady drip raises its own hourly limit through the pace factor; this cap has none.
+    def reasons(day):
+        f = Fake(one={PROF_COUNT: prof_row(day=day, month=10000)})
+        return ratings.burst_reasons(KEY, None, None, "campus", f.query_one, NOW)
+    assert reasons(30) == ["burst_prof_day"]
+    assert reasons(29) == []
+
+
+PAUSE = "WHERE status = 'held' AND updated_at >= %s"
+
+
+def test_a_held_burst_pauses_new_ratings_for_72_hours():
+    f = Fake(one={PAUSE: {"x": 1}})
+    assert ratings.burst_reasons(KEY, None, None, "campus", f.query_one, NOW) == ["burst_pause"]
+    (sql, params), = [c for c in f.calls if PAUSE in c[0]]
+    assert params[0] == NOW - timedelta(hours=72)
+    assert ratings.burst_reasons(KEY, None, None, "campus", Fake().query_one, NOW) == []
+
+
+def test_hold_burst_holds_the_professors_day_and_the_courses_hour():
+    f = Fake()
+    ratings.hold_burst(["burst_course", "burst_prof_day", "burst_pause"], KEY, "ip", "pre", f.write, NOW)
+    (day_sql, day_params), (course_sql, course_params) = f.writes  # burst_pause holds only the new rating
+    assert "course_code" not in day_sql
+    assert day_params == ("burst_prof_day", NOW - timedelta(days=1), "jane-doe", None)
+    assert "professor_slug" not in course_sql.split("RETURNING")[0]
+    assert course_params == ("burst_course", NOW - timedelta(hours=1), "CS2500", None)
 
 
 def test_hold_burst_holds_recent_accepted_rows_per_tripped_trigger():
@@ -191,23 +308,36 @@ def test_hold_burst_holds_recent_accepted_rows_per_tripped_trigger():
     assert "new_device = true" in f.writes[0][0] and "new_device" not in f.writes[1][0]
 
 
+def test_hold_burst_returns_the_professors_whose_rows_it_held():
+    returned = iter([[{"professor_slug": "alice-smith"}, {"professor_slug": None}],
+                     [{"professor_slug": "bob-jones"}, {"professor_slug": "alice-smith"}]])
+    held = ratings.hold_burst(["burst_ip", "burst_prefix"], KEY, "ip", "pre", lambda sql, params: next(returned), NOW)
+    assert held == {"alice-smith", "bob-jones"}   # a pending-professor row has no page to drop
+
+
+def test_hold_burst_with_nothing_held_returns_no_professors():
+    f = Fake()
+    assert ratings.hold_burst(["burst_ip"], KEY, "ip", "pre", f.write, NOW) == set()
+    assert "RETURNING professor_slug" in f.writes[0][0]
+
+
 def test_professor_context_returns_earlier_answers():
     many = {"FROM survey_ratings": [
         {"code": "CS3500", "name": "Object-Oriented Design", "pending": False, "term_label": "Fall 2025",
-         "rating": 4, "hours": "5-7", "grade": "A-", "comment": "Projects take time."},
+         "rating": 4, "difficulty": 4, "hours": "5-7", "grade": "A-", "comment": "Projects take time."},
         {"code": "CS4973", "name": None, "pending": False, "term_label": None,
-         "rating": 5, "hours": "8-10", "grade": None, "comment": None},
+         "rating": 5, "difficulty": None, "hours": "8-10", "grade": None, "comment": None},
         {"code": "CS4999", "name": "Applied ML", "pending": True, "term_label": "Fall 2025",
-         "rating": 3, "hours": "3-4", "grade": None, "comment": None},
+         "rating": 3, "difficulty": 2, "hours": "3-4", "grade": None, "comment": None},
     ]}
     f = Fake(many=many)
     assert ratings.professor_context("jane-doe", "d1", f.query) == {"ratedCourses": [
         {"code": "CS3500", "name": "Object-Oriented Design", "pending": False, "term": "Fall 2025",
-         "rating": 4, "hours": "5-7", "grade": "A-", "comment": "Projects take time."},
+         "rating": 4, "difficulty": 4, "hours": "5-7", "grade": "A-", "comment": "Projects take time."},
         {"code": "CS4973", "name": None, "pending": False, "term": None,
-         "rating": 5, "hours": "8-10", "grade": None, "comment": ""},
+         "rating": 5, "difficulty": None, "hours": "8-10", "grade": None, "comment": ""},
         {"code": "CS4999", "name": "Applied ML", "pending": True, "term": "Fall 2025",
-         "rating": 3, "hours": "3-4", "grade": None, "comment": ""}]}
+         "rating": 3, "difficulty": 2, "hours": "3-4", "grade": None, "comment": ""}]}
     sql, params = f.calls[0]
     assert "LEFT JOIN course_catalog" in sql and params == ("d1", "jane-doe")
     # Pending courses come from their review row, and held ratings count, so there's no status filter on r.

@@ -43,7 +43,7 @@ def test_approve_professor_inserts_survey_origin_and_moves_ratings():
     (sql, params), = cur.statements("INSERT INTO professors")
     assert "'survey'" in sql
     assert params[:4] == ("jane-doe", "Jane Doe", "jane doe", "Computer Science")
-    (sql, params), = cur.statements("UPDATE survey_ratings")
+    (sql, params), _ = cur.statements("UPDATE survey_ratings")
     assert "professor_slug = %s" in sql and "pending_professor_id = NULL" in sql
     assert params == ("jane-doe", "p1")
     (sql, params), = cur.statements("UPDATE survey_pending_professors")
@@ -125,9 +125,24 @@ def test_approve_course_moves_ratings_onto_the_pending_code():
     cur = FakeCursor({"FROM survey_pending_courses": [course]})
     rr.approve_course(cur, "c1")
     assert index_of(cur, "DELETE FROM survey_ratings") < index_of(cur, "UPDATE survey_ratings")
-    (sql, params), = cur.statements("UPDATE survey_ratings")
+    (sql, params), _ = cur.statements("UPDATE survey_ratings")
     assert "course_code = %s" in sql and "pending_course_id = NULL" in sql
     assert params == ("CS9999", "c1")
+
+
+def test_moved_ratings_on_an_untaught_pair_are_held():
+    # A merge is a judgment about the person, not about who taught the course, and the form
+    # skipped the pair check while the entry was pending.
+    cur = FakeCursor({"FROM survey_pending_professors": [PENDING],
+                      "SELECT 1 FROM professors": [{"?column?": 1}],
+                      "RETURNING id::text": [{"id": "r1"}, {"id": "r2"}]})
+    summary = rr.merge_professor(cur, "p1", "jane-doe")
+    _, (sql, params) = cur.statements("UPDATE survey_ratings")
+    assert "status = 'held'" in sql and "concat_ws(',', r.hold_reasons, 'unverified_pair')" in sql
+    assert "AND NOT (EXISTS (SELECT 1 FROM banner_course_instructors" in sql
+    assert "course_code = r.course_code AND professor_slug = r.professor_slug" in sql
+    assert params == (["r1", "r2"],)
+    assert "moved 2 rating(s)" in summary
 
 
 def test_merge_course_accepts_a_banner_only_code():
@@ -164,13 +179,14 @@ def test_approve_rating_only_touches_held_rows():
 
 def test_list_prints_no_hashes(capsys):
     held = {"id": "abcd1234-0000", "professor": "jane-doe", "course": "CS2500",
-            "term_label": "Fall 2025", "rating": 2, "hold_reasons": "burst",
+            "term_label": "Fall 2025", "rating": 2, "difficulty": 5, "hold_reasons": "burst",
             "comment": "x" * 100, "created_at": "2026-10-01",
             "device_hash": "DEVICEHASH", "ip_hash": "IPHASH"}
     cur = FakeCursor({"FROM survey_ratings": [held]})
     rr.list_pending(cur)
     out = capsys.readouterr().out
     assert "abcd1234" in out and "jane-doe" in out and "x" * 80 in out and "x" * 81 not in out
+    assert "difficulty 5/5" in out
     assert "DEVICEHASH" not in out and "IPHASH" not in out
 
 
@@ -185,7 +201,7 @@ def test_reject_rating_only_deletes_held_rows():
 def test_list_strips_control_characters(capsys):
     evil = "[2J"
     held = {"id": "abcd1234-0000", "professor": "jane-doe", "course": "CS2500",
-            "term_label": None, "rating": 2, "hold_reasons": "burst",
+            "term_label": None, "rating": 2, "difficulty": None, "hold_reasons": "burst",
             "comment": "hi" + evil, "created_at": "2026-10-01"}
     cur = FakeCursor({"FROM survey_ratings": [held],
                       "FROM survey_pending_professors": [{"id": "p1", "name": "Eve" + evil,
@@ -195,3 +211,75 @@ def test_list_strips_control_characters(capsys):
                                                        "n": 1, "in_catalog": False}]})
     rr.list_pending(cur)
     assert "" not in capsys.readouterr().out
+
+
+SECRET = "s" * 32
+
+
+class FakeConn:
+    def __init__(self, cur):
+        self.cur, self.commits = cur, 0
+
+    def cursor(self, cursor_factory=None):
+        cur = self.cur
+
+        class Ctx:
+            def __enter__(self):
+                return cur
+
+            def __exit__(self, *a):
+                return False
+        return Ctx()
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
+@pytest.mark.parametrize("argv", [["approve-rating", "beef5678"], ["reject-rating", "beef5678"],
+                                  ["remove-comment", "abcdef123456"], ["approve-professor", "beef5678"]])
+def test_commands_that_change_pages_bump_data_version(argv, monkeypatch):
+    cur = FakeCursor()
+    monkeypatch.setattr(rr, "run", lambda c, args: "ok")
+    monkeypatch.setattr(rr, "connect", lambda: FakeConn(cur))
+    assert rr.main(argv) == 0
+    assert any("'data_version'" in sql for sql, _ in cur.calls)
+
+
+@pytest.mark.parametrize("argv", [["list"], ["purge-ip"]])
+def test_read_only_commands_do_not_bump_data_version(argv, monkeypatch):
+    cur = FakeCursor()
+    monkeypatch.setattr(rr, "run", lambda c, args: "ok")
+    monkeypatch.setattr(rr, "connect", lambda: FakeConn(cur))
+    assert rr.main(argv) == 0
+    assert not any("'data_version'" in sql for sql, _ in cur.calls)
+
+
+def test_remove_comment_finds_the_review_by_its_public_id(monkeypatch):
+    import survey_reviews
+    monkeypatch.setenv("RATING_SECRET", SECRET)
+    target, other = "11111111-0000-0000-0000-000000000000", "22222222-0000-0000-0000-000000000000"
+    cur = FakeCursor({"SELECT id FROM survey_ratings": [{"id": other}, {"id": target}],
+                      "UPDATE survey_ratings": [{"id": target}]})
+    rr.remove_comment(cur, survey_reviews.public_id(SECRET, target))
+    (sql, params), = cur.statements("UPDATE")
+    assert "comment = NULL" in sql and "comment_hash" not in sql and params == (target,)
+    assert "'comment_removed'" in sql   # marks the row, so an edit bringing the comment back is held
+
+
+def test_remove_comment_with_an_unknown_id_raises(monkeypatch):
+    monkeypatch.setenv("RATING_SECRET", SECRET)
+    cur = FakeCursor({"SELECT id FROM survey_ratings": [{"id": "11111111-0000-0000-0000-000000000000"}]})
+    with pytest.raises(rr.ReviewError):
+        rr.remove_comment(cur, "abcdef123456")
+
+
+def test_remove_comment_needs_the_rating_secret(monkeypatch):
+    monkeypatch.delenv("RATING_SECRET", raising=False)
+    with pytest.raises(rr.ReviewError):
+        rr.remove_comment(FakeCursor(), "abcdef123456")

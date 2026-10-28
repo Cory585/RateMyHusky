@@ -133,7 +133,7 @@ def test_a_variant_slug_reuses_the_canonical_payload(monkeypatch):
     server._cache.clear()
     builds = []
 
-    def fake_build(slug, *args):
+    def fake_build(slug, *args, **kwargs):
         builds.append(slug)
         return {"identity": {"slug": "jane-doe"}}
 

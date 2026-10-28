@@ -14,7 +14,7 @@ SECRET = "rating-secret-0123456789abcdefghijklmnop"  # gitleaks:allow
 DEVICE = "a" * 32
 BODY = {
     "professor": {"slug": "alice-smith"}, "course": {"code": "CS2500"},
-    "term": "Fall 2025", "rating": 4, "hours": "5-7", "grade": "A",
+    "term": "Fall 2025", "rating": 4, "difficulty": 3, "hours": "5-7", "grade": "A",
     "comment": "Clear lectures and fair exams, would take again.",
     "website": "",
 }
@@ -33,9 +33,11 @@ def rate(monkeypatch):
     monkeypatch.setattr(server, "RATING_SECRET", SECRET, raising=False)
     monkeypatch.setattr(server, "PROXY_SECRET", None, raising=False)
     monkeypatch.delenv("TURNSTILE_SECRET_KEY", raising=False)
+    # Set so any team email would reach fake_post: the rating route sends none.
+    monkeypatch.setenv("RESEND_API_KEY", "re-test")
     server.limiter.reset()
 
-    state = {"writes": [], "emails": [], "moderation": "allow", "network": "other",
+    state = {"writes": [], "posts": [], "moderation": "allow", "network": "other",
              "turnstile": True, "turnstile_calls": 0, "seen": False, "existing": None}
 
     def fake_query_one(sql, params=()):
@@ -46,7 +48,9 @@ def rate(monkeypatch):
         if "FROM professors_catalog" in sql:
             return {"x": 1} if params[0] == "alice-smith" else None
         if "FROM course_catalog" in sql:
-            return {"x": 1} if params[0] == "CS2500" else None
+            return {"x": 1} if params[0] in ("CS2500", "CS3500") else None
+        if "AS taught" in sql:  # alice-smith taught CS2500, never CS3500
+            return {"taught": params[:2] == ("CS2500", "alice-smith")}
         if "count(*) AS cnt FROM survey_ratings WHERE created_at" in sql:
             return {"cnt": 3}
         if "AND status = 'pending'" in sql:  # the first insert wins, like the partial unique index
@@ -64,6 +68,7 @@ def rate(monkeypatch):
         return [SimpleNamespace(action=state["moderation"]) for _ in texts]
 
     def fake_post(url, **kw):
+        state["posts"].append(url)
         state["turnstile_calls"] += 1
         return SimpleNamespace(ok=True, json=lambda: {"success": state["turnstile"]})
 
@@ -72,8 +77,6 @@ def rate(monkeypatch):
     monkeypatch.setattr(server, "_write", fake_write, raising=False)
     monkeypatch.setattr(server, "_rating_moderation_score", fake_score, raising=False)
     monkeypatch.setattr(server.http_requests, "post", fake_post)
-    monkeypatch.setattr(server.notify, "send_team_email",
-                        lambda subject, text, post=None: state["emails"].append((subject, text)) or True)
     monkeypatch.setattr(server, "_networks", SimpleNamespace(network_type=lambda ip: state["network"]))
     return server, server.app.test_client(), state, ri
 
@@ -135,11 +138,33 @@ def test_submit_without_secret_is_503(rate, monkeypatch):
     assert state["writes"] == []
 
 
+def test_deployed_without_turnstile_is_503_not_captcha_free(rate, monkeypatch):
+    # PROXY_SECRET is set only when deployed; a dropped Turnstile key there must not
+    # quietly turn the CAPTCHA off.
+    server, client, state, ri = rate
+    monkeypatch.setattr(server, "PROXY_SECRET", "proxy-key")
+    key = {"X-Proxy-Key": "proxy-key"}
+    assert post(client, ri, **key).status_code == 503
+    assert client.get("/api/rate/start", headers=key).status_code == 503
+    assert client.get("/api/rate/professors/alice-smith", headers=key).status_code == 503
+    assert state["writes"] == []
+    monkeypatch.setenv("TURNSTILE_SECRET_KEY", "secret")
+    assert post(client, ri, {"turnstileToken": "tok"}, **key).status_code == 200
+
+
 def test_honeypot_gets_the_normal_response_and_writes_nothing(rate):
     server, client, state, ri = rate
     resp = post(client, ri, {"website": "http://spam.example"})
     assert resp.status_code == 200 and resp.get_json()["ok"] is True
     assert state["writes"] == [] and state["turnstile_calls"] == 0
+
+
+def test_json_nested_too_deep_to_parse_is_400_not_500(rate):
+    server, client, state, ri = rate
+    body = "[" * 30000 + "]" * 30000   # deep enough to recurse, small enough for MAX_CONTENT_LENGTH
+    resp = client.post("/api/rate", data=body, content_type="application/json")
+    assert resp.status_code == 400 and resp.get_json() == {"error": "Body must be a JSON object"}
+    assert state["writes"] == []
 
 
 def test_validation_error_is_400(rate):
@@ -158,13 +183,13 @@ def test_turnstile_failure_is_403_and_writes_nothing(rate, monkeypatch):
     assert state["writes"] == []
 
 
-def test_blocked_comment_is_422_and_creates_no_pending_professor_or_email(rate):
+def test_blocked_comment_is_422_and_creates_no_pending_professor(rate):
     server, client, state, ri = rate
     state["moderation"] = "block"
     resp = post(client, ri, {"professor": {"name": "New Person", "department": "Math"},
                              "course": {"code": "ZZ9999", "name": "Brand New Course"}})
     assert resp.status_code == 422 and resp.get_json() == {"error": "comment_blocked"}
-    assert state["writes"] == [] and state["emails"] == []
+    assert state["writes"] == []
 
 
 def test_moderation_timeout_holds(rate):
@@ -191,29 +216,19 @@ def test_quick_update_keeps_an_accepted_rating_accepted(rate):
     assert "held" in held and "datacenter,too_fast" in held
 
 
-def test_new_professor_creates_one_pending_entry_and_one_email(rate):
+def test_new_professor_creates_one_pending_entry_and_no_email(rate):
+    # Invented names cost nothing to submit, so an email each would flood the inbox
+    # and the Resend quota the feedback form shares. Reviewers use review_ratings.py list.
     server, client, state, ri = rate
     resp = post(client, ri, {"professor": {"name": "New Person", "department": "Math"}})
     assert resp.status_code == 200
     assert len([w for w in state["writes"] if "survey_pending_professors" in w[0]]) == 1
     assert [w for w in state["writes"] if "survey_pending_courses" in w[0]] == []
-    (subject, text), = state["emails"]
-    assert subject == "[RateMyHusky] New professor to review: New Person"
-    assert "Math" in text and "python review_ratings.py list" in text
-    # A second student naming the same professor shares the row and sends no email.
+    # A second student naming the same professor shares the row.
     post(client, ri, {"professor": {"name": "new  PERSON"}}, device="b" * 32)
-    assert len(state["emails"]) == 1
     pending_id = rating_writes(state)[0][1][1 + server.ratings._INSERT_COLUMNS.index("pending_professor_id")]
     assert rating_writes(state)[1][1][1 + server.ratings._INSERT_COLUMNS.index("pending_professor_id")] == pending_id
-
-
-def test_team_email_is_sent_after_the_rating_is_saved(rate, monkeypatch):
-    server, client, state, ri = rate
-    saved_at_send = []
-    monkeypatch.setattr(server.notify, "send_team_email",
-                        lambda subject, text, post=None: saved_at_send.append(len(rating_writes(state))))
-    post(client, ri, {"course": {"code": "ZZ9999", "name": "Brand New Course"}})
-    assert saved_at_send == [1]
+    assert state["posts"] == []
 
 
 def test_new_course_needs_a_name_and_known_code_ignores_it(rate):
@@ -225,7 +240,38 @@ def test_new_course_needs_a_name_and_known_code_ignores_it(rate):
     assert [w for w in state["writes"] if "survey_pending_courses" in w[0]] == []
     resp = post(client, ri, {"course": {"code": "ZZ9999", "name": "Brand New Course"}})
     assert resp.status_code == 200
-    assert state["emails"][-1][0] == "[RateMyHusky] New course to review: ZZ9999"
+    assert len([w for w in state["writes"] if "survey_pending_courses" in w[0]]) == 1
+    assert state["posts"] == []
+
+
+def test_a_course_the_professor_never_taught_is_held_for_review(rate):
+    # Any professor could otherwise be rated under any real code, moving that course's
+    # rating and listing the professor on its page.
+    server, client, state, ri = rate
+    post(client, ri)
+    post(client, ri, {"course": {"code": "CS3500"}})
+    taught, untaught = (params for sql, params in rating_writes(state))
+    assert "accepted" in taught and "unverified_pair" not in taught
+    assert "held" in untaught and "unverified_pair" in untaught
+
+
+def test_pending_professor_or_course_skips_the_taught_check(rate):
+    # Neither counts anywhere until a reviewer approves it, so there's nothing to check.
+    server, client, state, ri = rate
+    post(client, ri, {"professor": {"name": "New Person"}})
+    post(client, ri, {"course": {"code": "ZZ9999", "name": "Brand New Course"}})
+    assert all("accepted" in params for sql, params in rating_writes(state))
+
+
+def test_rate_limit_response_does_not_say_which_limit_fired(rate):
+    # Naming the bucket ("20 per 1 hour" vs "300 per 1 hour") tells an attacker that
+    # a fresh device token gets around it.
+    server, client, state, ri = rate
+    for _ in range(20):
+        post(client, ri)
+    resp = post(client, ri)
+    assert resp.status_code == 429
+    assert resp.get_json() == {"error": "Rate limit reached. Please try again later."}
 
 
 def test_accepted_and_held_responses_are_identical(rate):
@@ -240,7 +286,8 @@ def test_accepted_and_held_responses_are_identical(rate):
 def test_no_raw_ip_is_written(rate, monkeypatch):
     server, client, state, ri = rate
     monkeypatch.setattr(server, "PROXY_SECRET", "proxy-secret")
-    post(client, ri, **{"X-Proxy-Key": "proxy-secret", "X-RMH-Client-IP": "203.0.113.9"})
+    monkeypatch.setenv("TURNSTILE_SECRET_KEY", "secret")  # deployed, so Turnstile is required
+    post(client, ri, {"turnstileToken": "tok"}, **{"X-Proxy-Key": "proxy-secret", "X-RMH-Client-IP": "203.0.113.9"})
     assert rating_writes(state)
     for sql, params in state["writes"]:
         assert "203.0.113.9" not in repr(params)
@@ -277,7 +324,7 @@ def test_professor_context_reads_the_mirror_header_without_a_cookie(rate, monkey
     device_hash = ri.keyed_hash(SECRET, "device", DEVICE)
     monkeypatch.setattr(server, "query", lambda sql, params=None: (
         [{"code": "CS2500", "name": "Fundamentals of CS 1", "pending": False, "term_label": "Fall 2025",
-          "rating": 4, "hours": "5-7", "grade": "A-", "comment": "Fine."}] if "FROM survey_ratings" in sql and params[0] == device_hash else []))
+          "rating": 4, "difficulty": 3, "hours": "5-7", "grade": "A-", "comment": "Fine."}] if "FROM survey_ratings" in sql and params[0] == device_hash else []))
     assert client.get("/api/rate/professors/alice-smith").get_json()["ratedCourses"] == []
     resp = client.get("/api/rate/professors/alice-smith", headers={"X-Rmh-Device": DEVICE})
     assert [c["code"] for c in resp.get_json()["ratedCourses"]] == ["CS2500"]
@@ -291,6 +338,12 @@ def test_new_device_follows_the_opened_token_and_cookie_is_set(rate):
     assert rating_writes(state)[0][1][14] is False  # new_device column
     post(client, ri, device="c" * 32, minted=True)
     assert rating_writes(state)[1][1][14] is True
+
+
+def test_difficulty_is_saved(rate):
+    server, client, state, ri = rate
+    post(client, ri)
+    assert rating_writes(state)[0][1][1 + server.ratings._INSERT_COLUMNS.index("difficulty")] == 3
 
 
 def test_forged_token_without_prior_rows_is_a_new_device(rate):
@@ -345,3 +398,71 @@ def test_unreachable_siteverify_is_503_for_ratings_and_feedback(rate, monkeypatc
                                                "turnstileToken": "t"})
     assert resp.status_code == 503
     assert state["writes"] == []
+
+
+def test_accepted_save_drops_the_professor_page_cache(rate, monkeypatch):
+    server, client, state, ri = rate
+    dropped = []
+    monkeypatch.setattr(server, "drop_professor_pages", dropped.append)
+    post(client, ri)
+    assert dropped == [{"alice-smith"}]
+
+
+def test_a_save_for_a_pending_professor_drops_no_page_cache(rate, monkeypatch):
+    server, client, state, ri = rate
+    dropped = []
+    monkeypatch.setattr(server, "drop_professor_pages", dropped.append)
+    post(client, ri, {"professor": {"name": "New Person", "department": "Math"}})
+    assert len(rating_writes(state)) == 1 and dropped == []
+
+
+def test_drop_professor_pages_drops_alias_keys_and_leaves_other_professors(monkeypatch):
+    import server
+    monkeypatch.setattr(server, "data_version", lambda: 7)
+    server.cache_set("prof_full:a", {"identity": {"slug": "a"}})
+    server.cache_set("prof_full:a-alias", {"identity": {"slug": "a"}})
+    server.cache_set("prof_full:b", {"identity": {"slug": "b"}})
+    server.cache_set("stats", {"x": 1})
+    server.drop_professor_pages({"a"})
+    assert server.cache_get("prof_full:a") is None and server.cache_get("prof_full:a-alias") is None
+    assert server.cache_get("prof_full:b") == {"identity": {"slug": "b"}} and server.cache_get("stats") == {"x": 1}
+
+
+def test_a_burst_drops_the_pages_of_every_professor_it_held_after_the_hold(rate, monkeypatch):
+    server, client, state, ri = rate
+    events = []
+    monkeypatch.setattr(server.ratings, "burst_reasons", lambda *a: ["burst_ip"])
+    monkeypatch.setattr(server.ratings, "hold_burst", lambda *a: events.append("hold") or {"bob-jones"})
+    monkeypatch.setattr(server, "drop_professor_pages", lambda slugs: events.append(slugs))
+    post(client, ri)
+    # After the hold, so no request between the writes re-caches rows about to be held.
+    assert events == ["hold", {"alice-smith", "bob-jones"}]
+
+
+def test_an_accepted_review_edited_into_a_held_one_drops_the_page_cache(rate, monkeypatch):
+    server, client, state, ri = rate
+    dropped = []
+    monkeypatch.setattr(server, "drop_professor_pages", dropped.append)
+    state["existing"] = {"id": "r1", "status": "accepted", "hold_reasons": None}
+    state["network"] = "datacenter"   # a VPN edit holds the whole rating, so the old comment must leave the page
+    post(client, ri)
+    (sql, params), = rating_writes(state)
+    assert "held" in params
+    assert dropped == [{"alice-smith"}]
+
+
+def test_an_edit_bringing_back_a_removed_comment_is_held(rate):
+    server, client, state, ri = rate
+    state["existing"] = {"id": "r1", "status": "accepted", "hold_reasons": "comment_removed"}
+    post(client, ri)
+    (sql, params), = rating_writes(state)
+    assert "held" in params and "comment_removed" in params
+
+
+def test_an_edit_without_a_comment_keeps_the_removed_mark(rate):
+    server, client, state, ri = rate
+    state["existing"] = {"id": "r1", "status": "accepted", "hold_reasons": "comment_removed"}
+    post(client, ri, {"comment": ""})
+    (sql, params), = rating_writes(state)
+    # Accepted, but the next edit that adds a comment is still held.
+    assert "accepted" in params and "comment_removed" in params

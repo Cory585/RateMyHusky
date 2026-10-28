@@ -3,7 +3,7 @@ import { fetchSearchSuggestions } from '../../api/api';
 import { useDebouncedValue } from '../../utils/useDebouncedValue';
 import { ChoiceGroup, StepFoot } from './ChoiceGroup';
 import type { ChoiceOption } from './ChoiceGroup';
-import { formatCode, lastName } from './rateFlow';
+import { formatCode, lastName, ownMatches } from './rateFlow';
 import type { RateCourse, RateProfessor } from './rateFlow';
 
 const OTHER = '+other';
@@ -12,6 +12,10 @@ interface CourseStepProps {
   professor: RateProfessor;
   fresh: RateCourse[];
   rated: RateCourse[];
+  // Some of the professor's courses aren't tiles, so search finds them.
+  more: boolean;
+  // The courses are newest-first, so the tiles are the most recent ones.
+  recent: boolean;
   selected?: string;
   onPick: (c: RateCourse) => void;
   onOther: () => void;
@@ -32,7 +36,7 @@ export function Pencil() {
 const courseAria = (c: RateCourse, isRated: boolean) =>
   `${formatCode(c.code)}${c.name ? `, ${c.name}` : ''}${isRated ? ', update your rating' : ''}`;
 
-export function CourseStep({ professor, fresh, rated, selected, onPick, onOther }: CourseStepProps) {
+export function CourseStep({ professor, fresh, rated, more, recent, selected, onPick, onOther }: CourseStepProps) {
   const option = (c: RateCourse, isRated: boolean): ChoiceOption<string> => ({
     value: c.code,
     aria: courseAria(c, isRated),
@@ -45,7 +49,8 @@ export function CourseStep({ professor, fresh, rated, selected, onPick, onOther 
     ),
   });
   const options = fresh.map((c) => option(c, false));
-  options.push({ value: OTHER, aria: 'A different course', label: '+ A different course', className: 'course dash' });
+  const otherLabel = more ? 'Search for another course' : 'A different course';
+  options.push({ value: OTHER, aria: otherLabel, label: `+ ${otherLabel}`, className: 'course dash' });
   const ratedOptions = rated.map((c) => option(c, true));
   if (ratedOptions.length) ratedOptions[0].heading = 'Already rated';
   options.push(...ratedOptions);
@@ -53,7 +58,9 @@ export function CourseStep({ professor, fresh, rated, selected, onPick, onOther 
   return (
     <ChoiceGroup
       legend="Which course?"
-      subtitle={`Courses we know Prof. ${lastName(professor.name)} has taught.`}
+      subtitle={more
+        ? `Prof. ${lastName(professor.name)}'s most ${recent ? 'recent' : 'rated'} courses.`
+        : `Courses we know Prof. ${lastName(professor.name)} has taught.`}
       options={options}
       value={selected}
       layout="stack"
@@ -67,12 +74,13 @@ const NEW_CODE = /^[A-Z]{2,5}\d{4}[A-Z]?$/;
 const CODE_LIKE = /^[A-Za-z]{2,5}\s*\d{1,4}[A-Za-z]?$/;
 
 interface OtherCourseStepProps {
+  own: RateCourse[];
   rated: string[];
   onPick: (c: RateCourse) => void;
   onBack: () => void;
 }
 
-export function OtherCourseStep({ rated, onPick, onBack }: OtherCourseStepProps) {
+export function OtherCourseStep({ own, rated, onPick, onBack }: OtherCourseStepProps) {
   const [query, setQuery] = useState('');
   const [newName, setNewName] = useState('');
   const typed = query.trim();
@@ -93,7 +101,12 @@ export function OtherCourseStep({ rated, onPick, onBack }: OtherCourseStepProps)
     return () => { cancelled = true; };
   }, [debounced]);
 
-  const settled = found !== null && found.q === term ? found.items : null;
+  // The professor's own matches lead, since the catalog search misses Banner-only codes.
+  const mine = ownMatches(own, term);
+  const catalog = found !== null && found.q === term ? found.items : null;
+  const settled = catalog === null && mine.length === 0
+    ? null
+    : [...mine, ...(catalog ?? []).filter((c) => !mine.some((m) => m.code === c.code))].slice(0, 5);
   const code = typed.replace(/\s+/g, '').toUpperCase();
   const canAdd = settled !== null && settled.length === 0 && NEW_CODE.test(code);
 

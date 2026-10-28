@@ -23,6 +23,11 @@ def test_hold_reasons_in_order():
 def test_quick_edit_of_an_accepted_rating_is_not_too_fast():
     assert rc.assess(3, "campus", [], False, None, edit=True) == ("accepted", [])
     assert rc.assess(2, "campus", [], False, None, edit=True) == ("held", ["too_fast"])
+
+
+def test_a_comment_brought_back_after_removal_is_held():
+    assert rc.assess(30, "campus", [], False, None, edit=True, comment_removed=True) == (
+        "held", ["comment_removed"])
     assert rc.assess(None, "campus", [], False, None, edit=True) == ("held", ["no_timer"])
 
 
@@ -50,7 +55,7 @@ def test_comment_hash_ignores_case_and_punctuation_and_skips_short():
 
 def _body(**over):
     body = {"professor": {"slug": "jane-doe"}, "course": {"code": "CS2500"}, "term": "Fall 2025",
-            "rating": 4, "hours": "3-4", "grade": "A", "comment": "ok"}
+            "rating": 4, "difficulty": 3, "hours": "3-4", "grade": "A", "comment": "ok"}
     body.update(over)
     return body
 
@@ -64,6 +69,10 @@ def _body(**over):
     _body(rating=4.5),
     _body(rating=6),
     _body(hours="15+"),
+    _body(difficulty=0),
+    _body(difficulty=6),
+    _body(difficulty=2.5),
+    _body(difficulty=True),
     _body(grade="D"),
     _body(term="Fall 2015"),
     _body(term="Fall 2021"),
@@ -110,13 +119,22 @@ def test_validate_never_raises(body):
 def test_validate_cleans():
     clean, err = rc.validate_submission(
         {"professor": {"slug": "jane-doe"}, "course": {"code": "cs 2500"}, "term": "Summer 2025",
-         "rating": 4, "hours": "3-4", "grade": None, "comment": "  ok  "}, 2026)
+         "rating": 4, "difficulty": 2, "hours": "3-4", "grade": None, "comment": "  ok  "}, 2026)
     assert err is None
     assert clean["professor_slug"] == "jane-doe" and clean["new_professor"] is None
     assert clean["course_code"] == "CS2500" and clean["new_course_name"] is None
     assert clean["term_label"] == "Summer 2025"
     assert clean["rating"] == 4 and clean["hours"] == "3-4" and clean["grade"] is None
+    assert clean["difficulty"] == 2
     assert clean["comment"] == "ok"
+
+
+def test_validate_accepts_a_missing_difficulty():
+    # A page still running the form from before the question sends none.
+    body = _body()
+    del body["difficulty"]
+    clean, err = rc.validate_submission(body, 2026)
+    assert err is None and clean["difficulty"] is None
 
 
 def test_new_professor_name_needs_two_latin_words():
@@ -157,3 +175,9 @@ def test_validate_term_window_is_four_years_plus_a_year_each_side():
         assert rc.validate_submission(_body(term=term), 2026)[1] is None
     for term in ("Summer 2 2021", "Spring 2028"):
         assert rc.validate_submission(_body(term=term), 2026)[1] == "Invalid term"
+
+
+def test_a_pair_banner_and_rmp_never_saw_is_held_for_review():
+    assert rc.assess(30, "campus", [], False, None, unverified_pair=True) == ("held", ["unverified_pair"])
+    assert rc.assess(30, "other", ["burst_prof"], True, None, unverified_pair=True) == (
+        "held", ["burst_prof", "unverified_pair", "duplicate_comment"])

@@ -75,6 +75,20 @@ export interface SurveyData {
   hoursPerWeek: number | null;
   ratingDistribution: RatingDistribution;
   gradeDistribution: Record<string, number>;
+  /** Accepted /rate comments, newest first, at most 200. Never carries the grade.
+   *  Missing from a /full cached before it shipped. */
+  reviews?: SurveyReview[];
+}
+
+export interface SurveyReview {
+  /** A keyed hash, not the row id: for anchors and reports. */
+  id: string;
+  course: string | null;
+  /** "Fall 2025" when the class was big enough to show the term, else the year when the
+   *  professor taught the course in 2+ terms that year, else "" (no date shown). */
+  when: string;
+  rating: number;
+  comment: string;
 }
 
 export interface ProfessorCourse {
@@ -146,6 +160,9 @@ export interface RedditMention {
 const _courseCache = new Map<string, CourseDetail>();
 
 const _profPageCache = new Map<string, ProfessorPage>();
+/* Pages this tab just rated: the next /full skips the browser's HTTP cache (max-age=3600),
+   so the rater sees their own review instead of the copy fetched before they saved. */
+const _ratedProfPages = new Set<string>();
 
 /* ---- Maintenance detection ----
    While maintenance mode is on, Vercel 307-redirects /api/* to
@@ -172,21 +189,21 @@ export class ApiError extends Error {
    status 0 = network failure or the maintenance redirect. */
 export type Fetched<T> = { ok: true; data: T } | { ok: false; status: number };
 
-async function fetchWithStatus<T>(path: string, signal?: AbortSignal): Promise<Fetched<T>> {
+async function fetchWithStatus<T>(path: string, signal?: AbortSignal, fresh = false): Promise<Fetched<T>> {
   try {
-    return { ok: true, data: await get<T>(path, signal) };
+    return { ok: true, data: await get<T>(path, signal, fresh) };
   } catch (e) {
     return { ok: false, status: e instanceof ApiError ? e.status : 0 };
   }
 }
 
-async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+async function get<T>(path: string, signal?: AbortSignal, fresh = false): Promise<T> {
   const headers: Record<string, string> = {};
   const token = localStorage.getItem('auth_token');
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  const res = await fetch(`${API_BASE}${path}`, { headers, cache: token ? 'no-cache' : 'default', signal });
+  const res = await fetch(`${API_BASE}${path}`, { headers, cache: token || fresh ? 'no-cache' : 'default', signal });
   if (maintenanceGuard(res)) throw new Error('Site is under maintenance');
   if (!res.ok) throw new ApiError(res.status, `API ${res.status}: ${res.statusText}`);
   return res.json();
@@ -207,8 +224,12 @@ export const fetchRandomProfessor = () => get<RandomProfessor>("/api/random-prof
 export async function fetchProfessorFull(slug: string, signal?: AbortSignal): Promise<Fetched<ProfessorPage>> {
   const cached = _profPageCache.get(slug);
   if (cached) return { ok: true, data: cached };
-  const res = await fetchWithStatus<ProfessorPage>(`/api/professors/${encodeURIComponent(slug)}/full`, signal);
-  if (res.ok) _profPageCache.set(slug, res.data);
+  const fresh = _ratedProfPages.has(slug);
+  const res = await fetchWithStatus<ProfessorPage>(`/api/professors/${encodeURIComponent(slug)}/full`, signal, fresh);
+  if (res.ok) {
+    _profPageCache.set(slug, res.data);
+    _ratedProfPages.delete(slug);
+  }
   return res;
 }
 
@@ -397,7 +418,6 @@ export interface CourseHistory {
   offeredNow: string[];
   creditHours: string | null;
   typicalClassSize: number | null;
-  instructorCount: number | null;
   /** Taught it in the 12 months up to the newest term, newest first, at most 10. */
   recentInstructors: RecentInstructor[];
   replacedBy: HistoryCourseLink | null;
@@ -503,7 +523,8 @@ export interface RateStart { opened: string; deviceToken: string; counter: numbe
 export interface RatedCourse {
   /* pending: the course is still awaiting review, so the form resends it as a new course. */
   code: string; name: string | null; pending: boolean; term: string | null;
-  rating: number; hours: string; grade: string | null; comment: string;
+  /* difficulty: null for a rating from before the form asked it. */
+  rating: number; difficulty: number | null; hours: string; grade: string | null; comment: string;
 }
 export interface RateProfessorContext { ratedCourses: RatedCourse[] }
 export interface RateSubmission {
@@ -511,6 +532,7 @@ export interface RateSubmission {
   course: { code: string } | { code: string; name: string };
   term: string | null;
   rating: number;
+  difficulty: number;
   hours: string;
   grade: string | null;
   comment: string;
@@ -574,6 +596,10 @@ export async function submitRating(body: RateSubmission): Promise<RateSubmitResu
   if (maintenanceGuard(res)) return { ok: false, status: 0, error: "" };
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, status: res.status, error: typeof data.error === "string" ? data.error : "" };
+  if ("slug" in body.professor) {
+    _profPageCache.delete(body.professor.slug);
+    _ratedProfPages.add(body.professor.slug);
+  }
   return { ok: true, counter: typeof data.counter === "number" ? data.counter : null };
 }
 
