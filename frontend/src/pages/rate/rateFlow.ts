@@ -2,9 +2,7 @@
 import type { ProfessorCourse, RateStart, RateSubmission, RatedCourse } from '../../api/api';
 
 export type StepId = 'who' | 'newProfessor' | 'course' | 'otherCourse' | 'term' | 'otherTerm'
-  | 'overall' | 'workload' | 'grade' | 'comment' | 'thanks';
-
-export const QUESTION_COUNT = 7;
+  | 'overall' | 'difficulty' | 'workload' | 'grade' | 'comment' | 'thanks';
 
 export interface RateProfessor { slug: string | null; name: string; department: string | null }
 export interface RateCourse { code: string; name: string | null; isNew: boolean; terms: string[] }
@@ -13,12 +11,13 @@ export interface Answers {
   course?: RateCourse;
   term?: string | null;
   rating?: number;
+  difficulty?: number;
   hours?: string;
   grade?: string | null;
   comment: string;
   updating?: RatedCourse;
   // The fresh answers set aside while update mode shows the earlier ones.
-  draft?: Pick<Answers, 'course' | 'term' | 'rating' | 'hours' | 'grade' | 'comment'>;
+  draft?: Pick<Answers, 'course' | 'term' | 'rating' | 'difficulty' | 'hours' | 'grade' | 'comment'>;
 }
 
 export const OVERALL: { value: number; label: string }[] = [
@@ -27,6 +26,15 @@ export const OVERALL: { value: number; label: string }[] = [
   { value: 3, label: 'Okay' },
   { value: 2, label: 'Poor' },
   { value: 1, label: 'Awful' },
+];
+
+// RMP's scale (1 is easiest), so survey and RMP difficulty average together.
+export const DIFFICULTY: { value: number; label: string }[] = [
+  { value: 1, label: 'Very easy' },
+  { value: 2, label: 'Easy' },
+  { value: 3, label: 'Moderate' },
+  { value: 4, label: 'Hard' },
+  { value: 5, label: 'Very hard' },
 ];
 
 // value is what the server accepts (ASCII hyphen); label is what the student sees.
@@ -48,8 +56,10 @@ export const SEASONS: { value: string; label: string }[] = [
   { value: 'Summer', label: 'Full Summer' },
 ];
 
-const MAIN_ORDER = ['who', 'course', 'term', 'overall', 'workload', 'grade', 'comment'] as const;
+const MAIN_ORDER = ['who', 'course', 'term', 'overall', 'difficulty', 'workload', 'grade', 'comment'] as const;
 type MainStep = typeof MAIN_ORDER[number];
+
+export const QUESTION_COUNT = MAIN_ORDER.length;
 
 function mainOf(step: StepId): MainStep | null {
   switch (step) {
@@ -72,6 +82,7 @@ function isAnswered(step: MainStep, a: Answers): boolean {
     case 'course': return a.course !== undefined;
     case 'term': return a.term !== undefined;
     case 'overall': return a.rating !== undefined;
+    case 'difficulty': return a.difficulty !== undefined;
     case 'workload': return a.hours !== undefined;
     case 'grade': return a.grade !== undefined;
     case 'comment': return false;
@@ -119,7 +130,7 @@ function sameProfessor(x: RateProfessor | undefined, y: RateProfessor): boolean 
 
 // Leaving update mode brings back what the student had answered before entering it.
 function leaveUpdate(a: Answers): Answers {
-  const next: Answers = { ...a, rating: undefined, hours: undefined, grade: undefined, comment: '', ...a.draft };
+  const next: Answers = { ...a, rating: undefined, difficulty: undefined, hours: undefined, grade: undefined, comment: '', ...a.draft };
   delete next.updating;
   delete next.draft;
   return next;
@@ -152,9 +163,13 @@ export function pickCourse(a: Answers, c: RateCourse, ratedCourses: RatedCourse[
     ? { ...c, terms: [...c.terms, rated.term as string].sort((x, y) => termOrder(y) - termOrder(x)) }
     : c;
   return answer(base, {
-    course, term: keep ? rated.term : undefined, rating: rated.rating, hours: rated.hours,
-    grade: rated.grade, comment: rated.comment, updating: rated,
-    draft: { course: base.course, term: base.term, rating: base.rating, hours: base.hours, grade: base.grade, comment: base.comment },
+    // A rating from before the difficulty question has none, so the form asks it.
+    course, term: keep ? rated.term : undefined, rating: rated.rating, difficulty: rated.difficulty ?? undefined,
+    hours: rated.hours, grade: rated.grade, comment: rated.comment, updating: rated,
+    draft: {
+      course: base.course, term: base.term, rating: base.rating, difficulty: base.difficulty, hours: base.hours,
+      grade: base.grade, comment: base.comment,
+    },
   });
 }
 
@@ -253,7 +268,8 @@ export function prefillCourse(courses: ProfessorCourse[], rated: RatedCourse[], 
 
 export function buildSubmission(a: Answers, start: RateStart, turnstileToken: string, honeypot: string): RateSubmission {
   // undefined is unanswered; null is "Not sure" or "Prefer not to say".
-  if (!a.professor || !a.course || a.term === undefined || a.rating === undefined || a.hours === undefined || a.grade === undefined) {
+  if (!a.professor || !a.course || a.term === undefined || a.rating === undefined || a.difficulty === undefined
+    || a.hours === undefined || a.grade === undefined) {
     throw new Error('Incomplete rating');
   }
   return {
@@ -263,6 +279,7 @@ export function buildSubmission(a: Answers, start: RateStart, turnstileToken: st
     course: a.course.isNew ? { code: a.course.code, name: a.course.name ?? '' } : { code: a.course.code },
     term: a.term ?? null,
     rating: a.rating,
+    difficulty: a.difficulty,
     hours: a.hours,
     grade: a.grade ?? null,
     comment: a.comment,

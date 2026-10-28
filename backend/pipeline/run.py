@@ -111,7 +111,7 @@ def main(argv=None):
     rows, coverage = summaries.build_summaries(linked_pages, [r for r in reviews if r["visible"]],
                                                page_slug, name_key_slug, set(slug_by_id.values()))
     _print("coverage", coverage)
-    ratings = fetch_all(conn, "SELECT professor_slug, course_code, rating, hours, grade, comment "
+    ratings = fetch_all(conn, "SELECT professor_slug, course_code, rating, difficulty, hours, grade, comment "
                               "FROM survey_ratings WHERE status = 'accepted' AND professor_slug IS NOT NULL")
     survey_summary = survey.survey_rows(ratings)
     print(f"survey: ratings={len(ratings)}, rows={len(survey_summary)}")

@@ -38,7 +38,7 @@ TABLES = {
         {"instructor_key": "lucia nunez", "professor_slug": None, "track": "CPS Quarter", "sections": 1,
          "cps_subject": None, "cps_share": None},
     ],
-    "survey_ratings": [{"professor_slug": "olin-guha", "course_code": "CS2500", "rating": 5,
+    "survey_ratings": [{"professor_slug": "olin-guha", "course_code": "CS2500", "rating": 5, "difficulty": 2,
                         "hours": "3-4", "grade": None, "comment": ""}],
     "survey_pending_courses": [],
 }
