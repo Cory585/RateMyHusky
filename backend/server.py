@@ -1296,10 +1296,20 @@ def professor_payload(slug):
     # The lookup also accepts case, hyphen and alias variants of a name. A variant
     # caches only a pointer to the professor's own slug, so old or mis-cased links
     # hit the one cached payload instead of each keeping a full copy (or rebuilding).
-    canonical = cache_get(f"prof_slug:{slug}") or slug
-    data = cache_get(f"prof_full:{canonical}")
+    canonical = cache_get(f"prof_slug:{slug}")
+    data = cache_get(f"prof_full:{canonical or slug}")
+    if data is None and canonical is None:
+        # A slug seen for the first time may be a variant of a page that is cached:
+        # one indexed lookup finds out before a full build_payload.
+        prof = _resolve_professor(slug, query_one)
+        if prof is None:
+            return None
+        canonical = prof["slug"]
+        if canonical != slug:
+            cache_set(f"prof_slug:{slug}", canonical)
+            data = cache_get(f"prof_full:{canonical}")
     if data is None:
-        data = build_payload(slug, query, query_one, sanitize, fetch_reddit_mentions,
+        data = build_payload(canonical or slug, query, query_one, sanitize, fetch_reddit_mentions,
                              review_id=_review_id if _student_reviews_shown() else None)
         if data is None:
             return None
@@ -1307,8 +1317,6 @@ def professor_payload(slug):
             g.history_failed = True   # a failed Banner or survey read is not cached: see history_cache_control
         else:
             cache_set(f"prof_full:{data['identity']['slug']}", data)
-            if data["identity"]["slug"] != slug:
-                cache_set(f"prof_slug:{slug}", data["identity"]["slug"])
     return data
 
 
