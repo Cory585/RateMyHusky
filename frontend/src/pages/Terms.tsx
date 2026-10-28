@@ -134,7 +134,7 @@ const Terms = () => {
                 the RateMyHusky team via email and are not stored in our database. Submitted
                 information is used solely to improve the service and will not be shared with
                 third parties. The email address is optional for most message types but is
-                required for a "Data Deletion Request," which also requires you to be signed in
+                required for an "Account Deletion" request, which also requires you to be signed in
                 so your account identifier can be included and we can act on the correct account. It is
                 also required for a professor's request to correct or remove their page, so we
                 can confirm the request with them.
@@ -277,7 +277,7 @@ const Terms = () => {
                 If you are a professor or instructor and you want your information removed from
                 RateMyHusky, email{' '}
                 <a href="mailto:legal@ratemyhusky.com">legal@ratemyhusky.com</a> or use the
-                feedback form (&ldquo;Professor: Correct or Remove My Page&rdquo;), and include
+                feedback form (&ldquo;Data Deletion&rdquo;), and include
                 your Northeastern email address. We confirm each
                 request at that address before acting on it, so that no one can remove or change
                 a professor's information by using their name; a request without a Northeastern

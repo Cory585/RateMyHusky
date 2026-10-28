@@ -39,7 +39,7 @@ def _main(monkeypatch, held, pending=(0, 0), key="re-test"):
 
     monkeypatch.setattr(review_digest, "connect", lambda: SimpleNamespace(close=lambda: None))
     monkeypatch.setattr(review_digest, "fetch_all", fetch)
-    monkeypatch.setattr(review_digest.http_requests, "post",
+    monkeypatch.setattr(review_digest.notify.http_requests, "post",
                         lambda url, **kw: posts.append(kw["json"]) or SimpleNamespace(ok=True))
     if key:
         monkeypatch.setenv("RESEND_API_KEY", key)

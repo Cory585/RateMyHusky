@@ -1,8 +1,8 @@
 from pipeline import survey
 
-R = lambda slug, code, rating, hours, grade=None, comment="": {
+R = lambda slug, code, rating, hours, grade=None, comment="", difficulty=None: {
     "professor_slug": slug, "course_code": code, "rating": rating, "hours": hours,
-    "grade": grade, "comment": comment}
+    "grade": grade, "comment": comment, "difficulty": difficulty}
 
 def test_rows_for_professor_course_and_pair():
     rows = survey.survey_rows([R("jane-doe", "CS2500", 5, "3-4", "A", "great"),
@@ -23,6 +23,16 @@ def test_rating_on_a_pending_course_counts_nowhere_until_approved():
     by = {(r["professor_slug"], r["course_code"]): r for r in rows}
     assert (by[("jane-doe", "")]["rating"], by[("jane-doe", "")]["num_ratings"]) == (5.0, 1)
     assert survey.survey_rows([R("jane-doe", None, 1, "0-2")]) == []
+
+def test_difficulty_is_the_mean_of_ratings_that_answered_it():
+    # Ratings from before the question was asked have no difficulty and don't count toward it.
+    rows = survey.survey_rows([R("jane-doe", "CS2500", 5, "3-4", difficulty=4),
+                               R("jane-doe", "CS2500", 3, "10+", difficulty=1),
+                               R("jane-doe", "CS2500", 4, "0-2")])
+    by = {(r["professor_slug"], r["course_code"]): r for r in rows}
+    assert by[("jane-doe", "CS2500")]["difficulty"] == 2.5
+    assert by[("jane-doe", "")]["difficulty"] == 2.5
+    assert by[("jane-doe", "CS2500")]["num_difficulty"] == 2 and by[("jane-doe", "CS2500")]["num_ratings"] == 3
 
 def test_no_ratings_no_rows():
     assert survey.survey_rows([]) == []
@@ -48,7 +58,7 @@ NOW = datetime(2026, 11, 8, 10, 0, tzinfo=timezone.utc)
 
 def S(i, slug="jane-doe", code="CS2500", days_ago=1, hold_reasons=None):
     return {"id": f"r{i}", "professor_slug": slug, "course_code": code,
-            "created_at": NOW - timedelta(days=days_ago), "hold_reasons": hold_reasons}
+            "updated_at": NOW - timedelta(days=days_ago), "hold_reasons": hold_reasons}
 
 
 def test_a_professors_week_over_the_limit_is_a_surge():
@@ -72,3 +82,21 @@ def test_surge_counts_only_this_weeks_unreviewed_known_course_ratings():
     assert survey.surge_ids(week + older + approved + pending, NOW) == set()
     extra = S(999)
     assert survey.surge_ids(week + older + approved + pending + [extra], NOW) == {r["id"] for r in week + [extra]}
+
+
+def test_a_missed_weekly_run_still_checks_the_week_it_skipped():
+    # The last run that published was 14 days ago; a surge 8-13 days back was never checked.
+    missed = [S(i, days_ago=10) for i in range(survey.WEEKLY_SURGE_PROF + 1)]
+    assert survey.surge_ids(missed, NOW) == set()
+    assert survey.surge_ids(missed, NOW, since=NOW - timedelta(days=14)) == {r["id"] for r in missed}
+    # A run more recent than a week ago still scans the whole week.
+    assert survey.surge_ids([S(i) for i in range(41)], NOW, since=NOW - timedelta(hours=6)) != set()
+
+
+def test_a_longer_scan_still_holds_only_a_week_over_the_limit():
+    # 35 a week for two weeks is under the weekly limit in every 7 days.
+    steady = [S(i, days_ago=(i % 14) + 0.5) for i in range(70)]
+    assert survey.surge_ids(steady, NOW, since=NOW - timedelta(days=14)) == set()
+    spike = [S(100 + i, days_ago=11) for i in range(survey.WEEKLY_SURGE_PROF + 1)]
+    held = survey.surge_ids(spike + [S(200, days_ago=2)], NOW, since=NOW - timedelta(days=14))
+    assert held == {r["id"] for r in spike}   # the rating a week after the spike isn't in its 7 days

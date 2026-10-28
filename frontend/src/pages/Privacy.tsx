@@ -9,7 +9,7 @@ const Privacy = () => {
         <div className="terms-shell">
           <header className="terms-header">
             <h1>Privacy Policy</h1>
-            <p className="terms-meta">Effective October 21, 2026 &middot; RateMyHusky</p>
+            <p className="terms-meta">Effective October 27, 2026 &middot; RateMyHusky</p>
           </header>
 
           <div className="terms-body">
@@ -71,8 +71,8 @@ const Privacy = () => {
                   description, and an optional email address. Submissions are transmitted to
                   the RateMyHusky team via email and are not stored in a database. Submitted
                   information is used solely to improve the service. The form is protected by
-                  a CAPTCHA challenge (see Third-Party Services). If you submit a
-                  "Data Deletion Request," you must be signed in and an email address is
+                  a CAPTCHA challenge (see Third-Party Services). If you submit an
+                  "Account Deletion" request, you must be signed in and an email address is
                   required so we can respond; your account identifier is included so we can
                   locate the data held for your account and delete it. That account identifier is
                   derived from your sign-in token at the time you submit and is not retained
@@ -89,7 +89,7 @@ const Privacy = () => {
                 {RATE_ENABLED && (
                 <li>
                   <strong>Ratings:</strong> you do not need to sign in to submit a rating. We
-                  store your answers (professor, course, term, overall rating, weekly hours,
+                  store your answers (professor, course, term, overall rating, difficulty, weekly hours,
                   grade, and an optional comment), a keyed hash of a random device ID that your
                   browser keeps, keyed hashes of your IP address and of its /24 (IPv4) or /64
                   (IPv6) network, the network type (campus, mobile carrier, Private Relay,
@@ -363,7 +363,7 @@ const Privacy = () => {
                   <strong>clear localStorage</strong> in your browser settings to remove your
                   session token and stored preferences. You can remove an individual bookmark at
                   any time by un-bookmarking it. To delete everything we hold for your account,
-                  sign in and submit a <strong>Data Deletion Request</strong> through the
+                  sign in and submit a <strong>Account Deletion</strong> request through the
                   feedback form: an email address is required, and your signed-in account
                   identifier is included so we can verify your identity and delete the records
                   tied to your account.
@@ -448,7 +448,7 @@ const Privacy = () => {
                 <strong>Removal requests.</strong> If you are a professor or instructor and want
                 your information taken down, email{' '}
                 <a href="mailto:legal@ratemyhusky.com">legal@ratemyhusky.com</a> or use the
-                feedback form (&ldquo;Professor: Correct or Remove My Page&rdquo;), and include
+                feedback form (&ldquo;Data Deletion&rdquo;), and include
                 your Northeastern email address. We confirm each
                 request at that address before acting on it, so that no one can remove or
                 change a professor's information by using their name; a request without a

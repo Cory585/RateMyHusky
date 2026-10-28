@@ -112,10 +112,13 @@ def main(argv=None):
     rows, coverage = summaries.build_summaries(linked_pages, [r for r in reviews if r["visible"]],
                                                page_slug, name_key_slug, set(slug_by_id.values()))
     _print("coverage", coverage)
-    ratings = fetch_all(conn, "SELECT id::text AS id, professor_slug, course_code, rating, hours, grade, "
-                              "comment, hold_reasons, created_at "
+    ratings = fetch_all(conn, "SELECT id::text AS id, professor_slug, course_code, rating, difficulty, hours, "
+                              "grade, comment, hold_reasons, updated_at "
                               "FROM survey_ratings WHERE status = 'accepted' AND professor_slug IS NOT NULL")
-    surge = survey.surge_ids(ratings, datetime.now(timezone.utc))
+    now = datetime.now(timezone.utc)
+    checked = fetch_all(conn, f"SELECT value FROM stats_cache WHERE key = '{survey.SURGE_CHECKED_KEY}'")
+    surge = survey.surge_ids(ratings, now, datetime.fromtimestamp(checked[0]["value"], timezone.utc)
+                             if checked else None)
     if surge:
         print(f"::warning::{len(surge)} survey ratings in a weekly surge are left out and held for review "
               "(python review_ratings.py list)")
@@ -150,6 +153,7 @@ def main(argv=None):
     print(f"survey ratings held as a weekly surge: {survey.apply_surge_holds(conn, surge)}")
     read_models.write(conn, catalog, courses, rows, counts)
     print("replaced professors_catalog, course_catalog, source_summary; data_version bumped")
+    survey.mark_surge_checked(conn, now)
     return 0
 
 

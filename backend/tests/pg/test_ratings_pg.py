@@ -3,6 +3,7 @@
 import uuid
 
 import psycopg2
+from psycopg2.extras import RealDictCursor
 import pytest
 
 from tests.pg.pgutil import rows, scalar, truncate
@@ -72,10 +73,13 @@ def test_upsert_keeps_a_held_row_held(pg):
 
 
 def pg_write(pg):
+    """Like server._write: commits and returns the RETURNING rows as dicts."""
     def write(sql, params):
-        with pg.cursor() as cur:
+        with pg.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(sql, params)
+            found = cur.fetchall() if cur.description else None
         pg.commit()
+        return found
     return write
 
 
@@ -136,7 +140,8 @@ def test_hold_burst_skips_returning_devices_and_approved_rows(pg):
     pg.commit()
     key = {"professor_slug": "jane-doe", "pending_professor_id": None,
            "course_code": "CS2500", "pending_course_id": None}
-    ratings.hold_burst(["burst_pair"], key, None, None, pg_write(pg), datetime.now(timezone.utc))
+    assert ratings.hold_burst(["burst_pair"], key, None, None, pg_write(pg),
+                              datetime.now(timezone.utc)) == {"jane-doe"}
     held = rows(pg, "SELECT device_hash FROM survey_ratings WHERE status = 'held'")
     assert [r["device_hash"] for r in held] == ["d1"]
 
@@ -179,6 +184,56 @@ def test_pair_taught_reads_the_real_banner_table(pg):
     pg.commit()
     assert ratings.pair_taught("jane-doe", "CS2500", pg_query_one(pg))
     assert not ratings.pair_taught("jane-doe", "CS3500", pg_query_one(pg))
+
+
+def test_an_approved_unverified_pair_rating_makes_the_pair_taught(pg):
+    # A professor or course approved from the form is in neither Banner nor RMP.
+    import ratings
+
+    truncate(pg, "banner_course_instructors", "source_summary")
+    insert(pg, "d1", "new-prof", None, "CS3500", None, status="held")
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET hold_reasons = 'too_fast,unverified_pair'")
+    pg.commit()
+    assert not ratings.pair_taught("new-prof", "CS3500", pg_query_one(pg))
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET status = 'accepted'")  # review_ratings approve-rating
+    pg.commit()
+    assert ratings.pair_taught("new-prof", "CS3500", pg_query_one(pg))
+    assert not ratings.pair_taught("new-prof", "CS2500", pg_query_one(pg))
+
+
+def test_a_clean_edit_of_an_approved_rating_keeps_its_hold_reasons(pg):
+    import ratings
+
+    insert(pg, "d1", "jane-doe", None, "CS2500", None)
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET hold_reasons = 'weekly_surge'")  # approved by a reviewer
+    pg.commit()
+    row = {c: None for c in ratings.RATING_COLUMNS if c != "id"}
+    row.update(professor_slug="jane-doe", course_code="CS2500", rating=1, hours="3-4",
+               status="accepted", device_hash="d1", new_device=False,
+               network_type="unknown", collection="turnstile+device")
+    existing = ratings.existing_rating("d1", ratings.rating_key(row, None, None), pg_query_one(pg))
+    ratings.save_rating(row, existing, pg_write(pg))
+    (saved,) = rows(pg, "SELECT status, rating, hold_reasons FROM survey_ratings")
+    assert saved == {"status": "accepted", "rating": 1, "hold_reasons": "weekly_surge"}
+
+
+def test_a_wave_of_edits_to_old_ratings_trips_the_bursts(pg):
+    # An edit keeps created_at and bumps updated_at, which every burst window reads.
+    import ratings
+    from datetime import datetime, timezone
+
+    for i in range(ratings.PROF_BURST):
+        insert(pg, f"d{i}", "jane-doe", None, "CS2500", None)
+    with pg.cursor() as cur:
+        cur.execute("UPDATE survey_ratings SET created_at = now() - interval '40 days'")
+    pg.commit()
+    key = {"professor_slug": "jane-doe", "pending_professor_id": None,
+           "course_code": "CS2500", "pending_course_id": None}
+    assert ratings.burst_reasons(key, "ip", "pre", "other", pg_query_one(pg),
+                                 datetime.now(timezone.utc)) == ["burst_pair", "burst_prof"]
 
 
 def test_apply_surge_holds_holds_only_unreviewed_accepted_rows(pg):

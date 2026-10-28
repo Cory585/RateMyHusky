@@ -110,6 +110,9 @@ def validate_submission(body, this_year):
     rating = body.get("rating")
     if type(rating) is not int or not 1 <= rating <= 5:
         return None, "Rating must be a whole number from 1 to 5"
+    difficulty = body.get("difficulty")  # None from a page still on the form from before the question
+    if difficulty is not None and (type(difficulty) is not int or not 1 <= difficulty <= 5):
+        return None, "Difficulty must be a whole number from 1 to 5"
     hours = body.get("hours")
     if not isinstance(hours, str) or hours not in HOURS:
         return None, "Invalid hours"
@@ -129,7 +132,8 @@ def validate_submission(body, this_year):
     return {
         "professor_slug": slug, "new_professor": new_prof,
         "course_code": code, "new_course_name": course_name,
-        "term_label": term, "rating": rating, "hours": hours, "grade": grade, "comment": comment,
+        "term_label": term, "rating": rating, "difficulty": difficulty, "hours": hours, "grade": grade,
+        "comment": comment,
     }, None
 
 
@@ -157,12 +161,14 @@ def moderate(comment, score=moderation.score_texts):
 
 
 def assess(fill_seconds, network_type, bursts, duplicate_comment, moderation_action, edit=False,
-           unverified_pair=False):
+           unverified_pair=False, comment_removed=False):
     """("rejected", [...]) | ("held", reasons) | ("accepted", []).
 
     edit: this replaces an accepted rating. The form prefills the earlier answers,
     so a quick update is normal and only has to clear EDIT_MIN_FILL_SECONDS.
     unverified_pair: neither Banner nor RMP has this professor teaching this course.
+    comment_removed: this brings a comment back to a rating whose comment a
+    reviewer took down, so it waits for review.
     """
     if moderation_action == "block":
         return "rejected", ["moderation_block"]
@@ -180,6 +186,8 @@ def assess(fill_seconds, network_type, bursts, duplicate_comment, moderation_act
         reasons.append("unverified_pair")
     if duplicate_comment:
         reasons.append("duplicate_comment")
+    if comment_removed:
+        reasons.append("comment_removed")
     if moderation_action == "review":
         reasons.append("moderation_review")
     elif moderation_action == "unavailable":

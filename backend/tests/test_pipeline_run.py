@@ -41,9 +41,10 @@ TABLES = {
          "cps_subject": None, "cps_share": None},
     ],
     "survey_ratings": [{"id": "r1", "professor_slug": "olin-guha", "course_code": "CS2500", "rating": 5,
-                        "hours": "3-4", "grade": None, "comment": "", "hold_reasons": None,
-                        "created_at": datetime.now(timezone.utc) - timedelta(days=1)}],
+                        "difficulty": 2, "hours": "3-4", "grade": None, "comment": "", "hold_reasons": None,
+                        "updated_at": datetime.now(timezone.utc) - timedelta(days=1)}],
     "survey_pending_courses": [],
+    "stats_cache": [],
 }
 
 
@@ -71,6 +72,9 @@ def captured(monkeypatch):
     monkeypatch.setattr(run.read_models, "write",
                         lambda conn, catalog, courses, summary_rows, counts: written.update(
                             summary_rows=summary_rows))
+    # Only once the read models are written: a failed run must leave its window to the next one.
+    monkeypatch.setattr(run.survey, "mark_surge_checked",
+                        lambda conn, now: written.update(checked=now) if "summary_rows" in written else None)
     return sqls, written
 
 
@@ -86,6 +90,7 @@ def writes(monkeypatch):
     monkeypatch.setattr(run.name_keys, "apply_name_keys", lambda conn, p: calls.append(("name_keys", p)) or 0)
     monkeypatch.setattr(run.review_tags, "rebuild_if_present", lambda conn: calls.append(("tags",)))
     monkeypatch.setattr(run.read_models, "write", lambda conn, *a: calls.append(("read_models", a[0])))
+    monkeypatch.setattr(run.survey, "mark_surge_checked", lambda conn, now: None)
     return calls
 
 
@@ -196,3 +201,19 @@ def test_only_accepted_ratings_with_a_professor_are_read(captured):
     run.main(["--dry-run"])
     [sql] = [s for s in sqls if "FROM survey_ratings" in s]
     assert "status = 'accepted' AND professor_slug IS NOT NULL" in sql
+
+
+def test_the_surge_scan_reaches_back_to_the_last_run_that_published(captured, monkeypatch):
+    # The weekly run failed last Sunday: a surge 10 days back must still be held.
+    _, written = captured
+    old = datetime.now(timezone.utc) - timedelta(days=10)
+    surge = [dict(TABLES["survey_ratings"][0], id=f"s{i}", updated_at=old)
+             for i in range(run.survey.WEEKLY_SURGE_PROF + 1)]
+    monkeypatch.setitem(TABLES, "survey_ratings", surge)
+    held = []
+    monkeypatch.setattr(run.survey, "apply_surge_holds", lambda conn, ids: held.append(ids) or len(ids))
+    assert run.main([]) == 0 and held == [set()]
+    checked = int((datetime.now(timezone.utc) - timedelta(days=14)).timestamp())
+    monkeypatch.setitem(TABLES, "stats_cache", [{"value": checked}])
+    assert run.main([]) == 0 and held[-1] == {r["id"] for r in surge}
+    assert written["checked"] > datetime.now(timezone.utc) - timedelta(minutes=1)
