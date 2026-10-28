@@ -112,12 +112,12 @@ def float_arg(name, default, lo, hi, ndigits=1):
 # unbounded scan. No professor name or course title needs more than this.
 SEARCH_MAX_CHARS = 100
 SEARCH_MAX_WORDS = 6
-# Catalog pages above this size skip the cache: only the sitemap asks
-# for the whole catalog, and caching every filter combination at that size is
-# how the cache gets filled with multi-MB entries.
+# The most rows a catalog page returns, except the sitemap's: the homepage asks for
+# 100, and building or caching every filter combination of the whole catalog is how
+# requests got multi-MB rebuilds and the cache filled with multi-MB entries.
 CACHEABLE_PAGE_LIMIT = 100
 # The sitemap fetches the whole catalog in one page of this size
-# (frontend/scripts/generate-sitemap.mjs); it is the one big page that is cached.
+# (frontend/scripts/generate-sitemap.mjs); it is the one big page served, and cached.
 CATALOG_FULL_LIMIT = 10000
 # Sorts each catalog knows; anything else is alpha, so made-up sort values all
 # share alpha's cache entry instead of each minting one.
@@ -1527,11 +1527,16 @@ def professors_catalog():
     max_reviews = int_arg("maxReviews", -1, -1, 100000)
     max_reviews = None if max_reviews < 0 else max_reviews
 
-    cache_key = f"profcat:{q}:{college}:{dept}:{sort}:{page}:{limit}:{min_rating}:{max_rating}:{min_reviews}:{max_reviews}"
-    # A big page is cached only when it is exactly the sitemap's request.
-    cacheable = (limit <= CACHEABLE_PAGE_LIMIT
-                 or cache_key == f"profcat::::alpha:1:{CATALOG_FULL_LIMIT}:0.0:5.0:1:None")
-    cached = cache_get(cache_key) if cacheable else None
+    def key(rows):
+        return (f"profcat:{q}:{college}:{dept}:{sort}:{page}:{rows}:"
+                f"{min_rating}:{max_rating}:{min_reviews}:{max_reviews}")
+
+    # Only the sitemap's exact request gets the whole catalog; any other big page gets
+    # CACHEABLE_PAGE_LIMIT rows. So every page served is small or that one, and cached.
+    if limit > CACHEABLE_PAGE_LIMIT and key(limit) != f"profcat::::alpha:1:{CATALOG_FULL_LIMIT}:0.0:5.0:1:None":
+        limit = CACHEABLE_PAGE_LIMIT
+    cache_key = key(limit)
+    cached = cache_get(cache_key)
     if cached:
         return jsonify(cached)
 
@@ -1658,8 +1663,7 @@ def professors_catalog():
         "page": page,
         "totalPages": total_pages,
     }
-    if cacheable:
-        cache_set(cache_key, result)
+    cache_set(cache_key, result)
     return jsonify(result)
 
 
@@ -1692,11 +1696,14 @@ def courses_catalog():
     # The catalog page shows rated courses only; the sitemap and prerender need every course.
     rated_only = request.args.get("rated") == "1"
 
-    cache_key = f"coursecat:{q}:{dept}:{sort}:{page}:{limit}:{min_rating}:{max_rating}:{rated_only}"
-    # A big page is cached only when it is exactly the sitemap's request.
-    cacheable = (limit <= CACHEABLE_PAGE_LIMIT
-                 or cache_key == f"coursecat:::alpha:1:{CATALOG_FULL_LIMIT}:0.0:5.0:False")
-    cached = cache_get(cache_key) if cacheable else None
+    def key(rows):
+        return f"coursecat:{q}:{dept}:{sort}:{page}:{rows}:{min_rating}:{max_rating}:{rated_only}"
+
+    # Same cap as professors_catalog: only the sitemap's exact request gets the whole catalog.
+    if limit > CACHEABLE_PAGE_LIMIT and key(limit) != f"coursecat:::alpha:1:{CATALOG_FULL_LIMIT}:0.0:5.0:False":
+        limit = CACHEABLE_PAGE_LIMIT
+    cache_key = key(limit)
+    cached = cache_get(cache_key)
     if cached:
         return jsonify(cached)
 
@@ -1783,8 +1790,7 @@ def courses_catalog():
         "page": page,
         "totalPages": total_pages,
     }
-    if cacheable:
-        cache_set(cache_key, result)
+    cache_set(cache_key, result)
     return jsonify(result)
 
 

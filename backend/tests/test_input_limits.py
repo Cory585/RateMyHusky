@@ -37,33 +37,41 @@ def test_catalog_limit_zero_is_not_a_500(monkeypatch):
         assert client.get(path).status_code == 200
 
 
-def test_filtered_whole_catalog_pages_are_not_cached(monkeypatch):
+def _served_limits(monkeypatch):
+    """The LIMIT each catalog page query ran with."""
+    limits = []
     monkeypatch.setattr(server, "query_one", lambda *a, **k: {"cnt": 0})
-    monkeypatch.setattr(server, "query", lambda *a, **k: [])
+    monkeypatch.setattr(server, "query", lambda sql, params=(), **k: limits.append(params[-2]) or [])
     monkeypatch.setattr(server, "data_version", lambda: 0)
     server._cache.clear()
+    return limits
+
+
+@pytest.mark.parametrize("endpoint", ["professors-catalog", "courses-catalog"])
+def test_only_the_sitemaps_request_gets_the_whole_catalog(monkeypatch, endpoint):
+    limits = _served_limits(monkeypatch)
     client = server.app.test_client()
-    client.get("/api/professors-catalog?limit=10000&minRating=1.5")
-    assert not server._cache
-    client.get("/api/professors-catalog?limit=10000&page=1&sort=alpha")
-    assert len(server._cache) == 1
+    # Filtered, sorted, later pages and in-between sizes are each built from scratch, so they're capped.
+    for qs in ("limit=10000&sort=rating", "limit=10000&minRating=1.5", "limit=10000&page=2",
+               "limit=101", "limit=9999"):
+        client.get(f"/api/{endpoint}?{qs}")
+    # limit=101 and limit=9999 are both the 100-row page, so the second is a cache hit.
+    assert limits == [server.CACHEABLE_PAGE_LIMIT] * 4
+    # Made-up sorts fall back to alpha, so they are the sitemap's request.
+    for qs in ("limit=10000&page=1", "limit=10000&sort=x1", "limit=10000&sort=x2"):
+        client.get(f"/api/{endpoint}?{qs}")
+    assert limits[4:] == [server.CATALOG_FULL_LIMIT]
     server._cache.clear()
 
 
 @pytest.mark.parametrize("endpoint", ["professors-catalog", "courses-catalog"])
-def test_only_the_sitemaps_whole_catalog_page_is_cached(monkeypatch, endpoint):
-    monkeypatch.setattr(server, "query_one", lambda *a, **k: {"cnt": 0})
-    monkeypatch.setattr(server, "query", lambda *a, **k: [])
-    monkeypatch.setattr(server, "data_version", lambda: 0)
-    server._cache.clear()
+def test_every_catalog_page_served_is_cached(monkeypatch, endpoint):
+    limits = _served_limits(monkeypatch)
     client = server.app.test_client()
-    for qs in ("limit=10000&sort=rating", "limit=101", "limit=9999"):
-        client.get(f"/api/{endpoint}?{qs}")
-    assert not server._cache
-    # Made-up sorts fall back to alpha, so they all land on the sitemap's one entry.
-    for qs in ("limit=10000&page=1", "limit=10000&sort=x1", "limit=10000&sort=x2"):
-        client.get(f"/api/{endpoint}?{qs}")
-    assert len(server._cache) == 1
+    for _ in range(2):
+        client.get(f"/api/{endpoint}?limit=10000&sort=rating")
+        client.get(f"/api/{endpoint}?limit=10000")
+    assert len(limits) == 2 and len(server._cache) == 2
     server._cache.clear()
 
 
